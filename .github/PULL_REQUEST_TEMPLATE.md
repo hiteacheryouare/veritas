@@ -25,7 +25,7 @@ Sign off in a PR comment with `merge-bar: <reviewer|cowboy|fred|architect> <appr
 - [ ] Code reviewer approved
 - [ ] Coverage cowboy added or verified tests for every claimed R-ID
 - [ ] Fred approved (`finance` label)
-- [ ] Architect approved (`contract` label)
+- [ ] Architect approved (`contract` label, unless `architect-authored`)
 
 ## Notes for the reviewer
 

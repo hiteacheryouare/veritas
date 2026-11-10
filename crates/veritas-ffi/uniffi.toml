@@ -1,0 +1,5 @@
+[bindings.swift]
+module_name = "VeritasCore"
+ffi_module_name = "VeritasCoreFFI"
+ffi_module_filename = "VeritasCoreFFI"
+generate_module_map = false

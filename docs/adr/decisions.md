@@ -161,6 +161,56 @@ Every decision behind Veritas, so no question gets asked twice. D1–D24 are PLA
 - **Decision:** PLAN.md's explicit choices win (`xtask`, `thiserror`, `docs/adr/`). Everything else follows his Lattice & Co repos: tabs, LF stored and CRLF checked out, hard-tab rustfmt, ESM Node tools run with type stripping, and decision records in this format.
 - **Date:** 2026-11-09
 
+### D32. What direction does the design take?
+- **Options:** Quiet native / Account book / What's left
+- **Decision:** Quiet native's layout and calm, with fill bars that drain to show what's left, semantic color for every money state (always with an icon and a label), negatives written −34.75, and SF Rounded figures, so Veritas reads as its own app that happens to be native.
+- **Date:** 2026-11-09
+
+### D33. Gate 0
+- **Options:** approve / approve with notes / hold
+- **Decision:** Approved. docs/actual-format.md and docs/finance/ are the basis for Phase 1.
+- **Date:** 2026-11-09
+
+### D34. How are paychecks recorded?
+- **Options:** net deposit / gross with withholding splits
+- **Decision:** Gross with splits, so the W-2 income tax bucket is gross pay (docs/finance/classification.md CLS-10).
+- **Date:** 2026-11-09
+
+### D35. How do untagged on→off transfers count in Net Profit?
+- **Options:** expense with a review count and a per-category wizard / excluded until reviewed
+- **Decision:** Expense, plus a visible review count and a one-time wizard that sets a kind per category.
+- **Date:** 2026-11-09
+
+### D36. What does Veritas write into Actual for a goal?
+- **Options:** a `#goal` note line plus per-month goal rows / goal rows only / nothing extra
+- **Decision:** A `#goal <amount>` note line plus `zero_budgets.goal` / `long_goal` rows, so Actual shows progress once its goal-templates flag is on.
+- **Date:** 2026-11-09
+
+### D37. What happens to invalid input in an amount field?
+- **Options:** keep the old value everywhere / match Actual per field
+- **Decision:** Keep the old value everywhere, with a brief inline hint. Stored data still matches Actual.
+- **Date:** 2026-11-09
+
+### D38. What does quick entry fill for a known payee?
+- **Options:** category and amount from the payee's last transaction / only what Actual's learned rules fill
+- **Decision:** Category and amount from that payee's most recent transaction, computed on the fly. Nothing new is stored.
+- **Date:** 2026-11-09
+
+### D39. Fred's remaining finance defaults (FIN-2, FIN-3, FIN-5)?
+- **Options:** accept / change
+- **Decision:** Accepted. An off-budget asset purchase counts as an expense with a capitalized-transfers equity line. Escrow counts as an expense when paid. A no-spend day ignores bills and loan payments.
+- **Date:** 2026-11-09
+
+### D40. Accent color?
+- **Options:** indigo (rejected, too close to Actual's purple) / graphite / petrol / olive
+- **Decision:** Graphite. The interface stays neutral, so money is the only color on screen.
+- **Date:** 2026-11-09
+
+### D41. Which extra keyboard shortcuts?
+- **Options:** ⌘1–⌘6, ⌘F, ⌘D, ⌥↑/⌥↓, ⌘Return, H in Wrapped
+- **Decision:** All except H in Wrapped.
+- **Date:** 2026-11-09
+
 ### D42. Who signs off a contract PR the Architect wrote?
 - **Options:** an independent architect agent / Ryan / the code reviewer alone
 - **Decision:** The code reviewer alone. Those PRs carry the `architect-authored` label, and the merge-bar check then doesn't require an Architect sign-off.

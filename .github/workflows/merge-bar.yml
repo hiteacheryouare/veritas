@@ -3,7 +3,7 @@ name: Merge bar
 # Every agent posts as Ryan's account, and GitHub never counts an author's own
 # approval, so the PLAN §0.2 merge bar is enforced by this commit status instead:
 # reviewer, cowboy (covering every claimed R-ID), Fred on `finance`, Architect on
-# `contract`. Syntax and rules: .github/scripts/mergeBar.ts. Both triggers run the
+# `contract` unless the Architect wrote it (`architect-authored`, D42). Syntax and rules: .github/scripts/mergeBar.ts. Both triggers run the
 # base branch's workflow and script, never the PR's. It's a process guard for a
 # trusted fleet, not a security boundary: any same-repo workflow could post a status.
 

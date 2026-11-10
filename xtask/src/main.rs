@@ -8,6 +8,7 @@ commands:
 	oracle setup       install the oracle's pinned dependencies (npm ci)
 	oracle <args...>   run the Actual oracle CLI (dump, apply, generate)
 	fixtures           regenerate fixtures/synthetic with the oracle
+	bindings           build the core and generate its Swift bindings into VeritasKit
 	ci                 run every check CI runs";
 
 const FIXTURE_SPECS: [&str; 3] = ["small", "all-features", "perf-100k"];
@@ -20,6 +21,7 @@ fn main() -> ExitCode {
 		Some("reference") => reference(),
 		Some("oracle") => oracle(&args[1..]),
 		Some("fixtures") => fixtures(),
+		Some("bindings") => bindings(),
 		Some("ci") => ci(),
 		_ => Err(USAGE.to_owned()),
 	};
@@ -162,6 +164,68 @@ fn fixtures() -> Result {
 	Ok(())
 }
 
+const VERITAS_KIT: &str = "apps/macos/Packages/VeritasKit";
+
+fn bindings() -> Result {
+	let root = root();
+	run(
+		&root,
+		"cargo",
+		&["build", "--quiet", "--release", "--package", "veritas-ffi"],
+	)?;
+	let release = root.join("target/release");
+	let generated = root.join("target/uniffi/swift");
+	let dylib = release.join("libveritas_ffi.dylib");
+	run(
+		&root,
+		"cargo",
+		&[
+			"run",
+			"--quiet",
+			"--release",
+			"--package",
+			"xtask",
+			"--bin",
+			"uniffi-bindgen",
+			"--",
+			"generate",
+			"--library",
+			&dylib.to_string_lossy(),
+			"--language",
+			"swift",
+			"--out-dir",
+			&generated.to_string_lossy(),
+		],
+	)?;
+
+	let kit = root.join(VERITAS_KIT);
+	// The static library sits alone in its own folder: given a .dylib next to it,
+	// the linker would pick the dylib and the app would need it at runtime.
+	let link_dir = root.join("target/swift");
+	for (from, to) in [
+		(
+			generated.join("VeritasCore.swift"),
+			kit.join("Sources/VeritasCore/VeritasCore.swift"),
+		),
+		(
+			generated.join("VeritasCoreFFI.h"),
+			kit.join("Sources/VeritasCoreFFI/VeritasCoreFFI.h"),
+		),
+		(
+			release.join("libveritas_ffi.a"),
+			link_dir.join("libveritas_ffi.a"),
+		),
+	] {
+		if let Some(parent) = to.parent() {
+			std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+		}
+		std::fs::copy(&from, &to)
+			.map_err(|e| format!("{} → {}: {e}", from.display(), to.display()))?;
+	}
+	eprintln!("Swift bindings are in {VERITAS_KIT}");
+	Ok(())
+}
+
 fn ci() -> Result {
 	let root = root();
 	run(&root, "cargo", &["fmt", "--all", "--check"])?;
@@ -179,6 +243,8 @@ fn ci() -> Result {
 	)?;
 	run(&root, "cargo", &["test", "--workspace", "--quiet"])?;
 	run(&root, "node", &["--test", ".github/scripts/*.test.ts"])?;
+	bindings()?;
+	run(&root.join(VERITAS_KIT), "swift", &["test", "--quiet"])?;
 	if oracle_dir().join("node_modules").exists() {
 		run(&oracle_dir(), "npm", &["test", "--silent"])?;
 	} else {

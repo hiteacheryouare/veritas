@@ -23,7 +23,10 @@ publish = false
 # Dependency versions live here so every crate agrees, which UniFFI requires
 # between veritas-ffi and the bindings generator. Only Appendix B entries.
 [workspace.dependencies]
+chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 serde_json = "1"
+thiserror = "2.0.21"
+uniffi = "0.32.2"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

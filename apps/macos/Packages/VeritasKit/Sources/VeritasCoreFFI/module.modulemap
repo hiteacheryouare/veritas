@@ -1,0 +1,5 @@
+module VeritasCoreFFI {
+	header "VeritasCoreFFI.h"
+	link "veritas_ffi"
+	export *
+}
