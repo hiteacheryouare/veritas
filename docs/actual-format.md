@@ -1555,6 +1555,7 @@ What each action does (`action.ts:99-262`):
   - `fixed-percent` is next: `Math.round(remainder * pct/100)`.
   - `remainder` splits share `Math.round(rem/n)` equally, and the last remainder split absorbs the rounding.
   - Index 1 (splitIndex 0) is the "apply to all" scratch row, and it's spliced out.
+  - Confirmed by the oracle (`crates/veritas-rules/tests/oracle_splits.rs`): splitting sets the parent's payee to null and copies it onto the lines, so a later rule sees no payee. An action numbered past the end adds at most one line, so a rule whose first split action is line 2 throws out of `runRules`. A second split rule on an already split transaction still drops index 1, which is now the first real line, so only its own lines survive and the parent keeps the difference as its `error`.
   - **JS `Math.round` rounds −2.5 to −2, while Rust `f64::round` gives −3.** Every port of `Math.round`, including the split math and `getScheduledAmount`, uses the floor-and-compare form in §5.13.
 
 **Ordering, stages and chaining.**
