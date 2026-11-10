@@ -134,3 +134,12 @@ pub fn assert_same_dump(veritas: &[u8], oracle: &[u8], label: &str) {
 		show(&theirs)
 	);
 }
+
+pub fn imported(
+	result: Result<veritas_interop::ImportOutcome, veritas_domain::CoreError>,
+) -> veritas_interop::ImportedBudget {
+	match result {
+		Ok(veritas_interop::ImportOutcome::Imported(budget)) => budget,
+		other => panic!("expected an import, got {other:?}"),
+	}
+}

@@ -7,10 +7,10 @@ mod common;
 
 use std::path::Path;
 
-use common::{Scratch, fixture, pack, unpack, write_zip};
+use common::{Scratch, fixture, imported, pack, unpack, write_zip};
 use rusqlite::Connection;
 use veritas_domain::{CoreError, ReadOnlyReason};
-use veritas_interop::{Access, import_actual_zip};
+use veritas_interop::{Access, ImportOutcome, import_actual_zip};
 
 type Entry<'a> = (&'a str, &'a [u8]);
 
@@ -29,7 +29,7 @@ fn a_root_layout_zip_is_copied_and_the_source_is_untouched_r_io_1_r_io_8() {
 	let before = std::fs::read(&source).unwrap();
 	let modified = std::fs::metadata(&source).unwrap().modified().unwrap();
 
-	let budget = import_actual_zip(&source, &scratch.join("budget")).unwrap();
+	let budget = imported(import_actual_zip(&source, &scratch.join("budget")));
 
 	assert_eq!(budget.access, Access::ReadWrite);
 	assert_eq!(
@@ -69,7 +69,7 @@ fn one_shared_folder_is_accepted_and_the_root_wins_over_it_r_io_1() {
 			("My Budget/notes.txt", b"ignored"),
 		],
 	);
-	let budget = import_actual_zip(&nested, &scratch.join("from-folder")).unwrap();
+	let budget = imported(import_actual_zip(&nested, &scratch.join("from-folder")));
 	assert_eq!(std::fs::read(&budget.db_path).unwrap(), db);
 
 	let both = scratch.join("both.zip");
@@ -82,7 +82,7 @@ fn one_shared_folder_is_accepted_and_the_root_wins_over_it_r_io_1() {
 			("metadata.json", &metadata),
 		],
 	);
-	let budget = import_actual_zip(&both, &scratch.join("from-root")).unwrap();
+	let budget = imported(import_actual_zip(&both, &scratch.join("from-root")));
 	assert_eq!(std::fs::read(&budget.metadata_path).unwrap(), metadata);
 }
 
@@ -102,7 +102,11 @@ fn stored_entries_import_like_deflated_ones() {
 		std::io::Write::write_all(&mut zip, &bytes).unwrap();
 	}
 	zip.finish().unwrap();
-	assert!(import_actual_zip(&zip_path, &scratch.join("budget")).is_ok());
+	assert!(
+		imported(import_actual_zip(&zip_path, &scratch.join("budget")))
+			.audit
+			.is_clean()
+	);
 }
 
 #[test]
@@ -224,10 +228,10 @@ fn a_damaged_database_fails_the_integrity_check_and_is_not_adopted_r_rel_2() {
 
 	let target = scratch.join("budget");
 	let result = import_actual_zip(&zip_path, &target);
-	assert!(
-		matches!(result, Err(CoreError::AuditFailed { violations }) if violations > 0),
-		"{result:?}"
-	);
+	let Ok(ImportOutcome::Refused(report)) = result else {
+		panic!("a damaged file was imported: {result:?}");
+	};
+	assert!(report.is_corrupt());
 	assert!(!target.exists());
 }
 
@@ -249,7 +253,7 @@ fn a_file_from_a_newer_actual_imports_read_only_r_io_7() {
 		"INSERT INTO __migrations__ (id) VALUES (1795000000000);",
 		"import-newer",
 	);
-	let budget = import_actual_zip(&zip_path, &scratch.join("budget")).unwrap();
+	let budget = imported(import_actual_zip(&zip_path, &scratch.join("budget")));
 	assert_eq!(
 		budget.access,
 		Access::ReadOnly(ReadOnlyReason::NewerActualVersion)
@@ -291,4 +295,17 @@ fn importing_never_overwrites_an_existing_folder() {
 		Err(CoreError::Io(_))
 	));
 	assert_eq!(std::fs::read(target.join("keep.txt")).unwrap(), b"mine");
+}
+
+#[test]
+fn an_inconsistent_budget_imports_with_its_audit_report_r_rel_2() {
+	let (scratch, zip_path) = with_migrations(
+		"UPDATE transactions SET transferred_id = NULL WHERE id = \
+		 (SELECT id FROM transactions WHERE transferred_id IS NOT NULL ORDER BY id LIMIT 1);",
+		"import-inconsistent",
+	);
+	let budget = imported(import_actual_zip(&zip_path, &scratch.join("budget")));
+	assert!(!budget.audit.is_corrupt());
+	assert_eq!(budget.audit.violations.len(), 2, "{:?}", budget.audit);
+	assert!(budget.dir.exists());
 }

@@ -4,6 +4,7 @@ use std::time::Duration;
 use rusqlite::{Connection, ErrorCode, OpenFlags};
 use veritas_domain::CoreError;
 
+use crate::audit::{AuditReport, audit};
 use crate::load::{self, Loaded};
 use crate::schema;
 
@@ -57,6 +58,12 @@ impl Store {
 
 	pub fn integrity_check(&self) -> Result<Vec<String>, CoreError> {
 		integrity_check(&self.conn)
+	}
+
+	/// R-REL-2 on open: SQLite's integrity check, then, when the file is
+	/// sound, the load and the invariant audit of what it loaded.
+	pub fn open_audit(&self) -> Result<(Option<Loaded>, AuditReport), CoreError> {
+		audit_connection(&self.conn)
 	}
 
 	pub fn migration_ids(&self) -> Result<Vec<i64>, CoreError> {
@@ -130,4 +137,16 @@ pub fn migration_ids(conn: &Connection) -> Result<Vec<i64>, CoreError> {
 		}
 	}
 	Ok(ids)
+}
+
+/// The integrity check, and when it passes, the load and invariant audit.
+/// A corrupt file isn't loaded: nothing read from it could be trusted.
+pub fn audit_connection(conn: &Connection) -> Result<(Option<Loaded>, AuditReport), CoreError> {
+	let problems = integrity_check(conn)?;
+	if !problems.is_empty() {
+		return Ok((None, AuditReport::from_integrity(problems)));
+	}
+	let loaded = load::load(conn)?;
+	let report = audit(&loaded);
+	Ok((Some(loaded), report))
 }

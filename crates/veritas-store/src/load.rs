@@ -36,6 +36,9 @@ pub struct Loaded {
 	pub report: LoadReport,
 }
 
+pub(crate) const DUPLICATE_BUDGET_CELL: &str =
+	"repeats an earlier row's month and category, and replaces it";
+
 fn at<'r>(row: &'r Row<'_>, index: usize) -> Cell<ValueRef<'r>> {
 	row.get_ref(index).map_err(|_| "a column is missing")
 }
@@ -94,7 +97,7 @@ fn id(row: &Row<'_>, index: usize) -> Cell<String> {
 	required_text(at(row, index)?, "the row has no id")
 }
 
-pub(crate) fn load(conn: &Connection) -> Result<Loaded, CoreError> {
+pub fn load(conn: &Connection) -> Result<Loaded, CoreError> {
 	let mut data = BudgetData::empty(budget_type(conn)?);
 	let mut skipped = Vec::new();
 
@@ -247,7 +250,7 @@ pub(crate) fn load(conn: &Connection) -> Result<Loaded, CoreError> {
 				.budget_cells
 				.insert((cell.month, cell.category.clone()), cell);
 			match shadowed {
-				Some(_) => Err("repeats an earlier row's month and category, and replaces it"),
+				Some(_) => Err(DUPLICATE_BUDGET_CELL),
 				None => Ok(()),
 			}
 		},
