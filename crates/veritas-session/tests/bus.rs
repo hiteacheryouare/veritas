@@ -139,6 +139,7 @@ fn transaction(id: &str, amount: i64) -> Transaction {
 		date: CivilDate::new(2027, 3, 14).unwrap(),
 		amount: Money::from_minor(amount),
 		payee: None,
+		imported_payee: None,
 		category: Some(CategoryId::new("groceries")),
 		notes: None,
 		cleared: false,
