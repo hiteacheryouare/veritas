@@ -196,6 +196,7 @@ impl Book {
 				date: date(on),
 				amount: Money::from_minor(amount),
 				payee: None,
+				imported_payee: None,
 				category: None,
 				notes: None,
 				cleared: true,

@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Budget</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="shared/frame.css">
+<style>
+.overview { display: grid; grid-template-columns: 1fr 280px 280px; gap: var(--space-4); margin-bottom: var(--space-6); }
+.to-budget { display: flex; align-items: baseline; gap: var(--space-3); align-self: center; }
+.to-budget .hero { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--text-display); font-weight: var(--weight-bold); letter-spacing: -0.01em; line-height: 1.1; }
+.to-budget .hero .icon { width: 26px; height: 26px; stroke-width: 2; }
+.to-budget .hero-label { font-size: var(--text-heading); font-weight: var(--weight-semibold); }
+
+.goal-card { display: grid; grid-template-columns: var(--size-ring) 1fr; gap: var(--space-3); align-items: center; padding: var(--space-3) var(--space-4); }
+.goal-card h3 { margin: 0; font-size: var(--text-body); font-weight: var(--weight-semibold); }
+.goal-card .progress { margin-top: 2px; }
+.goal-card .progress .fig { font-weight: var(--weight-semibold); }
+.goal-card .note { margin-top: 3px; }
+
+.columns, .row, .group-head { display: grid; grid-template-columns: 1fr 160px 110px 110px 150px; align-items: center; column-gap: var(--space-4); padding: 0 var(--space-4); }
+.columns { color: var(--color-text-tertiary); font-size: var(--text-caption); padding-bottom: var(--space-1); }
+.columns span:nth-child(n+3), .row > .fig, .row > .field, .group-head .fig { text-align: right; justify-self: end; }
+.group { margin-bottom: var(--space-5); }
+.group-head { height: 30px; }
+.group-head h2 { margin: 0; font-size: var(--text-body); font-weight: var(--weight-semibold); }
+.group-head .fig { color: var(--color-text-secondary); }
+
+.row { height: var(--size-row); position: relative; transition: background var(--duration-fast) var(--easing-standard); }
+.row + .row::before { content: ""; position: absolute; top: 0; left: var(--space-4); right: var(--space-4); border-top: 1px solid var(--color-separator); }
+.row:hover { background: var(--color-surface-hover); }
+.row:first-child { border-radius: var(--radius-section) var(--radius-section) 0 0; }
+.row:last-child { border-radius: 0 0 var(--radius-section) var(--radius-section); }
+.row .fig { font-weight: var(--weight-medium); }
+.name { display: flex; align-items: center; gap: var(--space-2); min-width: 0; white-space: nowrap; }
+.row .avail { display: flex; align-items: center; gap: 4px; justify-content: flex-end; font-weight: var(--weight-semibold); }
+.avail .icon { opacity: 0.8; }
+.avail .state { width: 26px; text-align: left; font-family: var(--font-text); font-size: var(--text-caption); font-weight: var(--weight-regular); opacity: 0.85; }
+.avail.is-neutral .state { color: var(--color-text-tertiary); }
+.row.editing { background: var(--color-accent-soft); }
+.row.editing::before, .row.editing + .row::before { display: none; }
+.row .field { width: 110px; height: 26px; }
+.edit-preview { justify-self: end; font-size: var(--text-caption); color: var(--color-text-secondary); white-space: nowrap; }
+.edit-preview .fig { font-size: var(--text-body); color: var(--color-text-primary); font-weight: var(--weight-semibold); }
+</style>
+</head>
+<body>
+<header class="page-bar"><h1>Budget</h1></header>
+<main>
+<section class="stage" data-theme="light">
+<div class="window">
+	<nav class="sidebar" aria-label="Sections" data-current="budget"></nav>
+	<div class="main">
+		<div class="toolbar">
+			<div class="step">
+				<button type="button" aria-label="Previous month (⌘←)"><svg class="icon"><use href="#i-chev-l"/></svg></button>
+				<button type="button" aria-label="Next month (⌘→)"><svg class="icon"><use href="#i-chev-r"/></svg></button>
+			</div>
+			<h1 class="toolbar-title">November 2026</h1>
+			<div class="toolbar-gap"></div>
+			<button class="button" type="button" aria-pressed="false"><svg class="icon"><use href="#i-dense"/></svg>Dense</button>
+			<button class="button" type="button"><svg class="icon"><use href="#i-move"/></svg>Move budget</button>
+			<div class="search"><svg class="icon"><use href="#i-search"/></svg>Go to anything<kbd>⌘K</kbd></div>
+		</div>
+		<div class="content">
+			<div class="overview">
+				<div class="to-budget">
+					<span class="hero fig is-income"><svg class="icon"><use href="#i-income"/></svg>$312.40</span>
+					<span class="hero-label">To Budget</span>
+				</div>
+				<article class="goal-card grouped">
+					<svg class="ring" viewBox="0 0 52 52"><circle class="track" cx="26" cy="26" r="22"/><circle class="value" cx="26" cy="26" r="22" pathLength="100" stroke-dasharray="74.7 100"/></svg>
+					<div>
+						<h3>New laptop</h3>
+						<div class="progress"><span class="fig">$1,120</span> of <span class="fig">$1,500</span></div>
+						<div class="note is-available"><svg class="icon small"><use href="#i-check"/></svg>On track for March</div>
+					</div>
+				</article>
+				<article class="goal-card grouped">
+					<svg class="ring low" viewBox="0 0 52 52"><circle class="track" cx="26" cy="26" r="22"/><circle class="value" cx="26" cy="26" r="22" pathLength="100" stroke-dasharray="38.5 100"/></svg>
+					<div>
+						<h3>Japan trip</h3>
+						<div class="progress"><span class="fig">$2,310</span> of <span class="fig">$6,000</span></div>
+						<div class="note is-low"><svg class="icon small"><use href="#i-low"/></svg>Behind, needs $410 a month</div>
+					</div>
+				</article>
+			</div>
+			<div class="columns"><span>Envelope</span><span></span><span>Budgeted</span><span>Spent</span><span>Available</span></div>
+				<section class="group">
+					<div class="group-head"><h2>Everyday</h2><span></span><span class="fig">792.00</span><span class="fig">680.67</span><span class="fig">111.33</span></div>
+					<div class="grouped">
+						<div class="row editing"><span class="name">Groceries</span><span class="edit-preview">Return sets <span class="fig">452.00</span></span><span class="field fig focused">412.00+40<span class="caret"></span></span><span class="fig">318.62</span><span class="fig avail is-available"><svg class="icon small"><use href="#i-check"/></svg>93.38<span class="state">left</span></span></div>
+						<div class="row"><span class="name">Dining out</span><div class="drain overspent" style="--left:0%"><span></span></div><span class="fig">180.00</span><span class="fig">214.75</span><span class="fig avail is-overspent"><svg class="icon small"><use href="#i-over"/></svg>−34.75<span class="state">over</span></span></div>
+						<div class="row"><span class="name">Gas</span><div class="drain" style="--left:31%"><span></span></div><span class="fig">140.00</span><span class="fig">96.10</span><span class="fig avail is-available"><svg class="icon small"><use href="#i-check"/></svg>43.90<span class="state">left</span></span></div>
+						<div class="row"><span class="name">Household</span><div class="drain low" style="--left:15%"><span></span></div><span class="fig">60.00</span><span class="fig">51.20</span><span class="fig avail is-low"><svg class="icon small"><use href="#i-low"/></svg>8.80<span class="state">low</span></span></div>
+					</div>
+				</section>
+				<section class="group">
+					<div class="group-head"><h2>Housing and utilities</h2><span></span><span class="fig">1,855.00</span><span class="fig">1,765.00</span><span class="fig">90.00</span></div>
+					<div class="grouped">
+						<div class="row"><span class="name">Rent</span><div class="drain" style="--left:0%"><span></span></div><span class="fig">1,650.00</span><span class="fig">1,650.00</span><span class="fig avail is-neutral">0.00<span class="state"></span></span></div>
+						<div class="row"><span class="name">Electric<span class="note"><svg class="icon small"><use href="#i-clock"/></svg>Bill due Nov 15</span></span><div class="drain" style="--left:100%"><span></span></div><span class="fig">90.00</span><span class="fig is-neutral">0.00</span><span class="fig avail is-available"><svg class="icon small"><use href="#i-check"/></svg>90.00<span class="state">left</span></span></div>
+						<div class="row"><span class="name">Internet</span><div class="drain" style="--left:0%"><span></span></div><span class="fig">70.00</span><span class="fig">70.00</span><span class="fig avail is-neutral">0.00<span class="state"></span></span></div>
+						<div class="row"><span class="name">Phone</span><div class="drain" style="--left:0%"><span></span></div><span class="fig">45.00</span><span class="fig">45.00</span><span class="fig avail is-neutral">0.00<span class="state"></span></span></div>
+					</div>
+				</section>
+				<section class="group">
+					<div class="group-head"><h2>Personal</h2><span></span><span class="fig">203.00</span><span class="fig">50.99</span><span class="fig">232.01</span></div>
+					<div class="grouped">
+						<div class="row"><span class="name">Subscriptions</span><div class="drain" style="--left:0%"><span></span></div><span class="fig">38.00</span><span class="fig">38.00</span><span class="fig avail is-neutral">0.00<span class="state"></span></span></div>
+						<div class="row"><span class="name">Hobbies</span><div class="drain" style="--left:83%"><span></span></div><span class="fig">75.00</span><span class="fig">12.99</span><span class="fig avail is-available"><svg class="icon small"><use href="#i-check"/></svg>62.01<span class="state">left</span></span></div>
+						<div class="row"><span class="name">Clothing</span><div class="drain" style="--left:100%"><span></span></div><span class="fig">50.00</span><span class="fig is-neutral">0.00</span><span class="fig avail is-available"><svg class="icon small"><use href="#i-check"/></svg>50.00<span class="state">left</span></span></div>
+						<div class="row"><span class="name">Gifts</span><div class="drain" style="--left:100%"><span></span></div><span class="fig">40.00</span><span class="fig is-neutral">0.00</span><span class="fig avail is-available"><svg class="icon small"><use href="#i-check"/></svg>120.00<span class="state">left</span></span></div>
+					</div>
+				</section>
+				<section class="group">
+					<div class="group-head"><h2>Debt</h2><span></span><span class="fig">412.00</span><span class="fig">0.00</span><span class="fig">412.00</span></div>
+					<div class="grouped">
+						<div class="row"><span class="name">Car loan payment<span class="note"><svg class="icon small"><use href="#i-clock"/></svg>Bill due Nov 12</span></span><div class="drain" style="--left:100%"><span></span></div><span class="fig">332.00</span><span class="fig is-neutral">0.00</span><span class="fig avail is-available"><svg class="icon small"><use href="#i-check"/></svg>332.00<span class="state">left</span></span></div>
+						<div class="row"><span class="name">Loan interest</span><div class="drain" style="--left:100%"><span></span></div><span class="fig">80.00</span><span class="fig is-neutral">0.00</span><span class="fig avail is-available"><svg class="icon small"><use href="#i-check"/></svg>80.00<span class="state">left</span></span></div>
+					</div>
+				</section>
+				<section class="group">
+					<div class="group-head"><h2>Savings</h2><span></span><span class="fig">300.00</span><span class="fig">0.00</span><span class="fig">2,490.00</span></div>
+					<div class="grouped">
+						<div class="row"><span class="name">General savings</span><div class="drain" style="--left:100%"><span></span></div><span class="fig">200.00</span><span class="fig is-neutral">0.00</span><span class="fig avail is-available"><svg class="icon small"><use href="#i-check"/></svg>1,840.00<span class="state">left</span></span></div>
+						<div class="row"><span class="name">Car repairs</span><div class="drain" style="--left:100%"><span></span></div><span class="fig">100.00</span><span class="fig is-neutral">0.00</span><span class="fig avail is-available"><svg class="icon small"><use href="#i-check"/></svg>650.00<span class="state">left</span></span></div>
+					</div>
+				</section>
+		</div>
+	</div>
+</div>
+</section>
+</main>
+<script src="shared/frame.js"></script>
+</body>
+</html>
