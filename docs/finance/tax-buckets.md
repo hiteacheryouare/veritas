@@ -43,8 +43,12 @@ Scope (D13): a summary export that helps hand clean numbers to tax software or a
    3. Otherwise the category's bucket (`source = category`).
    4. Otherwise not counted.
 4. The same bucket reached through two tags counts once.
-5. A bucket id that is not in TAX-2, in a category's `tax_bucket` or in a tag mapping, is ignored: a tag with such a mapping is treated as an unmapped tag (so precedence falls through to the category), and a category with such a bucket has none. Such a row is never counted and never a conflict. The audit (R-REL-2) flags every unknown bucket id so the user can fix the mapping.
 5. Tag over category, always: a pharmacy purchase in Groceries tagged `#medical` counts as medical, and the category has no bearing.
+6. **Unknown bucket ids.** A bucket id that is not in TAX-2, in a tag mapping or in a category's `tax_bucket`, is ignored as if it were not set. What happens to the row:
+   - Tag mapped to an unknown id: that tag is treated as unmapped. Precedence continues with the row's other tags, then the category's bucket. If nothing else gives it a bucket, the row is not counted.
+   - Category with an unknown `tax_bucket`: the category has no bucket. A mapped tag can still give the row one. Otherwise the row is not counted.
+   - An unknown id never makes a row a conflict and is never counted as a bucket of its own.
+   - The audit (R-REL-2) reports every unknown id so the user can fix it. The report is informational only: it never makes the budget read-only and never blocks an export (only corruption refuses).
 
 ## TAX-4 Sign convention
 
