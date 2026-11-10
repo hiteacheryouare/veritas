@@ -86,6 +86,12 @@ pub fn oracle_dir() -> PathBuf {
 /// `tools/actual-oracle dump --raw-only`, or `None` (with a note on stderr)
 /// when the oracle isn't installed.
 pub fn oracle_raw_dump(zip_path: &Path) -> Option<Vec<u8>> {
+	oracle(&["dump".as_ref(), zip_path.as_os_str(), "--raw-only".as_ref()])
+}
+
+/// Runs `tools/actual-oracle` with these arguments and returns its stdout, or
+/// `None` (with a note on stderr) when the oracle isn't installed.
+pub fn oracle(args: &[&std::ffi::OsStr]) -> Option<Vec<u8>> {
 	if !oracle_dir().join("node_modules").exists() {
 		eprintln!(
 			"skipping the oracle comparison: tools/actual-oracle/node_modules is missing, run `cargo xtask oracle setup`"
@@ -94,9 +100,8 @@ pub fn oracle_raw_dump(zip_path: &Path) -> Option<Vec<u8>> {
 	}
 	let output = Command::new("node")
 		.current_dir(oracle_dir())
-		.args(["src/main.ts", "dump"])
-		.arg(zip_path)
-		.arg("--raw-only")
+		.arg("src/main.ts")
+		.args(args)
 		.output()
 		.expect("node runs");
 	assert!(
@@ -142,4 +147,21 @@ pub fn imported(
 		Ok(veritas_interop::ImportOutcome::Imported(budget)) => budget,
 		other => panic!("expected an import, got {other:?}"),
 	}
+}
+
+/// Imports a fixture-shaped zip, adopts it and exports it again, the way the
+/// app would with no edits in between.
+pub fn round_trip(zip_path: &Path, scratch: &Scratch) -> PathBuf {
+	let budget = imported(veritas_interop::import_actual_zip(
+		zip_path,
+		&scratch.join("budget"),
+	));
+	let mut store = veritas_store::Store::open(&budget.db_path).unwrap();
+	store.adopt().unwrap();
+	let out = scratch.join("exported.zip");
+	match veritas_interop::export_actual_zip(&store, &budget.metadata_path, &out).unwrap() {
+		veritas_interop::ExportOutcome::Exported(audit) => assert!(audit.is_clean(), "{audit:?}"),
+		refused => panic!("export refused: {refused:?}"),
+	}
+	out
 }

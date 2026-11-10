@@ -70,6 +70,45 @@ impl Store {
 		migration_ids(&self.conn)
 	}
 
+	/// Writes a standalone copy of the budget for an Actual export, the way
+	/// Actual's `exportBuffer` shapes one: the caches emptied and a rollback
+	/// journal instead of WAL. The working copy itself is not changed.
+	pub fn export_copy(&self, to: &Path) -> Result<(), CoreError> {
+		let target = to
+			.to_str()
+			.ok_or_else(|| CoreError::Io(format!("{} isn't a UTF-8 path", to.display())))?;
+		self.conn
+			.execute("VACUUM INTO ?1", [target])
+			.map_err(storage)?;
+		let copy = Connection::open_with_flags(
+			to,
+			OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+		)
+		.map_err(storage)?;
+		for cache in ["kvcache", "kvcache_key"] {
+			let exists: bool = copy
+				.query_row(
+					"SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+					[cache],
+					|row| row.get(0),
+				)
+				.map_err(storage)?;
+			if exists {
+				copy.execute(&format!("DELETE FROM {cache}"), [])
+					.map_err(storage)?;
+			}
+		}
+		let mode: String = copy
+			.query_row("PRAGMA journal_mode = DELETE", [], |row| row.get(0))
+			.map_err(storage)?;
+		if !mode.eq_ignore_ascii_case("delete") {
+			return Err(CoreError::Storage(format!(
+				"the export copy kept journal mode {mode}"
+			)));
+		}
+		copy.close().map_err(|(_, error)| storage(error))
+	}
+
 	pub fn pragma_text(&self, pragma: &str) -> Result<String, CoreError> {
 		self.conn
 			.query_row(&format!("PRAGMA {pragma}"), [], |row| {

@@ -246,6 +246,37 @@ pub(crate) fn write_pretty(out: &mut impl Write, value: &Value, depth: usize) ->
 	}
 }
 
+/// `JSON.stringify` with no indentation: keys in insertion order, and a
+/// number JSON can't hold written as `null`.
+pub(crate) fn stringify(out: &mut impl Write, value: &Value) -> io::Result<()> {
+	match value {
+		Value::Number(x) if !x.is_finite() => out.write_all(b"null"),
+		Value::Array(items) => {
+			out.write_all(b"[")?;
+			for (index, item) in items.iter().enumerate() {
+				if index > 0 {
+					out.write_all(b",")?;
+				}
+				stringify(out, item)?;
+			}
+			out.write_all(b"]")
+		}
+		Value::Object(entries) => {
+			out.write_all(b"{")?;
+			for (index, (key, item)) in entries.iter().enumerate() {
+				if index > 0 {
+					out.write_all(b",")?;
+				}
+				write_string(out, key)?;
+				out.write_all(b":")?;
+				stringify(out, item)?;
+			}
+			out.write_all(b"}")
+		}
+		_ => write_compact(out, value),
+	}
+}
+
 #[cfg(test)]
 pub(crate) fn to_canonical(value: &Value) -> String {
 	let mut out = Vec::new();
@@ -584,6 +615,17 @@ mod tests {
 		] {
 			assert_eq!(js_number(value), expected, "{value:e}");
 		}
+	}
+
+	#[test]
+	fn stringify_keeps_insertion_order_like_json_stringify() {
+		let parsed = parse("{\"b\": 1.50, \"a\": [1e400, \"\\ud800\"], \"b\": true}").unwrap();
+		let mut out = Vec::new();
+		stringify(&mut out, &parsed).unwrap();
+		assert_eq!(
+			String::from_utf8(out).unwrap(),
+			"{\"b\":true,\"a\":[null,\"\\ud800\"]}"
+		);
 	}
 
 	#[test]
