@@ -408,6 +408,7 @@ fn transaction(row: &Row<'_>) -> Cell<Transaction> {
 		date: date(at(row, 2)?)?.ok_or("the transaction has no date")?,
 		amount: money(at(row, 3)?)?.unwrap_or(Money::ZERO),
 		payee: text(at(row, 4)?)?.map(PayeeId::new),
+		imported_payee: None,
 		// Actual always reads a split parent's category as NULL.
 		category: if is_parent {
 			None
