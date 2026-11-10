@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { type Commit, evaluate, reviewedCommit, trustedSignoffs } from './mergeBar.ts';
+import { type Commit, evaluate, reviewedCommits, trustedSignoffs } from './mergeBar.ts';
 
 const { GITHUB_TOKEN, GITHUB_REPOSITORY, PR_NUMBER, GITHUB_SERVER_URL, GITHUB_RUN_ID } = process.env;
 if (!GITHUB_TOKEN || !GITHUB_REPOSITORY || !PR_NUMBER) {
@@ -73,7 +73,7 @@ const verdict = evaluate(
 		baseRef: pull.base.ref,
 		headRef: pull.head.ref,
 		headSha: pull.head.sha,
-		reviewedSha: reviewedCommit(pull.head.sha, commits, isCleanSync),
+		reviewedShas: reviewedCommits(pull.head.sha, commits, isCleanSync),
 		fromFork: pull.head.repo?.full_name !== GITHUB_REPOSITORY,
 		body: pull.body ?? '',
 		labels: pull.labels.map((label: { name: string }) => label.name)
