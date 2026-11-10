@@ -29,7 +29,7 @@ pub enum SnapshotReason {
 }
 
 impl SnapshotReason {
-	const ALL: [SnapshotReason; 8] = [
+	pub(crate) const ALL: [SnapshotReason; 8] = [
 		SnapshotReason::Open,
 		SnapshotReason::Import,
 		SnapshotReason::Export,
@@ -39,6 +39,11 @@ impl SnapshotReason {
 		SnapshotReason::Hourly,
 		SnapshotReason::Restore,
 	];
+
+	/// Taken on a schedule rather than before an operation.
+	pub fn is_routine(self) -> bool {
+		matches!(self, SnapshotReason::Open | SnapshotReason::Hourly)
+	}
 
 	fn slug(self) -> &'static str {
 		match self {
@@ -156,8 +161,9 @@ pub fn list_snapshots(snapshots_dir: &Path) -> Result<Vec<Snapshot>, CoreError> 
 pub fn prune_snapshots(
 	snapshots_dir: &Path,
 	policy: &RetentionPolicy,
+	now: DateTime<Utc>,
 ) -> Result<Vec<Snapshot>, CoreError> {
-	let gone = expired(&list_snapshots(snapshots_dir)?, policy);
+	let gone = expired(&list_snapshots(snapshots_dir)?, policy, now);
 	for snapshot in &gone {
 		remove_if_present(&snapshot.path)?;
 	}

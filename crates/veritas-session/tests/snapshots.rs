@@ -216,8 +216,10 @@ fn pruning_applies_the_policy_and_clears_half_written_copies() {
 		hourly: 2,
 		daily: 1,
 		monthly: 1,
+		operation_days: 30,
 	};
-	let gone = prune_snapshots(&budget.snapshots, &policy).unwrap();
+	let now = start + TimeDelta::days(3);
+	let gone = prune_snapshots(&budget.snapshots, &policy, now).unwrap();
 
 	assert_eq!(gone.len(), 8);
 	assert!(!partial.exists());
@@ -232,7 +234,7 @@ fn pruning_applies_the_policy_and_clears_half_written_copies() {
 	);
 	assert!(budget.snapshots.join("keep-me.txt").exists());
 	assert!(
-		prune_snapshots(&budget.snapshots, &policy)
+		prune_snapshots(&budget.snapshots, &policy, now)
 			.unwrap()
 			.is_empty()
 	);
@@ -457,7 +459,7 @@ fn a_month_of_daily_use_keeps_every_recent_hour_and_the_end_of_every_day() {
 			let snapshot =
 				take_snapshot(&budget.db, &budget.snapshots, reason, evening + offset).unwrap();
 			taken.push(snapshot.taken_at);
-			prune_snapshots(&budget.snapshots, &policy).unwrap();
+			prune_snapshots(&budget.snapshots, &policy, evening + offset).unwrap();
 		};
 		snap(TimeDelta::minutes(2), SnapshotReason::Open);
 		if day % 7 == 3 {
@@ -500,8 +502,17 @@ fn a_month_of_daily_use_keeps_every_recent_hour_and_the_end_of_every_day() {
 		assert!(kept.contains(&wanted), "lost the end of {month}");
 	}
 	assert!(kept.contains(&newest));
+	let recent_operations = list_snapshots(&budget.snapshots)
+		.unwrap()
+		.iter()
+		.filter(|snapshot| {
+			!snapshot.reason.is_routine()
+				&& newest - snapshot.taken_at < TimeDelta::days(policy.operation_days)
+		})
+		.count();
+	assert!(recent_operations > 0);
 	assert!(
-		kept.len() <= policy.hourly + policy.daily + policy.monthly,
+		kept.len() <= policy.hourly + policy.daily + policy.monthly + recent_operations,
 		"{} snapshots kept",
 		kept.len()
 	);
@@ -515,7 +526,6 @@ fn a_month_of_daily_use_keeps_every_recent_hour_and_the_end_of_every_day() {
 }
 
 #[test]
-#[ignore = "R-REL-3 bug: the hourly tier keeps only the newest snapshot of each hour, so a safety snapshot taken before a risky operation is deleted by the next snapshot in that hour"]
 fn a_snapshot_taken_before_a_risky_operation_survives_the_next_prune_in_the_same_hour() {
 	// R-REL-3 and §10 "restoring a snapshot brings back the exact prior state":
 	// the user imports at 14:20 and exports at 14:50, then wants the budget
@@ -538,7 +548,7 @@ fn a_snapshot_taken_before_a_risky_operation_survives_the_next_prune_in_the_same
 		at("2026-11-10T14:50:00Z"),
 	)
 	.unwrap();
-	prune_snapshots(&budget.snapshots, &policy).unwrap();
+	prune_snapshots(&budget.snapshots, &policy, at("2026-11-10T14:50:00Z")).unwrap();
 	assert!(
 		before_import.path.exists(),
 		"the pre-import snapshot was pruned"
@@ -560,7 +570,7 @@ fn a_snapshot_taken_before_a_risky_operation_survives_the_next_prune_in_the_same
 		at("2026-11-10T15:30:01Z"),
 	)
 	.unwrap();
-	prune_snapshots(&budget.snapshots, &policy).unwrap();
+	prune_snapshots(&budget.snapshots, &policy, at("2026-11-10T15:30:01Z")).unwrap();
 	assert!(
 		safety.path.exists(),
 		"the restore's safety snapshot was pruned"
