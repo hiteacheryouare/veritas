@@ -68,6 +68,16 @@ const resolvePayeeRefs = async (session: ActualSession, transaction: any): Promi
 	return resolved;
 };
 
+// Actual rebuilds the budget sheet for a new budget type without awaiting it.
+// Recreating the budgets waits for that rebuild, and reopening the file leaves
+// the sheet exactly as a fresh open would.
+const reloadBudget = async (api: any, internal: any) => {
+	await internal.send('get-budget-bounds');
+	const [{ id }] = await api.getBudgets();
+	await internal.send('close-budget');
+	await api.loadBudget(id);
+};
+
 export const opHandlers: Record<string, OpHandler> = {
 	createAccount: (session, op) => {
 		required(op, 'id', 'name');
@@ -271,9 +281,12 @@ export const opHandlers: Record<string, OpHandler> = {
 			})
 		);
 	},
-	setPreference: ({ api }, op) => {
+	setPreference: async ({ api, internal }, op) => {
 		required(op, 'id', 'value');
-		return api.setPreference(op.id, op.value);
+		await api.setPreference(op.id, op.value);
+		if (op.id === 'budgetType') {
+			await reloadBudget(api, internal);
+		}
 	}
 };
 
