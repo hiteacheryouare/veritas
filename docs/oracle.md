@@ -1,12 +1,16 @@
 # The Actual oracle
 
-`tools/actual-oracle/` drives Actual's own engine (`@actual-app/api`, pinned to exactly `26.11.0`) so Veritas can be checked against it. It is a dev tool and never ships. It has three commands:
+`tools/actual-oracle/` drives Actual's own engine (`@actual-app/api`, pinned to exactly `26.11.0`) so Veritas can be checked against it. It is a dev tool and never ships. It has five commands:
 
 | Command | Does |
 |---|---|
 | `dump <zip> [--out <file>] [--raw-only]` | Writes the canonical dump of an Actual export: every table as stored in the zip, plus the budget values Actual computes for it. |
 | `apply <zip> <ops.json> --out <zip>` | Imports the zip, runs an op list through Actual and exports the result. |
 | `generate <small\|all-features\|perf-100k> [--out <zip>]` | Builds a synthetic fixture into `fixtures/synthetic/<spec>.zip`. |
+| `eval <cases.json> [--out <file>]` | Runs Actual's `evalArithmetic` on a JSON array of `{"format", "expression"}` cases, each under its own number format. Results are JavaScript's number text (`"Infinity"`, `"-0"`) or `null`. |
+| `arithmetic-vectors [--out <file>]` | Rewrites `crates/veritas-engine/tests/fixtures/actual-arithmetic-vectors.json`, the vectors the engine's arithmetic tests compare against bit for bit. |
+
+`eval` and `arithmetic-vectors` can't use the bundle: `@actual-app/api` tree-shakes `evalArithmetic` and `currencyToAmount` away. They import the pinned, unmodified `packages/loot-core/src/shared/arithmetic.ts` and `util.ts` from `reference/actual` (or `ACTUAL_REFERENCE_DIR`) through a module hook that adds the `.ts` extension and resolves `date-fns` from the oracle's own `node_modules` (`src/reference.ts`). They refuse to run, naming `cargo xtask reference`, when that checkout is missing or isn't at the manifest's commit. `npm test` checks that `arithmetic-vectors` reproduces the committed file and skips those tests when the checkout is missing.
 
 All commands also take `--today <YYYY-MM-DD>` (default `2026-11-09`) and `--seed <n>` (default `1`).
 

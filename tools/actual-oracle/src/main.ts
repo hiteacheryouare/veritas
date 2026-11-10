@@ -8,18 +8,29 @@ import { computedDump, rawDump } from './dump.ts';
 import { DEFAULT_SEED, DEFAULT_TODAY, withActual } from './environment.ts';
 import type { Determinism } from './environment.ts';
 import { applyOps, parseOpFile } from './ops.ts';
+import { arithmeticVectors } from './arithmeticVectors.ts';
+import { loadArithmetic } from './reference.ts';
 import { fixtureSpecs } from './specs/index.ts';
 
 const USAGE = `Usage:
   node src/main.ts dump <zip> [--out <file>] [--raw-only]
   node src/main.ts apply <zip> <ops.json> --out <zip>
   node src/main.ts generate <${Object.keys(fixtureSpecs).join('|')}> [--out <zip>]
+  node src/main.ts eval <cases.json> [--out <file>]
+  node src/main.ts arithmetic-vectors [--out <file>]
+
+eval and arithmetic-vectors run Actual's arithmetic from the pinned source in
+reference/actual (or ACTUAL_REFERENCE_DIR), because the bundle doesn't ship it.
 
 Shared options:
   --today <YYYY-MM-DD>  the date Actual sees as today (default ${DEFAULT_TODAY})
   --seed <n>            seed for every id and random value Actual generates (default ${DEFAULT_SEED})`;
 
 const FIXTURE_DIR = resolve(import.meta.dirname, '../../../fixtures/synthetic');
+const ARITHMETIC_VECTORS = resolve(
+	import.meta.dirname,
+	'../../../crates/veritas-engine/tests/fixtures/actual-arithmetic-vectors.json'
+);
 const FLUSH_BYTES = 1 << 20;
 
 const writeCanonicalTo = (value: CanonicalValue, out: string | undefined) => {
@@ -82,6 +93,36 @@ const generate = (determinism: Determinism, specName: string, out: string) => {
 	});
 };
 
+interface EvalCase {
+	format: string;
+	expression: string;
+}
+
+// Cases are evaluated in order under each case's number format, the module
+// state Actual's evalArithmetic reads.
+const evaluate = async (casesPath: string, out: string | undefined) => {
+	const cases: EvalCase[] = JSON.parse(readFileSync(casesPath, 'utf8'));
+	if (!Array.isArray(cases) || cases.some(c => typeof c?.format !== 'string' || typeof c?.expression !== 'string')) {
+		throw new Error(`${casesPath} must be a JSON array of {"format", "expression"} strings`);
+	}
+	const actual = await loadArithmetic();
+	const encode = (v: number | null) => (v === null ? null : Object.is(v, -0) ? '-0' : String(v));
+	const results = cases.map(({ format, expression }) => {
+		actual.setNumberFormat({ format, hideFraction: false });
+		return { format, expression, result: encode(actual.evalArithmetic(expression)) };
+	});
+	const text = `${JSON.stringify(results)}\n`;
+	if (out) {
+		writeFileSync(out, text);
+	} else {
+		process.stdout.write(text);
+	}
+};
+
+const writeArithmeticVectors = async (out: string) => {
+	writeFileSync(out, arithmeticVectors(await loadArithmetic()));
+};
+
 const main = async () => {
 	const { positionals, values } = parseArgs({
 		allowPositionals: true,
@@ -108,6 +149,10 @@ const main = async () => {
 		await dump(determinism, args[0], values.out, values['raw-only']);
 	} else if (command === 'apply' && args.length === 2 && values.out) {
 		await apply(determinism, args[0], args[1], values.out);
+	} else if (command === 'eval' && args.length === 1) {
+		await evaluate(args[0], values.out);
+	} else if (command === 'arithmetic-vectors' && args.length === 0) {
+		await writeArithmeticVectors(values.out ?? ARITHMETIC_VECTORS);
 	} else if (command === 'generate' && args.length === 1) {
 		await generate(determinism, args[0], values.out ?? resolve(FIXTURE_DIR, `${args[0]}.zip`));
 	} else {
