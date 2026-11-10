@@ -31,6 +31,20 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # Differential tests drive Actual's real engine and read the pinned reference
+      # checkout. VERITAS_REQUIRE_ORACLE makes them fail instead of skip, so a green
+      # run always means parity was actually checked.
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: tools/actual-oracle/package-lock.json
+
+      - name: Oracle and reference
+        run: |
+          cargo xtask oracle setup
+          cargo xtask reference
+
       - name: Formatting
         run: cargo fmt --all --check
 
@@ -40,6 +54,8 @@ jobs:
 
       - name: Test
         if: ${{ !cancelled() }}
+        env:
+          VERITAS_REQUIRE_ORACLE: 1
         run: cargo test --workspace
 
   scripts:
