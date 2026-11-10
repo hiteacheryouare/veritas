@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Close goal</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="shared/frame.css">
+<style>
+.goal-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-4); margin-bottom: var(--space-6); }
+.goal { padding: var(--space-4); display: flex; flex-direction: column; align-items: flex-start; }
+.ring-wrap { position: relative; width: var(--size-ring-large); height: var(--size-ring-large); margin-bottom: var(--space-3); }
+.ring.large { width: var(--size-ring-large); height: var(--size-ring-large); }
+.ring.large circle { stroke-width: 9; }
+.ring-figure { position: absolute; inset: 0; display: grid; place-items: center; font-size: 20px; font-weight: var(--weight-bold); }
+.goal h3 { margin: 0; font-size: var(--text-heading); font-weight: var(--weight-semibold); }
+.goal .progress { margin: 2px 0 var(--space-2); }
+.goal .progress .fig { font-weight: var(--weight-semibold); }
+.goal .note { font-size: var(--text-body); font-weight: var(--weight-medium); gap: 5px; }
+.goal .note .icon { width: 14px; height: 14px; }
+.goal .detail { margin: var(--space-1) 0 0; color: var(--color-text-secondary); line-height: var(--line-body); }
+.goal .detail .fig { font-weight: var(--weight-semibold); }
+.goal .button { margin-top: var(--space-3); }
+.archive h2 { margin: 0 0 var(--space-1); font-size: var(--text-heading); font-weight: var(--weight-semibold); padding-left: var(--space-1); }
+.archive > p { margin: 0 0 var(--space-2); color: var(--color-text-secondary); padding-left: var(--space-1); }
+.closed { display: grid; grid-template-columns: 1fr 200px 160px; align-items: center; height: var(--size-row); padding: 0 var(--space-4); position: relative; color: var(--color-text-secondary); }
+.closed + .closed::before { content: ""; position: absolute; top: 0; left: var(--space-4); right: var(--space-4); border-top: 1px solid var(--color-separator); }
+.closed .name { color: var(--color-text-primary); font-weight: var(--weight-medium); }
+.closed .fig { text-align: right; }
+
+.close-sheet { width: 520px; }
+.leftover { padding: var(--space-4); border-radius: var(--radius-section); background: var(--color-surface-hover); }
+.leftover .headline { display: flex; align-items: center; gap: 6px; margin: 0 0 var(--space-3); font-weight: var(--weight-semibold); }
+.leftover .headline .icon { width: 15px; height: 15px; }
+.release { display: grid; grid-template-columns: auto 1fr; gap: var(--space-3); align-items: center; }
+.release label { color: var(--color-text-secondary); }
+.before-after { display: grid; grid-template-columns: 1fr auto auto auto; column-gap: var(--space-2); align-items: baseline; margin-top: var(--space-3); color: var(--color-text-secondary); }
+.before-after .fig { font-weight: var(--weight-semibold); color: var(--color-text-primary); }
+.warning { display: flex; align-items: flex-start; gap: 6px; margin: var(--space-3) 0 0; color: var(--color-money-overspent); line-height: var(--line-body); }
+.warning .icon { margin-top: 1px; width: 14px; height: 14px; }
+.small-print { margin: var(--space-3) 0 0; font-size: var(--text-caption); color: var(--color-text-secondary); line-height: var(--line-body); }
+</style>
+</head>
+<body>
+<header class="page-bar"><h1>Close goal</h1><p>First: $20 left, released to General savings as a budget move. Second: the goal was overspent by $20.</p></header>
+<main>
+<section class="stage" data-theme="light">
+<div class="window">
+	<nav class="sidebar" aria-label="Sections" data-current="goals"></nav>
+	<div class="main">
+		<div class="toolbar">
+			<h1 class="toolbar-title" style="margin-left: var(--space-2)">Goals</h1>
+			<div class="toolbar-gap"></div>
+			<button class="button" type="button"><svg class="icon"><use href="#i-plus"/></svg>New goal</button>
+			<div class="search"><svg class="icon"><use href="#i-search"/></svg>Go to anything<kbd>⌘K</kbd></div>
+		</div>
+		<div class="content">
+			<div class="goal-grid">
+				<article class="goal grouped">
+					<div class="ring-wrap"><svg class="ring large " viewBox="0 0 96 96"><circle class="track" cx="48" cy="48" r="41"/><circle class="value" cx="48" cy="48" r="41" pathLength="100" stroke-dasharray="74.7 100"/></svg><span class="fig ring-figure">75%</span></div>
+					<h3>New laptop</h3>
+					<p class="progress"><span class="fig">$1,120</span> of <span class="fig">$1,500</span></p>
+					<div class="note is-available"><svg class="icon small"><use href="#i-check"/></svg>On track for March</div>
+					<p class="detail">Budget <span class="fig">$76</span> a month to get there.</p>
+				</article>
+				<article class="goal grouped">
+					<div class="ring-wrap"><svg class="ring large low" viewBox="0 0 96 96"><circle class="track" cx="48" cy="48" r="41"/><circle class="value" cx="48" cy="48" r="41" pathLength="100" stroke-dasharray="38.5 100"/></svg><span class="fig ring-figure">38%</span></div>
+					<h3>Japan trip</h3>
+					<p class="progress"><span class="fig">$2,310</span> of <span class="fig">$6,000</span></p>
+					<div class="note is-low"><svg class="icon small"><use href="#i-low"/></svg>Behind, needs $410 a month</div>
+					<p class="detail">Target July 2027. You budgeted <span class="fig">$300</span> this month.</p>
+				</article>
+				<article class="goal grouped">
+					<div class="ring-wrap"><svg class="ring large " viewBox="0 0 96 96"><circle class="track" cx="48" cy="48" r="41"/><circle class="value" cx="48" cy="48" r="41" pathLength="100" stroke-dasharray="62 100"/></svg><span class="fig ring-figure">62%</span></div>
+					<h3>Emergency fund</h3>
+					<p class="progress"><span class="fig">$6,200</span> of <span class="fig">$10,000</span></p>
+					<div class="note is-available"><svg class="icon small"><use href="#i-check"/></svg>On track for August 2027</div>
+					<p class="detail">Budget <span class="fig">$380</span> a month to get there.</p>
+				</article>
+				<article class="goal grouped done">
+					<div class="ring-wrap"><svg class="ring large " viewBox="0 0 96 96"><circle class="track" cx="48" cy="48" r="41"/><circle class="value" cx="48" cy="48" r="41" pathLength="100" stroke-dasharray="100 100"/></svg><span class="fig ring-figure">100%</span></div>
+					<h3>Winter tires</h3>
+					<p class="progress"><span class="fig">$850</span> of <span class="fig">$850</span></p>
+					<div class="note is-available"><svg class="icon small"><use href="#i-check"/></svg>Reached → Spent</div><p class="detail"><span class="fig">$830.00</span> spent, <span class="fig is-available">$20.00</span> left</p>
+					<button class="button small" type="button"><svg class="icon"><use href="#i-archive"/></svg>Close goal</button>
+				</article>
+			</div>
+			<section class="archive">
+				<h2>Archive</h2>
+				<p>Closed goals stay in reports and Wrapped.</p>
+				<div class="grouped">
+					<div class="closed"><span class="name">Vet bill</span><span>Closed August 2026</span><span class="fig">1,204.18 spent</span></div>
+					<div class="closed"><span class="name">Concert tickets</span><span>Closed May 2026</span><span class="fig">310.00 spent</span></div>
+				</div>
+			</section>
+		</div>
+		<div class="scrim"></div>
+		<div class="sheet close-sheet" role="dialog" aria-label="Close Winter tires">
+			<h2>Close Winter tires?</h2>
+			<p class="lede">The goal leaves the budget. It stays in reports, Wrapped and the goal archive.</p>
+			<div class="leftover">
+				<p class="headline"><svg class="icon is-available"><use href="#i-check"/></svg><span><span class="fig">$20.00</span> is left in this goal.</span></p>
+				<div class="release">
+					<label>Release it to</label>
+					<div class="popup"><span>General savings</span><svg class="icon"><use href="#i-chev-updown"/></svg></div>
+				</div>
+				<div class="before-after"><span>General savings available</span><span class="fig">1,840.00</span><span>→</span><span class="fig is-available">1,860.00</span></div>
+			</div>
+			<p class="small-print">This is a budget move, not a transaction. Your tire purchase stays filed under Winter tires, and no history is re-filed.</p>
+			<div class="sheet-actions">
+				<button class="button" type="button">Cancel</button>
+				<button class="button primary" type="button">Close goal</button>
+			</div>
+		</div>
+	</div>
+</div>
+</section>
+<div class="stage-note">Overspent goal</div>
+<section class="stage" data-theme="light">
+<div class="window">
+	<nav class="sidebar" aria-label="Sections" data-current="goals"></nav>
+	<div class="main">
+		<div class="toolbar">
+			<h1 class="toolbar-title" style="margin-left: var(--space-2)">Goals</h1>
+			<div class="toolbar-gap"></div>
+			<button class="button" type="button"><svg class="icon"><use href="#i-plus"/></svg>New goal</button>
+			<div class="search"><svg class="icon"><use href="#i-search"/></svg>Go to anything<kbd>⌘K</kbd></div>
+		</div>
+		<div class="content">
+			<div class="goal-grid">
+				<article class="goal grouped">
+					<div class="ring-wrap"><svg class="ring large " viewBox="0 0 96 96"><circle class="track" cx="48" cy="48" r="41"/><circle class="value" cx="48" cy="48" r="41" pathLength="100" stroke-dasharray="74.7 100"/></svg><span class="fig ring-figure">75%</span></div>
+					<h3>New laptop</h3>
+					<p class="progress"><span class="fig">$1,120</span> of <span class="fig">$1,500</span></p>
+					<div class="note is-available"><svg class="icon small"><use href="#i-check"/></svg>On track for March</div>
+					<p class="detail">Budget <span class="fig">$76</span> a month to get there.</p>
+				</article>
+				<article class="goal grouped">
+					<div class="ring-wrap"><svg class="ring large low" viewBox="0 0 96 96"><circle class="track" cx="48" cy="48" r="41"/><circle class="value" cx="48" cy="48" r="41" pathLength="100" stroke-dasharray="38.5 100"/></svg><span class="fig ring-figure">38%</span></div>
+					<h3>Japan trip</h3>
+					<p class="progress"><span class="fig">$2,310</span> of <span class="fig">$6,000</span></p>
+					<div class="note is-low"><svg class="icon small"><use href="#i-low"/></svg>Behind, needs $410 a month</div>
+					<p class="detail">Target July 2027. You budgeted <span class="fig">$300</span> this month.</p>
+				</article>
+				<article class="goal grouped">
+					<div class="ring-wrap"><svg class="ring large " viewBox="0 0 96 96"><circle class="track" cx="48" cy="48" r="41"/><circle class="value" cx="48" cy="48" r="41" pathLength="100" stroke-dasharray="62 100"/></svg><span class="fig ring-figure">62%</span></div>
+					<h3>Emergency fund</h3>
+					<p class="progress"><span class="fig">$6,200</span> of <span class="fig">$10,000</span></p>
+					<div class="note is-available"><svg class="icon small"><use href="#i-check"/></svg>On track for August 2027</div>
+					<p class="detail">Budget <span class="fig">$380</span> a month to get there.</p>
+				</article>
+				<article class="goal grouped done">
+					<div class="ring-wrap"><svg class="ring large " viewBox="0 0 96 96"><circle class="track" cx="48" cy="48" r="41"/><circle class="value" cx="48" cy="48" r="41" pathLength="100" stroke-dasharray="100 100"/></svg><span class="fig ring-figure">100%</span></div>
+					<h3>Winter tires</h3>
+					<p class="progress"><span class="fig">$850</span> of <span class="fig">$850</span></p>
+					<div class="note is-overspent"><svg class="icon small"><use href="#i-over"/></svg>Reached → Spent, overspent</div><p class="detail"><span class="fig">$870.00</span> spent, <span class="fig is-overspent">−$20.00</span> over</p>
+					<button class="button small" type="button"><svg class="icon"><use href="#i-archive"/></svg>Close goal</button>
+				</article>
+			</div>
+			<section class="archive">
+				<h2>Archive</h2>
+				<p>Closed goals stay in reports and Wrapped.</p>
+				<div class="grouped">
+					<div class="closed"><span class="name">Vet bill</span><span>Closed August 2026</span><span class="fig">1,204.18 spent</span></div>
+					<div class="closed"><span class="name">Concert tickets</span><span>Closed May 2026</span><span class="fig">310.00 spent</span></div>
+				</div>
+			</section>
+		</div>
+		<div class="scrim"></div>
+		<div class="sheet close-sheet" role="dialog" aria-label="Close Winter tires">
+			<h2>Close Winter tires?</h2>
+			<p class="lede">The goal leaves the budget. It stays in reports, Wrapped and the goal archive.</p>
+			<div class="leftover">
+				<p class="headline"><svg class="icon is-overspent"><use href="#i-over"/></svg><span>You spent <span class="fig">$20.00</span> more than this goal held.</span></p>
+				<div class="release">
+					<label>Cover it from</label>
+					<div class="popup"><span>Dining out</span><svg class="icon"><use href="#i-chev-updown"/></svg></div>
+				</div>
+				<div class="before-after"><span>Dining out available</span><span class="fig is-overspent">−34.75</span><span>→</span><span class="fig is-overspent">−54.75</span></div>
+				<p class="warning"><svg class="icon"><use href="#i-over"/></svg><span>Dining out will be $54.75 over. Pick an envelope with money left, such as General savings with 1,840.00.</span></p>
+			</div>
+			<p class="small-print">This is a budget move, not a transaction. Your tire purchase stays filed under Winter tires, and no history is re-filed.</p>
+			<div class="sheet-actions">
+				<button class="button" type="button">Cancel</button>
+				<button class="button primary" type="button">Close goal</button>
+			</div>
+		</div>
+	</div>
+</div>
+</section>
+</main>
+<script src="shared/frame.js"></script>
+</body>
+</html>

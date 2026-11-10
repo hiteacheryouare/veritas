@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bills</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="shared/frame.css">
+<style>
+.section-title { display: flex; align-items: baseline; gap: var(--space-3); margin: 0 0 var(--space-2); padding-left: var(--space-1); }
+.section-title h2 { margin: 0; font-size: var(--text-heading); font-weight: var(--weight-semibold); }
+.section-title p { margin: 0; color: var(--color-text-secondary); }
+.upcoming { margin-bottom: var(--space-6); }
+
+.due, .bill, .columns { display: grid; column-gap: var(--space-4); align-items: center; padding: 0 var(--space-4); }
+.due { grid-template-columns: 76px 1fr 200px 120px 130px; min-height: 52px; position: relative; }
+.due + .due::before, .bill + .bill::before { content: ""; position: absolute; top: 0; left: var(--space-4); right: var(--space-4); border-top: 1px solid var(--color-separator); }
+.due .when { display: grid; }
+.due .when .fig { font-weight: var(--weight-semibold); }
+.due .when span:last-child { font-size: var(--text-caption); color: var(--color-text-secondary); }
+.due .what { font-weight: var(--weight-semibold); }
+.due .what span { display: block; font-weight: var(--weight-regular); color: var(--color-text-secondary); font-size: var(--text-caption); margin-top: 2px; }
+.due .route { color: var(--color-text-secondary); }
+.due .fig.amount { text-align: right; font-weight: var(--weight-semibold); }
+.due .about { color: var(--color-text-secondary); font-family: var(--font-text); font-weight: var(--weight-regular); margin-right: 3px; }
+.due > .button { justify-self: end; }
+
+.due.paying { background: var(--color-accent-soft); padding-top: var(--space-3); padding-bottom: var(--space-3); }
+.due.paying::before, .due.paying + .due::before { display: none; }
+.pay-form { grid-column: 4 / 6; display: grid; grid-template-columns: 1fr auto; gap: var(--space-2); align-items: center; justify-self: end; width: 250px; }
+.pay-form .field { width: 100%; }
+.pay-form .hint { grid-column: 1 / -1; font-size: var(--text-caption); color: var(--color-text-secondary); text-align: right; }
+
+.columns { grid-template-columns: 1fr 110px 130px 220px 140px 70px; color: var(--color-text-tertiary); font-size: var(--text-caption); padding-bottom: var(--space-1); }
+.bill { grid-template-columns: 1fr 110px 130px 220px 140px 70px; height: var(--size-row); position: relative; }
+.bill .name { font-weight: var(--weight-semibold); white-space: nowrap; }
+.bill .fig.amount, .columns span:nth-child(2), .columns span:last-child, .bill .next { text-align: right; }
+.bill .fig.amount { font-weight: var(--weight-medium); }
+.bill .about { color: var(--color-text-secondary); font-family: var(--font-text); margin-right: 3px; }
+.bill .when, .bill .route { color: var(--color-text-secondary); }
+.posting { display: inline-flex; align-items: center; gap: 5px; color: var(--color-text-secondary); }
+.posting .icon { width: 14px; height: 14px; color: var(--color-text-tertiary); }
+.bill .next { color: var(--color-text-secondary); }
+</style>
+</head>
+<body>
+<header class="page-bar"><h1>Bills</h1><p>A plain list. Ryan clicked Paid on Electric and is adjusting the amount before he saves it.</p></header>
+<main>
+<section class="stage" data-theme="light">
+<div class="window">
+	<nav class="sidebar" aria-label="Sections" data-current="bills"></nav>
+	<div class="main">
+		<div class="toolbar">
+			<h1 class="toolbar-title" style="margin-left: var(--space-2)">Bills</h1>
+			<div class="toolbar-gap"></div>
+			<button class="button" type="button"><svg class="icon"><use href="#i-plus"/></svg>New bill</button>
+			<div class="search"><svg class="icon"><use href="#i-search"/></svg>Go to anything<kbd>⌘K</kbd></div>
+		</div>
+		<div class="content">
+			<section class="upcoming">
+				<div class="section-title"><h2>Upcoming</h2><p>Confirm-first bills wait here until you mark them paid.</p></div>
+				<div class="grouped">
+					<div class="due">
+						<span class="when"><span class="fig">Nov 12</span><span>in 3 days</span></span>
+						<span class="what">Car loan<span>Asks for principal and interest when paid</span></span>
+						<span class="route">Checking → Car loan</span>
+						<span class="fig amount">412.00</span>
+						<button class="button small" type="button">Paid</button>
+					</div>
+					<div class="due paying">
+						<span class="when"><span class="fig">Nov 15</span><span>in 6 days</span></span>
+						<span class="what">Electric<span>Usually about 90.00. Last month was 88.36.</span></span>
+						<span class="route">Checking → Electric</span>
+						<div class="pay-form">
+							<span class="field fig focused">93.41<span class="caret"></span></span>
+							<button class="button small primary" type="button">Mark paid</button>
+							<span class="hint">Posts today to Checking. Esc to cancel.</span>
+						</div>
+					</div>
+				</div>
+			</section>
+
+			<div class="section-title"><h2>All bills</h2></div>
+			<div class="columns"><span>Bill</span><span>Amount</span><span>When</span><span>From → To</span><span>Posting</span><span>Next</span></div>
+			<div class="grouped">
+				<div class="bill"><span class="name">Rent</span><span class="fig amount">1,650.00</span><span class="when">1st of month</span><span class="route">Checking → Rent</span><span class="posting"><svg class="icon"><use href="#i-auto"/></svg>Auto-post</span><span class="fig next">Dec 1</span></div>
+				<div class="bill"><span class="name">Phone</span><span class="fig amount">45.00</span><span class="when">2nd of month</span><span class="route">Visa → Phone</span><span class="posting"><svg class="icon"><use href="#i-auto"/></svg>Auto-post</span><span class="fig next">Dec 2</span></div>
+				<div class="bill"><span class="name">Internet</span><span class="fig amount">70.00</span><span class="when">3rd of month</span><span class="route">Checking → Internet</span><span class="posting"><svg class="icon"><use href="#i-auto"/></svg>Auto-post</span><span class="fig next">Dec 3</span></div>
+				<div class="bill"><span class="name">Car loan</span><span class="fig amount">412.00</span><span class="when">12th of month</span><span class="route">Checking → Car loan</span><span class="posting"><svg class="icon"><use href="#i-ask"/></svg>Confirm first</span><span class="fig next">Nov 12</span></div>
+				<div class="bill"><span class="name">Electric</span><span class="fig amount"><span class="about">about</span>90.00</span><span class="when">15th of month</span><span class="route">Checking → Electric</span><span class="posting"><svg class="icon"><use href="#i-ask"/></svg>Confirm first</span><span class="fig next">Nov 15</span></div>
+				<div class="bill"><span class="name">Music streaming</span><span class="fig amount">10.99</span><span class="when">18th of month</span><span class="route">Visa → Subscriptions</span><span class="posting"><svg class="icon"><use href="#i-auto"/></svg>Auto-post</span><span class="fig next">Nov 18</span></div>
+			</div>
+		</div>
+	</div>
+</div>
+</section>
+</main>
+<script src="shared/frame.js"></script>
+</body>
+</html>

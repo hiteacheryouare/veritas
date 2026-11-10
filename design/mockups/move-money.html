@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Move money</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="shared/frame.css">
+<style>
+.account-head { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: var(--space-5); }
+.account-head h2 { margin: 0 0 2px; font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--color-text-secondary); }
+.account-head .hero { font-family: var(--font-figures); font-size: var(--text-display); font-weight: var(--weight-bold); line-height: 1.1; }
+.account-head p { margin: 0; color: var(--color-text-secondary); }
+.account-head p .fig { color: var(--color-text-primary); font-weight: var(--weight-medium); }
+.columns, .txn { display: grid; grid-template-columns: 64px 1fr 220px 120px 120px; column-gap: var(--space-4); align-items: center; padding: 0 var(--space-4); }
+.columns { color: var(--color-text-tertiary); font-size: var(--text-caption); padding-bottom: var(--space-1); }
+.columns span:nth-child(n+4), .txn .amount, .txn .balance { text-align: right; }
+.txn { height: var(--size-row); position: relative; }
+.txn + .txn::before { content: ""; position: absolute; top: 0; left: var(--space-4); right: var(--space-4); border-top: 1px solid var(--color-separator); }
+.txn:first-child { border-radius: var(--radius-section) var(--radius-section) 0 0; }
+.txn:last-child { border-radius: 0 0 var(--radius-section) var(--radius-section); }
+.txn.selected { background: var(--color-accent-soft); }
+.txn.selected::before, .txn.selected + .txn::before { display: none; }
+.date { color: var(--color-text-secondary); }
+.payee { display: flex; align-items: baseline; gap: var(--space-2); white-space: nowrap; font-weight: var(--weight-medium); }
+.direction { font-weight: var(--weight-semibold); color: var(--color-accent); margin-right: -2px; }
+.row-note { font-size: var(--text-caption); color: var(--color-text-secondary); font-weight: var(--weight-regular); }
+.env { color: var(--color-text-secondary); white-space: nowrap; }
+.envelope-income { display: inline-flex; align-items: center; gap: 4px; }
+.muted { color: var(--color-text-tertiary); }
+.amount { font-weight: var(--weight-semibold); }
+.balance { color: var(--color-text-secondary); }
+
+.move-sheet { width: 600px; }
+.ends { display: grid; grid-template-columns: 1fr 28px 1fr; align-items: start; gap: var(--space-3); margin: var(--space-4) 0 var(--space-5); }
+.end { display: grid; gap: var(--space-2); }
+.end-label { font-size: var(--text-caption); color: var(--color-text-secondary); font-weight: var(--weight-semibold); }
+.popup-balance { color: var(--color-text-secondary); }
+.arrow { align-self: center; margin-top: 4px; text-align: center; font-size: 18px; font-weight: var(--weight-semibold); color: var(--color-accent); }
+.before-after { display: grid; grid-template-columns: auto 1fr; column-gap: var(--space-3); row-gap: 2px; padding: var(--space-2) var(--space-3); border-radius: var(--radius-control); background: var(--color-surface-hover); color: var(--color-text-secondary); }
+.before-after .fig { text-align: right; color: var(--color-text-primary); }
+.before-after .strong { font-weight: var(--weight-semibold); }
+.form-grid { display: grid; grid-template-columns: 80px 160px; row-gap: var(--space-2); align-items: center; }
+.form-grid label { color: var(--color-text-secondary); }
+.loan-split { margin-top: var(--space-5); padding-top: var(--space-4); border-top: 1px solid var(--color-separator); }
+.loan-split h3 { margin: 0 0 4px; font-size: var(--text-body); font-weight: var(--weight-semibold); }
+.loan-split .lede { margin-bottom: var(--space-3); }
+.split-grid { display: grid; grid-template-columns: 80px 160px 1fr; gap: var(--space-2) var(--space-3); align-items: center; }
+.split-label { color: var(--color-text-secondary); }
+.popup.small { height: 28px; }
+.hint { display: flex; align-items: center; gap: 5px; margin: var(--space-3) 0 0; font-size: var(--text-caption); color: var(--color-text-secondary); }
+.hint + .hint { margin-top: var(--space-1); }
+</style>
+</head>
+<body>
+<header class="page-bar"><h1>Move money</h1><p>Move money from Checking to the car loan. Because the destination is a loan, the sheet asks for the principal and interest split.</p></header>
+<main>
+<section class="stage" data-theme="light">
+<div class="window">
+	<nav class="sidebar" aria-label="Sections" data-current="accounts/checking"></nav>
+	<div class="main">
+		<div class="toolbar">
+			<h1 class="toolbar-title" style="margin-left: var(--space-2)">Checking</h1>
+			<div class="toolbar-gap"></div>
+			<button class="button" type="button"><svg class="icon"><use href="#i-move"/></svg>Move money</button>
+			<button class="button" type="button"><svg class="icon"><use href="#i-plus"/></svg>Add transaction<kbd>⌘N</kbd></button>
+			<div class="search"><svg class="icon"><use href="#i-search"/></svg>Go to anything<kbd>⌘K</kbd></div>
+		</div>
+		<div class="content">
+			<div class="account-head">
+				<div><h2>Balance</h2><div class="hero">$2,140.18</div></div>
+				<p>Cleared <span class="fig">$2,222.32</span>, not yet cleared <span class="fig">−$82.14</span></p>
+			</div>
+			<div class="columns"><span>Date</span><span>Payee</span><span>Envelope</span><span>Amount</span><span>Balance</span></div>
+			<div class="grouped">
+					<div class="txn"><span class="fig date">Nov 9</span><span class="payee">Fernwood Market</span><span class="env">Groceries</span><span class="fig amount">−82.14</span><span class="fig balance">2,140.18</span></div>
+					<div class="txn"><span class="fig date">Nov 8</span><span class="payee"><span class="direction" aria-hidden="true">→</span>To Savings</span><span class="env"><span class="muted">Move money, no envelope</span></span><span class="fig amount">−200.00</span><span class="fig balance">2,222.32</span></div>
+					<div class="txn"><span class="fig date">Nov 7</span><span class="payee">Corner Bistro</span><span class="env">Dining out</span><span class="fig amount">−64.30</span><span class="fig balance">2,422.32</span></div>
+					<div class="txn"><span class="fig date">Nov 6</span><span class="payee"><span class="direction" aria-hidden="true">→</span>To Visa<span class="row-note">Card payment</span></span><span class="env"><span class="muted">Move money, no envelope</span></span><span class="fig amount">−350.00</span><span class="fig balance">2,486.62</span></div>
+					<div class="txn"><span class="fig date">Nov 4</span><span class="payee"><span class="direction" aria-hidden="true">←</span>From Savings</span><span class="env"><span class="muted">Move money, no envelope</span></span><span class="fig amount">+150.00</span><span class="fig balance">2,836.62</span></div>
+					<div class="txn"><span class="fig date">Nov 3</span><span class="payee">Northwind Payroll</span><span class="env"><span class="is-income envelope-income"><svg class="icon small"><use href="#i-income"/></svg>Income</span></span><span class="fig amount is-income">+1,937.20</span><span class="fig balance">2,686.62</span></div>
+					<div class="txn"><span class="fig date">Nov 1</span><span class="payee">Maple Court Apartments<span class="row-note">Bill, auto-posted</span></span><span class="env">Rent</span><span class="fig amount">−1,650.00</span><span class="fig balance">749.42</span></div>
+					<div class="txn"><span class="fig date">Oct 31</span><span class="payee">Fernwood Market</span><span class="env">Groceries</span><span class="fig amount">−58.20</span><span class="fig balance">2,399.42</span></div>
+					<div class="txn"><span class="fig date">Oct 28</span><span class="payee">Quickfuel</span><span class="env">Gas</span><span class="fig amount">−41.75</span><span class="fig balance">2,457.62</span></div>
+					<div class="txn"><span class="fig date">Oct 20</span><span class="payee">Northwind Payroll</span><span class="env"><span class="is-income envelope-income"><svg class="icon small"><use href="#i-income"/></svg>Income</span></span><span class="fig amount is-income">+1,937.20</span><span class="fig balance">2,499.37</span></div>
+					<div class="txn"><span class="fig date">Oct 12</span><span class="payee"><span class="direction" aria-hidden="true">→</span>To Car loan<span class="row-note">Debt paydown 331.80, interest 80.20</span></span><span class="env">Car loan payment</span><span class="fig amount">−412.00</span><span class="fig balance">562.17</span></div>
+					<div class="txn"><span class="fig date">Oct 10</span><span class="payee">Harbor Electric<span class="row-note">Bill, confirmed</span></span><span class="env">Electric</span><span class="fig amount">−88.36</span><span class="fig balance">974.17</span></div>
+			</div>
+		</div>
+		<div class="scrim"></div>
+		<div class="sheet move-sheet" role="dialog" aria-label="Move money">
+			<h2>Move money</h2>
+			<div class="ends">
+				<div class="end">
+					<span class="end-label">From</span>
+					<div class="popup"><span>Checking</span><span class="fig popup-balance">$2,140.18</span><svg class="icon"><use href="#i-chev-updown"/></svg></div>
+					<div class="before-after"><span>Now</span><span class="fig">$2,140.18</span><span>After</span><span class="fig strong">$1,728.18</span></div>
+				</div>
+				<div class="arrow" aria-hidden="true">→</div>
+				<div class="end">
+					<span class="end-label">To</span>
+					<div class="popup"><span>Car loan</span><span class="fig popup-balance">−$9,800.00</span><svg class="icon"><use href="#i-chev-updown"/></svg></div>
+					<div class="before-after"><span>Now</span><span class="fig">−$9,800.00</span><span>After</span><span class="fig strong is-available">−$9,468.20</span></div>
+				</div>
+			</div>
+			<div class="form-grid">
+				<label>Amount</label><span class="field fig">412.00</span>
+				<label>Date</label><span class="field fig">Nov 9, 2026</span>
+			</div>
+			<section class="loan-split">
+				<h3>This goes to a loan. How much is principal and how much is interest?</h3>
+				<p class="lede">Filled in from your October 12 payment. Principal is the rest of the amount.</p>
+				<div class="split-grid">
+					<span class="split-label">Interest</span>
+					<span class="field fig focused">80.20<span class="caret"></span></span>
+					<div class="popup small"><span>Loan interest</span><svg class="icon"><use href="#i-chev-updown"/></svg></div>
+					<span class="split-label">Principal</span>
+					<span class="field fig readonly">331.80</span>
+					<div class="popup small"><span>Car loan payment</span><svg class="icon"><use href="#i-chev-updown"/></svg></div>
+				</div>
+				<p class="hint"><svg class="icon small"><use href="#i-ask"/></svg>About $80.03 of this is probably interest, based on 9.80% a year.</p>
+				<p class="hint">Interest counts as spending in reports. Principal counts as Debt paydown.</p>
+			</section>
+			<div class="sheet-actions">
+				<button class="button" type="button">Cancel</button>
+				<button class="button primary" type="button">Move money</button>
+			</div>
+		</div>
+	</div>
+</div>
+</section>
+</main>
+<script src="shared/frame.js"></script>
+</body>
+</html>
