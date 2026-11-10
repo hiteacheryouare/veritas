@@ -29,7 +29,9 @@ const icons = {
 	spent: '<path d="M4 7h16v11H4z"/><path d="M4 11h16M8 15h3"/>',
 	close: '<path d="M6 6l12 12M18 6L6 18"/>',
 	play: '<path d="M8 5.5v13l10-6.5z"/>',
-	pause: '<path d="M8 5v14M16 5v14"/>'
+	pause: '<path d="M8 5v14M16 5v14"/>',
+	tag: '<path d="M4 4h7.5L20 12.5 12.5 20 4 11.5z"/><circle cx="8.5" cy="8.5" r="1.3"/>',
+	calendar: '<rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>'
 };
 
 const sprite = `<svg width="0" height="0" style="position:absolute" aria-hidden="true">${Object.entries(icons).map(([name, body]) => `<symbol id="i-${name}" viewBox="0 0 24 24">${body}</symbol>`).join('')}</svg>`;
@@ -74,7 +76,7 @@ const renderSidebar = (nav) => {
 			});
 		}
 	});
-	parts.push('<div class="sidebar-spacer"></div>', `<a class="nav-item">${icon('settings')}Settings</a>`);
+	parts.push('<div class="sidebar-spacer"></div>', `<a class="nav-item${section === 'settings' ? ' current' : ''}">${icon('settings')}Settings</a>`);
 	nav.innerHTML = parts.join('');
 };
 
@@ -86,40 +88,28 @@ document.querySelectorAll('.stage[data-theme="light"]').forEach((stage) => {
 	stage.after(dark);
 });
 
-const accents = ['graphite', 'petrol', 'olive'];
 const params = new URLSearchParams(location.search);
-
-const storedAccent = () => {
-	try {
-		return localStorage.getItem('veritas-accent');
-	} catch {
-		return null;
-	}
-};
-
-const setAccent = (accent) => {
-	const chosen = accents.includes(accent) ? accent : 'graphite';
-	document.documentElement.dataset.accent = chosen;
-	try {
-		localStorage.setItem('veritas-accent', chosen);
-	} catch {}
-	document.querySelectorAll('.accent-switch button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.accent === chosen)));
-};
 
 const setView = (view) => {
 	document.body.dataset.view = view;
-	document.querySelectorAll('.view-switch:not(.accent-switch) button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
+	document.querySelectorAll('.view-switch[aria-label="Appearance"] button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
+};
+
+const setTags = (style) => {
+	document.body.dataset.tags = style;
+	document.querySelectorAll('.view-switch[aria-label="Tag style"] button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.tags === style)));
 };
 
 const bar = document.querySelector('.page-bar');
 if (bar) {
+	const tagSwitch = document.querySelector('.tag') ? '<div class="view-switch" role="group" aria-label="Tag style"><button type="button" data-tags="text">Tags as text</button><button type="button" data-tags="pills">Tags as pills</button></div>' : '';
 	bar.insertAdjacentHTML('afterbegin', '<a href="index.html">All screens</a>');
-	bar.insertAdjacentHTML('beforeend', `<div class="bar-controls"><div class="view-switch accent-switch" role="group" aria-label="Accent">${accents.map((a) => `<button type="button" data-accent="${a}">${a[0].toUpperCase()}${a.slice(1)}</button>`).join('')}</div><div class="view-switch" role="group" aria-label="Appearance"><button type="button" data-view="both">Both</button><button type="button" data-view="light">Light</button><button type="button" data-view="dark">Dark</button></div></div>`);
-	bar.querySelectorAll('.view-switch:not(.accent-switch) button').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
-	bar.querySelectorAll('.accent-switch button').forEach((b) => b.addEventListener('click', () => setAccent(b.dataset.accent)));
+	bar.insertAdjacentHTML('beforeend', `<div class="bar-controls">${tagSwitch}<div class="view-switch" role="group" aria-label="Appearance"><button type="button" data-view="both">Both</button><button type="button" data-view="light">Light</button><button type="button" data-view="dark">Dark</button></div></div>`);
+	bar.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
+	bar.querySelectorAll('[data-tags]').forEach((b) => b.addEventListener('click', () => setTags(b.dataset.tags)));
 }
 
-setAccent(params.get('accent') || storedAccent());
+setTags(params.get('tags') === 'pills' ? 'pills' : 'text');
 
 if (params.has('embed')) {
 	document.body.classList.add('embed');

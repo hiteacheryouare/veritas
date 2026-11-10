@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tags</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="shared/frame.css">
+<style>
+.content { padding-top: var(--space-4); }
+.columns, .tag-row { display: grid; grid-template-columns: 28px 190px 1fr 230px 70px 60px; column-gap: var(--space-4); align-items: center; padding: 0 var(--space-4); }
+.columns { color: var(--color-text-tertiary); font-size: var(--text-caption); padding-bottom: var(--space-1); }
+.columns span:nth-child(5), .used { text-align: right; }
+.columns span:last-child { text-align: center; }
+.tag-row { height: 44px; position: relative; }
+.tag-row + .tag-row::before { content: ""; position: absolute; top: 0; left: var(--space-4); right: var(--space-4); border-top: 1px solid var(--color-separator); }
+.tag-row:first-child { border-radius: var(--radius-section) var(--radius-section) 0 0; }
+.tag-row:last-child { border-radius: 0 0 var(--radius-section) var(--radius-section); }
+.tag-row.selected { background: var(--color-accent-soft); }
+.tag-row.selected::before, .tag-row.selected + .tag-row::before { display: none; }
+.tag-row.hidden-tag > :not(.checkbox) { opacity: 0.5; }
+.well { width: 22px; height: 22px; border-radius: 6px; border: 0; padding: 0; background: var(--tag); box-shadow: inset 0 0 0 1px rgba(20, 22, 30, 0.15), 0 0 0 1px var(--color-edge-control); cursor: pointer; }
+.rename { height: 26px; }
+.tag-row .tag { justify-self: start; }
+.desc { color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.desc.empty { color: var(--color-text-tertiary); }
+.tag-row .popup { height: 26px; }
+.used { color: var(--color-text-secondary); }
+.checkbox { justify-self: center; width: 16px; height: 16px; border-radius: 4px; display: grid; place-items: center; font-size: 11px; font-weight: 700; box-shadow: inset 0 0 0 1px var(--color-edge-control); background: var(--color-surface-field); color: var(--color-text-on-accent); }
+.checkbox.on { background: var(--color-accent-fill); box-shadow: none; }
+</style>
+</head>
+<body>
+<header class="page-bar"><h1>Tags</h1></header>
+<main>
+<section class="stage" data-theme="light">
+<div class="window">
+	<nav class="sidebar" aria-label="Sections" data-current="settings"></nav>
+	<div class="main">
+		<div class="toolbar">
+			<h1 class="toolbar-title" style="margin-left: var(--space-2)">Settings</h1>
+			<div class="toolbar-gap"></div>
+			<div class="segmented" role="group" aria-label="Settings section"><button type="button" aria-pressed="false">Backups</button><button type="button" aria-pressed="false">Actual</button><button type="button" aria-pressed="false">AI</button><button type="button" aria-pressed="false">Appearance</button><button type="button" aria-pressed="true">Tags</button></div>
+			<button class="button" type="button"><svg class="icon"><use href="#i-plus"/></svg>New tag</button>
+
+		</div>
+		<div class="content">
+			<div class="columns"><span></span><span>Tag</span><span>Description</span><span>Tax bucket</span><span>Used</span><span>Hidden</span></div>
+			<div class="grouped">
+				<div class="tag-row"><button class="well" type="button" style="--tag:#0f8a9a" aria-label="Color for #medical"></button><span class="tag" style="--tag:#0f8a9a">#medical</span><span class="desc">Doctor, pharmacy and copays</span><div class="popup small"><span>Medical</span><svg class="icon"><use href="#i-chev-updown"/></svg></div><span class="fig used">14</span><span class="checkbox" role="checkbox" aria-checked="false"></span></div>
+				<div class="tag-row"><button class="well" type="button" style="--tag:#5a6614" aria-label="Color for #gift"></button><span class="tag" style="--tag:#5a6614">#gift</span><span class="desc empty">Add a description</span><div class="popup small"><span>None</span><svg class="icon"><use href="#i-chev-updown"/></svg></div><span class="fig used">11</span><span class="checkbox" role="checkbox" aria-checked="false"></span></div>
+				<div class="tag-row selected"><button class="well" type="button" style="--tag:#5d6b82" aria-label="Color for #reimbursable"></button><span class="field focused rename">#reimbursable<span class="caret"></span></span><span class="desc">Work costs to claim back</span><div class="popup small"><span>Exclude from tax summary</span><svg class="icon"><use href="#i-chev-updown"/></svg></div><span class="fig used">9</span><span class="checkbox" role="checkbox" aria-checked="false"></span></div>
+				<div class="tag-row"><button class="well" type="button" style="--tag:#8b5e34" aria-label="Color for #donation"></button><span class="tag" style="--tag:#8b5e34">#donation</span><span class="desc empty">Add a description</span><div class="popup small"><span>Charitable giving</span><svg class="icon"><use href="#i-chev-updown"/></svg></div><span class="fig used">6</span><span class="checkbox" role="checkbox" aria-checked="false"></span></div>
+				<div class="tag-row"><button class="well" type="button" style="--tag:#a5603a" aria-label="Color for #japan-trip"></button><span class="tag" style="--tag:#a5603a">#japan-trip</span><span class="desc">Anything bought for the trip</span><div class="popup small"><span>None</span><svg class="icon"><use href="#i-chev-updown"/></svg></div><span class="fig used">4</span><span class="checkbox" role="checkbox" aria-checked="false"></span></div>
+				<div class="tag-row"><button class="well" type="button" style="--tag:#3d6f8f" aria-label="Color for #side-gig"></button><span class="tag" style="--tag:#3d6f8f">#side-gig</span><span class="desc">Photography jobs</span><div class="popup small"><span>Business expenses</span><svg class="icon"><use href="#i-chev-updown"/></svg></div><span class="fig used">3</span><span class="checkbox" role="checkbox" aria-checked="false"></span></div>
+				<div class="tag-row hidden-tag"><button class="well" type="button" style="--tag:#8a8a92" aria-label="Color for #old-car"></button><span class="tag" style="--tag:#8a8a92">#old-car</span><span class="desc empty">Add a description</span><div class="popup small"><span>None</span><svg class="icon"><use href="#i-chev-updown"/></svg></div><span class="fig used">22</span><span class="checkbox on" role="checkbox" aria-checked="true">✓</span></div>
+			</div>
+		</div>
+	</div>
+</div>
+</section>
+</main>
+<script src="shared/frame.js"></script>
+</body>
+</html>

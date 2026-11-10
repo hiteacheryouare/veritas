@@ -34,11 +34,6 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--color-focus-rin
 		<h1>Veritas mockups</h1>
 		<nav class="doc-links"><a href="../tokens.md">Tokens</a><a href="../interaction.md">Interaction notes</a></nav>
 		<div class="switches">
-			<div class="view-switch accent-switch" role="group" aria-label="Accent">
-				<button type="button" data-accent="graphite" aria-pressed="true">Graphite</button>
-				<button type="button" data-accent="petrol" aria-pressed="false">Petrol</button>
-				<button type="button" data-accent="olive" aria-pressed="false">Olive</button>
-			</div>
 			<div class="view-switch theme-switch" role="group" aria-label="Preview appearance">
 				<button type="button" data-view="light" aria-pressed="true">Light</button>
 				<button type="button" data-view="dark" aria-pressed="false">Dark</button>
@@ -61,6 +56,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--color-focus-rin
 		<div class="screens">
 			<a class="screen" href="register.html"><div class="preview"><iframe data-src="register.html" title="Register" tabindex="-1"></iframe></div><h3>Register</h3></a>
 			<a class="screen" href="move-money.html"><div class="preview"><iframe data-src="move-money.html" title="Move money" tabindex="-1"></iframe></div><h3>Move money</h3></a>
+			<a class="screen" href="quick-entry.html"><div class="preview"><iframe data-src="quick-entry.html" title="Quick entry" tabindex="-1"></iframe></div><h3>Quick entry</h3></a>
 			<a class="screen" href="bills.html"><div class="preview"><iframe data-src="bills.html" title="Bills" tabindex="-1"></iframe></div><h3>Bills</h3></a>
 		</div>
 	</section>
@@ -75,28 +71,23 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--color-focus-rin
 			<a class="screen" href="statement.html"><div class="preview"><iframe data-src="statement.html" title="Statement" tabindex="-1"></iframe></div><h3>Statement</h3></a>
 		</div>
 	</section>
+
+	<section class="area">
+		<h2>Settings</h2>
+		<div class="screens">
+			<a class="screen" href="tags.html"><div class="preview"><iframe data-src="tags.html" title="Tags" tabindex="-1"></iframe></div><h3>Tags</h3></a>
+		</div>
+	</section>
 </div>
 <script>
 const frames = document.querySelectorAll('.preview iframe');
-const accents = ['graphite', 'petrol', 'olive'];
-const state = { view: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light', accent: 'graphite' };
-try {
-	const saved = localStorage.getItem('veritas-accent');
-	if (accents.includes(saved)) state.accent = saved;
-} catch {}
-const render = () => {
-	document.documentElement.dataset.theme = state.view;
-	document.documentElement.dataset.accent = state.accent;
-	try {
-		localStorage.setItem('veritas-accent', state.accent);
-	} catch {}
-	frames.forEach((f) => { f.src = `${f.dataset.src}?embed&view=${state.view}&accent=${state.accent}`; });
-	document.querySelectorAll('.theme-switch button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === state.view)));
-	document.querySelectorAll('.accent-switch button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.accent === state.accent)));
+const show = (view) => {
+	document.documentElement.dataset.theme = view;
+	frames.forEach((f) => { f.src = `${f.dataset.src}?embed&view=${view}`; });
+	document.querySelectorAll('.theme-switch button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
 };
-document.querySelectorAll('.theme-switch button').forEach((b) => b.addEventListener('click', () => { state.view = b.dataset.view; render(); }));
-document.querySelectorAll('.accent-switch button').forEach((b) => b.addEventListener('click', () => { state.accent = b.dataset.accent; render(); }));
-render();
+document.querySelectorAll('.theme-switch button').forEach((b) => b.addEventListener('click', () => show(b.dataset.view)));
+show(matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
 </script>
 </body>
 </html>

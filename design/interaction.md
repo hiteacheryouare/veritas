@@ -39,6 +39,8 @@ Every amount field (budgeted, quick entry, Move money, Paid, split amounts) beha
 ## Accounts and Move money
 
 - In a register, ↑ / ↓ move between transactions and Return edits the selected one. Transfer rows read as a direction plus the other account: `→ To Savings`, `← From Checking`.
+- The balance graph covers the register's date filter. Moving the pointer over it shows the balance at the end of that day. Hovering is the only interaction; the date filter changes the range.
+- Clicking a tag in Notes sets the tag filter to that tag. The tag filter also opens from its popup, and Esc clears it. While a tag filter is on, the Balance column is hidden and the filter bar shows the count and total of the matching rows.
 - Move money opens with the current account as From. Tab order: From, To, Amount, Date, then Interest when the destination is a loan. Principal is read-only and is always the rest of the amount.
 - Return triggers "Move money" when the amounts add up. Esc cancels.
 
@@ -46,6 +48,13 @@ Every amount field (budgeted, quick entry, Move money, Paid, split amounts) beha
 
 - Payee first. Picking a known payee fills the envelope and amount from that payee's history, and the amount is selected so it can be typed over or appended to.
 - Tab walks Payee, Amount, Envelope, Account, Date, Notes. Return saves and closes. ⌘Return saves and opens a fresh entry.
+- Typing `#` in Notes opens a list of existing tags, most used first, narrowed as you type. ↑ / ↓ pick one, Return or Tab inserts it. A tag that isn't in the list yet is added to it when the transaction is saved. Actual finds new tags in notes the same way (`tags-discover`, `reference/actual/packages/loot-core/src/server/tags/app.ts:30`).
+
+## Tags (Settings)
+
+- Click a tag name to rename it, or press Return on the selected row. Return saves, Esc cancels.
+- The color well opens the system color picker. Description, tax bucket and Hidden save as soon as they change.
+- Hidden tags still show in notes and count in reports. They are left out of the tag filter and the `#` list.
 
 ## Bills
 
