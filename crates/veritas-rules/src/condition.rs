@@ -7,6 +7,7 @@ use serde_json::Value;
 use veritas_domain::YearMonth;
 
 use crate::js;
+use crate::jsregex::JsPattern;
 use crate::recur::{RecurError, Recurrence};
 
 /// Why a stored condition or action isn't one Veritas runs.
@@ -195,6 +196,8 @@ pub enum ConditionValue {
 	Between(f64, f64),
 	Date(DateValue),
 	Bool(bool),
+	/// A `matches` regex, lowercased first on text fields as Actual does.
+	Pattern(JsPattern),
 	/// `onBudget`, `offBudget` and `and` don't look at the value.
 	Ignored,
 }
@@ -263,6 +266,21 @@ fn parse_date_string(text: &str) -> Result<DateValue, Gap> {
 			.or_else(|_| rejected(format!("{text:?} is not a year"))),
 		_ => rejected(format!("{text:?} is not a date")),
 	}
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum EvalError {
+	#[error(transparent)]
+	Recurrence(#[from] RecurError),
+	#[error("the text has characters a JavaScript regex reads as two")]
+	AstralText,
+}
+
+/// `new RegExp(source)`, refused when Veritas can't promise JS's reading.
+fn pattern(source: &str) -> Result<ConditionValue, Gap> {
+	JsPattern::new(source)
+		.map(ConditionValue::Pattern)
+		.map_err(Gap::Unsupported)
 }
 
 pub(crate) fn recur_gap(error: RecurError) -> Gap {
@@ -370,13 +388,14 @@ impl Condition {
 		}
 	}
 
-	/// `Condition.eval`. A recurrence that can't be expanded is an error,
-	/// as it would throw out of Actual's `runRules`.
+	/// `Condition.eval`. An error means Veritas can't give Actual's answer:
+	/// a recurrence Actual would throw on, or text a pattern would read
+	/// differently in JS.
 	pub fn eval(
 		&self,
 		field_value: FieldValue,
 		account_off_budget: Option<bool>,
-	) -> Result<bool, RecurError> {
+	) -> Result<bool, EvalError> {
 		let kind = self.field.kind();
 		let mut value = match field_value {
 			FieldValue::Absent | FieldValue::Null if kind == FieldKind::Text => {
@@ -453,6 +472,9 @@ impl Condition {
 			(Op::NotOneOf, F::Text(text), V::IdList(list)) => !list
 				.iter()
 				.any(|entry| entry.as_deref() == Some(text.as_str())),
+			(Op::Matches, F::Text(text), V::Pattern(pattern)) => {
+				pattern.test(text).ok_or(EvalError::AstralText)?
+			}
 			(Op::HasTags, F::Text(text), V::Text(tags)) => extract_tags(tags)
 				.iter()
 				.all(|tag| has_tag(text, &tag.to_lowercase())),
@@ -523,7 +545,7 @@ fn parse_text(op: Op, value: Option<&Value>) -> Result<ConditionValue, Gap> {
 		return rejected(format!("{op:?} must have non-empty string"));
 	}
 	match op {
-		Op::Matches => unsupported("regular expression conditions"),
+		Op::Matches => pattern(&text.to_lowercase()),
 		Op::HasTags | Op::HasAnyTag => Ok(ConditionValue::Text(text.clone())),
 		_ => Ok(ConditionValue::Text(text.to_lowercase())),
 	}
@@ -548,7 +570,10 @@ fn parse_id(op: Op, value: Option<&Value>) -> Result<ConditionValue, Gap> {
 			))
 		}
 		Op::OnBudget | Op::OffBudget => Ok(ConditionValue::Ignored),
-		Op::Matches => unsupported("regular expression conditions"),
+		Op::Matches => match value {
+			Some(Value::String(source)) => pattern(source),
+			_ => unsupported("a regex that isn't text"),
+		},
 		Op::Contains | Op::DoesNotContain => match value {
 			Some(Value::String(needle)) => Ok(ConditionValue::Id(Some(needle.clone()))),
 			_ => unsupported("contains with a value that isn't text"),
@@ -781,8 +806,26 @@ mod tests {
 		for miss in ["bfo", "f o o"] {
 			assert!(!eval(&contains, text(miss)), "{miss}");
 		}
+		// The pattern is lowercased too, so `\\D` becomes `\\d`.
+		let matches = condition("matches", "notes", json!("^fo*$"));
+		for (hit, expected) in [
+			("bar foo baz", false),
+			("foo", true),
+			("FOOOO", true),
+			("foob", false),
+		] {
+			assert_eq!(eval(&matches, text(hit)), expected, "{hit}");
+		}
+		assert!(eval(
+			&condition("matches", "notes", json!("^\\D+$")),
+			text("12345")
+		));
+		assert!(!eval(
+			&condition("matches", "notes", json!("^\\D+$")),
+			text("abc")
+		));
 		assert!(matches!(
-			parse_gap("matches", "notes", json!("^fo*$")),
+			parse_gap("matches", "notes", json!("(?=a)")),
 			Gap::Unsupported(_)
 		));
 	}

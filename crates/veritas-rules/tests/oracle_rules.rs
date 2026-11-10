@@ -461,3 +461,161 @@ fn unsupported_rules_in_the_fixture_are_read_only_and_untouched() {
 			.any(|(actions, _)| actions.contains("formula"))
 	);
 }
+
+const PATTERNS: [&str; 40] = [
+	"^amzn",
+	"amzn|amazon",
+	"^(starbucks|peet'?s) #?\\d+",
+	"\\d{3,}",
+	"^\\D+$",
+	"\\bshell\\b",
+	"oil$",
+	"^zelle (to|from) \\w+$",
+	"[aeiou]{2}",
+	"^[a-z ]+$",
+	"\\.com$",
+	"s\\.",
+	"\\s{2,}",
+	"^$",
+	"école",
+	"\\u00e9",
+	"\\x41",
+	"[^a-z0-9 ]",
+	"(?:mk|dig)",
+	"a{2}",
+	"\\W",
+	"^.{5}$",
+	"#\\d",
+	"llc\\b",
+	"[A-Z]",
+	"\\S+\\s\\S+",
+	"x{",
+	"a]",
+	"(oil|gas)?$",
+	"(?<n>\\d)",
+	"^[\\w.]+$",
+	"[-.]",
+	"\\Bll",
+	"^a.*b$",
+	"mktp\\s+us",
+	"[\\d-]",
+	"b+?",
+	"^.+@.+$",
+	"(?=a)",
+	"fo**",
+];
+
+const TEXTS: [&str; 24] = [
+	"AMZN Mktp US",
+	"Amazon.com",
+	"Starbucks #123",
+	"Peets 42",
+	"Shell Oil",
+	"SHELL",
+	"Zelle to Bob",
+	"zelle from Ann",
+	"École du ski",
+	"12345",
+	"Coffee  Shop",
+	"A1",
+	"Gas",
+	"LANDLORD LLC",
+	"llcx",
+	"x{",
+	"a]b",
+	"aa",
+	"ab",
+	"me@example.com",
+	"1-2",
+	"Mr. Smith",
+	"amzn digital",
+	"",
+];
+
+/// D47: `matches` conditions go through the `regex` crate, read the JS way.
+/// Each rule appends its own marker, so the notes show exactly which
+/// patterns Actual matched for each text.
+#[test]
+fn regex_conditions_match_the_oracle() {
+	let Some(oracle) = oracle_dir() else {
+		eprintln!(
+			"skipping the regex oracle test: tools/actual-oracle/node_modules is missing, run `cargo xtask oracle setup`"
+		);
+		return;
+	};
+	let world = world();
+	let mut ops = setup_ops(&world);
+	let mut refused = Vec::new();
+	for (n, pattern) in PATTERNS.iter().enumerate() {
+		let condition =
+			json!({"op": "matches", "field": "imported_payee", "value": pattern, "type": "string"});
+		let probe = rule_from_row(
+			&json!({"id": "probe", "conditions": json!([condition]).to_string(), "actions": "[]"}),
+		);
+		if ParsedRule::parse(&probe).support() != RuleSupport::Full {
+			refused.push(*pattern);
+			continue;
+		}
+		ops.push(
+			json!({"op": "createRule", "id": uuid(8, n), "conditions": [condition],
+			"actions": [{"op": "append-notes", "value": format!(" [{n}]")}]}),
+		);
+	}
+	assert_eq!(
+		refused,
+		["(?=a)", "fo**"],
+		"only lookaround and patterns regex can't read are refused"
+	);
+	let account = &world.accounts[0].0;
+	let transactions: Vec<Value> = TEXTS
+		.iter()
+		.enumerate()
+		.map(|(n, text)| json!({"id": uuid(9, n), "date": "2026-11-01", "amount": -100, "cleared": true, "imported_payee": text}))
+		.collect();
+	ops.push(json!({"op": "addTransactions", "account": account, "transactions": transactions, "runTransfers": false}));
+
+	let scratch = scratch_dir("regex");
+	let dump = apply_and_dump(
+		&oracle,
+		&scratch,
+		"regex",
+		&repo_root().join("fixtures/synthetic/small.zip"),
+		ops,
+		TODAY,
+	);
+	let _ = std::fs::remove_dir_all(&scratch);
+	let budget = budget_from(&world, &dump);
+	let book = RuleBook::new(&budget);
+	let rows: BTreeMap<&str, &Value> = dump["tables"]["transactions"]["rows"]
+		.as_array()
+		.into_iter()
+		.flatten()
+		.filter_map(|row| Some((row["id"].as_str()?, row)))
+		.collect();
+	let mut mismatches = Vec::new();
+	let mut matched = 0;
+	for input in &transactions {
+		let outcome = book.run(&rule_transaction(input, account), &budget);
+		assert!(
+			outcome.undetermined.is_empty(),
+			"{input}: {:?}",
+			outcome.undetermined
+		);
+		matched += outcome.applied.len();
+		let actual = &rows[input["id"].as_str().unwrap()]["notes"];
+		let veritas = json!(outcome.transaction.notes);
+		if *actual != veritas {
+			mismatches.push(format!(
+				"{:?}: actual {actual}, veritas {veritas}",
+				input["imported_payee"]
+			));
+		}
+	}
+	eprintln!(
+		"{} patterns × {} texts, {matched} matches, {} differ",
+		PATTERNS.len() - refused.len(),
+		TEXTS.len(),
+		mismatches.len()
+	);
+	assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+}

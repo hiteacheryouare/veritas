@@ -467,7 +467,7 @@ mod tests {
 			"regex-and",
 			RuleStage::Default,
 			ConditionsOp::And,
-			json!([{"op": "matches", "field": "notes", "value": "^a"}, {"op": "is", "field": "amount", "value": 1}]),
+			json!([{"op": "matches", "field": "notes", "value": "(?=a)"}, {"op": "is", "field": "amount", "value": 1}]),
 			json!([{"op": "set", "field": "notes", "value": "x"}]),
 		);
 		add_rule(
@@ -475,7 +475,7 @@ mod tests {
 			"regex-or",
 			RuleStage::Default,
 			ConditionsOp::Or,
-			json!([{"op": "matches", "field": "notes", "value": "^a"}, {"op": "is", "field": "amount", "value": -4210}]),
+			json!([{"op": "matches", "field": "notes", "value": "(?=a)"}, {"op": "is", "field": "amount", "value": -4210}]),
 			json!([{"op": "set", "field": "cleared", "value": true}]),
 		);
 		add_rule(
@@ -491,7 +491,7 @@ mod tests {
 			"unknown",
 			RuleStage::Default,
 			ConditionsOp::And,
-			json!([{"op": "matches", "field": "notes", "value": "^a"}]),
+			json!([{"op": "matches", "field": "notes", "value": "(?=a)"}]),
 			json!([{"op": "set", "field": "cleared", "value": true}]),
 		);
 		let outcome = run(&budget, &transaction("Shop"));

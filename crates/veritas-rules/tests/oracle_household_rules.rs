@@ -1127,7 +1127,6 @@ fn rules_veritas_cannot_run_are_read_only_untouched_and_never_half_applied() {
 			"venmo template",
 			"rent increase formula",
 			"costco split",
-			"square regex",
 			"amazon with order note"
 		]
 		.into_iter()
@@ -1152,11 +1151,9 @@ fn rules_veritas_cannot_run_are_read_only_untouched_and_never_half_applied() {
 				purchase.label
 			);
 		}
-		// Actual's regex matched only the Square charge, so wherever it's the
-		// one unknown, everything else Veritas did must still agree with Actual.
-		let regex_missed =
-			names.iter().all(|name| *name == "square regex") && purchase.label != "square coffee";
-		if regex_missed {
+		// Where no read-only rule is in play, everything Veritas did must
+		// agree with Actual, the Square regex included (D47).
+		if names.is_empty() {
 			let row = rows[uuid(9, n).as_str()];
 			if let Some((actual, veritas)) =
 				compare(&expected_row(&outcome.transaction, &account_id), row)
@@ -1174,8 +1171,6 @@ fn rules_veritas_cannot_run_are_read_only_untouched_and_never_half_applied() {
 		("venmo", "venmo template"),
 		("rent", "rent increase formula"),
 		("costco run", "costco split"),
-		("square coffee", "square regex"),
-		("not square", "square regex"),
 		("amazon", "amazon with order note"),
 	] {
 		assert!(
@@ -1184,6 +1179,12 @@ fn rules_veritas_cannot_run_are_read_only_untouched_and_never_half_applied() {
 			undetermined[label].0
 		);
 	}
+	assert_eq!(
+		undetermined["square coffee"].1.category,
+		Some(CategoryId::new(category("Dining"))),
+		"the regex rule runs in Veritas now"
+	);
+	assert_eq!(undetermined["not square"].1.category, None);
 	assert_eq!(
 		undetermined["amazon"].1.category, None,
 		"the plain half of a rule with a template must not be applied on its own"

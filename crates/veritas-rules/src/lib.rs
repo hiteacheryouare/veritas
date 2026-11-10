@@ -3,6 +3,7 @@
 mod action;
 mod condition;
 mod js;
+mod jsregex;
 mod recur;
 mod rule;
 mod run;
@@ -10,8 +11,8 @@ mod schedule;
 
 pub use action::{Action, RuleTransaction, SetField};
 pub use condition::{
-	AmountSign, Condition, ConditionValue, DateValue, Field, FieldKind, FieldValue, Gap, Op,
-	parse_date_value,
+	AmountSign, Condition, ConditionValue, DateValue, EvalError, Field, FieldKind, FieldValue, Gap,
+	Op, parse_date_value,
 };
 pub use recur::{Frequency, RecurError, Recurrence, WeekendSolveMode};
 pub use rule::{Item, ParsedRule, RuleSupport};
