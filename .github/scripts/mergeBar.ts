@@ -1,0 +1,78 @@
+export const ROLES = ['reviewer', 'cowboy', 'fred', 'architect'] as const;
+export type Role = typeof ROLES[number];
+
+export interface Signoff {
+	role: Role;
+	verdict: 'approve' | 'reject';
+	sha: string;
+	requirements: string[];
+}
+
+export interface PullRequest {
+	baseRef: string;
+	headSha: string;
+	body: string;
+	labels: string[];
+}
+
+export interface Verdict {
+	state: 'success' | 'pending';
+	description: string;
+}
+
+const SIGNOFF = /^merge-bar:\s*(reviewer|cowboy|fred|architect)\s+(approve|reject)\s+([0-9a-f]{7,40})\b(.*)$/gim;
+const REQUIREMENT = /\bR-[A-Z]+-\d+\b/g;
+const TRUSTED = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+
+export const parseSignoffs = (text: string): Signoff[] =>
+	[...text.matchAll(SIGNOFF)].map(([, role, verdict, sha, rest]) => ({
+		role: role.toLowerCase() as Role,
+		verdict: verdict.toLowerCase() as Signoff['verdict'],
+		sha: sha.toLowerCase(),
+		requirements: rest.match(REQUIREMENT) ?? []
+	}));
+
+export const trustedSignoffs = (posts: { body: string | null; authorAssociation: string }[]): Signoff[] =>
+	posts.filter((post) => TRUSTED.has(post.authorAssociation)).flatMap((post) => parseSignoffs(post.body ?? ''));
+
+export const claimedRequirements = (body: string): string[] => {
+	const line = body.split(/\r?\n/).find((text) => /^\s*claims:/i.test(text));
+	return [...new Set(line?.match(REQUIREMENT) ?? [])].sort();
+};
+
+export const evaluate = (pr: PullRequest, signoffs: Signoff[]): Verdict => {
+	if (pr.baseRef === 'main') {
+		return { state: 'success', description: 'Gate PR into main: Ryan merges these himself' };
+	}
+	const latest = new Map<Role, Signoff>();
+	for (const signoff of signoffs) {
+		if (pr.headSha.startsWith(signoff.sha)) {
+			latest.set(signoff.role, signoff);
+		}
+	}
+	const approved = (role: Role) => latest.get(role)?.verdict === 'approve';
+	const claims = claimedRequirements(pr.body);
+	const missing: string[] = [];
+
+	if (!approved('reviewer')) {
+		missing.push('reviewer');
+	}
+	if (claims.length > 0) {
+		const covered = new Set(approved('cowboy') ? latest.get('cowboy')?.requirements : []);
+		const uncovered = claims.filter((id) => !covered.has(id));
+		if (uncovered.length > 0) {
+			missing.push(`cowboy (${uncovered.join(', ')})`);
+		}
+	}
+	if (pr.labels.includes('finance') && !approved('fred')) {
+		missing.push('fred');
+	}
+	if (pr.labels.includes('contract') && !approved('architect')) {
+		missing.push('architect');
+	}
+
+	if (missing.length === 0) {
+		return { state: 'success', description: `Signed off on ${pr.headSha.slice(0, 7)}` };
+	}
+	return { state: 'pending', description: `Needs ${missing.join(', ')} on ${pr.headSha.slice(0, 7)}`.slice(0, 140) };
+};

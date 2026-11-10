@@ -1,0 +1,32 @@
+> [!NOTE]
+> This content was created by an AI agent acting on behalf of Ryan.
+
+<!--
+PRs target `dev`, stay inside one workstream's directories, and ship tests.
+Merges are merge commits, so your commit messages survive. Write them properly.
+The merge-bar check reads the Claims line below; list every R-ID this PR implements.
+-->
+
+Claims: <!-- R-IO-1, R-IO-3 — or "none" -->
+
+## What this changes
+
+<!-- What it does and why. Cite reference/actual/<path>:<line> for format or math changes, and docs/finance/ for money semantics. -->
+
+## How it was verified
+
+<!-- The commands you ran and what they showed: cargo xtask ci, oracle differential tests, journeys. -->
+
+## Merge bar
+
+Sign off in a PR comment with `merge-bar: <reviewer|cowboy|fred|architect> <approve|reject> <head sha> [R-IDs]`.
+
+- [ ] CI green, including oracle differential tests
+- [ ] Code reviewer approved
+- [ ] Coverage cowboy added or verified tests for every claimed R-ID
+- [ ] Fred approved (`finance` label)
+- [ ] Architect approved (`contract` label)
+
+## Notes for the reviewer
+
+<!-- Trade-offs, open questions, follow-up work deliberately left out. -->

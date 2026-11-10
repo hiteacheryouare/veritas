@@ -1,0 +1,46 @@
+name: Merge bar
+
+# Every agent posts as Ryan's account, and GitHub never counts an author's own
+# approval, so the PLAN §0.2 merge bar is enforced by this commit status instead:
+# reviewer, cowboy (covering every claimed R-ID), Fred on `finance`, Architect on
+# `contract`. Syntax and rules: .github/scripts/mergeBar.ts.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  issue_comment:
+    types: [created, edited, deleted]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+  statuses: write
+
+concurrency:
+  group: merge-bar-${{ github.event.pull_request.number || github.event.issue.number }}
+
+jobs:
+  merge-bar:
+    name: evaluate
+    if: ${{ github.event_name != 'issue_comment' || github.event.issue.pull_request }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Runs the base branch's copy of the script, so a PR can't rewrite its own bar.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          sparse-checkout: .github
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Evaluate sign-offs
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+        run: node .github/scripts/mergeBarCheck.ts
