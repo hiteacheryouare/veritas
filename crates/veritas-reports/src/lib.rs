@@ -7,8 +7,10 @@ mod balances;
 mod classify;
 mod net_profit;
 mod period;
+mod sankey;
 mod standard;
 mod statements;
+mod tax;
 
 pub use balances::{AccountBalance, Side, account_balances, net_worth};
 pub use classify::{
@@ -17,8 +19,13 @@ pub use classify::{
 };
 pub use net_profit::{CategoryLabels, CategoryLine, Line, NetProfit, Section, net_profit};
 pub use period::{Period, months};
+pub use sankey::{Flow, Node, NodeKind, Sankey, sankey};
 pub use standard::{NetWorthPoint, net_profit_by_month, net_worth_by_month};
 pub use statements::{
 	AccountGroupSection, BalanceSheet, CashFlow, OwnersEquity, SheetLine, balance_sheet, cash_flow,
 	owners_equity,
+};
+pub use tax::{
+	Bucket, BucketTotal, Direction, Source, TaxRow, TaxSummary, detail_csv, extract_tags,
+	summary_csv, tax_summary,
 };

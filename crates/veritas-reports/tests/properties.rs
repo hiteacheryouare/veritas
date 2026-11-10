@@ -15,8 +15,8 @@ use veritas_domain::{
 	TransactionId, TransactionKind, YearMonth,
 };
 use veritas_reports::{
-	Classification, Leg, NetProfit, Period, Section, balance_sheet, cash_flow, net_profit,
-	net_worth_by_month, owners_equity,
+	Classification, Leg, NetProfit, NodeKind, Period, Sankey, Section, balance_sheet, cash_flow,
+	net_profit, net_worth_by_month, owners_equity, sankey, tax_summary,
 };
 
 // Index ACCOUNTS names an account that is never created, so rows there are
@@ -377,7 +377,55 @@ fn build(scenario: &Scenario) -> Book {
 			}
 		}
 	}
+	tag_everything(&mut book);
 	book
+}
+
+const NOTES: [&str; 7] = [
+	"",
+	"#medical",
+	"#medical #education",
+	"#notax #medical",
+	"#rx#medical",
+	"##medical",
+	"#hsa",
+];
+const CATEGORY_BUCKETS: [Option<&str>; 4] =
+	[None, Some("charitable"), Some("w2_income"), Some("bogus")];
+
+/// Spreads tags over the rows and tax buckets over the categories, so the
+/// tax summary sees tags, conflicts, exclusions and category buckets.
+fn tag_everything(book: &mut Book) {
+	for (tag, bucket) in [
+		("medical", "medical"),
+		("rx", "medical"),
+		("education", "education"),
+		("notax", "none"),
+		("hsa", "hsa"),
+	] {
+		book.budget
+			.tax_tags
+			.insert(tag.to_owned(), bucket.to_owned());
+	}
+	for (index, transaction) in book.budget.transactions.values_mut().enumerate() {
+		if transaction.notes.is_none() {
+			let notes = NOTES[index % NOTES.len()];
+			transaction.notes = (!notes.is_empty()).then(|| notes.to_owned());
+		}
+	}
+	for index in 0..CATEGORIES {
+		if let Some(bucket) = CATEGORY_BUCKETS[index % CATEGORY_BUCKETS.len()] {
+			book.budget
+				.category_meta
+				.entry(cat(&category(index)))
+				.or_insert(veritas_domain::CategoryMeta {
+					kind: None,
+					tax_bucket: None,
+					archived_on: None,
+				})
+				.tax_bucket = Some(bucket.to_owned());
+		}
+	}
 }
 
 fn live_rows(budget: &BudgetData) -> BTreeSet<TransactionId> {
@@ -581,6 +629,110 @@ proptest! {
 			prop_assert_eq!(
 				(point.assets, point.liabilities, point.net_worth),
 				(sheet.total_assets, sheet.total_liabilities, sheet.net_worth)
+			);
+		}
+	}
+
+	#[test]
+	fn sankey_invariants_hold_on_every_range(scenario in scenario()) {
+		let book = build(&scenario);
+		let classification = book.classify();
+		for (first, last) in [
+			(in_2027(1, 1), in_2027(1, 31)),
+			(in_2027(1, 10), in_2027(3, 20)),
+			(in_2027(3, 1), in_2027(3, 31)),
+		] {
+			let period = Period::new(first, last).unwrap();
+			let graph = sankey(&book.budget, &classification, period).unwrap();
+			let report = net_profit(&book.budget, &classification, period).unwrap();
+			assert_sankey_invariants(&graph, &report);
+		}
+	}
+
+	#[test]
+	fn tax_totals_equal_their_detail_rows(scenario in scenario()) {
+		let book = build(&scenario);
+		let classification = book.classify();
+		let summary = tax_summary(&book.budget, &classification, 2027).unwrap();
+		let mut seen = BTreeSet::new();
+		for row in &summary.detail {
+			prop_assert!(seen.insert(row.row.clone()), "TAX-6 invariant 2: {} twice", row.row);
+			let classified = classification.get(&row.row).unwrap();
+			prop_assert!(classified.is_primary(), "TAX-6 invariant 2: a mirror leg");
+			prop_assert!(matches!(
+				classified.kind(),
+				TransactionKind::Income
+					| TransactionKind::Expense
+					| TransactionKind::DebtPrincipal
+					| TransactionKind::SavingsContribution
+			));
+			prop_assert_eq!(row.counted.is_some(), row.bucket.is_some());
+		}
+		for total in &summary.buckets {
+			let detail: i64 = summary
+				.detail
+				.iter()
+				.filter(|row| row.bucket == Some(total.bucket))
+				.map(|row| row.counted.unwrap().minor())
+				.sum();
+			prop_assert_eq!(total.total.minor(), detail, "TAX-6 invariant 1");
+		}
+	}
+}
+
+fn assert_sankey_invariants(graph: &Sankey, report: &NetProfit) {
+	let value = |kind: NodeKind| graph.node(&kind).map_or(0, |node| node.value.minor());
+	for node in &graph.nodes {
+		assert!(node.value > Money::ZERO, "{:?}", node.kind);
+	}
+	let middle = graph
+		.nodes
+		.iter()
+		.position(|node| node.kind == NodeKind::Income);
+	let into: i64 = graph
+		.flows
+		.iter()
+		.filter(|flow| Some(flow.to) == middle)
+		.map(|flow| flow.value.minor())
+		.sum();
+	let out: i64 = graph
+		.flows
+		.iter()
+		.filter(|flow| Some(flow.from) == middle)
+		.map(|flow| flow.value.minor())
+		.sum();
+	let income = value(NodeKind::Income);
+	assert_eq!((into, out), (income, income), "ST-8 invariant 2");
+	let sources: i64 = graph
+		.nodes
+		.iter()
+		.filter(|node| matches!(node.kind, NodeKind::IncomeCategory(_)))
+		.map(|node| node.value.minor())
+		.sum();
+	assert_eq!(
+		sources - value(NodeKind::IncomeReversals),
+		report.income.total.minor(),
+		"ST-8 invariant 1"
+	);
+	let gap = report.net_cash_flow.total.minor() - report.unreviewed.total.minor();
+	if value(NodeKind::Shortfall) == 0 {
+		assert_eq!(value(NodeKind::Unallocated), gap, "ST-8 invariant 3");
+	} else {
+		assert_eq!(value(NodeKind::Unallocated), 0, "ST-8 invariant 3");
+		assert_eq!(value(NodeKind::Shortfall), -gap, "ST-8 invariant 3");
+	}
+	for (index, node) in graph.nodes.iter().enumerate() {
+		if matches!(node.kind, NodeKind::CategoryGroup(_)) {
+			let children: i64 = graph
+				.flows
+				.iter()
+				.filter(|flow| flow.from == index)
+				.map(|flow| flow.value.minor())
+				.sum();
+			assert_eq!(
+				children,
+				node.value.minor(),
+				"a group equals its categories"
 			);
 		}
 	}
