@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 
 use crate::{
 	AccountGroupId, AccountId, AccountKind, BudgetType, CategoryGroupId, CategoryId, CategoryKind,
-	CivilDate, GoalId, GoalStatus, Money, PayeeId, RuleId, ScheduleId, TagId, TransactionId,
-	YearMonth,
+	CivilDate, CustomReportId, DashboardPageId, GoalId, GoalStatus, Money, PayeeId, RuleId,
+	ScheduleId, TagId, TransactionId, WidgetId, YearMonth,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -169,6 +169,61 @@ pub struct TransactionMeta {
 	pub adjustment: bool,
 }
 
+/// Actual's `custom_reports` row as stored. Its text columns stay as Actual
+/// wrote them, so a report Veritas never edits is written back unchanged;
+/// veritas-reports reads the settings out of it.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct CustomReportRow {
+	pub id: String,
+	pub name: Option<String>,
+	pub start_date: Option<String>,
+	pub end_date: Option<String>,
+	pub date_static: Option<i64>,
+	pub date_range: Option<String>,
+	pub mode: Option<String>,
+	pub group_by: Option<String>,
+	pub balance_type: Option<String>,
+	pub show_empty: Option<i64>,
+	pub show_offbudget: Option<i64>,
+	pub show_hidden: Option<i64>,
+	pub show_uncategorized: Option<i64>,
+	pub selected_categories: Option<String>,
+	pub graph_type: Option<String>,
+	pub conditions: Option<String>,
+	pub conditions_op: Option<String>,
+	pub metadata: Option<String>,
+	pub interval: Option<String>,
+	pub color_scheme: Option<String>,
+	pub tombstone: Option<i64>,
+	pub include_current: Option<i64>,
+	pub sort_by: Option<String>,
+	pub trim_intervals: Option<i64>,
+	pub show_trend_lines: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DashboardPage {
+	pub id: DashboardPageId,
+	pub name: Option<String>,
+	pub tombstone: bool,
+}
+
+/// One `dashboard` row. `kind` is Actual's widget `type`, kept as text so
+/// widget types Veritas doesn't know survive untouched, and `meta` is the
+/// stored JSON text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Widget {
+	pub id: WidgetId,
+	pub kind: Option<String>,
+	pub width: Option<i64>,
+	pub height: Option<i64>,
+	pub x: Option<i64>,
+	pub y: Option<i64>,
+	pub meta: Option<String>,
+	pub page: Option<DashboardPageId>,
+	pub tombstone: bool,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Goal {
 	pub id: GoalId,
@@ -214,6 +269,9 @@ pub struct BudgetData {
 	/// `veritas_tax_tag`: Actual tag name (without `#`) to TAX-2 bucket id.
 	pub tax_tags: BTreeMap<String, String>,
 	pub goals: BTreeMap<GoalId, Goal>,
+	pub custom_reports: BTreeMap<CustomReportId, CustomReportRow>,
+	pub dashboard_pages: BTreeMap<DashboardPageId, DashboardPage>,
+	pub widgets: BTreeMap<WidgetId, Widget>,
 }
 
 impl BudgetData {
@@ -239,6 +297,9 @@ impl BudgetData {
 			transaction_meta: BTreeMap::new(),
 			tax_tags: BTreeMap::new(),
 			goals: BTreeMap::new(),
+			custom_reports: BTreeMap::new(),
+			dashboard_pages: BTreeMap::new(),
+			widgets: BTreeMap::new(),
 		}
 	}
 

@@ -37,4 +37,7 @@ id!(
 	TagId,
 	GoalId,
 	ScenarioId,
+	CustomReportId,
+	DashboardPageId,
+	WidgetId,
 );
