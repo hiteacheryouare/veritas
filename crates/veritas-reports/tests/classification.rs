@@ -446,8 +446,7 @@ fn cls5_reconciliation_markers() {
 		Some(veritas_reports::RECONCILIATION_NOTE.to_owned());
 	book.row("Veritas", "CHK", "2027-01-31", 300)
 		.in_category("Groceries");
-	book.veritas_adjustments
-		.insert(TransactionId::new("Veritas"));
+	book.mark_adjustment("Veritas");
 	book.row("Off", "BRK", "2027-01-31", 300).notes =
 		Some(veritas_reports::RECONCILIATION_NOTE.to_owned());
 	book.row("Uncleared", "CHK", "2027-01-31", -100).notes =
@@ -474,14 +473,146 @@ fn cls5_reconciliation_markers() {
 }
 
 #[test]
-fn cls1_rows_in_an_unknown_account_are_flagged_for_review() {
+fn cls1_orphaned_row_is_not_classified_and_counts_nowhere() {
 	let mut book = master_book();
 	book.row("Ghost", "GONE", "2027-01-04", -500)
 		.in_category("Groceries");
 	let classification = book.classify();
-	assert_row(&classification, "Ghost", 11, Adjustment, Leg::Primary);
-	assert!(row(&classification, "Ghost").flags.needs_review);
-	assert!(!row(&classification, "Ghost").on_budget);
+	assert!(classification.get(&TransactionId::new("Ghost")).is_none());
+	assert_eq!(classification.orphans(), ids(&["Ghost"]));
+	assert_eq!(book.net_profit(month("2027-01")).expenses.total.minor(), 0);
+}
+
+#[test]
+fn cls1_missing_transfer_account_is_an_unpaired_transfer_toward_off_budget() {
+	let mut book = master_book();
+	book.account("GONE", false);
+	book.transfer("T", "CHK", "GONE", "2027-01-04", -2_000)
+		.in_category("Savings");
+	book.budget
+		.accounts
+		.remove(&veritas_domain::AccountId::new("GONE"));
+	let classification = book.classify();
+	assert_eq!(classification.orphans(), ids(&["Tm"]));
+	assert_row(&classification, "T", 7, SavingsContribution, Leg::Primary);
+	let flags = row(&classification, "T").flags;
+	assert!(flags.unpaired && !flags.needs_review);
+	assert_eq!(
+		book.net_profit(month("2027-01")).savings.total.minor(),
+		2_000
+	);
+}
+
+#[test]
+fn cls1_one_way_link_leaves_both_legs_unpaired() {
+	let mut book = master_book();
+	book.transfer("V", "CHK", "VISA", "2027-01-10", -7_500);
+	book.row("Other", "VISA", "2027-01-10", 7_500).payee = Some(Book::transfer_payee("CHK"));
+	book.get("Vm").transfer = Some(TransactionId::new("Other"));
+	let classification = book.classify();
+	for id in ["V", "Vm", "Other"] {
+		assert_row(&classification, id, 4, InternalTransfer, Leg::Primary);
+		assert!(row(&classification, id).flags.unpaired, "{id}");
+	}
+}
+
+#[test]
+fn cls1_one_way_link_on_to_off_has_no_mirror() {
+	let mut book = master_book();
+	book.transfer("S", "CHK", "SAV", "2027-01-12", -20_000)
+		.in_category("Savings");
+	book.get("Sm").transfer = None;
+	let classification = book.classify();
+	assert_row(&classification, "S", 7, SavingsContribution, Leg::Primary);
+	assert!(row(&classification, "S").flags.unpaired);
+	assert_row(&classification, "Sm", 10, InternalTransfer, Leg::Primary);
+	let flags = row(&classification, "Sm").flags;
+	assert!(flags.unpaired && flags.needs_review);
+}
+
+#[test]
+fn cls1_a_split_parent_is_never_a_partner() {
+	let mut book = master_book();
+	book.transfer("V", "CHK", "VISA", "2027-01-10", -7_500);
+	book.get("Vm").split = SplitRole::Parent;
+	let classification = book.classify();
+	assert!(classification.get(&TransactionId::new("Vm")).is_none());
+	assert!(row(&classification, "V").flags.unpaired);
+}
+
+#[test]
+fn cls1_deleted_category_without_a_target_still_classifies_and_is_labeled() {
+	let mut book = master_book();
+	book.category("Gym", "Shopping", None);
+	book.budget
+		.categories
+		.get_mut(&cat("Gym"))
+		.unwrap()
+		.tombstone = true;
+	book.row("G", "CHK", "2027-01-04", -3_000)
+		.in_category("Gym");
+	let classification = book.classify();
+	assert_row(&classification, "G", 13, Expense, Leg::Primary);
+	assert_eq!(row(&classification, "G").category, Some(cat("Gym")));
+	let report = book.net_profit(month("2027-01"));
+	assert!(report.expenses.categories[0].labels.deleted);
+}
+
+#[test]
+fn cls1_a_category_with_no_mapping_row_is_uncategorized() {
+	let mut book = master_book();
+	book.budget.category_mapping.remove(&cat("Groceries"));
+	book.row("G", "CHK", "2027-01-04", -3_000)
+		.in_category("Groceries");
+	let classification = book.classify();
+	assert_row(&classification, "G", 15, Expense, Leg::Primary);
+	assert_eq!(row(&classification, "G").category, None);
+}
+
+#[test]
+fn cls4_rows_2_and_3_yield_to_a_paired_same_side_transfer() {
+	let mut book = master_book();
+	book.transfer("V", "CHK", "VISA", "2027-01-10", -7_500)
+		.starting_balance = true;
+	let classification = book.classify();
+	for id in ["V", "Vm"] {
+		assert_row(&classification, id, 4, InternalTransfer, Leg::Primary);
+		let flags = row(&classification, id).flags;
+		assert!(flags.needs_review && !flags.unpaired, "{id}");
+	}
+}
+
+#[test]
+fn cls4_rows_2_and_3_yield_to_a_paired_on_off_transfer_flagging_the_primary() {
+	let mut book = master_book();
+	book.transfer("S", "CHK", "SAV", "2027-01-12", -20_000)
+		.in_category("Savings");
+	book.mark_adjustment("Sm");
+	let classification = book.classify();
+	assert_row(&classification, "S", 7, SavingsContribution, Leg::Primary);
+	assert!(row(&classification, "S").flags.needs_review);
+	assert_row(&classification, "Sm", 7, SavingsContribution, Leg::Mirror);
+	assert_eq!(row(&classification, "Sm").flags, Flags::default());
+	assert_eq!(
+		book.net_profit(month("2027-01")).savings.total.minor(),
+		20_000
+	);
+}
+
+#[test]
+fn cls4_rows_2_and_3_still_apply_to_an_unpaired_transfer() {
+	let mut book = master_book();
+	book.row("SB", "CHK", "2027-01-02", 50_000).payee = Some(Book::transfer_payee("VISA"));
+	book.get("SB").starting_balance = true;
+	book.row("Adj", "VISA", "2027-01-31", -300).payee = Some(Book::transfer_payee("SAV"));
+	book.mark_adjustment("Adj");
+	let classification = book.classify();
+	assert_row(&classification, "SB", 2, StartingBalance, Leg::Primary);
+	assert_row(&classification, "Adj", 3, Adjustment, Leg::Primary);
+	for id in ["SB", "Adj"] {
+		let flags = row(&classification, id).flags;
+		assert!(flags.needs_review && flags.unpaired, "{id}");
+	}
 }
 
 #[test]

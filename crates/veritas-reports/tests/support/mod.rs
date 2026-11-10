@@ -1,12 +1,10 @@
 // Test helpers outside #[test] fns, so clippy.toml's test allowances miss them.
 #![allow(dead_code, clippy::unwrap_used, clippy::panic)]
 
-use std::collections::BTreeSet;
-
 use veritas_domain::{
 	Account, AccountId, BudgetData, BudgetType, Category, CategoryGroup, CategoryGroupId,
 	CategoryId, CategoryKind, CategoryMeta, CivilDate, Money, Payee, PayeeId, SplitRole,
-	Transaction, TransactionId, TransactionKind, YearMonth,
+	Transaction, TransactionId, TransactionKind, TransactionMeta, YearMonth,
 };
 use veritas_reports::{
 	Classification, ClassifiedRow, Leg, NetProfit, Period, classify, net_profit,
@@ -32,14 +30,12 @@ pub fn ids(ids: &[&str]) -> Vec<TransactionId> {
 /// A budget built row by row, the way the finance spec's examples read.
 pub struct Book {
 	pub budget: BudgetData,
-	pub veritas_adjustments: BTreeSet<TransactionId>,
 }
 
 impl Book {
 	pub fn new() -> Self {
 		Book {
 			budget: BudgetData::empty(BudgetType::Envelope),
-			veritas_adjustments: BTreeSet::new(),
 		}
 	}
 
@@ -63,6 +59,9 @@ impl Book {
 			},
 		);
 		let payee = Book::transfer_payee(id);
+		self.budget
+			.payee_mapping
+			.insert(payee.clone(), payee.clone());
 		self.budget.payees.insert(
 			payee.clone(),
 			Payee {
@@ -78,6 +77,9 @@ impl Book {
 	}
 
 	pub fn payee(&mut self, id: &str) -> &mut Self {
+		self.budget
+			.payee_mapping
+			.insert(PayeeId::new(id), PayeeId::new(id));
 		self.budget.payees.insert(
 			PayeeId::new(id),
 			Payee {
@@ -113,6 +115,7 @@ impl Book {
 	pub fn category(&mut self, id: &str, group: &str, kind: Option<CategoryKind>) -> &mut Self {
 		let is_income = self.budget.category_groups[&CategoryGroupId::new(group)].is_income;
 		let order = self.budget.categories.len() as f64;
+		self.budget.category_mapping.insert(cat(id), cat(id));
 		self.budget.categories.insert(
 			cat(id),
 			Category {
@@ -135,7 +138,7 @@ impl Book {
 		self.budget.category_meta.insert(
 			cat(id),
 			CategoryMeta {
-				kind,
+				kind: Some(kind),
 				tax_bucket: None,
 				archived_on: None,
 			},
@@ -213,8 +216,15 @@ impl Book {
 		parent
 	}
 
+	/// Marks a row as made by Veritas's reconcile flow (CLS-5).
+	pub fn mark_adjustment(&mut self, id: &str) {
+		self.budget
+			.transaction_meta
+			.insert(TransactionId::new(id), TransactionMeta { adjustment: true });
+	}
+
 	pub fn classify(&self) -> Classification {
-		classify(&self.budget, &self.veritas_adjustments)
+		classify(&self.budget)
 	}
 
 	pub fn net_profit(&self, period: Period) -> NetProfit {

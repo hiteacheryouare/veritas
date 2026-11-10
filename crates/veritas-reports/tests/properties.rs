@@ -14,6 +14,8 @@ use veritas_domain::{
 };
 use veritas_reports::{Classification, Leg, NetProfit, Period, Section, net_profit};
 
+// Index ACCOUNTS names an account that is never created, so rows there are
+// orphaned and transfers to it lose their counterpart account.
 const ACCOUNTS: usize = 4;
 const CATEGORIES: usize = 5;
 
@@ -28,6 +30,7 @@ struct CategorySpec {
 	kind: Option<CategoryKind>,
 	hidden: bool,
 	merged_into: Option<usize>,
+	unmapped: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -70,6 +73,7 @@ enum MirrorState {
 	Present,
 	Missing,
 	Tombstoned,
+	OneWay,
 }
 
 fn kind() -> impl Strategy<Value = Option<CategoryKind>> {
@@ -94,7 +98,7 @@ fn op() -> impl Strategy<Value = Op> {
 	let category = proptest::option::of(0..CATEGORIES);
 	prop_oneof![
 		(
-			0..ACCOUNTS,
+			0..=ACCOUNTS,
 			day(),
 			amount(),
 			category.clone(),
@@ -126,7 +130,7 @@ fn op() -> impl Strategy<Value = Op> {
 			),
 		(
 			0..ACCOUNTS,
-			0..ACCOUNTS,
+			0..=ACCOUNTS,
 			day(),
 			amount(),
 			category.clone(),
@@ -134,6 +138,7 @@ fn op() -> impl Strategy<Value = Op> {
 				4 => Just(MirrorState::Present),
 				1 => Just(MirrorState::Missing),
 				1 => Just(MirrorState::Tombstoned),
+				1 => Just(MirrorState::OneWay),
 			],
 		)
 			.prop_map(|(from, to, day, amount, category, mirror)| Op::Transfer {
@@ -151,7 +156,7 @@ fn op() -> impl Strategy<Value = Op> {
 				(
 					amount(),
 					category,
-					proptest::option::weighted(0.3, 0..ACCOUNTS)
+					proptest::option::weighted(0.3, 0..=ACCOUNTS)
 				),
 				1..4
 			),
@@ -178,13 +183,17 @@ fn scenario() -> impl Strategy<Value = Scenario> {
 				kind(),
 				proptest::bool::weighted(0.2),
 				proptest::option::weighted(0.2, 0..CATEGORIES),
+				proptest::bool::weighted(0.1),
 			)
-				.prop_map(|(is_income, kind, hidden, merged_into)| CategorySpec {
-					is_income,
-					kind,
-					hidden,
-					merged_into,
-				}),
+				.prop_map(
+					|(is_income, kind, hidden, merged_into, unmapped)| CategorySpec {
+						is_income,
+						kind,
+						hidden,
+						merged_into,
+						unmapped,
+					},
+				),
 			CATEGORIES,
 		),
 		proptest::collection::vec(op(), 0..40),
@@ -228,6 +237,9 @@ fn build(scenario: &Scenario) -> Book {
 			.get_mut(&cat(&category(index)))
 			.unwrap()
 			.hidden = spec.hidden;
+		if spec.unmapped {
+			book.budget.category_mapping.remove(&cat(&category(index)));
+		}
 		if let Some(target) = spec.merged_into {
 			book.budget
 				.category_mapping
@@ -257,7 +269,7 @@ fn build(scenario: &Scenario) -> Book {
 					row.payee = Some(veritas_domain::PayeeId::new("Store"));
 				}
 				if *veritas_adjustment {
-					book.veritas_adjustments.insert(TransactionId::new(&id));
+					book.mark_adjustment(&id);
 				}
 			}
 			Op::Transfer {
@@ -282,6 +294,13 @@ fn build(scenario: &Scenario) -> Book {
 							.get_mut(&mirror_id)
 							.unwrap()
 							.tombstone = true;
+					}
+					MirrorState::OneWay => {
+						book.budget
+							.transactions
+							.get_mut(&mirror_id)
+							.unwrap()
+							.transfer = None;
 					}
 				}
 			}
@@ -315,7 +334,7 @@ fn build(scenario: &Scenario) -> Book {
 	book
 }
 
-fn expected_rows(budget: &BudgetData) -> BTreeSet<TransactionId> {
+fn live_rows(budget: &BudgetData) -> BTreeSet<TransactionId> {
 	budget
 		.transactions
 		.values()
@@ -411,7 +430,16 @@ proptest! {
 		let classified: Vec<_> = classification.rows().iter().map(|row| row.id.clone()).collect();
 		let unique: BTreeSet<_> = classified.iter().cloned().collect();
 		prop_assert_eq!(unique.len(), classified.len(), "a row was classified twice");
-		prop_assert_eq!(unique, expected_rows(&book.budget));
+		let orphans: BTreeSet<_> = classification.orphans().iter().cloned().collect();
+		prop_assert!(unique.is_disjoint(&orphans));
+		let live = live_rows(&book.budget);
+		let expected_orphans: BTreeSet<_> = live
+			.iter()
+			.filter(|id| !book.budget.accounts.contains_key(&book.budget.transactions[*id].account))
+			.cloned()
+			.collect();
+		prop_assert_eq!(&orphans, &expected_orphans);
+		prop_assert_eq!(unique, &live - &orphans);
 
 		for row in classification.rows() {
 			prop_assert_eq!(row.kind(), row.decision.kind());
@@ -420,6 +448,11 @@ proptest! {
 				let partner = book.budget.transactions[&row.id].transfer.clone().unwrap();
 				let primary = classification.get(&partner).unwrap();
 				prop_assert!(primary.on_budget && primary.is_primary());
+				prop_assert_eq!(
+					book.budget.transactions[&partner].transfer.as_ref(),
+					Some(&row.id),
+					"a mirror's link must be reciprocal"
+				);
 				prop_assert_eq!(primary.decision, row.decision);
 			}
 			if row.adjustment_source().is_some() {

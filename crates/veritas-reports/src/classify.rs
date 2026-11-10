@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 
 use veritas_domain::{
 	AccountId, BudgetData, CategoryId, CategoryKind, CivilDate, Money, SplitRole, Transaction,
@@ -139,6 +139,7 @@ impl ClassifiedRow {
 pub struct Classification {
 	rows: Vec<ClassifiedRow>,
 	by_id: HashMap<TransactionId, usize>,
+	orphans: Vec<TransactionId>,
 }
 
 impl Classification {
@@ -156,6 +157,13 @@ impl Classification {
 		self.rows.get(start..end).unwrap_or_default()
 	}
 
+	/// Live rows whose own account is missing from the budget. No account holds
+	/// them, so they are never classified, count in no total, and each one
+	/// needs review.
+	pub fn orphans(&self) -> &[TransactionId] {
+		&self.orphans
+	}
+
 	/// On↔off transfers counted as spending only because their category has
 	/// no Veritas kind yet. The UI shows this count and the one-time wizard
 	/// that assigns kinds to those categories.
@@ -166,56 +174,44 @@ impl Classification {
 		self.rows.iter().filter(|row| {
 			row.decision == Decision::CapitalizedExpense
 				&& row.is_primary()
-				&& row
-					.category
-					.as_ref()
-					.is_some_and(|category| !budget.category_meta.contains_key(category))
+				&& row.category.as_ref().is_some_and(|category| {
+					budget
+						.category_meta
+						.get(category)
+						.and_then(|meta| meta.kind)
+						.is_none()
+				})
 		})
 	}
 }
 
-/// Classifies every row of `budget`. `veritas_adjustments` holds the rows
-/// Veritas's own reconcile flow created (`veritas_transaction_meta.adjustment`),
-/// which `BudgetData` does not carry yet.
-pub fn classify(
-	budget: &BudgetData,
-	veritas_adjustments: &BTreeSet<TransactionId>,
-) -> Classification {
-	let classifier = Classifier {
-		budget,
-		veritas_adjustments,
-	};
-	let mut rows = Vec::new();
-	let mut mirrors = Vec::new();
+pub fn classify(budget: &BudgetData) -> Classification {
+	let mut orphans = Vec::new();
+	let mut candidates = BTreeMap::new();
 	for transaction in budget.transactions.values() {
 		if !is_row(budget, transaction) {
 			continue;
 		}
-		let facts = classifier.facts(transaction);
-		let outcome = classifier.decide(transaction, &facts);
-		let row = ClassifiedRow {
-			id: transaction.id.clone(),
-			parent: match &transaction.split {
-				SplitRole::Child { parent } => Some(parent.clone()),
-				SplitRole::None | SplitRole::Parent => None,
-			},
-			account: transaction.account.clone(),
-			date: transaction.date,
-			amount: transaction.amount,
-			category: facts.category,
-			on_budget: facts.on_budget,
-			transfer_account: facts.transfer.map(|transfer| transfer.account),
-			decision: Decision::Uncategorized,
-			leg: Leg::Primary,
-			flags: Flags::default(),
-		};
-		match outcome {
+		match Candidate::new(budget, transaction) {
+			Some(candidate) => {
+				candidates.insert(&transaction.id, candidate);
+			}
+			None => orphans.push(transaction.id.clone()),
+		}
+	}
+
+	let mut rows = Vec::with_capacity(candidates.len());
+	let mut mirrors = Vec::new();
+	for candidate in candidates.values() {
+		let partner = partner(&candidates, candidate);
+		let row = candidate.row();
+		match decide(budget, candidate, partner) {
 			Outcome::Decided(decision, flags) => rows.push(ClassifiedRow {
 				decision,
 				flags,
 				..row
 			}),
-			Outcome::MirrorOf(primary, flags) => mirrors.push((row, primary, flags)),
+			Outcome::MirrorOf(primary) => mirrors.push((row, primary)),
 		}
 	}
 
@@ -223,12 +219,11 @@ pub fn classify(
 		.iter()
 		.map(|row| (row.id.clone(), row.decision))
 		.collect();
-	for (row, primary, flags) in mirrors {
+	for (row, primary) in mirrors {
 		let classified = match decided.get(&primary) {
 			Some(&decision) => ClassifiedRow {
 				decision,
 				leg: Leg::Mirror,
-				flags,
 				..row
 			},
 			None => ClassifiedRow {
@@ -236,7 +231,7 @@ pub fn classify(
 				flags: Flags {
 					needs_review: true,
 					unpaired: true,
-					..flags
+					..Flags::default()
 				},
 				..row
 			},
@@ -250,7 +245,11 @@ pub fn classify(
 		.enumerate()
 		.map(|(index, row)| (row.id.clone(), index))
 		.collect();
-	Classification { rows, by_id }
+	Classification {
+		rows,
+		by_id,
+		orphans,
+	}
 }
 
 /// Actual's `v_transactions_internal_alive` with `is_parent = 0`: not
@@ -269,128 +268,152 @@ fn is_row(budget: &BudgetData, transaction: &Transaction) -> bool {
 	}
 }
 
-enum Outcome {
-	Decided(Decision, Flags),
-	MirrorOf(TransactionId, Flags),
-}
-
-struct TransferFacts {
+struct Transfer {
 	account: AccountId,
+	/// A counterpart account missing from the budget counts as off-budget.
 	other_on_budget: bool,
-	partner: Option<TransactionId>,
 }
 
-struct RowFacts {
+/// A live row and the facts the decision table reads, before pairing.
+struct Candidate<'a> {
+	transaction: &'a Transaction,
 	category: Option<CategoryId>,
 	on_budget: bool,
-	transfer: Option<TransferFacts>,
-	unknown_account: bool,
+	transfer: Option<Transfer>,
+	starting_balance: bool,
+	reconciliation: bool,
 }
 
-struct Classifier<'a> {
-	budget: &'a BudgetData,
-	veritas_adjustments: &'a BTreeSet<TransactionId>,
-}
-
-impl Classifier<'_> {
-	fn on_budget(&self, account: &AccountId) -> Option<bool> {
-		self.budget
-			.accounts
-			.get(account)
-			.map(|account| !account.off_budget)
-	}
-
-	/// An account missing from the budget is treated as off-budget, as
-	/// Actual's budget sums skip it, and its rows are flagged for review.
-	fn facts(&self, transaction: &Transaction) -> RowFacts {
-		let budget = self.budget;
-		let own_side = self.on_budget(&transaction.account);
+impl<'a> Candidate<'a> {
+	/// `None` when the row's own account is missing: an orphaned row.
+	fn new(budget: &BudgetData, transaction: &'a Transaction) -> Option<Self> {
+		let on_budget = !budget.accounts.get(&transaction.account)?.off_budget;
 		let category = transaction
 			.category
 			.as_ref()
-			.map(|category| budget.resolve_category(category))
-			.filter(|category| budget.categories.contains_key(category));
-		let transfer_account = transaction
+			.and_then(|category| budget.resolve_category(category))
+			.filter(|category| budget.categories.contains_key(*category))
+			.cloned();
+		let payee = transaction
 			.payee
 			.as_ref()
-			.map(|payee| budget.resolve_payee(payee))
-			.and_then(|payee| budget.payees.get(&payee))
-			.and_then(|payee| payee.transfer_account.clone());
-		let mut unknown_account = own_side.is_none();
-		let transfer = transfer_account.map(|account| {
-			let other_side = self.on_budget(&account);
-			unknown_account |= other_side.is_none();
-			let partner = transaction.transfer.clone().filter(|partner| {
-				budget
-					.transactions
-					.get(partner)
-					.is_some_and(|partner| partner.account == account && is_row(budget, partner))
-			});
-			TransferFacts {
+			.and_then(|payee| budget.resolve_payee(payee))
+			.and_then(|payee| budget.payees.get(payee));
+		let transfer = payee
+			.and_then(|payee| payee.transfer_account.clone())
+			.map(|account| Transfer {
+				other_on_budget: budget
+					.accounts
+					.get(&account)
+					.is_some_and(|account| !account.off_budget),
 				account,
-				other_on_budget: other_side.unwrap_or(false),
-				partner,
-			}
-		});
-		RowFacts {
-			category,
-			on_budget: own_side.unwrap_or(false),
-			transfer,
-			unknown_account,
-		}
-	}
-
-	fn is_reconciliation(&self, transaction: &Transaction, facts: &RowFacts) -> bool {
-		self.veritas_adjustments.contains(&transaction.id)
+			});
+		let reconciliation = budget
+			.transaction_meta
+			.get(&transaction.id)
+			.is_some_and(|meta| meta.adjustment)
 			|| (transaction.cleared
-				&& transaction.payee.is_none()
-				&& facts.category.is_none()
-				&& transaction.notes.as_deref() == Some(RECONCILIATION_NOTE))
+				&& payee.is_none()
+				&& category.is_none()
+				&& transaction.notes.as_deref() == Some(RECONCILIATION_NOTE));
+		Some(Candidate {
+			transaction,
+			category,
+			on_budget,
+			transfer,
+			starting_balance: transaction.starting_balance,
+			reconciliation,
+		})
 	}
 
-	/// The category's effective kind. Actual's `is_income` wins over Veritas
-	/// metadata on the income/expense axis, and a disagreement is a conflict.
-	fn category_kind(&self, category: &CategoryId) -> (CategoryKind, bool) {
-		let is_income = self
-			.budget
-			.categories
-			.get(category)
-			.is_some_and(|category| category.is_income);
-		let stored = self
-			.budget
-			.category_meta
-			.get(category)
-			.map(|meta| meta.kind);
-		match (is_income, stored) {
-			(true, None | Some(CategoryKind::Income)) => (CategoryKind::Income, false),
-			(true, Some(_)) => (CategoryKind::Income, true),
-			(false, None) => (CategoryKind::Expense, false),
-			(false, Some(CategoryKind::Income)) => (CategoryKind::Expense, true),
-			(false, Some(kind)) => (kind, false),
-		}
+	fn marked(&self) -> bool {
+		self.starting_balance || self.reconciliation
 	}
 
-	fn decide(&self, transaction: &Transaction, facts: &RowFacts) -> Outcome {
-		let mut flags = Flags {
-			needs_review: facts.unknown_account,
-			..Flags::default()
-		};
-		if transaction.starting_balance {
-			return Outcome::Decided(Decision::StartingBalance, flags);
+	fn row(&self) -> ClassifiedRow {
+		let transaction = self.transaction;
+		ClassifiedRow {
+			id: transaction.id.clone(),
+			parent: match &transaction.split {
+				SplitRole::Child { parent } => Some(parent.clone()),
+				SplitRole::None | SplitRole::Parent => None,
+			},
+			account: transaction.account.clone(),
+			date: transaction.date,
+			amount: transaction.amount,
+			category: self.category.clone(),
+			on_budget: self.on_budget,
+			transfer_account: self
+				.transfer
+				.as_ref()
+				.map(|transfer| transfer.account.clone()),
+			decision: Decision::Uncategorized,
+			leg: Leg::Primary,
+			flags: Flags::default(),
 		}
-		if self.is_reconciliation(transaction, facts) {
-			return Outcome::Decided(Decision::Reconciliation, flags);
-		}
-		let category_kind = facts
-			.category
-			.as_ref()
-			.map(|category| self.category_kind(category));
+	}
+}
 
-		let Some(transfer) = &facts.transfer else {
-			if !facts.on_budget {
-				return Outcome::Decided(Decision::OffBudgetRevaluation, flags);
-			}
-			let decision = match category_kind {
+/// The other leg, only when the link is reciprocal: each row points at the
+/// other and sits in the other's transfer account.
+fn partner<'c, 'a>(
+	candidates: &'c BTreeMap<&TransactionId, Candidate<'a>>,
+	candidate: &Candidate<'a>,
+) -> Option<&'c Candidate<'a>> {
+	let own = candidate.transaction;
+	let transfer = candidate.transfer.as_ref()?;
+	let id = own.transfer.as_ref().filter(|id| *id != &own.id)?;
+	let other = candidates.get(id)?;
+	let points_back = other.transaction.transfer.as_ref() == Some(&own.id);
+	let other_points_here = other
+		.transfer
+		.as_ref()
+		.is_some_and(|transfer| transfer.account == own.account);
+	(points_back && other_points_here && other.transaction.account == transfer.account)
+		.then_some(other)
+}
+
+enum Outcome {
+	Decided(Decision, Flags),
+	MirrorOf(TransactionId),
+}
+
+/// The category's effective kind. Actual's `is_income` wins over Veritas
+/// metadata on the income/expense axis, and a disagreement is a conflict.
+fn category_kind(budget: &BudgetData, category: &CategoryId) -> (CategoryKind, bool) {
+	let is_income = budget
+		.categories
+		.get(category)
+		.is_some_and(|category| category.is_income);
+	let stored = budget
+		.category_meta
+		.get(category)
+		.and_then(|meta| meta.kind);
+	match (is_income, stored) {
+		(true, None | Some(CategoryKind::Income)) => (CategoryKind::Income, false),
+		(true, Some(_)) => (CategoryKind::Income, true),
+		(false, None) => (CategoryKind::Expense, false),
+		(false, Some(CategoryKind::Income)) => (CategoryKind::Expense, true),
+		(false, Some(kind)) => (kind, false),
+	}
+}
+
+fn decide(budget: &BudgetData, candidate: &Candidate, partner: Option<&Candidate>) -> Outcome {
+	let mut flags = Flags::default();
+	let category_kind = candidate
+		.category
+		.as_ref()
+		.map(|category| category_kind(budget, category));
+
+	let Some(transfer) = &candidate.transfer else {
+		let decision = if candidate.starting_balance {
+			Decision::StartingBalance
+		} else if candidate.reconciliation {
+			Decision::Reconciliation
+		} else if !candidate.on_budget {
+			Decision::OffBudgetRevaluation
+		} else {
+			match category_kind {
 				None => {
 					flags.needs_review = true;
 					Decision::Uncategorized
@@ -406,44 +429,73 @@ impl Classifier<'_> {
 						}
 					}
 				}
+			}
+		};
+		return Outcome::Decided(decision, flags);
+	};
+
+	let Some(partner) = partner else {
+		flags.unpaired = true;
+		if candidate.marked() {
+			flags.needs_review = true;
+			let decision = if candidate.starting_balance {
+				Decision::StartingBalance
+			} else {
+				Decision::Reconciliation
 			};
 			return Outcome::Decided(decision, flags);
-		};
+		}
+		return Outcome::Decided(
+			transfer_decision(candidate, transfer, category_kind, &mut flags),
+			flags,
+		);
+	};
 
-		flags.unpaired = transfer.partner.is_none();
-		let decision = match (facts.on_budget, transfer.other_on_budget) {
-			(true, true) => {
-				flags.needs_review |= facts.category.is_some();
-				Decision::OnBudgetTransfer
+	if !candidate.on_budget && transfer.other_on_budget {
+		return Outcome::MirrorOf(partner.transaction.id.clone());
+	}
+	flags.needs_review = candidate.marked() || partner.marked();
+	Outcome::Decided(
+		transfer_decision(candidate, transfer, category_kind, &mut flags),
+		flags,
+	)
+}
+
+/// Rows 4 to 10 for a transfer that is not a mirror leg.
+fn transfer_decision(
+	candidate: &Candidate,
+	transfer: &Transfer,
+	category_kind: Option<(CategoryKind, bool)>,
+	flags: &mut Flags,
+) -> Decision {
+	match (candidate.on_budget, transfer.other_on_budget) {
+		(true, true) => {
+			flags.needs_review |= candidate.category.is_some();
+			Decision::OnBudgetTransfer
+		}
+		(false, false) => {
+			flags.needs_review |= candidate.category.is_some();
+			Decision::OffBudgetTransfer
+		}
+		(false, true) => {
+			flags.needs_review = true;
+			Decision::UncategorizedTransfer
+		}
+		(true, false) => match category_kind {
+			None => {
+				flags.needs_review = true;
+				Decision::UncategorizedTransfer
 			}
-			(false, false) => {
-				flags.needs_review |= facts.category.is_some();
-				Decision::OffBudgetTransfer
+			Some((kind, conflict)) => {
+				flags.kind_conflict = conflict;
+				match kind {
+					CategoryKind::DebtPrincipal => Decision::DebtPrincipalTransfer,
+					CategoryKind::Savings => Decision::SavingsTransfer,
+					CategoryKind::Expense => Decision::CapitalizedExpense,
+					CategoryKind::Income => Decision::CapitalizedIncome,
+				}
 			}
-			(false, true) => match &transfer.partner {
-				Some(partner) => return Outcome::MirrorOf(partner.clone(), flags),
-				None => {
-					flags.needs_review = true;
-					Decision::UncategorizedTransfer
-				}
-			},
-			(true, false) => match category_kind {
-				None => {
-					flags.needs_review = true;
-					Decision::UncategorizedTransfer
-				}
-				Some((kind, conflict)) => {
-					flags.kind_conflict = conflict;
-					match kind {
-						CategoryKind::DebtPrincipal => Decision::DebtPrincipalTransfer,
-						CategoryKind::Savings => Decision::SavingsTransfer,
-						CategoryKind::Expense => Decision::CapitalizedExpense,
-						CategoryKind::Income => Decision::CapitalizedIncome,
-					}
-				}
-			},
-		};
-		Outcome::Decided(decision, flags)
+		},
 	}
 }
 
