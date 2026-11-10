@@ -9,14 +9,16 @@ use std::sync::{Arc, Mutex};
 
 use proptest::prelude::*;
 use veritas_domain::{
-	Account, AccountId, BudgetCell, BudgetData, BudgetType, Category, CategoryGroup,
-	CategoryGroupId, CategoryId, CategoryKind, CategoryMeta, CivilDate, CoreError, Goal, GoalId,
-	GoalStatus, Money, ReadOnlyReason, SplitRole, Transaction, TransactionId, TransactionMeta,
-	YearMonth,
+	Account, AccountGroup, AccountGroupId, AccountId, AccountKind, AccountMeta, BudgetCell,
+	BudgetData, BudgetType, Category, CategoryGroup, CategoryGroupId, CategoryId, CategoryKind,
+	CategoryMeta, CivilDate, ConditionsOp, CoreError, Goal, GoalId, GoalStatus, Money, Payee,
+	PayeeId, ReadOnlyReason, Rule, RuleId, RuleStage, Schedule, ScheduleId, SplitRole, Tag, TagId,
+	Transaction, TransactionId, TransactionMeta, YearMonth,
 };
 use veritas_session::{
-	CategoryMapping, CategoryMetaRow, Change, ChangeListener, ChangeSet, CommandBus, EntityRef,
-	Hold, Note, Row, Store, StoreTransaction, TransactionMetaRow,
+	AccountMetaRow, CategoryMapping, CategoryMetaRow, Change, ChangeListener, ChangeSet,
+	CommandBus, EntityRef, Hold, Note, PayeeMapping, Row, Store, StoreTransaction,
+	TransactionMetaRow,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -506,6 +508,289 @@ fn subscribers_hear_which_rows_changed_after_each_commit() {
 	bus.unsubscribe(subscription);
 	bus.perform(&rows(vec![budgeted("rent", 3)])).unwrap();
 	assert!(listener.take().is_empty());
+}
+
+/// One new row of every kind the bus writes, as a "set up my budget" command
+/// would create them.
+struct NewRows {
+	account: Account,
+	account_group: AccountGroup,
+	category_group: CategoryGroup,
+	category: Category,
+	payee: Payee,
+	transaction: Transaction,
+	rule: Rule,
+	schedule: Schedule,
+	tag: Tag,
+	cell: BudgetCell,
+	hold: Hold,
+	note: Note,
+	category_mapping: CategoryMapping,
+	payee_mapping: PayeeMapping,
+	category_meta: CategoryMetaRow,
+	account_meta: AccountMetaRow,
+	transaction_meta: TransactionMetaRow,
+	goal: Goal,
+}
+
+impl NewRows {
+	fn new() -> Self {
+		NewRows {
+			account: Account {
+				group: Some(AccountGroupId::new("cash")),
+				..account("savings", "High-yield savings")
+			},
+			account_group: AccountGroup {
+				id: AccountGroupId::new("cash"),
+				name: "Cash".to_owned(),
+				sort_order: 1.0,
+				tombstone: false,
+			},
+			category_group: CategoryGroup {
+				id: CategoryGroupId::new("wants"),
+				name: "Wants".to_owned(),
+				is_income: false,
+				hidden: false,
+				sort_order: 2.0,
+				tombstone: false,
+			},
+			category: Category {
+				group: CategoryGroupId::new("wants"),
+				..category("dining", "Dining out")
+			},
+			payee: Payee {
+				id: PayeeId::new("landlord"),
+				name: "Landlord LLC".to_owned(),
+				transfer_account: None,
+				favorite: false,
+				learn_categories: true,
+				tombstone: false,
+			},
+			transaction: Transaction {
+				payee: Some(PayeeId::new("landlord")),
+				category: Some(CategoryId::new("rent")),
+				..transaction("t-rent", -165_000)
+			},
+			rule: Rule {
+				id: RuleId::new("rule-rent"),
+				stage: RuleStage::Default,
+				conditions_op: ConditionsOp::And,
+				conditions_json: r#"[{"op":"is","field":"payee","value":"landlord"}]"#.to_owned(),
+				actions_json: r#"[{"op":"set","field":"category","value":"rent"}]"#.to_owned(),
+				tombstone: false,
+			},
+			schedule: Schedule {
+				id: ScheduleId::new("sched-rent"),
+				name: Some("Rent".to_owned()),
+				rule: RuleId::new("rule-rent"),
+				posts_transaction: false,
+				completed: false,
+				next_date: CivilDate::new(2027, 4, 1).ok(),
+				tombstone: false,
+			},
+			tag: Tag {
+				id: TagId::new("tag-house"),
+				name: "house".to_owned(),
+				color: Some("#5b8def".to_owned()),
+				description: None,
+				hidden: false,
+				tombstone: false,
+			},
+			cell: cell("rent", 165_000),
+			hold: Hold {
+				month: march(),
+				amount: Some(Money::from_minor(25_000)),
+			},
+			note: Note {
+				id: "rent".to_owned(),
+				text: "Due on the 1st".to_owned(),
+			},
+			category_mapping: CategoryMapping {
+				from: CategoryId::new("dining"),
+				to: CategoryId::new("dining"),
+			},
+			payee_mapping: PayeeMapping {
+				from: PayeeId::new("landlord"),
+				to: PayeeId::new("landlord"),
+			},
+			category_meta: CategoryMetaRow {
+				category: CategoryId::new("dining"),
+				meta: CategoryMeta {
+					kind: Some(CategoryKind::Expense),
+					tax_bucket: None,
+					archived_on: None,
+				},
+			},
+			account_meta: AccountMetaRow {
+				account: AccountId::new("savings"),
+				meta: AccountMeta {
+					kind: Some(AccountKind::Asset),
+					..AccountMeta::default()
+				},
+			},
+			transaction_meta: TransactionMetaRow {
+				transaction: TransactionId::new("t-rent"),
+				meta: TransactionMeta { adjustment: false },
+			},
+			goal: goal("trip"),
+		}
+	}
+
+	/// The same rows after a second command edits a field of each one.
+	fn edited() -> Self {
+		let mut rows = NewRows::new();
+		rows.account.name = "Emergency fund".to_owned();
+		rows.account_group.name = "Cash & savings".to_owned();
+		rows.category_group.hidden = true;
+		rows.category.name = "Restaurants".to_owned();
+		rows.payee.favorite = true;
+		rows.transaction.amount = Money::from_minor(-170_000);
+		rows.rule.stage = RuleStage::Pre;
+		rows.schedule.next_date = CivilDate::new(2027, 5, 1).ok();
+		rows.tag.hidden = true;
+		rows.cell.budgeted = Money::from_minor(170_000);
+		rows.hold.amount = Some(Money::from_minor(30_000));
+		rows.note.text = "Due on the 1st, late after the 5th".to_owned();
+		rows.category_mapping.to = CategoryId::new("groceries");
+		rows.payee_mapping.to = PayeeId::new("property-co");
+		rows.category_meta.meta.tax_bucket = Some("schedule-c".to_owned());
+		rows.account_meta.meta.lender = Some("Ally".to_owned());
+		rows.transaction_meta.meta.adjustment = true;
+		rows.goal.target = Money::from_minor(450_000);
+		rows
+	}
+
+	fn rows(&self) -> Vec<Row> {
+		vec![
+			Row::AccountGroup(self.account_group.clone()),
+			Row::Account(self.account.clone()),
+			Row::CategoryGroup(self.category_group.clone()),
+			Row::Category(self.category.clone()),
+			Row::Payee(self.payee.clone()),
+			Row::Transaction(self.transaction.clone()),
+			Row::Rule(self.rule.clone()),
+			Row::Schedule(self.schedule.clone()),
+			Row::Tag(self.tag.clone()),
+			Row::BudgetCell(self.cell.clone()),
+			Row::Hold(self.hold.clone()),
+			Row::Note(self.note.clone()),
+			Row::CategoryMapping(self.category_mapping.clone()),
+			Row::PayeeMapping(self.payee_mapping.clone()),
+			Row::CategoryMeta(self.category_meta.clone()),
+			Row::AccountMeta(self.account_meta.clone()),
+			Row::TransactionMeta(self.transaction_meta.clone()),
+			Row::Goal(self.goal.clone()),
+		]
+	}
+}
+
+#[test]
+fn every_kind_of_row_undoes_and_redoes_exactly() {
+	// R-REL-5 "covering every command": one command creates a row of every
+	// kind, a second edits each of them. Undoing the edit restores every row
+	// exactly; undoing the creation retires each the way Actual does
+	// (reference/actual/packages/loot-core/src/server/undo.ts:161-203); redo
+	// brings both back.
+	let mut bus = bus();
+	let initial = bus.data().clone();
+	let created = NewRows::new();
+	let edited = NewRows::edited();
+
+	let changed = bus.perform(&rows(created.rows())).unwrap();
+	assert_eq!(changed.entities.len(), 18);
+	let after_create = bus.data().clone();
+	let changed = bus.perform(&rows(edited.rows())).unwrap();
+	assert_eq!(changed.entities.len(), 18);
+	let after_edit = bus.data().clone();
+
+	bus.undo().unwrap();
+	assert_eq!(bus.data(), &after_create);
+	assert_in_sync(&bus);
+
+	bus.undo().unwrap();
+	let mut retired = initial.clone();
+	macro_rules! tombstoned {
+		($($field:ident: $row:ident),*) => {$(
+			retired.$field.insert(
+				created.$row.id.clone(),
+				{
+					let mut row = created.$row.clone();
+					row.tombstone = true;
+					row
+				},
+			);
+		)*};
+	}
+	tombstoned!(
+		accounts: account,
+		account_groups: account_group,
+		category_groups: category_group,
+		categories: category,
+		payees: payee,
+		transactions: transaction,
+		rules: rule,
+		schedules: schedule,
+		tags: tag
+	);
+	retired.budget_cells.insert(
+		(march(), CategoryId::new("rent")),
+		BudgetCell {
+			budgeted: Money::ZERO,
+			carryover: false,
+			..created.cell.clone()
+		},
+	);
+	retired.holds.insert(march(), Some(Money::ZERO));
+	retired
+		.category_mapping
+		.insert(CategoryId::new("dining"), CategoryId::new("dining"));
+	retired
+		.payee_mapping
+		.insert(PayeeId::new("landlord"), PayeeId::new("landlord"));
+	assert_eq!(bus.data(), &retired);
+	assert_in_sync(&bus);
+
+	bus.redo().unwrap();
+	assert_eq!(bus.data(), &after_create);
+	bus.redo().unwrap();
+	assert_eq!(bus.data(), &after_edit);
+	assert_in_sync(&bus);
+	assert!(!bus.can_redo());
+}
+
+#[test]
+fn a_command_that_writes_one_row_twice_undoes_to_the_original() {
+	// R-REL-1, R-REL-5: covering overspending moves money into the same
+	// category twice in one command. Undo returns the original amount, and a
+	// failure on the second write leaves the first unapplied too.
+	let mut bus = bus();
+	let original = bus.data().clone();
+	let twice = rows(vec![
+		budgeted("groceries", 70_000),
+		budgeted("groceries", 71_234),
+	]);
+
+	bus.store_mut().fail_next(Failure::OnApply(1));
+	assert!(bus.perform(&twice).is_err());
+	assert_eq!(bus.data(), &original);
+	assert_in_sync(&bus);
+
+	bus.perform(&twice).unwrap();
+	let groceries = (march(), CategoryId::new("groceries"));
+	assert_eq!(
+		bus.data().budget_cells[&groceries].budgeted,
+		Money::from_minor(71_234)
+	);
+	assert_in_sync(&bus);
+
+	bus.undo().unwrap();
+	assert_eq!(bus.data(), &original);
+	assert_in_sync(&bus);
+	bus.redo().unwrap();
+	assert_eq!(
+		bus.data().budget_cells[&groceries].budgeted,
+		Money::from_minor(71_234)
+	);
 }
 
 #[derive(Clone, Debug)]
