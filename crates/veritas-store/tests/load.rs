@@ -131,7 +131,20 @@ fn all_features_loads_every_modeled_row_including_tombstones() {
 		.find(|(from, to)| from != to)
 		.map(|(from, _)| from.clone())
 		.unwrap();
-	assert_ne!(data.resolve_category(&merged), merged);
+	assert_ne!(data.resolve_category(&merged), Some(&merged));
+	let self_mapped = data
+		.category_mapping
+		.iter()
+		.filter(|(from, to)| from == to)
+		.count();
+	assert_eq!(
+		self_mapped,
+		count(
+			&raw,
+			"SELECT count(*) FROM category_mapping WHERE id = transferId"
+		)
+	);
+	assert!(self_mapped > 0);
 	assert!(data.categories[&merged].tombstone);
 	assert!(data.payee_mapping.iter().any(|(from, to)| from != to));
 
@@ -167,7 +180,7 @@ fn all_features_loads_every_modeled_row_including_tombstones() {
 		.unwrap();
 	assert_eq!(
 		data.holds[&YearMonth::parse("2026-07").unwrap()],
-		Money::from_minor(hold)
+		Some(Money::from_minor(hold))
 	);
 
 	let (schedule, next): (String, i64) = raw
@@ -279,14 +292,20 @@ fn veritas_metadata_loads_when_present() {
 	raw.execute_batch(&format!(
 		"INSERT INTO veritas_category_meta VALUES ('{category}', 'savings', 'hsa', 20270115);
 		 INSERT INTO veritas_account_meta VALUES ('{account}', 'liability', 649, 31250, 15, 'Credit union');
+		 INSERT INTO veritas_category_meta VALUES ('kindless', NULL, NULL, NULL);
+		 INSERT INTO veritas_transaction_meta VALUES ('t-adjust', 1), ('t-plain', 0);
 		 INSERT INTO veritas_goal (id, category_id, target_cents, target_date, status, reached_month, created_at)
 		   VALUES ('g1', '{category}', 500000, 20271201, 'reached', '2027-06', 0);"
 	))
 	.unwrap();
 	let data = store.load().unwrap().data;
 	let meta = &data.category_meta[&CategoryId::new(&category)];
-	assert_eq!(meta.kind, CategoryKind::Savings);
+	assert_eq!(meta.kind, Some(CategoryKind::Savings));
+	assert_eq!(meta.tax_bucket.as_deref(), Some("hsa"));
 	assert_eq!(meta.archived_on.unwrap().to_string(), "2027-01-15");
+	assert_eq!(data.category_meta[&CategoryId::new("kindless")].kind, None);
+	assert!(data.transaction_meta[&TransactionId::new("t-adjust")].adjustment);
+	assert!(!data.transaction_meta[&TransactionId::new("t-plain")].adjustment);
 	let loan = &data.account_meta[&veritas_domain::AccountId::new(&account)];
 	assert_eq!(loan.loan_payment, Some(Money::from_minor(31250)));
 	assert_eq!(loan.loan_payment_day, Some(15));
@@ -334,6 +353,7 @@ fn actuals_quirks_load_and_unrepresentable_rows_are_counted_not_fatal() {
 		 INSERT INTO rules (id, conditions, actions) VALUES ('no-actions', '[]', NULL);
 		 INSERT INTO category_mapping VALUES ('dangling', NULL);
 		 INSERT INTO notes VALUES ('empty-note', NULL);
+		 INSERT INTO zero_budget_months VALUES ('2019-03', NULL);
 		 INSERT INTO accounts (id, name, sort_order) VALUES (NULL, 'No id', 'first');"
 	))
 	.unwrap();
@@ -372,6 +392,7 @@ fn actuals_quirks_load_and_unrepresentable_rows_are_counted_not_fatal() {
 		veritas_domain::RuleStage::Default
 	);
 	assert_eq!(data.notes["empty-note"], "");
+	assert_eq!(data.holds[&march], None);
 
 	let mut skipped: Vec<(&str, Option<String>)> = loaded
 		.report

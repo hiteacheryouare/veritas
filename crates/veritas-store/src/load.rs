@@ -7,7 +7,7 @@ use veritas_domain::{
 	BudgetData, BudgetType, Category, CategoryGroup, CategoryGroupId, CategoryId, CategoryKind,
 	CategoryMeta, CivilDate, ConditionsOp, CoreError, Goal, GoalId, GoalStatus, Money, Payee,
 	PayeeId, Rule, RuleId, RuleStage, Schedule, ScheduleId, SplitRole, Tag, TagId, Transaction,
-	TransactionId,
+	TransactionId, TransactionMeta,
 };
 
 use crate::cells::{
@@ -260,7 +260,7 @@ pub(crate) fn load(conn: &Connection) -> Result<Loaded, CoreError> {
 		&mut skipped,
 		|row| {
 			let month = text_month(at(row, 0)?)?.ok_or("the row has no id")?;
-			let held = money(at(row, 1)?)?.unwrap_or(Money::ZERO);
+			let held = money(at(row, 1)?)?;
 			data.holds.insert(month, held);
 			Ok(())
 		},
@@ -495,7 +495,9 @@ fn load_veritas_tables(
 			|row| {
 				let category = CategoryId::new(id(row, 0)?);
 				let meta = CategoryMeta {
-					kind: category_kind(&required_text(at(row, 1)?, "the row has no kind")?)?,
+					kind: text(at(row, 1)?)?
+						.map(|kind| category_kind(&kind))
+						.transpose()?,
 					tax_bucket: text(at(row, 2)?)?,
 					archived_on: date(at(row, 3)?)?,
 				};
@@ -534,6 +536,23 @@ fn load_veritas_tables(
 					lender: text(at(row, 5)?)?,
 				};
 				data.account_meta.insert(account, meta);
+				Ok(())
+			},
+		)?;
+	}
+
+	if table_exists(conn, "veritas_transaction_meta")? {
+		each_row(
+			conn,
+			"veritas_transaction_meta",
+			"SELECT transaction_id, adjustment FROM veritas_transaction_meta",
+			skipped,
+			|row| {
+				let transaction = TransactionId::new(id(row, 0)?);
+				let meta = TransactionMeta {
+					adjustment: flag(at(row, 1)?),
+				};
+				data.transaction_meta.insert(transaction, meta);
 				Ok(())
 			},
 		)?;
