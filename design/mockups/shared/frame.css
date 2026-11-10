@@ -108,7 +108,7 @@ svg.icon.small { width: 12px; height: 12px; }
 }
 .button .icon { color: var(--color-text-secondary); }
 .button.small { height: var(--size-control-small); padding: 0 11px; border-radius: 13px; }
-.button.primary { background: var(--color-accent); color: var(--color-text-on-accent); box-shadow: none; font-weight: var(--weight-medium); }
+.button.primary { background: var(--color-accent-fill); color: var(--color-text-on-accent); box-shadow: none; font-weight: var(--weight-medium); }
 .button.primary .icon { color: inherit; }
 .button[aria-pressed="true"] { background: var(--color-accent-soft); box-shadow: 0 0 0 1px var(--color-accent); }
 .button[aria-pressed="true"] .icon { color: var(--color-accent); }

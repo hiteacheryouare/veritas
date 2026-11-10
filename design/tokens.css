@@ -28,6 +28,7 @@
 	--color-text-paper: #23232a;
 
 	--color-accent: #5146d8;
+	--color-accent-fill: #5146d8;
 	--color-accent-soft: rgba(81, 70, 216, 0.11);
 	--color-focus-ring: #5146d8;
 
@@ -90,6 +91,7 @@
 	--color-text-paper: #23232a;
 
 	--color-accent: #8f87ff;
+	--color-accent-fill: #5c53e0;
 	--color-accent-soft: rgba(143, 135, 255, 0.18);
 	--color-focus-ring: #8f87ff;
 

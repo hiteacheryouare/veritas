@@ -27,6 +27,7 @@ Every color has a light and a dark value. There is no pure black or white anywhe
 | Token | Light | Dark | Use |
 |---|---|---|---|
 | `color-accent` | #5146d8 | #8f87ff | Selection, focus ring, primary buttons, sidebar icons. Never money |
+| `color-accent-fill` | #5146d8 | #5c53e0 | Primary button fill (darker in dark mode so its label keeps contrast) |
 | `color-money-available` | #127a49 | #4cc47a | Available amounts above the low threshold, on-track goals |
 | `color-money-low` | #9a5a00 | #eda23a | Envelope at or under 20% left, goals behind schedule |
 | `color-money-overspent` | #c4262e | #ff6a64 | Overspent envelopes, losses, shortfalls |
