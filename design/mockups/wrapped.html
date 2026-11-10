@@ -12,25 +12,25 @@
 .nav-arrow { width: 44px; height: 44px; border-radius: 22px; border: 0; display: grid; place-items: center; background: var(--color-surface-control); box-shadow: 0 0 0 1px var(--color-edge-control), var(--shadow-control); color: var(--color-text-primary); cursor: pointer; }
 .story { width: 400px; height: 660px; border-radius: 28px; padding: 22px 30px 28px; background: var(--color-accent-fill); color: var(--color-text-on-accent); display: flex; flex-direction: column; box-shadow: var(--shadow-sheet); }
 .progress { display: grid; grid-template-columns: repeat(9, 1fr); gap: 4px; margin-bottom: 36px; }
-.progress span { height: 3px; border-radius: 2px; background: rgba(247, 247, 255, 0.3); }
-.progress .seen { background: rgba(247, 247, 255, 0.95); }
-.progress .now { background: linear-gradient(90deg, rgba(247, 247, 255, 0.95) 40%, rgba(247, 247, 255, 0.3) 40%); }
+.progress span { height: 3px; border-radius: 2px; background: color-mix(in srgb, var(--color-text-on-accent) 30%, transparent); }
+.progress .seen { background: var(--color-text-on-accent); }
+.progress .now { background: linear-gradient(90deg, var(--color-text-on-accent) 40%, color-mix(in srgb, var(--color-text-on-accent) 30%, transparent) 40%); }
 .kicker { margin: 0 0 var(--space-3); font-weight: var(--weight-semibold); opacity: 0.8; }
 .story h2 { margin: 0; font-family: var(--font-figures); font-size: 30px; line-height: 1.15; font-weight: var(--weight-bold); letter-spacing: -0.01em; }
 .big { margin: 26px 0 4px; font-size: var(--text-showcase); font-weight: var(--weight-bold); line-height: 1; letter-spacing: -0.02em; }
 .sub { margin: 0; font-size: var(--text-heading); line-height: var(--line-body); opacity: 0.9; max-width: 30ch; }
 .bars { margin-top: auto; display: grid; grid-template-columns: repeat(12, 1fr); gap: 6px; align-items: end; height: 190px; }
 .col { display: flex; flex-direction: column; align-items: stretch; gap: 6px; text-align: center; font-size: var(--text-caption); opacity: 0.75; }
-.col .bar { position: relative; border-radius: 4px; background: rgba(247, 247, 255, 0.4); }
+.col .bar { position: relative; border-radius: 4px; background: color-mix(in srgb, var(--color-text-on-accent) 40%, transparent); }
 .col.best { opacity: 1; font-weight: var(--weight-bold); }
-.col.best .bar { background: var(--color-money-available-fill); box-shadow: 0 0 0 2px rgba(247, 247, 255, 0.9); }
+.col.best .bar { background: var(--color-money-available-fill); box-shadow: 0 0 0 2px var(--color-text-on-accent); }
 .bar-value { position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); font-weight: var(--weight-bold); font-size: 12px; }
 .foot { margin: var(--space-4) 0 0; font-size: var(--text-caption); opacity: 0.75; }
-.redact { display: inline-block; height: 0.72em; border-radius: 0.14em; background: rgba(247, 247, 255, 0.85); vertical-align: 0.04em; }
+.redact { display: inline-block; height: 0.72em; border-radius: 0.14em; background: color-mix(in srgb, var(--color-text-on-accent) 85%, transparent); vertical-align: 0.04em; }
 </style>
 </head>
 <body>
-<header class="page-bar"><h1>Wrapped card</h1><p>Card 4 of 9 in the December story. The second version hides every dollar amount for sharing.</p></header>
+<header class="page-bar"><h1>Wrapped card</h1></header>
 <main>
 <section class="stage" data-theme="light">
 <div class="window">
@@ -51,9 +51,8 @@
 					<div class="progress" aria-label="Card 4 of 9"><span class="seen"></span><span class="seen"></span><span class="seen"></span><span class="now"></span><span class=""></span><span class=""></span><span class=""></span><span class=""></span><span class=""></span></div>
 					<h2>March was your best month for saving.</h2>
 					<p class="big fig">$1,150</p>
-					<p class="sub">went into savings and goals that month, 56% more than your average month.</p>
+					<p class="sub">went into savings and goals, 56% more than your average month.</p>
 					<div class="bars"><div class="col"><div class="bar" style="height:78px"></div><span>J</span></div><div class="col"><div class="bar" style="height:85px"></div><span>F</span></div><div class="col best"><div class="bar" style="height:150px"><span class="bar-value fig">1,150</span></div><span>M</span></div><div class="col"><div class="bar" style="height:91px"></div><span>A</span></div><div class="col"><div class="bar" style="height:94px"></div><span>M</span></div><div class="col"><div class="bar" style="height:104px"></div><span>J</span></div><div class="col"><div class="bar" style="height:104px"></div><span>J</span></div><div class="col"><div class="bar" style="height:78px"></div><span>A</span></div><div class="col"><div class="bar" style="height:104px"></div><span>S</span></div><div class="col"><div class="bar" style="height:104px"></div><span>O</span></div><div class="col"><div class="bar" style="height:83px"></div><span>N</span></div><div class="col"><div class="bar" style="height:78px"></div><span>D</span></div></div>
-					<p class="foot">Savings and goal contributions by month, January to December.</p>
 				</div>
 				<button class="nav-arrow" type="button" aria-label="Next card (→)"><svg class="icon"><use href="#i-chev-r"/></svg></button>
 			</div>
@@ -81,9 +80,8 @@
 					<div class="progress" aria-label="Card 4 of 9"><span class="seen"></span><span class="seen"></span><span class="seen"></span><span class="now"></span><span class=""></span><span class=""></span><span class=""></span><span class=""></span><span class=""></span></div>
 					<h2>March was your best month for saving.</h2>
 					<p class="big fig"><span class="redact" aria-label="Amount hidden" style="width:3.6em"></span></p>
-					<p class="sub">went into savings and goals that month, 56% more than your average month.</p>
+					<p class="sub">went into savings and goals, 56% more than your average month.</p>
 					<div class="bars"><div class="col"><div class="bar" style="height:78px"></div><span>J</span></div><div class="col"><div class="bar" style="height:85px"></div><span>F</span></div><div class="col best"><div class="bar" style="height:150px"></div><span>M</span></div><div class="col"><div class="bar" style="height:91px"></div><span>A</span></div><div class="col"><div class="bar" style="height:94px"></div><span>M</span></div><div class="col"><div class="bar" style="height:104px"></div><span>J</span></div><div class="col"><div class="bar" style="height:104px"></div><span>J</span></div><div class="col"><div class="bar" style="height:78px"></div><span>A</span></div><div class="col"><div class="bar" style="height:104px"></div><span>S</span></div><div class="col"><div class="bar" style="height:104px"></div><span>O</span></div><div class="col"><div class="bar" style="height:83px"></div><span>N</span></div><div class="col"><div class="bar" style="height:78px"></div><span>D</span></div></div>
-					<p class="foot">Amounts are hidden, so this card is safe to share.</p>
 				</div>
 				<button class="nav-arrow" type="button" aria-label="Next card (→)"><svg class="icon"><use href="#i-chev-r"/></svg></button>
 			</div>

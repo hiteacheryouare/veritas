@@ -8,7 +8,7 @@
 <link rel="stylesheet" href="shared/frame.css">
 <style>
 .content { display: flex; justify-content: center; padding-top: var(--space-2); }
-.paper { width: 612px; padding: 48px 72px 32px; background: var(--color-surface-paper); color: var(--color-text-paper); border-radius: 4px; box-shadow: var(--shadow-popover); font-family: var(--font-paper); display: flex; flex-direction: column; }
+.paper { width: 612px; padding: 48px 72px 56px; background: var(--color-surface-paper); color: var(--color-text-paper); border-radius: 4px; box-shadow: var(--shadow-popover); font-family: var(--font-paper); display: flex; flex-direction: column; }
 .paper header { text-align: center; margin-bottom: 24px; }
 .paper .entity { margin: 0; font-size: 22px; font-weight: 600; }
 .paper .title { margin: 6px 0 2px; font-size: 16px; font-weight: 600; }
@@ -25,11 +25,11 @@
 .paper .total td { border-top: 1px solid #23232a; }
 .paper .grand th { padding-top: 20px; font-size: 15px; font-weight: 700; }
 .paper .grand td { padding-top: 20px; font-size: 15px; font-weight: 700; border-bottom: 3px double #23232a; }
-.paper footer { margin-top: auto; padding-top: 32px; text-align: center; font-size: 12px; color: #5c5c64; font-style: italic; }
+.paper .unaudited { font-weight: 400; font-style: italic; font-size: 16px; color: #5c5c64; }
 </style>
 </head>
 <body>
-<header class="page-bar"><h1>Statement</h1><p>The Balance Sheet preview. The page stays paper-colored in dark mode, the way it will print.</p></header>
+<header class="page-bar"><h1>Statement</h1></header>
 <main>
 <section class="stage" data-theme="light">
 <div class="window">
@@ -46,7 +46,7 @@
 		<div class="content">
 			<article class="paper" aria-label="Balance Sheet preview">
 				<header>
-					<p class="entity">Your Household, LLC</p>
+					<p class="entity">Your Household, LLC <span class="unaudited">(Unaudited. Obviously.)</span></p>
 					<p class="title">Balance Sheet</p>
 					<p class="basis">As of November 9, 2026, in US dollars</p>
 				</header>
@@ -67,7 +67,6 @@
 					<tr class="total"><th>Total liabilities</th><td>10,412.33</td></tr>
 					<tr class="grand"><th>Net worth</th><td>24,450.40</td></tr>
 				</table>
-				<footer>Unaudited. Obviously.</footer>
 			</article>
 		</div>
 	</div>

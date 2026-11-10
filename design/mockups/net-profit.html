@@ -7,7 +7,8 @@
 <link rel="stylesheet" href="../tokens.css">
 <link rel="stylesheet" href="shared/frame.css">
 <style>
-.summary { display: flex; align-items: flex-end; gap: var(--space-6); margin-bottom: var(--space-4); }
+.summary { display: flex; align-items: baseline; gap: var(--space-3); margin-bottom: var(--space-4); }
+.summary .hero-label { font-size: var(--text-heading); font-weight: var(--weight-semibold); color: var(--color-text-secondary); }
 .summary h2 { margin: 0 0 2px; font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--color-text-secondary); }
 .summary .hero { font-family: var(--font-figures); font-size: var(--text-display); font-weight: var(--weight-bold); line-height: 1.1; }
 .summary p { margin: 0 0 6px; color: var(--color-text-secondary); line-height: var(--line-body); max-width: 60ch; }
@@ -23,7 +24,7 @@
 .chart .bar-expense { fill: var(--color-chart-expense); }
 .chart .bar-expense.hovered { fill: var(--color-text-primary); }
 .chart .net { font-size: 12px; font-weight: 600; font-family: var(--font-figures); }
-.chart .net-pos { fill: var(--color-money-available); }
+.chart .net-pos { fill: var(--color-text-secondary); }
 .chart .net-neg { fill: var(--color-money-overspent); }
 table { width: 100%; border-collapse: collapse; }
 th, td { height: 38px; padding: 0 var(--space-4); text-align: right; white-space: nowrap; border-top: 1px solid var(--color-separator); }
@@ -40,13 +41,11 @@ tr.below th { padding-left: 28px; color: var(--color-text-secondary); }
 td.drill { background: var(--color-accent-soft); }
 td.drill .cell { text-decoration: underline; text-decoration-color: var(--color-accent); text-underline-offset: 3px; }
 td.drill .icon { color: var(--color-accent); }
-.drill-pop { position: absolute; z-index: 3; bottom: calc(100% + 12px); right: -12px; display: grid; gap: 2px; padding: 10px 12px; text-align: left; border-radius: 10px; background: var(--color-surface-raised); box-shadow: var(--shadow-popover); font-family: var(--font-text); font-weight: var(--weight-regular); color: var(--color-text-secondary); text-decoration: none; }
-.drill-pop strong { color: var(--color-text-primary); font-weight: var(--weight-semibold); }
-.drill-action { color: var(--color-accent); font-weight: var(--weight-medium); margin-top: 4px; }
+.drill-pop { position: absolute; z-index: 3; bottom: calc(100% + 10px); right: -12px; white-space: nowrap; padding: 7px 11px; border-radius: 10px; background: var(--color-surface-raised); box-shadow: var(--shadow-popover); font-family: var(--font-text); font-weight: var(--weight-medium); color: var(--color-accent); text-decoration: none; }
 </style>
 </head>
 <body>
-<header class="page-bar"><h1>Net Profit</h1><p>Every number drills down. The pointer is on August expenses.</p></header>
+<header class="page-bar"><h1>Net Profit</h1></header>
 <main>
 <section class="stage" data-theme="light">
 <div class="window">
@@ -61,11 +60,10 @@ td.drill .icon { color: var(--color-accent); }
 		</div>
 		<div class="content">
 			<div class="summary">
-				<div><h2>Net Profit, June to November 2026</h2><div class="hero fig is-available">3,581.68</div></div>
-				<p>Income minus expenses. Debt paydown and Savings are not spending, so they sit below Net Profit. November runs through the 9th.</p>
+				<span class="hero fig">3,581.68</span><span class="hero-label">June to November 2026</span>
 			</div>
 			<div class="chart-wrap grouped">
-				<div class="legend"><span><i style="background:var(--color-money-income-fill)"></i>Income</span><span><i style="background:var(--color-chart-expense)"></i>Expenses</span><span>Net Profit under each month</span></div>
+				<div class="legend"><span><i style="background:var(--color-money-income-fill)"></i>Income</span><span><i style="background:var(--color-chart-expense)"></i>Expenses</span></div>
 				<svg class="chart" viewBox="0 0 930 254" role="img" aria-label="Income and expenses by month, June to November 2026"><line x1="56" x2="930" y1="224.0" y2="224.0" class="grid"/><text x="46" y="228.0" class="axis" text-anchor="end">0k</text><line x1="56" x2="930" y1="164.0" y2="164.0" class="grid"/><text x="46" y="168.0" class="axis" text-anchor="end">2k</text><line x1="56" x2="930" y1="104.0" y2="104.0" class="grid"/><text x="46" y="108.0" class="axis" text-anchor="end">4k</text><line x1="56" x2="930" y1="44.0" y2="44.0" class="grid"/><text x="46" y="48.0" class="axis" text-anchor="end">6k</text><rect x="100.8" y="61.6" width="26" height="162.4" rx="4" class="bar-income"/><rect x="130.8" y="92.4" width="26" height="131.6" rx="4" class="bar-expense"/><text x="128.8" y="242" text-anchor="middle" class="axis month">Jun</text><text x="128.8" y="260" text-anchor="middle" class="net net-pos">+1,024</text><rect x="246.5" y="61.6" width="26" height="162.4" rx="4" class="bar-income"/><rect x="276.5" y="76.9" width="26" height="147.1" rx="4" class="bar-expense"/><text x="274.5" y="242" text-anchor="middle" class="axis month">Jul</text><text x="274.5" y="260" text-anchor="middle" class="net net-pos">+509</text><rect x="392.2" y="53.3" width="26" height="170.7" rx="4" class="bar-income"/><rect x="422.2" y="40.9" width="26" height="183.1" rx="4" class="bar-expense hovered"/><text x="420.2" y="242" text-anchor="middle" class="axis month">Aug</text><text x="420.2" y="260" text-anchor="middle" class="net net-neg">−414</text><rect x="537.8" y="61.6" width="26" height="162.4" rx="4" class="bar-income"/><rect x="567.8" y="88.7" width="26" height="135.3" rx="4" class="bar-expense"/><text x="565.8" y="242" text-anchor="middle" class="axis month">Sep</text><text x="565.8" y="260" text-anchor="middle" class="net net-pos">+901</text><rect x="683.5" y="61.6" width="26" height="162.4" rx="4" class="bar-income"/><rect x="713.5" y="85.4" width="26" height="138.6" rx="4" class="bar-expense"/><text x="711.5" y="242" text-anchor="middle" class="axis month">Oct</text><text x="711.5" y="260" text-anchor="middle" class="net net-pos">+794</text><rect x="829.2" y="107.8" width="26" height="116.2" rx="4" class="bar-income"/><rect x="859.2" y="130.8" width="26" height="93.2" rx="4" class="bar-expense"/><text x="857.2" y="242" text-anchor="middle" class="axis month">Nov</text><text x="857.2" y="260" text-anchor="middle" class="net net-pos">+769</text></svg>
 			</div>
 			<div class="grouped">
@@ -73,11 +71,11 @@ td.drill .icon { color: var(--color-accent); }
 					<thead><tr><th></th><th>Jun</th><th>Jul</th><th>Aug</th><th>Sep</th><th>Oct</th><th>Nov</th><th>6 months</th></tr></thead>
 					<tbody>
 					<tr><th scope="row"><span class="row-label"><svg class="icon small"><use href="#i-income"/></svg>Income</span></th><td class="fig is-income"><span class="cell">5,412.00</span></td><td class="fig is-income"><span class="cell">5,412.00</span></td><td class="fig is-income"><span class="cell">5,690.40</span></td><td class="fig is-income"><span class="cell">5,412.00</span></td><td class="fig is-income"><span class="cell">5,412.00</span></td><td class="fig is-income"><span class="cell">3,874.40</span></td><td class="fig is-income"><span class="cell">31,212.80</span></td></tr>
-					<tr><th scope="row">Expenses<span class="row-note">Interest and fees included</span></th><td class="fig"><span class="cell">4,388.20</span></td><td class="fig"><span class="cell">4,902.55</span></td><td class="fig drill"><span class="cell">6,104.90<svg class="icon small"><use href="#i-drill"/></svg><span class="drill-pop"><strong>August expenses</strong><span>47 transactions, <span class="fig">6,104.90</span></span><span class="drill-action">Show transactions</span></span></span></td><td class="fig"><span class="cell">4,511.37</span></td><td class="fig"><span class="cell">4,618.44</span></td><td class="fig"><span class="cell">3,105.66</span></td><td class="fig"><span class="cell">27,631.12</span></td></tr>
-					<tr class="total"><th scope="row">Net Profit</th><td class="fig is-available"><span class="cell">1,023.80</span></td><td class="fig is-available"><span class="cell">509.45</span></td><td class="fig is-overspent"><span class="cell"><svg class="icon small"><use href="#i-over"/></svg>−414.50</span></td><td class="fig is-available"><span class="cell">900.63</span></td><td class="fig is-available"><span class="cell">793.56</span></td><td class="fig is-available"><span class="cell">768.74</span></td><td class="fig is-available"><span class="cell">3,581.68</span></td></tr>
-					<tr class="below"><th scope="row">Debt paydown<span class="row-note">Principal only</span></th><td class="fig"><span class="cell">318.10</span></td><td class="fig"><span class="cell">320.70</span></td><td class="fig"><span class="cell">323.31</span></td><td class="fig"><span class="cell">325.95</span></td><td class="fig"><span class="cell">328.60</span></td><td class="fig"><span class="cell">0.00</span></td><td class="fig"><span class="cell">1,616.66</span></td></tr>
+					<tr><th scope="row">Expenses</th><td class="fig"><span class="cell">4,388.20</span></td><td class="fig"><span class="cell">4,902.55</span></td><td class="fig drill"><span class="cell">6,104.90<svg class="icon small"><use href="#i-drill"/></svg><span class="drill-pop">Show 47 transactions</span></span></td><td class="fig"><span class="cell">4,511.37</span></td><td class="fig"><span class="cell">4,618.44</span></td><td class="fig"><span class="cell">3,105.66</span></td><td class="fig"><span class="cell">27,631.12</span></td></tr>
+					<tr class="total"><th scope="row">Net Profit</th><td class="fig"><span class="cell">1,023.80</span></td><td class="fig"><span class="cell">509.45</span></td><td class="fig is-overspent"><span class="cell"><svg class="icon small"><use href="#i-over"/></svg>−414.50</span></td><td class="fig"><span class="cell">900.63</span></td><td class="fig"><span class="cell">793.56</span></td><td class="fig"><span class="cell">768.74</span></td><td class="fig"><span class="cell">3,581.68</span></td></tr>
+					<tr class="below"><th scope="row">Debt paydown</th><td class="fig"><span class="cell">318.10</span></td><td class="fig"><span class="cell">320.70</span></td><td class="fig"><span class="cell">323.31</span></td><td class="fig"><span class="cell">325.95</span></td><td class="fig"><span class="cell">328.60</span></td><td class="fig"><span class="cell">0.00</span></td><td class="fig"><span class="cell">1,616.66</span></td></tr>
 					<tr class="below"><th scope="row">Savings</th><td class="fig"><span class="cell">400.00</span></td><td class="fig"><span class="cell">400.00</span></td><td class="fig"><span class="cell">200.00</span></td><td class="fig"><span class="cell">400.00</span></td><td class="fig"><span class="cell">400.00</span></td><td class="fig"><span class="cell">200.00</span></td><td class="fig"><span class="cell">2,000.00</span></td></tr>
-					<tr class="total"><th scope="row">Net cash flow</th><td class="fig is-available"><span class="cell">305.70</span></td><td class="fig is-overspent"><span class="cell"><svg class="icon small"><use href="#i-over"/></svg>−211.25</span></td><td class="fig is-overspent"><span class="cell"><svg class="icon small"><use href="#i-over"/></svg>−937.81</span></td><td class="fig is-available"><span class="cell">174.68</span></td><td class="fig is-available"><span class="cell">64.96</span></td><td class="fig is-available"><span class="cell">568.74</span></td><td class="fig is-overspent"><span class="cell"><svg class="icon small"><use href="#i-over"/></svg>−34.98</span></td></tr>
+					<tr class="total"><th scope="row">Net cash flow</th><td class="fig"><span class="cell">305.70</span></td><td class="fig is-overspent"><span class="cell"><svg class="icon small"><use href="#i-over"/></svg>−211.25</span></td><td class="fig is-overspent"><span class="cell"><svg class="icon small"><use href="#i-over"/></svg>−937.81</span></td><td class="fig"><span class="cell">174.68</span></td><td class="fig"><span class="cell">64.96</span></td><td class="fig"><span class="cell">568.74</span></td><td class="fig is-overspent"><span class="cell"><svg class="icon small"><use href="#i-over"/></svg>−34.98</span></td></tr>
 					</tbody>
 				</table>
 			</div>

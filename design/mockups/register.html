@@ -43,7 +43,8 @@
 .form-grid { display: grid; grid-template-columns: 80px 160px; row-gap: var(--space-2); align-items: center; }
 .form-grid label { color: var(--color-text-secondary); }
 .loan-split { margin-top: var(--space-5); padding-top: var(--space-4); border-top: 1px solid var(--color-separator); }
-.loan-split h3 { margin: 0 0 4px; font-size: var(--text-body); font-weight: var(--weight-semibold); }
+.balance-title { margin-left: var(--space-2); color: var(--color-text-secondary); font-weight: var(--weight-semibold); }
+.loan-split h3 { margin: 0 0 var(--space-3); font-size: var(--text-body); font-weight: var(--weight-semibold); }
 .loan-split .lede { margin-bottom: var(--space-3); }
 .split-grid { display: grid; grid-template-columns: 80px 160px 1fr; gap: var(--space-2) var(--space-3); align-items: center; }
 .split-label { color: var(--color-text-secondary); }
@@ -53,38 +54,34 @@
 </style>
 </head>
 <body>
-<header class="page-bar"><h1>Register</h1><p>Checking in November. Transfer rows read as a direction and the other account.</p></header>
+<header class="page-bar"><h1>Register</h1></header>
 <main>
 <section class="stage" data-theme="light">
 <div class="window">
 	<nav class="sidebar" aria-label="Sections" data-current="accounts/checking"></nav>
 	<div class="main">
 		<div class="toolbar">
-			<h1 class="toolbar-title" style="margin-left: var(--space-2)">Checking</h1>
+			<h1 class="toolbar-title" style="margin-left: var(--space-2)">Checking <span class="fig balance-title">$2,140.18</span></h1>
 			<div class="toolbar-gap"></div>
 			<button class="button" type="button"><svg class="icon"><use href="#i-move"/></svg>Move money</button>
 			<button class="button" type="button"><svg class="icon"><use href="#i-plus"/></svg>Add transaction<kbd>⌘N</kbd></button>
 			<div class="search"><svg class="icon"><use href="#i-search"/></svg>Go to anything<kbd>⌘K</kbd></div>
 		</div>
 		<div class="content">
-			<div class="account-head">
-				<div><h2>Balance</h2><div class="hero">$2,140.18</div></div>
-				<p>Cleared <span class="fig">$2,222.32</span>, not yet cleared <span class="fig">−$82.14</span></p>
-			</div>
 			<div class="columns"><span>Date</span><span>Payee</span><span>Envelope</span><span>Amount</span><span>Balance</span></div>
 			<div class="grouped">
 					<div class="txn"><span class="fig date">Nov 9</span><span class="payee">Fernwood Market</span><span class="env">Groceries</span><span class="fig amount">−82.14</span><span class="fig balance">2,140.18</span></div>
-					<div class="txn selected"><span class="fig date">Nov 8</span><span class="payee"><span class="direction" aria-hidden="true">→</span>To Savings</span><span class="env"><span class="muted">Move money, no envelope</span></span><span class="fig amount">−200.00</span><span class="fig balance">2,222.32</span></div>
+					<div class="txn selected"><span class="fig date">Nov 8</span><span class="payee"><span class="direction" aria-hidden="true">→</span>To Savings</span><span class="env"></span><span class="fig amount">−200.00</span><span class="fig balance">2,222.32</span></div>
 					<div class="txn"><span class="fig date">Nov 7</span><span class="payee">Corner Bistro</span><span class="env">Dining out</span><span class="fig amount">−64.30</span><span class="fig balance">2,422.32</span></div>
-					<div class="txn"><span class="fig date">Nov 6</span><span class="payee"><span class="direction" aria-hidden="true">→</span>To Visa<span class="row-note">Card payment</span></span><span class="env"><span class="muted">Move money, no envelope</span></span><span class="fig amount">−350.00</span><span class="fig balance">2,486.62</span></div>
-					<div class="txn"><span class="fig date">Nov 4</span><span class="payee"><span class="direction" aria-hidden="true">←</span>From Savings</span><span class="env"><span class="muted">Move money, no envelope</span></span><span class="fig amount">+150.00</span><span class="fig balance">2,836.62</span></div>
+					<div class="txn"><span class="fig date">Nov 6</span><span class="payee"><span class="direction" aria-hidden="true">→</span>To Visa</span><span class="env"></span><span class="fig amount">−350.00</span><span class="fig balance">2,486.62</span></div>
+					<div class="txn"><span class="fig date">Nov 4</span><span class="payee"><span class="direction" aria-hidden="true">←</span>From Savings</span><span class="env"></span><span class="fig amount">+150.00</span><span class="fig balance">2,836.62</span></div>
 					<div class="txn"><span class="fig date">Nov 3</span><span class="payee">Northwind Payroll</span><span class="env"><span class="is-income envelope-income"><svg class="icon small"><use href="#i-income"/></svg>Income</span></span><span class="fig amount is-income">+1,937.20</span><span class="fig balance">2,686.62</span></div>
-					<div class="txn"><span class="fig date">Nov 1</span><span class="payee">Maple Court Apartments<span class="row-note">Bill, auto-posted</span></span><span class="env">Rent</span><span class="fig amount">−1,650.00</span><span class="fig balance">749.42</span></div>
+					<div class="txn"><span class="fig date">Nov 1</span><span class="payee">Maple Court Apartments<span class="row-note">Bill</span></span><span class="env">Rent</span><span class="fig amount">−1,650.00</span><span class="fig balance">749.42</span></div>
 					<div class="txn"><span class="fig date">Oct 31</span><span class="payee">Fernwood Market</span><span class="env">Groceries</span><span class="fig amount">−58.20</span><span class="fig balance">2,399.42</span></div>
 					<div class="txn"><span class="fig date">Oct 28</span><span class="payee">Quickfuel</span><span class="env">Gas</span><span class="fig amount">−41.75</span><span class="fig balance">2,457.62</span></div>
 					<div class="txn"><span class="fig date">Oct 20</span><span class="payee">Northwind Payroll</span><span class="env"><span class="is-income envelope-income"><svg class="icon small"><use href="#i-income"/></svg>Income</span></span><span class="fig amount is-income">+1,937.20</span><span class="fig balance">2,499.37</span></div>
 					<div class="txn"><span class="fig date">Oct 12</span><span class="payee"><span class="direction" aria-hidden="true">→</span>To Car loan<span class="row-note">Debt paydown 331.80, interest 80.20</span></span><span class="env">Car loan payment</span><span class="fig amount">−412.00</span><span class="fig balance">562.17</span></div>
-					<div class="txn"><span class="fig date">Oct 10</span><span class="payee">Harbor Electric<span class="row-note">Bill, confirmed</span></span><span class="env">Electric</span><span class="fig amount">−88.36</span><span class="fig balance">974.17</span></div>
+					<div class="txn"><span class="fig date">Oct 10</span><span class="payee">Harbor Electric<span class="row-note">Bill</span></span><span class="env">Electric</span><span class="fig amount">−88.36</span><span class="fig balance">974.17</span></div>
 			</div>
 		</div>
 	</div>

@@ -9,7 +9,7 @@
 <style>
 .summary { display: flex; align-items: baseline; gap: var(--space-5); padding: 0 var(--space-2) var(--space-3); color: var(--color-text-secondary); }
 .summary .to-budget { display: flex; align-items: baseline; gap: var(--space-2); color: var(--color-text-primary); font-weight: var(--weight-semibold); }
-.summary .to-budget .fig { font-size: var(--text-title); font-weight: var(--weight-bold); }
+.summary .to-budget .fig { display: inline-flex; align-items: center; gap: 5px; font-size: var(--text-title); font-weight: var(--weight-bold); }
 .summary .fig { color: var(--color-text-primary); font-weight: var(--weight-medium); }
 .summary .to-budget .fig { color: var(--color-money-income); }
 .ledger { width: 100%; border-collapse: collapse; background: var(--color-surface-grouped); border-radius: var(--radius-section); box-shadow: 0 0 0 1px var(--color-edge-grouped); overflow: hidden; }
@@ -23,11 +23,13 @@
 .ledger .group-row td { color: var(--color-text-secondary); }
 .ledger tr.selected th, .ledger tr.selected td { background: var(--color-accent-soft); }
 .avail { display: inline-flex; align-items: center; gap: 4px; font-weight: var(--weight-semibold); }
-.state { font-family: var(--font-text); font-size: var(--text-caption); }
+.avail .icon { opacity: 0.8; }
+.state { width: 24px; text-align: left; font-family: var(--font-text); font-size: var(--text-caption); font-weight: var(--weight-regular); opacity: 0.85; }
+.is-neutral .state { color: var(--color-text-tertiary); }
 </style>
 </head>
 <body>
-<header class="page-bar"><h1>Budget, dense</h1><p>The Dense toggle is on. Same month and numbers; Dining out is the selected row.</p></header>
+<header class="page-bar"><h1>Budget, dense</h1></header>
 <main>
 <section class="stage" data-theme="light">
 <div class="window">
@@ -46,34 +48,32 @@
 		</div>
 		<div class="content">
 			<div class="summary">
-				<span class="to-budget">To Budget <span class="fig is-income">312.40</span></span>
-				<span><svg class="icon small is-income" style="vertical-align:-1px"><use href="#i-income"/></svg> Received <span class="fig">3,874.40</span></span>
-				<span>In envelopes <span class="fig">3,562.00</span></span>
+				<span class="to-budget"><span class="fig is-income"><svg class="icon small"><use href="#i-income"/></svg>312.40</span>To Budget</span>
 			</div>
 			<table class="ledger">
 				<thead><tr><th>Envelope</th><th>Budgeted</th><th>Spent</th><th>Available</th></tr></thead>
 				<tbody>
 						<tr class="group-row"><th scope="rowgroup">Everyday</th><td class="fig">792.00</td><td class="fig">680.67</td><td class="fig">111.33</td></tr>
-						<tr><th scope="row">Groceries</th><td class="fig">412.00</td><td class="fig">318.62</td><td class="fig is-available"><span class="avail">93.38</span></td></tr>
-						<tr class="selected"><th scope="row">Dining out</th><td class="fig">180.00</td><td class="fig">214.75</td><td class="fig is-overspent"><span class="avail"><svg class="icon small"><use href="#i-over"/></svg><span class="state">Over</span>−34.75</span></td></tr>
-						<tr><th scope="row">Gas</th><td class="fig">140.00</td><td class="fig">96.10</td><td class="fig is-available"><span class="avail">43.90</span></td></tr>
-						<tr><th scope="row">Household</th><td class="fig">60.00</td><td class="fig">51.20</td><td class="fig is-low"><span class="avail"><svg class="icon small"><use href="#i-low"/></svg><span class="state">Low</span>8.80</span></td></tr>
+						<tr><th scope="row">Groceries</th><td class="fig">412.00</td><td class="fig">318.62</td><td class="fig is-available"><span class="avail"><svg class="icon small"><use href="#i-check"/></svg>93.38<span class="state">left</span></span></td></tr>
+						<tr class="selected"><th scope="row">Dining out</th><td class="fig">180.00</td><td class="fig">214.75</td><td class="fig is-overspent"><span class="avail"><svg class="icon small"><use href="#i-over"/></svg>−34.75<span class="state">over</span></span></td></tr>
+						<tr><th scope="row">Gas</th><td class="fig">140.00</td><td class="fig">96.10</td><td class="fig is-available"><span class="avail"><svg class="icon small"><use href="#i-check"/></svg>43.90<span class="state">left</span></span></td></tr>
+						<tr><th scope="row">Household</th><td class="fig">60.00</td><td class="fig">51.20</td><td class="fig is-low"><span class="avail"><svg class="icon small"><use href="#i-low"/></svg>8.80<span class="state">low</span></span></td></tr>
 						<tr class="group-row"><th scope="rowgroup">Housing and utilities</th><td class="fig">1,855.00</td><td class="fig">1,765.00</td><td class="fig">90.00</td></tr>
-						<tr><th scope="row">Rent</th><td class="fig">1,650.00</td><td class="fig">1,650.00</td><td class="fig is-neutral"><span class="avail">0.00</span></td></tr>
-						<tr><th scope="row">Electric</th><td class="fig">90.00</td><td class="fig is-neutral">0.00</td><td class="fig is-available"><span class="avail">90.00</span></td></tr>
-						<tr><th scope="row">Internet</th><td class="fig">70.00</td><td class="fig">70.00</td><td class="fig is-neutral"><span class="avail">0.00</span></td></tr>
-						<tr><th scope="row">Phone</th><td class="fig">45.00</td><td class="fig">45.00</td><td class="fig is-neutral"><span class="avail">0.00</span></td></tr>
+						<tr><th scope="row">Rent</th><td class="fig">1,650.00</td><td class="fig">1,650.00</td><td class="fig is-neutral"><span class="avail">0.00<span class="state"></span></span></td></tr>
+						<tr><th scope="row">Electric</th><td class="fig">90.00</td><td class="fig is-neutral">0.00</td><td class="fig is-available"><span class="avail"><svg class="icon small"><use href="#i-check"/></svg>90.00<span class="state">left</span></span></td></tr>
+						<tr><th scope="row">Internet</th><td class="fig">70.00</td><td class="fig">70.00</td><td class="fig is-neutral"><span class="avail">0.00<span class="state"></span></span></td></tr>
+						<tr><th scope="row">Phone</th><td class="fig">45.00</td><td class="fig">45.00</td><td class="fig is-neutral"><span class="avail">0.00<span class="state"></span></span></td></tr>
 						<tr class="group-row"><th scope="rowgroup">Personal</th><td class="fig">203.00</td><td class="fig">50.99</td><td class="fig">232.01</td></tr>
-						<tr><th scope="row">Subscriptions</th><td class="fig">38.00</td><td class="fig">38.00</td><td class="fig is-neutral"><span class="avail">0.00</span></td></tr>
-						<tr><th scope="row">Hobbies</th><td class="fig">75.00</td><td class="fig">12.99</td><td class="fig is-available"><span class="avail">62.01</span></td></tr>
-						<tr><th scope="row">Clothing</th><td class="fig">50.00</td><td class="fig is-neutral">0.00</td><td class="fig is-available"><span class="avail">50.00</span></td></tr>
-						<tr><th scope="row">Gifts</th><td class="fig">40.00</td><td class="fig is-neutral">0.00</td><td class="fig is-available"><span class="avail">120.00</span></td></tr>
+						<tr><th scope="row">Subscriptions</th><td class="fig">38.00</td><td class="fig">38.00</td><td class="fig is-neutral"><span class="avail">0.00<span class="state"></span></span></td></tr>
+						<tr><th scope="row">Hobbies</th><td class="fig">75.00</td><td class="fig">12.99</td><td class="fig is-available"><span class="avail"><svg class="icon small"><use href="#i-check"/></svg>62.01<span class="state">left</span></span></td></tr>
+						<tr><th scope="row">Clothing</th><td class="fig">50.00</td><td class="fig is-neutral">0.00</td><td class="fig is-available"><span class="avail"><svg class="icon small"><use href="#i-check"/></svg>50.00<span class="state">left</span></span></td></tr>
+						<tr><th scope="row">Gifts</th><td class="fig">40.00</td><td class="fig is-neutral">0.00</td><td class="fig is-available"><span class="avail"><svg class="icon small"><use href="#i-check"/></svg>120.00<span class="state">left</span></span></td></tr>
 						<tr class="group-row"><th scope="rowgroup">Debt</th><td class="fig">412.00</td><td class="fig">0.00</td><td class="fig">412.00</td></tr>
-						<tr><th scope="row">Car loan payment</th><td class="fig">332.00</td><td class="fig is-neutral">0.00</td><td class="fig is-available"><span class="avail">332.00</span></td></tr>
-						<tr><th scope="row">Loan interest</th><td class="fig">80.00</td><td class="fig is-neutral">0.00</td><td class="fig is-available"><span class="avail">80.00</span></td></tr>
+						<tr><th scope="row">Car loan payment</th><td class="fig">332.00</td><td class="fig is-neutral">0.00</td><td class="fig is-available"><span class="avail"><svg class="icon small"><use href="#i-check"/></svg>332.00<span class="state">left</span></span></td></tr>
+						<tr><th scope="row">Loan interest</th><td class="fig">80.00</td><td class="fig is-neutral">0.00</td><td class="fig is-available"><span class="avail"><svg class="icon small"><use href="#i-check"/></svg>80.00<span class="state">left</span></span></td></tr>
 						<tr class="group-row"><th scope="rowgroup">Savings</th><td class="fig">300.00</td><td class="fig">0.00</td><td class="fig">2,490.00</td></tr>
-						<tr><th scope="row">General savings</th><td class="fig">200.00</td><td class="fig is-neutral">0.00</td><td class="fig is-available"><span class="avail">1,840.00</span></td></tr>
-						<tr><th scope="row">Car repairs</th><td class="fig">100.00</td><td class="fig is-neutral">0.00</td><td class="fig is-available"><span class="avail">650.00</span></td></tr>
+						<tr><th scope="row">General savings</th><td class="fig">200.00</td><td class="fig is-neutral">0.00</td><td class="fig is-available"><span class="avail"><svg class="icon small"><use href="#i-check"/></svg>1,840.00<span class="state">left</span></span></td></tr>
+						<tr><th scope="row">Car repairs</th><td class="fig">100.00</td><td class="fig is-neutral">0.00</td><td class="fig is-available"><span class="avail"><svg class="icon small"><use href="#i-check"/></svg>650.00<span class="state">left</span></span></td></tr>
 				</tbody>
 			</table>
 		</div>
