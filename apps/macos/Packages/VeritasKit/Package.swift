@@ -2,10 +2,7 @@
 import PackageDescription
 
 // `cargo xtask bindings` generates Sources/VeritasCore/VeritasCore.swift and
-// Sources/VeritasCoreFFI/VeritasCoreFFI.h, and puts the core's static library in
-// target/swift at the repo root.
-let rustLibrary = Context.packageDirectory + "/../../../../target/swift"
-
+// VeritasCoreFFI.xcframework (the core's static library, its C header and module map).
 let package = Package(
 	name: "VeritasKit",
 	platforms: [.macOS("27.0")],
@@ -13,12 +10,8 @@ let package = Package(
 		.library(name: "VeritasCore", targets: ["VeritasCore"])
 	],
 	targets: [
-		.systemLibrary(name: "VeritasCoreFFI"),
-		.target(
-			name: "VeritasCore",
-			dependencies: ["VeritasCoreFFI"],
-			linkerSettings: [.unsafeFlags(["-L", rustLibrary])]
-		),
+		.binaryTarget(name: "VeritasCoreFFI", path: "VeritasCoreFFI.xcframework"),
+		.target(name: "VeritasCore", dependencies: ["VeritasCoreFFI"]),
 		.testTarget(name: "VeritasCoreTests", dependencies: ["VeritasCore"])
 	]
 )

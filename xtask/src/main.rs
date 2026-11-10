@@ -165,6 +165,8 @@ fn fixtures() -> Result {
 }
 
 const VERITAS_KIT: &str = "apps/macos/Packages/VeritasKit";
+const FFI_MODULE_MAP: &str =
+	"module VeritasCoreFFI {\n\theader \"VeritasCoreFFI.h\"\n\texport *\n}\n";
 
 fn bindings() -> Result {
 	let root = root();
@@ -199,31 +201,56 @@ fn bindings() -> Result {
 	)?;
 
 	let kit = root.join(VERITAS_KIT);
-	// The static library sits alone in its own folder: given a .dylib next to it,
-	// the linker would pick the dylib and the app would need it at runtime.
-	let link_dir = root.join("target/swift");
-	for (from, to) in [
-		(
-			generated.join("VeritasCore.swift"),
-			kit.join("Sources/VeritasCore/VeritasCore.swift"),
-		),
-		(
-			generated.join("VeritasCoreFFI.h"),
-			kit.join("Sources/VeritasCoreFFI/VeritasCoreFFI.h"),
-		),
-		(
-			release.join("libveritas_ffi.a"),
-			link_dir.join("libveritas_ffi.a"),
-		),
-	] {
-		if let Some(parent) = to.parent() {
-			std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
-		}
-		std::fs::copy(&from, &to)
-			.map_err(|e| format!("{} → {}: {e}", from.display(), to.display()))?;
+	copy(
+		&generated.join("VeritasCore.swift"),
+		&kit.join("Sources/VeritasCore/VeritasCore.swift"),
+	)?;
+
+	// SwiftPM and Xcode both link a binary target's static library without search
+	// paths or unsafe flags, so the core travels as an xcframework.
+	let headers = root.join("target/swift/include");
+	copy(
+		&generated.join("VeritasCoreFFI.h"),
+		&headers.join("VeritasCoreFFI.h"),
+	)?;
+	write(&headers.join("module.modulemap"), FFI_MODULE_MAP)?;
+	let xcframework = kit.join("VeritasCoreFFI.xcframework");
+	if xcframework.exists() {
+		std::fs::remove_dir_all(&xcframework)
+			.map_err(|e| format!("{}: {e}", xcframework.display()))?;
 	}
+	run(
+		&root,
+		"xcodebuild",
+		&[
+			"-quiet",
+			"-create-xcframework",
+			"-library",
+			&release.join("libveritas_ffi.a").to_string_lossy(),
+			"-headers",
+			&headers.to_string_lossy(),
+			"-output",
+			&xcframework.to_string_lossy(),
+		],
+	)?;
 	eprintln!("Swift bindings are in {VERITAS_KIT}");
 	Ok(())
+}
+
+fn copy(from: &Path, to: &Path) -> Result {
+	if let Some(parent) = to.parent() {
+		std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+	}
+	std::fs::copy(from, to)
+		.map(|_| ())
+		.map_err(|e| format!("{} → {}: {e}", from.display(), to.display()))
+}
+
+fn write(path: &Path, contents: &str) -> Result {
+	if let Some(parent) = path.parent() {
+		std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+	}
+	std::fs::write(path, contents).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 fn ci() -> Result {
