@@ -242,7 +242,10 @@ fn account_meta_columns(row: &AccountMeta) -> Columns {
 }
 
 fn transaction_meta_columns(row: &TransactionMeta) -> Columns {
-	vec![("adjustment", flag(row.adjustment))]
+	vec![
+		("adjustment", flag(row.adjustment)),
+		("needs_actual", text(row.needs_actual.as_deref())),
+	]
 }
 
 fn goal_columns(row: &Goal) -> Columns {
@@ -736,34 +739,19 @@ impl<'conn> Writer<'conn> {
 	}
 
 	/// Actual clears a note by writing NULL, so a removed note becomes NULL.
+	/// `None` text is a NULL note, which is how Actual clears one.
 	pub fn put_note(
 		&mut self,
 		id: &str,
-		before: Option<&str>,
-		after: Option<&str>,
+		before: Option<Option<&str>>,
+		after: Option<Option<&str>>,
 	) -> Result<(), CoreError> {
 		let key = [("id", owned(id))];
-		match before {
-			None => match after {
-				None => Ok(()),
-				// A cleared note is a NULL row that memory doesn't hold, so the
-				// insert takes it over instead of failing on its id.
-				Some(text) => self
-					.tx
-					.execute(
-						"INSERT INTO notes (id, note) VALUES (?1, ?2) \
-						 ON CONFLICT (id) DO UPDATE SET note = excluded.note",
-						[id, text],
-					)
-					.map(|_| ())
-					.map_err(storage),
-			},
-			Some(old) => self.update(
-				"notes",
-				&key,
-				&vec![("note", owned(old))],
-				&vec![("note", text(after))],
-			),
+		let columns = |note: Option<&str>| vec![("note", text(note))];
+		match (before, after) {
+			(_, None) => Err(invalid("notes are cleared, never deleted")),
+			(None, Some(note)) => self.insert("notes", &key, &columns(note), Nulls::Write),
+			(Some(old), Some(note)) => self.update("notes", &key, &columns(old), &columns(note)),
 		}
 	}
 

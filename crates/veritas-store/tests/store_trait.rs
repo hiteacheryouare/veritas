@@ -127,11 +127,14 @@ fn reloading_after_every_kind_of_change_matches_memory_r_rel_1() {
 			}),
 			Row::Note(Note {
 				id: format!("budget-{november}"),
-				text: "Vet visit".to_owned(),
+				text: Some("Vet visit".to_owned()),
 			}),
 			Row::TransactionMeta(TransactionMetaRow {
 				transaction: purchase.id.clone(),
-				meta: TransactionMeta { adjustment: false },
+				meta: TransactionMeta {
+					adjustment: false,
+					needs_actual: Some("a rule set notes with a template".to_owned()),
+				},
 			}),
 			Row::Goal(Goal {
 				id: GoalId::new("goal-pets"),

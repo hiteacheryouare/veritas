@@ -358,12 +358,12 @@ fn a_cleared_note_is_written_as_null_and_can_be_set_again() {
 	let mut store = Store::open(&db, Access::ReadWrite).unwrap();
 	let mut writer = store.writer().unwrap();
 	writer
-		.put_note("budget-2026-10", None, Some("Rent went up"))
+		.put_note("budget-2026-10", None, Some(Some("Rent went up")))
 		.unwrap();
 	writer.commit().unwrap();
 	let mut writer = store.writer().unwrap();
 	writer
-		.put_note("budget-2026-10", Some("Rent went up"), None)
+		.put_note("budget-2026-10", Some(Some("Rent went up")), Some(None))
 		.unwrap();
 	writer.commit().unwrap();
 	let raw = Connection::open(&db).unwrap();
@@ -375,13 +375,23 @@ fn a_cleared_note_is_written_as_null_and_can_be_set_again() {
 		)
 		.unwrap();
 	assert_eq!(note, None);
-	assert!(!loaded(&db).notes.contains_key("budget-2026-10"));
+	assert_eq!(loaded(&db).notes["budget-2026-10"], None);
+	assert!(matches!(
+		store
+			.writer()
+			.unwrap()
+			.put_note("budget-2026-10", Some(None), None),
+		Err(CoreError::Invalid(_))
+	));
 	let mut writer = store.writer().unwrap();
 	writer
-		.put_note("budget-2026-10", None, Some("Back to normal"))
+		.put_note("budget-2026-10", Some(None), Some(Some("Back to normal")))
 		.unwrap();
 	writer.commit().unwrap();
-	assert_eq!(loaded(&db).notes["budget-2026-10"], "Back to normal");
+	assert_eq!(
+		loaded(&db).notes["budget-2026-10"].as_deref(),
+		Some("Back to normal")
+	);
 }
 
 #[test]

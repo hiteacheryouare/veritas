@@ -43,8 +43,8 @@ impl StoreTransaction for Writer<'_> {
 			),
 			Change::Note(delta) => self.put_note(
 				&delta.key,
-				delta.before.as_ref().map(|note| note.text.as_str()),
-				delta.after.as_ref().map(|note| note.text.as_str()),
+				delta.before.as_ref().map(|note| note.text.as_deref()),
+				delta.after.as_ref().map(|note| note.text.as_deref()),
 			),
 			Change::CategoryMapping(delta) => self.put_category_mapping(
 				&delta.key,

@@ -385,7 +385,7 @@ fn undoing_a_creation_retires_rows_the_way_actual_does() {
 		budgeted("rent", 165_000),
 		Row::Note(Note {
 			id: "rent".to_owned(),
-			text: "Due on the 1st".to_owned(),
+			text: Some("Due on the 1st".to_owned()),
 		}),
 		Row::CategoryMeta(meta),
 		Row::Goal(goal("trip")),
@@ -395,7 +395,10 @@ fn undoing_a_creation_retires_rows_the_way_actual_does() {
 		}),
 		Row::TransactionMeta(TransactionMetaRow {
 			transaction: TransactionId::new("t3"),
-			meta: TransactionMeta { adjustment: true },
+			meta: TransactionMeta {
+				adjustment: true,
+				needs_actual: None,
+			},
 		}),
 		Row::CategoryMapping(CategoryMapping {
 			from: CategoryId::new("vacation"),
@@ -411,7 +414,10 @@ fn undoing_a_creation_retires_rows_the_way_actual_does() {
 	let rent = &data.budget_cells[&(march(), CategoryId::new("rent"))];
 	assert_eq!((rent.budgeted, rent.carryover), (Money::ZERO, false));
 	assert_eq!(rent.goal, Some(Money::from_minor(50_000)));
-	assert!(!data.notes.contains_key("rent"));
+	assert_eq!(
+		data.notes["rent"], None,
+		"undo clears the note and keeps its row"
+	);
 	assert!(
 		!data
 			.category_meta
@@ -602,7 +608,7 @@ impl NewRows {
 			},
 			note: Note {
 				id: "rent".to_owned(),
-				text: "Due on the 1st".to_owned(),
+				text: Some("Due on the 1st".to_owned()),
 			},
 			category_mapping: CategoryMapping {
 				from: CategoryId::new("dining"),
@@ -629,7 +635,10 @@ impl NewRows {
 			},
 			transaction_meta: TransactionMetaRow {
 				transaction: TransactionId::new("t-rent"),
-				meta: TransactionMeta { adjustment: false },
+				meta: TransactionMeta {
+					adjustment: false,
+					needs_actual: None,
+				},
 			},
 			goal: goal("trip"),
 		}
@@ -649,7 +658,7 @@ impl NewRows {
 		rows.tag.hidden = true;
 		rows.cell.budgeted = Money::from_minor(170_000);
 		rows.hold.amount = Some(Money::from_minor(30_000));
-		rows.note.text = "Due on the 1st, late after the 5th".to_owned();
+		rows.note.text = Some("Due on the 1st, late after the 5th".to_owned());
 		rows.category_mapping.to = CategoryId::new("groceries");
 		rows.payee_mapping.to = PayeeId::new("property-co");
 		rows.category_meta.meta.tax_bucket = Some("schedule-c".to_owned());
@@ -740,6 +749,7 @@ fn every_kind_of_row_undoes_and_redoes_exactly() {
 		},
 	);
 	retired.holds.insert(march(), Some(Money::ZERO));
+	retired.notes.insert("rent".to_owned(), None);
 	retired
 		.category_mapping
 		.insert(CategoryId::new("dining"), CategoryId::new("dining"));

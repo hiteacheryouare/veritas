@@ -349,10 +349,7 @@ pub fn load(conn: &Connection) -> Result<Loaded, CoreError> {
 		&mut skipped,
 		|row| {
 			let id = id(row, 0)?;
-			// Actual clears a note by writing NULL, so a NULL note is no note.
-			if let Some(note) = text(at(row, 1)?)? {
-				data.notes.insert(id, note);
-			}
+			data.notes.insert(id, text(at(row, 1)?)?);
 			Ok(())
 		},
 	)?;
@@ -560,12 +557,13 @@ fn load_veritas_tables(
 		each_row(
 			conn,
 			"veritas_transaction_meta",
-			"SELECT transaction_id, adjustment FROM veritas_transaction_meta",
+			"SELECT transaction_id, adjustment, needs_actual FROM veritas_transaction_meta",
 			skipped,
 			|row| {
 				let transaction = TransactionId::new(id(row, 0)?);
 				let meta = TransactionMeta {
 					adjustment: flag(at(row, 1)?),
+					needs_actual: text(at(row, 2)?)?,
 				};
 				data.transaction_meta.insert(transaction, meta);
 				Ok(())

@@ -272,7 +272,7 @@ fn veritas_metadata_loads_when_present() {
 		 INSERT INTO veritas_account_meta VALUES ('{account}', 'liability', 649, 31250, 15, 'Credit union');
 		 INSERT INTO veritas_category_meta VALUES ('kindless', NULL, NULL, NULL);
 		 INSERT INTO veritas_tax_tag VALUES ('medical', 'medical'), ('gift', 'none');
-		 INSERT INTO veritas_transaction_meta VALUES ('t-adjust', 1), ('t-plain', 0);
+		 INSERT INTO veritas_transaction_meta VALUES ('t-adjust', 1, 'a rule ran a template'), ('t-plain', 0, NULL);
 		 INSERT INTO veritas_goal (id, category_id, target_cents, target_date, status, reached_month, created_at)
 		   VALUES ('g1', '{category}', 500000, 20271201, 'reached', '2027-06', 0);"
 	))
@@ -287,6 +287,16 @@ fn veritas_metadata_loads_when_present() {
 	assert_eq!(data.tax_tags["gift"], "none");
 	assert!(data.transaction_meta[&TransactionId::new("t-adjust")].adjustment);
 	assert!(!data.transaction_meta[&TransactionId::new("t-plain")].adjustment);
+	assert_eq!(
+		data.transaction_meta[&TransactionId::new("t-adjust")]
+			.needs_actual
+			.as_deref(),
+		Some("a rule ran a template")
+	);
+	assert_eq!(
+		data.transaction_meta[&TransactionId::new("t-plain")].needs_actual,
+		None
+	);
 	let loan = &data.account_meta[&veritas_domain::AccountId::new(&account)];
 	assert_eq!(loan.loan_payment, Some(Money::from_minor(31250)));
 	assert_eq!(loan.loan_payment_day, Some(15));
@@ -385,7 +395,7 @@ fn actuals_quirks_load_and_unrepresentable_rows_are_counted_not_fatal() {
 		data.rules[&veritas_domain::RuleId::new("odd-stage")].stage,
 		veritas_domain::RuleStage::Default
 	);
-	assert!(!data.notes.contains_key("empty-note"));
+	assert_eq!(data.notes["empty-note"], None);
 	// Actual's transaction views use IFNULL(tombstone, 0); every other read is tombstone = 0.
 	assert!(!transaction("null-tombstone").unwrap().tombstone);
 	assert!(data.categories[&CategoryId::new("null-tombstone")].tombstone);
@@ -522,13 +532,7 @@ fn no_odd_value_in_any_modeled_column_aborts_the_load_or_drops_a_row_silently() 
 				{
 					continue;
 				}
-				// A NULL note is how Actual clears one, so it is no row at all.
-				let present = if table == "notes" {
-					" WHERE note IS NOT NULL"
-				} else {
-					""
-				};
-				let rows = count(&raw, &format!("SELECT count(*) FROM {table}{present}"));
+				let rows = count(&raw, &format!("SELECT count(*) FROM {table}"));
 				drop(raw);
 
 				let loaded = Store::open(&db_path, Access::ReadWrite)
