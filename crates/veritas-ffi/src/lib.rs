@@ -98,8 +98,8 @@ pub struct Month {
 }
 
 #[uniffi::export]
-pub fn core_version() -> String {
-	env!("CARGO_PKG_VERSION").to_owned()
+pub fn core_version() -> Result<String, FfiError> {
+	guard(|| Ok(env!("CARGO_PKG_VERSION").to_owned()))
 }
 
 #[uniffi::export]

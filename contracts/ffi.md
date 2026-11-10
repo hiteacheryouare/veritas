@@ -6,13 +6,13 @@
 
 | Rust | Swift | Notes |
 |---|---|---|
-| `core_version() -> String` | `coreVersion()` | Proves the bridge links. |
+| `core_version() -> Result<String, FfiError>` | `coreVersion() throws -> String` | Proves the bridge links. |
 | `parse_month(text) -> Result<Month, FfiError>` | `parseMonth(text:) throws -> Month` | `"YYYY-MM"` → `Month { year, month }`. Proves typed errors cross the bridge. |
 | `FfiError` | `enum FfiError: Error` | See contracts/errors.md. |
 
 ## Rules for every export
 
-- Every export goes through `guard`, which catches panics into `FfiError::Internal`.
+- Every export returns `Result<_, FfiError>` and goes through `guard`, which catches panics into `FfiError::Internal`. UniFFI turns an infallible export into `try!` in Swift, so a panic there would crash the app.
 - Coarse calls only. The UI asks for whole screen models ("budget month 2027-03"), never one cell at a time (PLAN §6.5).
 - Records are plain data. Money crosses as `i64` minor units, and VeritasKit formats it for display. Dates cross as `"YYYY-MM-DD"` strings and months as `Month`.
 - Long work (reports, forecasts, import, export) runs on the core's background queue and can be cancelled (`FfiError::Cancelled`).

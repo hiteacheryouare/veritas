@@ -27,6 +27,7 @@ macro_rules! id {
 // carry other shapes, so nothing here assumes a format.
 id!(
 	AccountId,
+	AccountGroupId,
 	CategoryId,
 	CategoryGroupId,
 	PayeeId,

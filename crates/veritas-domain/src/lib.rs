@@ -4,10 +4,12 @@ mod date;
 mod error;
 mod ids;
 mod kinds;
+mod model;
 mod money;
 
 pub use date::{CivilDate, YearMonth};
 pub use error::{CoreError, ReadOnlyReason};
 pub use ids::*;
 pub use kinds::{AccountKind, BudgetType, CategoryKind, GoalStatus, TransactionKind};
+pub use model::*;
 pub use money::Money;
