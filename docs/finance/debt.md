@@ -120,7 +120,7 @@ These are the finance rules for goals (R-GOAL-1, R-GOAL-4, edge case 8). Envelop
 | Goal | A category in a Goals group with `veritas_goal(target_cents, target_date?, status)`. Category kind `expense` (CLS-3.3). Actual cannot express target dates. It can hold the target amount as a long-term goal (`goal_def` with `template_settings.source = "ui"`, or `zero_budgets.goal` with `long_goal = 1`), and shows progress only when its experimental goal-templates flag is on. Veritas never depends on that display. |
 | Available | The goal category's available balance for a month from Actual's envelope sheet (`leftover-<category>`). Not recomputed by Veritas. |
 | Status | Stored in `veritas_goal`: `active`, `reached` or `closed`. It only moves forward (see DEBT-8.2). `reached_month` is stored with it. "Spent" is the sum of the category's net spending (CLS-6 `expense_total`), shown on the card as "Reached → Spent" once status is `reached` or `closed` and spending exists. |
-| Carry | `available - budgeted(M)` for the goal in month `M`: money already in the envelope before this month's contribution. |
+| Carry | `available - budgeted(M)` for the goal in month `M`: money already in the envelope before this month's contribution. Because `available` already includes this month's spending in the goal, carry is net of it. |
 | Months left | Number of budget months from the current month `M` through the target month, counting both, minimum 1. "Due in N months" means the target date falls in month `M + N - 1`, so the current month is month 1. The UI stores the target date, tests use any date in that month. No target date: no suggestion. |
 
 ### DEBT-8.1 Monthly suggestion (R-GOAL-1)
