@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use veritas_domain::CoreError;
-use veritas_store::AuditReport;
+use veritas_store::{AuditReport, Store};
 
 use crate::archive::BudgetArchive;
 use crate::canonical::json;
@@ -75,4 +75,15 @@ fn populate(
 		access,
 		audit,
 	}))
+}
+
+/// Opens an imported budget's working copy with the access its migration
+/// history allows: a file from a newer Actual opens read-only, and one from an
+/// older Actual doesn't open.
+pub fn open_budget(db_path: &Path) -> Result<Store, CoreError> {
+	let access = {
+		let conn = veritas_store::open_read_only(db_path)?;
+		Manifest::supported()?.check(&veritas_store::migration_ids(&conn)?)?
+	};
+	Store::open(db_path, access)
 }

@@ -14,7 +14,7 @@ use veritas_domain::{
 	Account, AccountId, BudgetCell, BudgetData, Category, CategoryId, CivilDate, CoreError, Money,
 	Payee, PayeeId, SplitRole, Transaction, TransactionId, YearMonth,
 };
-use veritas_store::Store;
+use veritas_store::{Access, Store};
 
 fn row(conn: &Connection, table: &str, id: &str) -> Vec<(String, Value)> {
 	let mut statement = conn
@@ -42,7 +42,11 @@ fn changed_columns(before: &[(String, Value)], after: &[(String, Value)]) -> Vec
 }
 
 fn loaded(db: &Path) -> BudgetData {
-	Store::open(db).unwrap().load().unwrap().data
+	Store::open(db, Access::ReadWrite)
+		.unwrap()
+		.load()
+		.unwrap()
+		.data
 }
 
 fn first_plain_transaction(data: &BudgetData) -> Transaction {
@@ -73,7 +77,7 @@ fn an_edit_writes_only_the_changed_column_and_an_unknown_column_survives_edge_ca
 		amount: Money::from_minor(before.amount.minor() - 1250),
 		..before.clone()
 	};
-	let mut store = Store::open(&db).unwrap();
+	let mut store = Store::open(&db, Access::ReadWrite).unwrap();
 	let mut writer = store.writer().unwrap();
 	writer.put_transaction(Some(&before), Some(&after)).unwrap();
 	writer.commit().unwrap();
@@ -90,7 +94,7 @@ fn writing_a_row_unchanged_touches_nothing() {
 	let db = fixture_db("all-features", &scratch);
 	let data = loaded(&db);
 	let before = std::fs::read(&db).unwrap();
-	let mut store = Store::open(&db).unwrap();
+	let mut store = Store::open(&db, Access::ReadWrite).unwrap();
 	let mut writer = store.writer().unwrap();
 	for transaction in data.transactions.values() {
 		writer
@@ -117,7 +121,7 @@ fn a_delete_is_a_tombstone_and_actual_rows_are_never_removed() {
 	let scratch = Scratch::new("write-tombstone");
 	let db = fixture_db("small", &scratch);
 	let before = first_plain_transaction(&loaded(&db));
-	let mut store = Store::open(&db).unwrap();
+	let mut store = Store::open(&db, Access::ReadWrite).unwrap();
 	let mut writer = store.writer().unwrap();
 	let deleted = Transaction {
 		tombstone: true,
@@ -153,7 +157,7 @@ fn a_new_transaction_gets_actuals_defaults_for_everything_veritas_leaves_out() {
 		sort_order: 1_794_225_600_000.0,
 		..template
 	};
-	let mut store = Store::open(&db).unwrap();
+	let mut store = Store::open(&db, Access::ReadWrite).unwrap();
 	let mut writer = store.writer().unwrap();
 	writer.put_transaction(None, Some(&new)).unwrap();
 	writer.commit().unwrap();
@@ -197,7 +201,7 @@ fn a_new_category_needs_its_mapping_row_in_the_same_change() {
 		sort_order: 99_999.0,
 		tombstone: false,
 	};
-	let mut store = Store::open(&db).unwrap();
+	let mut store = Store::open(&db, Access::ReadWrite).unwrap();
 	let mut writer = store.writer().unwrap();
 	writer.put_category(None, Some(&category)).unwrap();
 	assert!(matches!(writer.commit(), Err(CoreError::Invalid(_))));
@@ -247,7 +251,7 @@ fn a_new_account_needs_its_transfer_payee_and_mapping() {
 		learn_categories: true,
 		tombstone: false,
 	};
-	let mut store = Store::open(&db).unwrap();
+	let mut store = Store::open(&db, Access::ReadWrite).unwrap();
 	let mut writer = store.writer().unwrap();
 	writer.put_account(None, Some(&account)).unwrap();
 	assert!(matches!(writer.commit(), Err(CoreError::Invalid(_))));
@@ -281,7 +285,10 @@ fn a_new_account_needs_its_transfer_payee_and_mapping() {
 		after.payees[&payee.id], payee,
 		"a rename never touches the transfer payee"
 	);
-	let (loaded, report) = Store::open(&db).unwrap().open_audit().unwrap();
+	let (loaded, report) = Store::open(&db, Access::ReadWrite)
+		.unwrap()
+		.open_audit()
+		.unwrap();
 	assert!(loaded.is_some());
 	assert!(report.is_clean(), "{report:?}");
 }
@@ -319,7 +326,7 @@ fn budget_cells_are_found_by_month_and_category_in_either_id_format() {
 		goal: None,
 		long_goal: false,
 	};
-	let mut store = Store::open(&db).unwrap();
+	let mut store = Store::open(&db, Access::ReadWrite).unwrap();
 	let mut writer = store.writer().unwrap();
 	writer.put_budget_cell(Some(&before), Some(&after)).unwrap();
 	writer.put_budget_cell(None, Some(&fresh)).unwrap();
@@ -348,7 +355,7 @@ fn budget_cells_are_found_by_month_and_category_in_either_id_format() {
 fn a_cleared_note_is_written_as_null_and_can_be_set_again() {
 	let scratch = Scratch::new("write-note");
 	let db = fixture_db("small", &scratch);
-	let mut store = Store::open(&db).unwrap();
+	let mut store = Store::open(&db, Access::ReadWrite).unwrap();
 	let mut writer = store.writer().unwrap();
 	writer
 		.put_note("budget-2026-10", None, Some("Rent went up"))
@@ -387,7 +394,7 @@ fn a_dropped_writer_rolls_back_r_rel_1() {
 		amount: Money::from_minor(1),
 		..before.clone()
 	};
-	let mut store = Store::open(&db).unwrap();
+	let mut store = Store::open(&db, Access::ReadWrite).unwrap();
 	{
 		let mut writer = store.writer().unwrap();
 		writer.put_transaction(Some(&before), Some(&after)).unwrap();
@@ -413,7 +420,7 @@ fn a_schedule_date_change_lands_where_v_schedules_reads_it() {
 		next_date: Some(CivilDate::new(2027, 1, 15).unwrap()),
 		..before.clone()
 	};
-	let mut store = Store::open(&db).unwrap();
+	let mut store = Store::open(&db, Access::ReadWrite).unwrap();
 	let mut writer = store.writer().unwrap();
 	writer.put_schedule(Some(&before), Some(&after)).unwrap();
 	writer.commit().unwrap();
@@ -440,6 +447,28 @@ fn the_store_sets_wal_even_on_a_file_restored_in_delete_mode() {
 		.unwrap();
 	assert_eq!(mode, "delete");
 	drop(raw);
-	let store = Store::open(&db).unwrap();
+	let store = Store::open(&db, Access::ReadWrite).unwrap();
 	assert_eq!(store.pragma_text("journal_mode").unwrap(), "wal");
+}
+
+#[test]
+fn a_write_protected_file_is_never_opened_for_writing() {
+	let scratch = Scratch::new("write-protected");
+	let db = fixture_db("small", &scratch);
+	let writable = std::fs::metadata(&db).unwrap().permissions();
+	let mut protected = writable.clone();
+	protected.set_readonly(true);
+	std::fs::set_permissions(&db, protected).unwrap();
+	assert!(matches!(
+		Store::open(&db, Access::ReadWrite),
+		Err(CoreError::Io(_))
+	));
+	let store = Store::open(
+		&db,
+		Access::ReadOnly(veritas_domain::ReadOnlyReason::OpenElsewhere),
+	)
+	.unwrap();
+	assert!(store.load().is_ok());
+	drop(store);
+	std::fs::set_permissions(&db, writable).unwrap();
 }

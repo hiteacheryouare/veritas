@@ -9,7 +9,7 @@ use std::io::Read;
 
 use common::{Scratch, assert_same_dump, fixture, pack, round_trip, unpack};
 use rusqlite::Connection;
-use veritas_interop::{canonical_dump_of_actual_tables, canonical_dump_to_vec};
+use veritas_interop::{Access, canonical_dump_of_actual_tables, canonical_dump_to_vec};
 
 fn assert_round_trips(name: &str) {
 	let scratch = Scratch::new(&format!("round-trip-{name}"));
@@ -138,7 +138,7 @@ fn exporting_replaces_the_old_backup_whole_or_not_at_all_r_rel_4() {
 		&fixture("small"),
 		&scratch.join("budget"),
 	));
-	let store = veritas_store::Store::open(&budget.db_path).unwrap();
+	let store = veritas_store::Store::open(&budget.db_path, Access::ReadWrite).unwrap();
 	let target = scratch.join("backup.zip");
 	std::fs::write(&target, b"last week's backup").unwrap();
 	veritas_interop::export_actual_zip(&store, &budget.metadata_path, &target).unwrap();

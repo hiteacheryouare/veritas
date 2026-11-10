@@ -24,7 +24,7 @@ fn perf_100k_imports_loads_and_exports_r_perf_5() {
 	assert!(budget.audit.is_clean());
 
 	let started = Instant::now();
-	let mut store = Store::open(&budget.db_path).unwrap();
+	let mut store = Store::open(&budget.db_path, Access::ReadWrite).unwrap();
 	store.adopt().unwrap();
 	let opened = started.elapsed();
 	let started = Instant::now();

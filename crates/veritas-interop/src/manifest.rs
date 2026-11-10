@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 use veritas_domain::{CoreError, ReadOnlyReason};
+pub use veritas_store::Access;
 
 const MANIFEST_JSON: &str = include_str!("../manifest/actual-26.11.0.json");
 
@@ -13,12 +14,6 @@ pub struct Manifest {
 	pub api_version: String,
 	pub additive_only_cutoff: i64,
 	pub migrations: Vec<i64>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Access {
-	ReadWrite,
-	ReadOnly(ReadOnlyReason),
 }
 
 impl Manifest {

@@ -328,3 +328,49 @@ fn an_oversized_metadata_file_is_refused() {
 	));
 	assert!(!target.exists());
 }
+
+#[test]
+fn a_newer_actual_file_opens_read_only_and_is_never_written_r_io_7() {
+	let (scratch, zip_path) = with_migrations(
+		"INSERT INTO __migrations__ (id) VALUES (1795000000000);",
+		"open-newer",
+	);
+	let budget = imported(import_actual_zip(&zip_path, &scratch.join("budget")));
+	let before = std::fs::read(&budget.db_path).unwrap();
+
+	let mut store = veritas_interop::open_budget(&budget.db_path).unwrap();
+	assert_eq!(
+		store.access(),
+		Access::ReadOnly(ReadOnlyReason::NewerActualVersion)
+	);
+	assert!(matches!(
+		store.adopt(),
+		Err(CoreError::ReadOnly(ReadOnlyReason::NewerActualVersion))
+	));
+	assert!(matches!(
+		store.writer(),
+		Err(CoreError::ReadOnly(ReadOnlyReason::NewerActualVersion))
+	));
+	assert!(!store.load().unwrap().data.transactions.is_empty());
+	let exported = scratch.join("exported.zip");
+	assert!(matches!(
+		veritas_interop::export_actual_zip(&store, &budget.metadata_path, &exported).unwrap(),
+		veritas_interop::ExportOutcome::Exported(_)
+	));
+	drop(store);
+
+	assert_eq!(std::fs::read(&budget.db_path).unwrap(), before);
+	assert!(!budget.dir.join("db.sqlite-wal").exists());
+	assert_eq!(&before[18..20], [1, 1], "still in rollback-journal mode");
+}
+
+#[test]
+fn a_current_file_opens_read_write() {
+	let scratch = Scratch::new("open-current");
+	let budget = imported(import_actual_zip(
+		&fixture("small"),
+		&scratch.join("budget"),
+	));
+	let store = veritas_interop::open_budget(&budget.db_path).unwrap();
+	assert_eq!(store.access(), Access::ReadWrite);
+}

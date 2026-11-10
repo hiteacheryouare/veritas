@@ -6,10 +6,13 @@ mod common;
 
 use common::{Scratch, fixture_db};
 use rusqlite::Connection;
-use veritas_store::{Check, Store, Violation};
+use veritas_store::{Access, Check, Store, Violation};
 
 fn violations(db: &std::path::Path) -> Vec<Violation> {
-	let (loaded, report) = Store::open(db).unwrap().open_audit().unwrap();
+	let (loaded, report) = Store::open(db, Access::ReadWrite)
+		.unwrap()
+		.open_audit()
+		.unwrap();
 	assert!(loaded.is_some());
 	report.violations
 }
@@ -105,7 +108,10 @@ fn every_broken_invariant_is_reported_and_nothing_is_fixed_r_rel_2() {
 		p2 = payees[2],
 	))
 	.unwrap();
-	Store::open(&db_path).unwrap().adopt().unwrap();
+	Store::open(&db_path, Access::ReadWrite)
+		.unwrap()
+		.adopt()
+		.unwrap();
 	conn.execute_batch(
 		"INSERT INTO veritas_goal (id, category_id, target_cents, status, created_at) \
 		 VALUES ('orphan-goal', 'deleted-in-actual', 100, 'active', 0);",
@@ -212,7 +218,10 @@ fn a_damaged_file_reports_corruption_and_is_not_loaded_r_rel_2() {
 	}
 	std::fs::write(&db_path, bytes).unwrap();
 
-	let (loaded, report) = Store::open(&db_path).unwrap().open_audit().unwrap();
+	let (loaded, report) = Store::open(&db_path, Access::ReadWrite)
+		.unwrap()
+		.open_audit()
+		.unwrap();
 	assert!(loaded.is_none());
 	assert!(report.is_corrupt());
 	assert!(

@@ -210,7 +210,8 @@ pub fn round_trip(zip_path: &Path, scratch: &Scratch) -> PathBuf {
 		zip_path,
 		&scratch.join("budget"),
 	));
-	let mut store = veritas_store::Store::open(&budget.db_path).unwrap();
+	let mut store =
+		veritas_store::Store::open(&budget.db_path, veritas_store::Access::ReadWrite).unwrap();
 	store.adopt().unwrap();
 	let out = scratch.join("exported.zip");
 	match veritas_interop::export_actual_zip(&store, &budget.metadata_path, &out).unwrap() {

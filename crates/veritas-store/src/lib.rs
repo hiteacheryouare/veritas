@@ -8,7 +8,9 @@ mod schema;
 mod write;
 
 pub use audit::{AuditReport, Check, Violation, audit};
-pub use connection::{Store, audit_connection, integrity_check, migration_ids, open_read_only};
+pub use connection::{
+	Access, Store, audit_connection, integrity_check, migration_ids, open_read_only,
+};
 pub use load::{LoadReport, Loaded, SkippedRow, load};
 pub use schema::VERITAS_SCHEMA_VERSION;
 pub use write::Writer;

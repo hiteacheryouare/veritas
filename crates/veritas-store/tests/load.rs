@@ -13,14 +13,17 @@ use veritas_domain::{
 	BudgetType, CategoryId, CategoryKind, CoreError, GoalStatus, Money, PayeeId, ReadOnlyReason,
 	ScheduleId, SplitRole, TransactionId, YearMonth,
 };
-use veritas_store::{Store, VERITAS_SCHEMA_VERSION};
+use veritas_store::{Access, Store, VERITAS_SCHEMA_VERSION};
 
 #[test]
 fn all_features_loads_every_modeled_row_including_tombstones() {
 	let scratch = Scratch::new("all-features");
 	let db_path = fixture_db("all-features", &scratch);
 	let raw = Connection::open(&db_path).unwrap();
-	let loaded = Store::open(&db_path).unwrap().load().unwrap();
+	let loaded = Store::open(&db_path, Access::ReadWrite)
+		.unwrap()
+		.load()
+		.unwrap();
 	let data = &loaded.data;
 
 	assert_eq!(loaded.report.skipped, vec![]);
@@ -168,7 +171,7 @@ fn all_features_loads_every_modeled_row_including_tombstones() {
 #[test]
 fn the_working_copy_runs_in_wal_with_full_sync_and_no_foreign_keys() {
 	let scratch = Scratch::new("pragmas");
-	let store = Store::open(&fixture_db("small", &scratch)).unwrap();
+	let store = Store::open(&fixture_db("small", &scratch), Access::ReadWrite).unwrap();
 	assert_eq!(store.pragma_text("journal_mode").unwrap(), "wal");
 	assert_eq!(store.pragma_text("synchronous").unwrap(), "2");
 	assert_eq!(store.pragma_text("foreign_keys").unwrap(), "0");
@@ -189,7 +192,7 @@ fn adopting_adds_the_veritas_tables_and_leaves_migrations_alone() {
 			.unwrap()
 	};
 	let before = migrations(&db_path);
-	let mut store = Store::open(&db_path).unwrap();
+	let mut store = Store::open(&db_path, Access::ReadWrite).unwrap();
 	store.adopt().unwrap();
 	store.adopt().unwrap();
 	assert_eq!(store.migration_ids().unwrap().len(), 60);
@@ -225,7 +228,7 @@ fn adopting_adds_the_veritas_tables_and_leaves_migrations_alone() {
 fn a_budget_from_a_newer_veritas_schema_is_read_only() {
 	let scratch = Scratch::new("schema-version");
 	let db_path = fixture_db("small", &scratch);
-	let mut store = Store::open(&db_path).unwrap();
+	let mut store = Store::open(&db_path, Access::ReadWrite).unwrap();
 	store.adopt().unwrap();
 	Connection::open(&db_path)
 		.unwrap()
@@ -252,7 +255,7 @@ fn a_budget_from_a_newer_veritas_schema_is_read_only() {
 fn veritas_metadata_loads_when_present() {
 	let scratch = Scratch::new("veritas-meta");
 	let db_path = fixture_db("small", &scratch);
-	let mut store = Store::open(&db_path).unwrap();
+	let mut store = Store::open(&db_path, Access::ReadWrite).unwrap();
 	assert!(store.load().unwrap().data.goals.is_empty());
 	store.adopt().unwrap();
 	let raw = Connection::open(&db_path).unwrap();
@@ -342,7 +345,10 @@ fn actuals_quirks_load_and_unrepresentable_rows_are_counted_not_fatal() {
 	.unwrap();
 	drop(raw);
 
-	let loaded = Store::open(&db_path).unwrap().load().unwrap();
+	let loaded = Store::open(&db_path, Access::ReadWrite)
+		.unwrap()
+		.load()
+		.unwrap();
 	let data = &loaded.data;
 	let march = YearMonth::parse("2019-03").unwrap();
 	let april = YearMonth::parse("2019-04").unwrap();
@@ -425,7 +431,11 @@ fn a_tracking_budget_reads_reflect_budgets() {
 	.unwrap();
 	let reflect = count(&raw, "SELECT count(*) FROM reflect_budgets");
 	drop(raw);
-	let data = Store::open(&db_path).unwrap().load().unwrap().data;
+	let data = Store::open(&db_path, Access::ReadWrite)
+		.unwrap()
+		.load()
+		.unwrap()
+		.data;
 	assert_eq!(data.budget_type, BudgetType::Tracking);
 	assert_eq!(data.budget_cells.len(), reflect);
 	assert!(data.holds.is_empty(), "tracking budgets have no holds");
@@ -441,7 +451,7 @@ fn a_missing_or_legacy_budget_type_is_envelope() {
 		[],
 	)
 	.unwrap();
-	let store = Store::open(&db_path).unwrap();
+	let store = Store::open(&db_path, Access::ReadWrite).unwrap();
 	assert_eq!(store.load().unwrap().data.budget_type, BudgetType::Envelope);
 	raw.execute("DELETE FROM preferences WHERE id = 'budgetType'", [])
 		.unwrap();
@@ -475,7 +485,10 @@ fn loaded_counts(loaded: &veritas_store::Loaded) -> Vec<(&'static str, usize)> {
 fn no_odd_value_in_any_modeled_column_aborts_the_load_or_drops_a_row_silently() {
 	let scratch = Scratch::new("odd-values");
 	let pristine = fixture_db("all-features", &scratch);
-	let baseline = Store::open(&pristine).unwrap().load().unwrap();
+	let baseline = Store::open(&pristine, Access::ReadWrite)
+		.unwrap()
+		.load()
+		.unwrap();
 	assert_eq!(baseline.report.skipped, vec![]);
 	let baseline_counts = loaded_counts(&baseline);
 	let mut tables: Vec<&str> = baseline_counts.iter().map(|(table, _)| *table).collect();
@@ -518,7 +531,7 @@ fn no_odd_value_in_any_modeled_column_aborts_the_load_or_drops_a_row_silently() 
 				let rows = count(&raw, &format!("SELECT count(*) FROM {table}{present}"));
 				drop(raw);
 
-				let loaded = Store::open(&db_path)
+				let loaded = Store::open(&db_path, Access::ReadWrite)
 					.unwrap()
 					.load()
 					.unwrap_or_else(|error| panic!("{case}: the load failed: {error}"));
