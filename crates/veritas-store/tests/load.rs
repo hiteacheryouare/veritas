@@ -10,8 +10,8 @@ use std::path::Path;
 use common::{Scratch, count, fixture_db};
 use rusqlite::Connection;
 use veritas_domain::{
-	BudgetType, CategoryId, CategoryKind, GoalStatus, Money, PayeeId, ScheduleId, SplitRole,
-	TransactionId, YearMonth,
+	BudgetType, CategoryId, CategoryKind, CoreError, GoalStatus, Money, PayeeId, ReadOnlyReason,
+	ScheduleId, SplitRole, TransactionId, YearMonth,
 };
 use veritas_store::{Store, VERITAS_SCHEMA_VERSION};
 
@@ -222,7 +222,7 @@ fn adopting_adds_the_veritas_tables_and_leaves_migrations_alone() {
 }
 
 #[test]
-fn a_budget_from_another_veritas_schema_is_refused_on_adopt() {
+fn a_budget_from_a_newer_veritas_schema_is_read_only() {
 	let scratch = Scratch::new("schema-version");
 	let db_path = fixture_db("small", &scratch);
 	let mut store = Store::open(&db_path).unwrap();
@@ -234,7 +234,18 @@ fn a_budget_from_another_veritas_schema_is_refused_on_adopt() {
 			[],
 		)
 		.unwrap();
-	assert!(store.adopt().is_err());
+	assert!(matches!(
+		store.adopt(),
+		Err(CoreError::ReadOnly(ReadOnlyReason::NewerVeritasSchema))
+	));
+	Connection::open(&db_path)
+		.unwrap()
+		.execute(
+			"UPDATE veritas_meta SET value = 'banana' WHERE key = 'schema_version'",
+			[],
+		)
+		.unwrap();
+	assert!(matches!(store.adopt(), Err(CoreError::Storage(_))));
 }
 
 #[test]
@@ -257,6 +268,7 @@ fn veritas_metadata_loads_when_present() {
 		"INSERT INTO veritas_category_meta VALUES ('{category}', 'savings', 'hsa', 20270115);
 		 INSERT INTO veritas_account_meta VALUES ('{account}', 'liability', 649, 31250, 15, 'Credit union');
 		 INSERT INTO veritas_category_meta VALUES ('kindless', NULL, NULL, NULL);
+		 INSERT INTO veritas_tax_tag VALUES ('medical', 'medical'), ('gift', 'none');
 		 INSERT INTO veritas_transaction_meta VALUES ('t-adjust', 1), ('t-plain', 0);
 		 INSERT INTO veritas_goal (id, category_id, target_cents, target_date, status, reached_month, created_at)
 		   VALUES ('g1', '{category}', 500000, 20271201, 'reached', '2027-06', 0);"
@@ -268,6 +280,8 @@ fn veritas_metadata_loads_when_present() {
 	assert_eq!(meta.tax_bucket.as_deref(), Some("hsa"));
 	assert_eq!(meta.archived_on.unwrap().to_string(), "2027-01-15");
 	assert_eq!(data.category_meta[&CategoryId::new("kindless")].kind, None);
+	assert_eq!(data.tax_tags["medical"], "medical");
+	assert_eq!(data.tax_tags["gift"], "none");
 	assert!(data.transaction_meta[&TransactionId::new("t-adjust")].adjustment);
 	assert!(!data.transaction_meta[&TransactionId::new("t-plain")].adjustment);
 	let loan = &data.account_meta[&veritas_domain::AccountId::new(&account)];
@@ -302,6 +316,7 @@ fn actuals_quirks_load_and_unrepresentable_rows_are_counted_not_fatal() {
 		 INSERT INTO zero_budgets (id, month, category, amount) VALUES ('2019-04-{category}', 201904, '{category}', 99);
 		 INSERT INTO transactions (id, acct, amount, date, description) VALUES ('null-amount', '{account}', NULL, 20261101, NULL);
 		 INSERT INTO transactions (id, acct, amount, date) VALUES ('no-date', '{account}', 100, NULL);
+		 INSERT INTO transactions (id, acct, amount, date, imported_description) VALUES ('imported', '{account}', -100, 20261101, 'ACME*STORE 123');
 		 INSERT INTO transactions (id, acct, amount, date) VALUES ('bad-date', '{account}', 100, 20270230);
 		 INSERT INTO transactions (id, acct, amount, date) VALUES ('fraction', '{account}', 12.5, 20261101);
 		 INSERT INTO transactions (id, acct, amount, date) VALUES ('no-account', NULL, 100, 20261101);
@@ -336,6 +351,11 @@ fn actuals_quirks_load_and_unrepresentable_rows_are_counted_not_fatal() {
 	assert!(!april_cell.carryover);
 
 	let transaction = |id: &str| data.transactions.get(&TransactionId::new(id));
+	assert_eq!(
+		transaction("imported").unwrap().imported_payee.as_deref(),
+		Some("ACME*STORE 123")
+	);
+	assert_eq!(transaction("null-amount").unwrap().imported_payee, None);
 	assert_eq!(transaction("null-amount").unwrap().amount, Money::ZERO);
 	assert_eq!(transaction("null-amount").unwrap().payee, None);
 	assert_eq!(transaction("parent").unwrap().category, None);

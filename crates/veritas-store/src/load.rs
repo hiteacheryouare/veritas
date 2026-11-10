@@ -209,7 +209,7 @@ pub fn load(conn: &Connection) -> Result<Loaded, CoreError> {
 		"transactions",
 		"SELECT id, acct, date, amount, description, category, notes, cleared, reconciled, \
 		 isParent, isChild, parent_id, transferred_id, schedule, starting_balance_flag, \
-		 sort_order, tombstone FROM transactions",
+		 sort_order, tombstone, imported_description FROM transactions",
 		&mut skipped,
 		|row| {
 			let transaction = transaction(row)?;
@@ -411,6 +411,7 @@ fn transaction(row: &Row<'_>) -> Cell<Transaction> {
 		date: date(at(row, 2)?)?.ok_or("the transaction has no date")?,
 		amount: money(at(row, 3)?)?.unwrap_or(Money::ZERO),
 		payee: text(at(row, 4)?)?.map(PayeeId::new),
+		imported_payee: text(at(row, 17)?)?,
 		// Actual always reads a split parent's category as NULL.
 		category: if is_parent {
 			None
@@ -556,6 +557,21 @@ fn load_veritas_tables(
 					adjustment: flag(at(row, 1)?),
 				};
 				data.transaction_meta.insert(transaction, meta);
+				Ok(())
+			},
+		)?;
+	}
+
+	if table_exists(conn, "veritas_tax_tag")? {
+		each_row(
+			conn,
+			"veritas_tax_tag",
+			"SELECT tag, bucket FROM veritas_tax_tag",
+			skipped,
+			|row| {
+				let tag = required_text(at(row, 0)?, "the row has no tag")?;
+				let bucket = required_text(at(row, 1)?, "the tag has no bucket")?;
+				data.tax_tags.insert(tag, bucket);
 				Ok(())
 			},
 		)?;
