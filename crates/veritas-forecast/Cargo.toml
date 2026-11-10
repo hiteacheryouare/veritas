@@ -1,0 +1,16 @@
+[package]
+name = "veritas-forecast"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+veritas-domain = { path = "../veritas-domain" }
+veritas-engine = { path = "../veritas-engine" }
+veritas-rules = { path = "../veritas-rules" }
+veritas-reports = { path = "../veritas-reports" }
+
+[lints]
+workspace = true
