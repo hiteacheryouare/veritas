@@ -125,41 +125,6 @@
 	--shadow-control: 0 1px 3px rgba(0, 0, 10, 0.3);
 }
 
-:root[data-accent="petrol"],
-:root[data-accent="petrol"] [data-theme="light"] {
-	--color-accent: #0c6b78;
-	--color-accent-fill: #0c6b78;
-	--color-accent-soft: rgba(12, 107, 120, 0.11);
-	--color-focus-ring: #0c6b78;
-	--color-text-on-accent: #f3fafb;
-}
-
-:root[data-accent="petrol"][data-theme="dark"],
-:root[data-accent="petrol"] [data-theme="dark"] {
-	--color-accent: #4cb3c2;
-	--color-accent-fill: #13808f;
-	--color-accent-soft: rgba(76, 179, 194, 0.18);
-	--color-focus-ring: #4cb3c2;
-	--color-text-on-accent: #f3fafb;
-}
-
-:root[data-accent="olive"],
-:root[data-accent="olive"] [data-theme="light"] {
-	--color-accent: #5a6614;
-	--color-accent-fill: #5a6614;
-	--color-accent-soft: rgba(90, 102, 20, 0.12);
-	--color-focus-ring: #5a6614;
-	--color-text-on-accent: #fafbf2;
-}
-
-:root[data-accent="olive"][data-theme="dark"],
-:root[data-accent="olive"] [data-theme="dark"] {
-	--color-accent: #b4c24e;
-	--color-accent-fill: #6c7a1a;
-	--color-accent-soft: rgba(180, 194, 78, 0.18);
-	--color-focus-ring: #b4c24e;
-	--color-text-on-accent: #fafbf2;
-}
 
 :root {
 	--font-text: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;

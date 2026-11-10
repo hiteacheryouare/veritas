@@ -26,7 +26,7 @@ Every color has a light and a dark value. There is no pure black or white anywhe
 
 | Token | Light | Dark | Use |
 |---|---|---|---|
-| `color-accent` | #3b3d45 | #d9dae0 | Graphite, the default. Selection, focus ring, primary buttons, sidebar icons. Never money |
+| `color-accent` | #3b3d45 | #d9dae0 | Graphite. Selection, focus ring, primary buttons, sidebar icons. Never money |
 | `color-accent-fill` | #2f3138 | #e2e3e8 | Primary button fill. In dark mode it is light, so `color-text-on-accent` flips to dark |
 | `color-money-available` | #127a49 | #4cc47a | Available amounts above the low threshold, on-track goals |
 | `color-money-low` | #9a5a00 | #eda23a | Envelope at or under 20% left, goals behind schedule |
@@ -41,15 +41,13 @@ Every color has a light and a dark value. There is no pure black or white anywhe
 | `color-surface-*` | | | window, sidebar (glass), grouped, raised (sheets, popovers), field, paper, scrim |
 | `color-text-*` | | | primary, secondary, tertiary, on-accent, paper |
 
-### Accent candidates
+### Accent
 
-Purple is out because Actual's brand is purple. Blue, green, amber and red belong to money. `index.html` has a switcher; pages honor `?accent=` and remember the last choice.
+The accent is graphite. Interface chrome stays neutral, so the only color on screen belongs to money and to tags.
 
-| Accent | Light | Dark | Why |
-|---|---|---|---|
-| Graphite (default) | #3b3d45 | #d9dae0 | The UI stays neutral, so the only color on screen is money |
-| Petrol | #0c6b78 | #4cb3c2 | A cool chromatic accent that sits between income blue and available green without matching either |
-| Olive | #5a6614 | #b4c24e | A warm accent that nothing else in a finance app uses, clear of amber and green |
+### Tags
+
+A tag's color is the `color` stored in Actual's `tags` table, used as is in light mode and mixed 38% toward white in dark mode so it stays readable. Tags in notes render as colored text by default. The mockups can also show Actual-style pills (white text on the tag color) for comparison.
 
 ### Money states
 
