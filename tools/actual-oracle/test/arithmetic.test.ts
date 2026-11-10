@@ -8,7 +8,11 @@ import { referenceDir } from '../src/reference.ts';
 import { runOracle, runOracleOk, scratchDir } from './helpers.ts';
 
 const ENGINE_VECTORS = resolve(import.meta.dirname, '../../../crates/veritas-engine/tests/fixtures/actual-arithmetic-vectors.json');
-const noReference = !existsSync(referenceDir()) && 'needs reference/actual: run `cargo xtask reference`';
+const missingReference = !existsSync(referenceDir());
+if (missingReference && process.env.VERITAS_REQUIRE_ORACLE) {
+	throw new Error('VERITAS_REQUIRE_ORACLE is set but reference/actual is missing: run `cargo xtask reference`');
+}
+const noReference = missingReference && 'needs reference/actual: run `cargo xtask reference`';
 
 test('arithmetic-vectors reproduces the engine fixture from the pinned source (R-BUD-3)', { skip: noReference }, t => {
 	const out = join(scratchDir(t), 'vectors.json');

@@ -1,12 +1,13 @@
 # The Actual oracle
 
-`tools/actual-oracle/` drives Actual's own engine (`@actual-app/api`, pinned to exactly `26.11.0`) so Veritas can be checked against it. It is a dev tool and never ships. It has five commands:
+`tools/actual-oracle/` drives Actual's own engine (`@actual-app/api`, pinned to exactly `26.11.0`) so Veritas can be checked against it. It is a dev tool and never ships. It has six commands:
 
 | Command | Does |
 |---|---|
 | `dump <zip> [--out <file>] [--raw-only]` | Writes the canonical dump of an Actual export: every table as stored in the zip, plus the budget values Actual computes for it. |
 | `apply <zip> <ops.json> --out <zip>` | Imports the zip, runs an op list through Actual and exports the result. |
 | `generate <small\|all-features\|perf-100k> [--out <zip>]` | Builds a synthetic fixture into `fixtures/synthetic/<spec>.zip`. |
+| `replay <zip> <sessions.json> --out <results.json>` | Runs many op lists in one Actual process, each on a fresh import of the zip, and writes one result per list: `error` (the first failing op's message, or `null`), the budget `months` as in `computed`, and the raw `zeroBudgets`, `zeroBudgetMonths` and `budgetNotes` rows. After each op it waits one timer turn, because some of Actual's work outlives the call that started it: the 6- and 12-month averages don't await their writes (`budget/actions.ts:311-357`) and the sheet recomputes on a later tick. A person's next click always comes later, and without the wait the next op reads stale cells. `apply` and `generate` don't wait, so the committed fixtures stay byte-identical. The engine's differential tests use `replay` for thousands of random sessions. |
 | `eval <cases.json> [--out <file>]` | Runs Actual's `evalArithmetic` on a JSON array of `{"format", "expression"}` cases, each under its own number format. Results are JavaScript's number text (`"Infinity"`, `"-0"`) or `null`. |
 | `arithmetic-vectors [--out <file>]` | Rewrites `crates/veritas-engine/tests/fixtures/actual-arithmetic-vectors.json`, the vectors the engine's arithmetic tests compare against bit for bit. |
 
@@ -168,6 +169,7 @@ Ops run in order. The first failure stops the run and names the op's index. Amou
 | `transferAvailable` | `month`, `amount`, `category` | `internal.send('budget/transfer-available')`, which moves To Budget into a category |
 | `moveBudget` | `month`, `from`, `to` (category id or `"to-budget"`), `amount`, `currencyCode?` | `internal.send('budget/transfer-category')`. It also appends a movement line to the `budget-<month>` note. |
 | `coverOverspending` | `month`, `from`, `to`, `amount?`, `currencyCode?` | `internal.send('budget/cover-overspending')` |
+| `budgetAction` | `action`, `args` | `internal.send('budget/<action>', args)` for one of Actual's envelope budget handlers, with the arguments its client sends (`reference/actual/packages/desktop-client/src/budget/mutations.ts:780-900`): `budget-amount`, `copy-previous-month`, `copy-single-month`, `set-zero`, `set-3month-avg`, `set-6month-avg`, `set-12month-avg`, `set-n-month-avg`, `hold-for-next-month`, `reset-hold`, `cover-overspending`, `transfer-available`, `cover-overbudgeted`, `transfer-category`, `copy-until-year-end`, `set-carryover`, `reset-income-carryover`. It skips the API's month and amount checks. |
 | `applyTemplates` | `month` | `internal.send('budget/apply-goal-template')`, which stores `#template` notes as `goal_def` and fills unbudgeted categories |
 | `storeNoteCleanups` | | `internal.send('budget/store-note-cleanups')`, which stores `#cleanup` notes as `cleanup_def` and `cleanup_groups` |
 | `createRule` | `id`, `stage?`, `conditionsOp?`, `conditions`, `actions` | `api.createRule`, which keeps the supplied id |
