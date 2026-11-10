@@ -167,6 +167,8 @@ Rules:
 - **GOAL-5** Past reports keep the goal's spending in its own category (R-GOAL-5, R-REP-3). Hiding changes nothing historical.
 - **GOAL-6** If a transaction is categorized to a closed goal later, no release happens. The goal shows "Closed goal has new activity" and the user may reopen or move the budget by hand.
 - **GOAL-7** The move writes Actual's usual movement note, as `transferCategory` does (`addMovementNotes`, `actions.ts:669-675`), so Actual shows the same history. WS-ENGINE owns parity.
+- **GOAL-8** Releasing an overspent goal against To Budget (`L < 0`, source To Budget) is allowed and unclamped: goal budgeted amount `+= |L|`, To Budget falls by `|L|` and may go negative (overbudgeted, which Actual carries forward). Actual's own helpers clamp to To Budget or write a junk row, so Veritas writes the budget cell directly and the movement note (GOAL-7). The sheet warns "To Budget will be $X over" before confirmation, as in GOAL-3. The goal always ends at available 0.
+- **GOAL-9** The `reached_month` backfill for imported goals scans months up to and including the current month only: the first month whose available is at least the target (the current month counts as soon as it is). Budget amounts planned for future months never mark a goal reached.
 
 Worked examples (all in month M, one goal "New laptop", target 150000):
 
