@@ -6,10 +6,12 @@
 mod support;
 
 use support::*;
-use veritas_domain::{CoreError, GoalId, ScheduleId};
+use veritas_domain::{
+	Cadence, CoreError, GoalId, IncomeDelta, Scenario, ScenarioChange, ScenarioId, ScheduleId,
+};
 use veritas_forecast::{
-	BandMethod, Cadence, Certainty, FlowKind, Forecaster, IncomeDelta, KnownFlow, LoanPayment,
-	Projection, Scenario, ScenarioEvent, ScheduleAmount,
+	BandMethod, Certainty, FlowKind, Forecaster, KnownFlow, LoanPayment, Projection,
+	ScheduleAmount, cadence_dates,
 };
 
 const TODAY: &str = "2027-01-15";
@@ -50,7 +52,7 @@ fn fc_3_flows() -> Vec<KnownFlow> {
 	flows
 }
 
-fn project(book: &Book, flows: &[KnownFlow], scenario: &Scenario) -> Projection {
+fn project(book: &Book, flows: &[KnownFlow], scenario: Option<&Scenario>) -> Projection {
 	Forecaster::new(&book.budget)
 		.unwrap()
 		.project(date(TODAY), flows, scenario)
@@ -60,7 +62,7 @@ fn project(book: &Book, flows: &[KnownFlow], scenario: &Scenario) -> Projection 
 #[test]
 fn fc_3_worked_example_single_account() {
 	let book = fc_3_book();
-	let projection = project(&book, &fc_3_flows(), &Scenario::baseline());
+	let projection = project(&book, &fc_3_flows(), None);
 	assert_eq!(projection.net_worth_today, cents(388800));
 	let january = &projection.months[0];
 	assert_eq!(january.baselined_net_flow, cents(-23000));
@@ -81,7 +83,7 @@ fn fc_3_worked_example_single_account() {
 #[test]
 fn r_fc_1_horizons_at_3_6_10_and_12_months() {
 	let book = fc_3_book();
-	let projection = project(&book, &fc_3_flows(), &Scenario::baseline());
+	let projection = project(&book, &fc_3_flows(), None);
 	let horizons: Vec<_> = projection
 		.horizons
 		.iter()
@@ -115,7 +117,7 @@ fn r_fc_1_band_is_net_worth_plus_scaled_offsets() {
 		let month = ym("2026-01").offset(step as i32).unwrap();
 		book.spend("Groceries", &format!("{month}-15"), -x);
 	}
-	let projection = project(&book, &[], &Scenario::baseline());
+	let projection = project(&book, &[], None);
 	assert_eq!(projection.band.method, BandMethod::Residuals);
 	assert_eq!(projection.band.months, 9);
 	for horizon in &projection.horizons {
@@ -131,7 +133,7 @@ fn r_fc_1_band_is_net_worth_plus_scaled_offsets() {
 fn r_fc_1_no_history_means_no_band() {
 	let mut book = Book::household();
 	book.opening("CHK", "2027-01-02", 50000);
-	let projection = project(&book, &[], &Scenario::baseline());
+	let projection = project(&book, &[], None);
 	assert_eq!(projection.band.label(), "No history yet");
 	assert!(
 		projection
@@ -158,7 +160,7 @@ fn fc_3_transfers_move_balances_not_net_worth() {
 	};
 	let mut flows = fc_3_flows();
 	flows.push(card);
-	let projection = project(&book, &flows, &Scenario::baseline());
+	let projection = project(&book, &flows, None);
 	let february = &projection.months[1];
 	assert_eq!(february.net_worth, cents(457800));
 	assert_eq!(february.balances[&acct("CHK")], cents(407800));
@@ -203,7 +205,7 @@ fn fc_2_loan_payments_split_interest_and_principal() {
 	let mut book = Book::household();
 	book.opening("CHK", "2026-12-31", 100000);
 	book.opening("LOAN", "2026-12-31", -980000);
-	let projection = project(&book, &flows, &Scenario::baseline());
+	let projection = project(&book, &flows, None);
 	assert_eq!(projection.months[1].net_income, cents(-8003));
 	assert_eq!(projection.months[1].balances[&acct("LOAN")], cents(-948003));
 }
@@ -269,7 +271,7 @@ fn fc_2_lists_categories_that_may_be_double_counted() {
 	let book = fc_3_book();
 	let mut flows = fc_3_flows();
 	flows.push(known("2027-02-03", "Groceries", -50000, FlowKind::Expense));
-	let projection = project(&book, &flows, &Scenario::baseline());
+	let projection = project(&book, &flows, None);
 	assert_eq!(projection.possible_double_counts, [cat("Groceries")]);
 }
 
@@ -282,7 +284,7 @@ fn fc_3_ap_1_an_asset_purchase_is_not_spending() {
 	book.spend("Fuel", "2026-12-10", -20000);
 	book.transfer("CHK", "CAR", "2026-12-20", -50000)
 		.in_category("Fuel");
-	let projection = project(&book, &[], &Scenario::baseline());
+	let projection = project(&book, &[], None);
 	let fuel = projection
 		.baselines
 		.iter()
@@ -301,23 +303,17 @@ fn fc_3_ap_1_an_asset_purchase_is_not_spending() {
 #[test]
 fn r_fc_2_recurrence_is_anchored_on_the_start() {
 	let year_end = date("2027-12-31");
-	let biweekly = Cadence::EveryWeeks(2)
-		.dates(date("2027-01-01"), year_end)
-		.unwrap();
+	let biweekly = cadence_dates(Cadence::EveryWeeks(2), date("2027-01-01"), year_end).unwrap();
 	assert_eq!(biweekly.len(), 27);
-	let from_jan_8 = Cadence::EveryWeeks(2)
-		.dates(date("2027-01-08"), year_end)
-		.unwrap();
+	let from_jan_8 = cadence_dates(Cadence::EveryWeeks(2), date("2027-01-08"), year_end).unwrap();
 	assert_eq!(from_jan_8.len(), 26);
-	let monthly = Cadence::EveryMonths(1)
-		.dates(date("2027-01-31"), year_end)
-		.unwrap();
-	assert_eq!(monthly.len(), 12);
-	assert_eq!(monthly[1], date("2027-02-28"));
-	assert_eq!(monthly[2], date("2027-03-31"));
-	let quarterly = Cadence::EveryMonths(3)
-		.dates(date("2027-01-15"), year_end)
-		.unwrap();
+	let monthly = cadence_dates(Cadence::EveryMonths(1), date("2027-01-31"), year_end).unwrap();
+	// Actual's rschedule skips months without a 31st, as a bill on the 31st does.
+	let months: Vec<u32> = monthly.iter().map(|day| day.month()).collect();
+	assert_eq!(months, [1, 3, 5, 7, 8, 10, 12]);
+	let mid_month = cadence_dates(Cadence::EveryMonths(1), date("2027-01-15"), year_end).unwrap();
+	assert_eq!(mid_month.len(), 12);
+	let quarterly = cadence_dates(Cadence::EveryMonths(3), date("2027-01-15"), year_end).unwrap();
 	assert_eq!(quarterly.len(), 4);
 }
 
@@ -325,17 +321,17 @@ fn r_fc_2_recurrence_is_anchored_on_the_start() {
 fn r_fc_2_one_time_and_recurring_events() {
 	let book = fc_3_book();
 	let flows = fc_3_flows();
-	let baseline = project(&book, &flows, &Scenario::baseline());
-	let scenario = Scenario {
-		name: "Car and side job".to_owned(),
-		events: vec![
-			ScenarioEvent::OneTime {
+	let baseline = project(&book, &flows, None);
+	let scenario = scenario(
+		"Car and side job",
+		vec![
+			ScenarioChange::OneTime {
 				date: date("2027-03-10"),
 				account: acct("CHK"),
 				category: None,
 				amount: cents(-2_000_000),
 			},
-			ScenarioEvent::Recurring {
+			ScenarioChange::Recurring {
 				start: date("2027-01-22"),
 				end_month: Some(ym("2027-02")),
 				cadence: Cadence::EveryWeeks(2),
@@ -344,8 +340,8 @@ fn r_fc_2_one_time_and_recurring_events() {
 				amount: cents(10000),
 			},
 		],
-	};
-	let projection = project(&book, &flows, &scenario);
+	);
+	let projection = project(&book, &flows, Some(&scenario));
 	let scenario_net: Vec<i64> = projection
 		.months
 		.iter()
@@ -360,16 +356,16 @@ fn r_fc_2_one_time_and_recurring_events() {
 #[test]
 fn r_fc_2_category_percent_change_scales_the_baseline() {
 	let book = fc_3_book();
-	let scenario = Scenario {
-		name: "Cook more".to_owned(),
-		events: vec![ScenarioEvent::CategoryPercent {
+	let scenario = scenario(
+		"Cook more",
+		vec![ScenarioChange::CategoryPercent {
 			category: cat("Groceries"),
 			percent_bp: -1000,
 			start_month: ym("2027-02"),
 			end_month: Some(ym("2027-03")),
 		}],
-	};
-	let projection = project(&book, &fc_3_flows(), &scenario);
+	);
+	let projection = project(&book, &fc_3_flows(), Some(&scenario));
 	let baselined: Vec<i64> = projection
 		.months
 		.iter()
@@ -382,17 +378,17 @@ fn r_fc_2_category_percent_change_scales_the_baseline() {
 #[test]
 fn r_fc_2_income_changes_by_amount_and_percent() {
 	let book = fc_3_book();
-	let scenario = Scenario {
-		name: "Raise".to_owned(),
-		events: vec![
-			ScenarioEvent::IncomeChange {
+	let scenario = scenario(
+		"Raise",
+		vec![
+			ScenarioChange::IncomeChange {
 				account: acct("CHK"),
 				category: Some(cat("Paycheck")),
 				change: IncomeDelta::Percent(1000),
 				start_month: ym("2027-02"),
 				end_month: None,
 			},
-			ScenarioEvent::IncomeChange {
+			ScenarioChange::IncomeChange {
 				account: acct("CHK"),
 				category: None,
 				change: IncomeDelta::Amount(cents(5000)),
@@ -400,8 +396,8 @@ fn r_fc_2_income_changes_by_amount_and_percent() {
 				end_month: Some(ym("2027-04")),
 			},
 		],
-	};
-	let projection = project(&book, &fc_3_flows(), &scenario);
+	);
+	let projection = project(&book, &fc_3_flows(), Some(&scenario));
 	let scenario_net: Vec<i64> = projection
 		.months
 		.iter()
@@ -415,17 +411,17 @@ fn r_fc_2_income_changes_by_amount_and_percent() {
 fn r_fc_2_goal_contributions_never_move_money() {
 	let book = fc_3_book();
 	let flows = fc_3_flows();
-	let baseline = project(&book, &flows, &Scenario::baseline());
-	let scenario = Scenario {
-		name: "Save for a laptop".to_owned(),
-		events: vec![ScenarioEvent::GoalContribution {
+	let baseline = project(&book, &flows, None);
+	let scenario = scenario(
+		"Save for a laptop",
+		vec![ScenarioChange::GoalContribution {
 			goal: GoalId::new("laptop"),
 			amount: cents(25000),
 			start_month: ym("2027-02"),
 			end_month: None,
 		}],
-	};
-	let projection = project(&book, &flows, &scenario);
+	);
+	let projection = project(&book, &flows, Some(&scenario));
 	assert_eq!(projection.months, baseline.months);
 	assert_eq!(projection.horizons, baseline.horizons);
 }
@@ -434,17 +430,19 @@ fn r_fc_2_goal_contributions_never_move_money() {
 fn r_fc_2_compares_up_to_three_scenarios() {
 	let book = fc_3_book();
 	let forecaster = Forecaster::new(&book.budget).unwrap();
-	let scenarios: Vec<Scenario> = (0..4)
-		.map(|step| Scenario {
-			name: format!("Scenario {step}"),
-			events: Vec::new(),
-		})
+	let stored: Vec<Scenario> = (0..4)
+		.map(|step| scenario(&format!("Scenario {step}"), Vec::new()))
 		.collect();
+	let scenarios: Vec<&Scenario> = stored.iter().collect();
 	let three = forecaster
 		.compare(date(TODAY), &fc_3_flows(), &scenarios[..3])
 		.unwrap();
 	assert_eq!(three.scenarios.len(), 3);
-	assert_eq!(three.scenarios[2].scenario, "Scenario 2");
+	assert_eq!(
+		three.scenarios[2].scenario,
+		Some(ScenarioId::new("Scenario 2"))
+	);
+	assert_eq!(three.baseline.scenario, None);
 	assert!(matches!(
 		forecaster.compare(date(TODAY), &fc_3_flows(), &scenarios),
 		Err(CoreError::Invalid(_))
@@ -454,31 +452,31 @@ fn r_fc_2_compares_up_to_three_scenarios() {
 #[test]
 fn r_fc_2_rejects_a_change_that_ends_before_it_starts() {
 	let book = fc_3_book();
-	let scenario = Scenario {
-		name: "Backwards".to_owned(),
-		events: vec![ScenarioEvent::CategoryPercent {
+	let scenario = scenario(
+		"Backwards",
+		vec![ScenarioChange::CategoryPercent {
 			category: cat("Groceries"),
 			percent_bp: 500,
 			start_month: ym("2027-05"),
 			end_month: Some(ym("2027-04")),
 		}],
-	};
+	);
 	let result =
 		Forecaster::new(&book.budget)
 			.unwrap()
-			.project(date(TODAY), &fc_3_flows(), &scenario);
+			.project(date(TODAY), &fc_3_flows(), Some(&scenario));
 	assert!(matches!(result, Err(CoreError::Invalid(_))));
 }
 
 #[test]
 fn fc_3_unpaid_flows_due_today_or_overdue_count_now() {
 	let book = fc_3_book();
-	let baseline = project(&book, &fc_3_flows(), &Scenario::baseline());
+	let baseline = project(&book, &fc_3_flows(), None);
 	let mut flows = fc_3_flows();
 	flows.push(known("2027-01-14", "Electric", -12000, FlowKind::Expense));
 	flows.push(known("2027-01-15", "Fun", -3000, FlowKind::Expense));
 	flows.push(known("2026-12-20", "Side gigs", 5000, FlowKind::Income));
-	let projection = project(&book, &flows, &Scenario::baseline());
+	let projection = project(&book, &flows, None);
 	assert_eq!(
 		projection.months[0].net_worth.minor(),
 		baseline.months[0].net_worth.minor() - 12000 - 3000 + 5000
@@ -498,16 +496,16 @@ fn fc_3_unpaid_flows_due_today_or_overdue_count_now() {
 #[test]
 fn r_fc_2_what_ifs_count_from_today_and_reject_the_past() {
 	let book = fc_3_book();
-	let today = Scenario {
-		name: "Today".to_owned(),
-		events: vec![
-			ScenarioEvent::OneTime {
+	let today = scenario(
+		"Today",
+		vec![
+			ScenarioChange::OneTime {
 				date: date(TODAY),
 				account: acct("CHK"),
 				category: None,
 				amount: cents(-7000),
 			},
-			ScenarioEvent::Recurring {
+			ScenarioChange::Recurring {
 				start: date("2026-12-01"),
 				end_month: None,
 				cadence: Cadence::EveryWeeks(1),
@@ -516,24 +514,25 @@ fn r_fc_2_what_ifs_count_from_today_and_reject_the_past() {
 				amount: cents(100),
 			},
 		],
-	};
-	let projection = project(&book, &fc_3_flows(), &today);
+	);
+	let projection = project(&book, &fc_3_flows(), Some(&today));
 	assert_eq!(
 		projection.months[0].scenario_net_income,
 		cents(-7000 + 2 * 100)
 	);
-	let past = Scenario {
-		name: "Past".to_owned(),
-		events: vec![ScenarioEvent::OneTime {
+	let past = scenario(
+		"Past",
+		vec![ScenarioChange::OneTime {
 			date: date("2027-01-14"),
 			account: acct("CHK"),
 			category: None,
 			amount: cents(-7000),
 		}],
-	};
-	let result = Forecaster::new(&book.budget)
-		.unwrap()
-		.project(date(TODAY), &fc_3_flows(), &past);
+	);
+	let result =
+		Forecaster::new(&book.budget)
+			.unwrap()
+			.project(date(TODAY), &fc_3_flows(), Some(&past));
 	assert!(matches!(result, Err(CoreError::Invalid(_))));
 }
 
@@ -570,7 +569,7 @@ fn fc_1_an_uncategorized_income_schedule_feeds_its_posted_category() {
 	let mut flow = known("2027-02-01", "Paycheck", 300000, FlowKind::Income);
 	flow.category = None;
 	flow.schedule = Some(ScheduleId::new("pay"));
-	let projection = project(&book, &[flow], &Scenario::baseline());
+	let projection = project(&book, &[flow], None);
 	assert_eq!(projection.months[1].net_income, cents(300000));
 	assert!(
 		projection
@@ -591,7 +590,7 @@ fn fc_2_warns_when_an_income_baseline_sits_next_to_an_income_flow() {
 	let mut flow = known("2027-02-01", "Paycheck", 300000, FlowKind::Income);
 	flow.category = None;
 	flow.schedule = Some(ScheduleId::new("new pay"));
-	let projection = project(&book, &[flow], &Scenario::baseline());
+	let projection = project(&book, &[flow], None);
 	assert_eq!(projection.possible_double_counts, [cat("Paycheck")]);
 }
 
@@ -643,7 +642,7 @@ fn fc_2_fl_1_escrow_is_an_expense_not_principal() {
 	let mut book = Book::household();
 	book.opening("CHK", "2026-12-31", 1_000_000);
 	book.opening("LOAN", "2026-12-31", -30_000_000);
-	let projection = project(&book, &flows, &Scenario::baseline());
+	let projection = project(&book, &flows, None);
 	assert_eq!(projection.months[1].net_income, cents(-200000));
 	assert_eq!(projection.months[2].net_income, cents(-199900));
 	assert_eq!(
@@ -686,25 +685,25 @@ fn fc_2_fl_3_a_payment_below_interest_and_escrow_never_capitalizes() {
 	let mut book = Book::household();
 	book.opening("CHK", "2026-12-31", 1_000_000);
 	book.opening("LOAN", "2026-12-31", -30_000_000);
-	let february = &project(&book, &flows, &Scenario::baseline()).months[1];
+	let february = &project(&book, &flows, None).months[1];
 	assert_eq!(february.net_income, cents(-160000));
 	assert_eq!(february.balances[&acct("CHK")], cents(840000));
 	assert_eq!(february.balances[&acct("LOAN")], cents(-30_000_000));
 }
 
 fn percent(changes: &[i64]) -> Scenario {
-	Scenario {
-		name: "Percent".to_owned(),
-		events: changes
+	scenario(
+		"Percent",
+		changes
 			.iter()
-			.map(|bp| ScenarioEvent::CategoryPercent {
+			.map(|bp| ScenarioChange::CategoryPercent {
 				category: cat("Groceries"),
 				percent_bp: *bp,
 				start_month: ym("2027-02"),
 				end_month: None,
 			})
 			.collect(),
-	}
+	)
 }
 
 fn groceries_book(level: i64) -> Book {
@@ -720,7 +719,7 @@ fn groceries_book(level: i64) -> Book {
 #[test]
 fn fc_3_sc_1_to_sc_4_percent_changes() {
 	let february = |level: i64, changes: &[i64]| {
-		project(&groceries_book(level), &[], &percent(changes)).months[1].baselined_net_flow
+		project(&groceries_book(level), &[], Some(&percent(changes))).months[1].baselined_net_flow
 	};
 	assert_eq!(
 		february(43005, &[-1000]),
@@ -743,7 +742,7 @@ fn fc_4_2_residuals_use_forecast_plus() {
 		let month = ym("2026-04").offset(step).unwrap();
 		book.spend("Fun", &format!("{month}-15"), 3000);
 	}
-	let band = project(&book, &[], &Scenario::baseline()).band;
+	let band = project(&book, &[], None).band;
 	assert_eq!((band.low, band.high), (cents(3000), cents(3000)));
 }
 
@@ -761,7 +760,7 @@ fn fc_2_an_income_schedule_feeds_its_most_common_posted_category() {
 	let mut flow = known("2027-02-01", "Paycheck", 300000, FlowKind::Income);
 	flow.category = None;
 	flow.schedule = Some(ScheduleId::new("pay"));
-	let projection = project(&book, &[flow], &Scenario::baseline());
+	let projection = project(&book, &[flow], None);
 	let baselined: Vec<&str> = projection
 		.baselines
 		.iter()
@@ -782,13 +781,13 @@ fn fc_3_spending_no_baseline_covers_is_noted_not_projected() {
 		book.row("CHK", &format!("{month}-05"), -2000);
 		book.spend("Books", &format!("{month}-06"), -1050);
 	}
-	let projection = project(&book, &[], &Scenario::baseline());
+	let projection = project(&book, &[], None);
 	assert_eq!(projection.not_forecast, cents(3050));
 	assert_eq!(
 		projection.not_forecast_note().as_deref(),
 		Some("Not forecast: $31 a month in uncategorized or hidden spending")
 	);
 	assert_eq!(projection.months[1].baselined_net_flow, cents(-43000));
-	let clean = project(&groceries_book(43000), &[], &Scenario::baseline());
+	let clean = project(&groceries_book(43000), &[], None);
 	assert_eq!(clean.not_forecast_note(), None);
 }

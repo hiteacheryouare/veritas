@@ -1,8 +1,8 @@
-use veritas_domain::{BudgetData, CoreError, GoalId, Money, YearMonth};
+use veritas_domain::{BudgetData, CoreError, GoalId, Money, Scenario, YearMonth};
 
 use crate::baseline::months_between;
 use crate::math::{ceil_div, median};
-use crate::scenario::Scenario;
+use crate::scenario::Overlay;
 
 const PACE_MONTHS: i32 = 3;
 /// FC-6's cap: an ETA further out than this is "No ETA", never an error.
@@ -112,8 +112,9 @@ pub fn goal_eta(
 	goal: &GoalId,
 	current: YearMonth,
 	available: Money,
-	scenario: &Scenario,
+	scenario: Option<&Scenario>,
 ) -> Result<GoalEta, CoreError> {
+	let overlay = Overlay::new(scenario);
 	let found = budget.goals.get(goal).ok_or_else(|| CoreError::NotFound {
 		entity: "goal",
 		id: goal.to_string(),
@@ -149,7 +150,7 @@ pub fn goal_eta(
 		(Some(mid), Some(max), Some(min)) => Some((mid, *max, *min)),
 		_ => None,
 	};
-	let eta = |pace: i64| months_to_go(remaining, pace, goal, current, scenario);
+	let eta = |pace: i64| months_to_go(remaining, pace, goal, current, overlay);
 	let status = match pace {
 		_ if remaining == Money::ZERO => EtaStatus::Reached,
 		None => EtaStatus::NoHistory,
@@ -191,7 +192,7 @@ fn months_to_go(
 	pace: i64,
 	goal: &GoalId,
 	current: YearMonth,
-	scenario: &Scenario,
+	scenario: Overlay,
 ) -> Result<Reach, CoreError> {
 	let remaining = i128::from(remaining.minor());
 	let mut simulated = 0i32;

@@ -8,10 +8,10 @@ mod support;
 use std::collections::BTreeMap;
 
 use support::*;
-use veritas_domain::{CategoryKind, GoalId};
+use veritas_domain::{CategoryKind, GoalId, Scenario, ScenarioChange};
 use veritas_forecast::{
-	Basis, Envelope, EtaStatus, FlowKind, Forecaster, KnownFlow, Scenario, ScenarioEvent,
-	ScheduleAmount, Suggestion, Suggestions, goal_eta,
+	Basis, Envelope, EtaStatus, FlowKind, Forecaster, KnownFlow, ScheduleAmount, Suggestion,
+	Suggestions, goal_eta,
 };
 
 fn six(category: &str, book: &mut Book, x: i64) {
@@ -312,7 +312,7 @@ fn laptop_book(contributions: &[(&str, i64)]) -> Book {
 	book
 }
 
-fn eta(book: &Book, available: i64, scenario: &Scenario) -> veritas_forecast::GoalEta {
+fn eta(book: &Book, available: i64, scenario: Option<&Scenario>) -> veritas_forecast::GoalEta {
 	goal_eta(
 		&book.budget,
 		&GoalId::new("laptop"),
@@ -326,7 +326,7 @@ fn eta(book: &Book, available: i64, scenario: &Scenario) -> veritas_forecast::Go
 #[test]
 fn fc_6_e_1_eta_from_the_median_pace() {
 	let book = laptop_book(&[("2026-10", 25000), ("2026-11", 25000), ("2026-12", 20000)]);
-	let result = eta(&book, 112000, &Scenario::baseline());
+	let result = eta(&book, 112000, None);
 	assert_eq!(result.remaining, cents(38000));
 	assert_eq!(result.pace.unwrap().0, cents(25000));
 	assert!(matches!(result.status, EtaStatus::Eta { month, .. } if month == ym("2027-03")));
@@ -336,7 +336,7 @@ fn fc_6_e_1_eta_from_the_median_pace() {
 #[test]
 fn fc_6_e_2_range_from_optimistic_to_pessimistic() {
 	let book = laptop_book(&[("2026-10", 30000), ("2026-11", 20000), ("2026-12", 10000)]);
-	let result = eta(&book, 112000, &Scenario::baseline());
+	let result = eta(&book, 112000, None);
 	assert_eq!(
 		result.status,
 		EtaStatus::Eta {
@@ -354,7 +354,7 @@ fn fc_6_e_2_range_from_optimistic_to_pessimistic() {
 #[test]
 fn fc_6_e_3_nothing_being_added() {
 	let book = laptop_book(&[("2026-10", 0), ("2026-11", 0), ("2026-12", 0)]);
-	let result = eta(&book, 112000, &Scenario::baseline());
+	let result = eta(&book, 112000, None);
 	assert_eq!(result.status, EtaStatus::NotAdding);
 	assert_eq!(result.text(), "No ETA: nothing is being added");
 }
@@ -362,14 +362,14 @@ fn fc_6_e_3_nothing_being_added() {
 #[test]
 fn fc_6_e_4_reached() {
 	let book = laptop_book(&[("2026-12", 25000)]);
-	let result = eta(&book, 150000, &Scenario::baseline());
+	let result = eta(&book, 150000, None);
 	assert_eq!(result.text(), "Reached");
 }
 
 #[test]
 fn fc_6_e_5_one_month_of_history() {
 	let book = laptop_book(&[("2026-12", 25000)]);
-	let result = eta(&book, 112000, &Scenario::baseline());
+	let result = eta(&book, 112000, None);
 	assert_eq!(
 		result.pace,
 		Some((cents(25000), cents(25000), cents(25000)))
@@ -380,7 +380,7 @@ fn fc_6_e_5_one_month_of_history() {
 #[test]
 fn fc_6_e_6_agrees_with_debt_8_1() {
 	let book = laptop_book(&[("2026-12", 25000), ("2027-01", 25000)]);
-	let result = eta(&book, 25000, &Scenario::baseline());
+	let result = eta(&book, 25000, None);
 	assert_eq!(result.remaining, cents(125000));
 	assert!(matches!(result.status, EtaStatus::Eta { month, .. } if month == ym("2027-06")));
 	assert_eq!(result.on_track, Some(true));
@@ -389,16 +389,16 @@ fn fc_6_e_6_agrees_with_debt_8_1() {
 #[test]
 fn fc_6_no_history_and_slowest_pace() {
 	let book = laptop_book(&[]);
-	assert_eq!(eta(&book, 0, &Scenario::baseline()).text(), "No ETA yet");
+	assert_eq!(eta(&book, 0, None).text(), "No ETA yet");
 	let stalled = laptop_book(&[("2026-10", 30000), ("2026-11", 20000), ("2026-12", 0)]);
-	let result = eta(&stalled, 112000, &Scenario::baseline());
+	let result = eta(&stalled, 112000, None);
 	assert_eq!(result.text(), "ETA March 2027, no ETA at the slowest pace");
 }
 
 #[test]
 fn fc_6_off_track_when_the_eta_passes_the_target() {
 	let book = laptop_book(&[("2026-12", 10000)]);
-	let result = eta(&book, 0, &Scenario::baseline());
+	let result = eta(&book, 0, None);
 	assert!(matches!(result.status, EtaStatus::Eta { month, .. } if month == ym("2028-04")));
 	assert_eq!(result.on_track, Some(false));
 }
@@ -406,35 +406,35 @@ fn fc_6_off_track_when_the_eta_passes_the_target() {
 #[test]
 fn r_fc_2_goal_contribution_scenario_moves_the_eta() {
 	let book = laptop_book(&[("2026-12", 10000)]);
-	let bounded = Scenario {
-		name: "Bonus".to_owned(),
-		events: vec![ScenarioEvent::GoalContribution {
+	let bounded = scenario(
+		"Bonus",
+		vec![ScenarioChange::GoalContribution {
 			goal: GoalId::new("laptop"),
 			amount: cents(40000),
 			start_month: ym("2027-02"),
 			end_month: Some(ym("2027-03")),
 		}],
-	};
-	let result = eta(&book, 0, &bounded);
+	);
+	let result = eta(&book, 0, Some(&bounded));
 	assert!(matches!(result.status, EtaStatus::Eta { month, .. } if month == ym("2027-08")));
 
-	let open = Scenario {
-		name: "Steady".to_owned(),
-		events: vec![ScenarioEvent::GoalContribution {
+	let open = scenario(
+		"Steady",
+		vec![ScenarioChange::GoalContribution {
 			goal: GoalId::new("laptop"),
 			amount: cents(15000),
 			start_month: ym("2027-02"),
 			end_month: None,
 		}],
-	};
-	let result = eta(&book, 0, &open);
+	);
+	let result = eta(&book, 0, Some(&open));
 	assert!(matches!(result.status, EtaStatus::Eta { month, .. } if month == ym("2027-07")));
 }
 
 #[test]
 fn fc_6_a_pace_slower_than_100_years_has_no_eta() {
 	let book = laptop_book(&[("2026-12", 1)]);
-	let result = eta(&book, 0, &Scenario::baseline());
+	let result = eta(&book, 0, None);
 	assert_eq!(result.status, EtaStatus::NotAdding, "FC-6 cap");
 	assert_eq!(result.text(), "No ETA: nothing is being added");
 }
@@ -442,17 +442,17 @@ fn fc_6_a_pace_slower_than_100_years_has_no_eta() {
 #[test]
 fn fc_6_a_contribution_ending_past_100_years_is_capped() {
 	let book = laptop_book(&[("2026-12", 0)]);
-	let long = Scenario {
-		name: "Drip".to_owned(),
-		events: vec![ScenarioEvent::GoalContribution {
+	let long = scenario(
+		"Drip",
+		vec![ScenarioChange::GoalContribution {
 			goal: GoalId::new("laptop"),
 			amount: cents(100),
 			start_month: ym("2027-02"),
 			end_month: Some(ym("2200-01")),
 		}],
-	};
+	);
 	assert_eq!(
-		eta(&book, 0, &long).status,
+		eta(&book, 0, Some(&long)).status,
 		EtaStatus::NotAdding,
 		"FC-6 cap"
 	);
@@ -461,7 +461,7 @@ fn fc_6_a_contribution_ending_past_100_years_is_capped() {
 #[test]
 fn fc_6_e_8_a_gap_inside_the_history_counts_as_zero() {
 	let book = laptop_book(&[("2026-10", 25000), ("2026-12", 20000)]);
-	let result = eta(&book, 112000, &Scenario::baseline());
+	let result = eta(&book, 112000, None);
 	assert_eq!(result.pace, Some((cents(20000), cents(25000), cents(0))));
 	assert_eq!(result.text(), "ETA March 2027, no ETA at the slowest pace");
 }
@@ -469,22 +469,10 @@ fn fc_6_e_8_a_gap_inside_the_history_counts_as_zero() {
 #[test]
 fn fc_6_e_9_and_e_10_history_starts_at_the_first_cell() {
 	let book = laptop_book(&[("2026-12", 25000)]);
-	assert_eq!(
-		eta(&book, 112000, &Scenario::baseline()).history_months,
-		1,
-		"E-9"
-	);
+	assert_eq!(eta(&book, 112000, None).history_months, 1, "E-9");
 	let this_month = laptop_book(&[("2027-01", 25000)]);
-	assert_eq!(
-		eta(&this_month, 25000, &Scenario::baseline()).text(),
-		"No ETA yet",
-		"E-10"
-	);
-	assert_eq!(
-		eta(&this_month, 150000, &Scenario::baseline()).text(),
-		"Reached",
-		"E-10"
-	);
+	assert_eq!(eta(&this_month, 25000, None).text(), "No ETA yet", "E-10");
+	assert_eq!(eta(&this_month, 150000, None).text(), "Reached", "E-10");
 }
 
 #[test]

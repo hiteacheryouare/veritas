@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use veritas_domain::{
-	AccountId, BudgetData, CategoryId, CivilDate, CoreError, Money, TransactionKind, YearMonth,
+	AccountId, BudgetData, CategoryId, CivilDate, CoreError, IncomeDelta, Money, Scenario,
+	ScenarioId, TransactionKind, YearMonth,
 };
 use veritas_reports::{Classification, Period, classify, net_worth};
 
@@ -10,7 +11,7 @@ use crate::baseline::{Baseline, SEASON_MIN, WINDOW, complete_months};
 use crate::flows::{FlowKind, KnownFlow};
 use crate::history::{History, Series, Side, asset_purchase, balances, bill_linked};
 use crate::math::{median, round_half_away, to_money};
-use crate::scenario::{IncomeDelta, MAX_COMPARED, Scenario};
+use crate::scenario::{MAX_COMPARED, Overlay, validate};
 
 /// FC-3's horizons, in complete months after the current month.
 pub const HORIZONS: [u32; 4] = [3, 6, 10, 12];
@@ -43,7 +44,8 @@ pub struct HorizonForecast {
 /// A baseline (or scenario) projection for one "today" (R-FC-1).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Projection {
-	pub scenario: String,
+	/// `None` for the baseline.
+	pub scenario: Option<ScenarioId>,
 	pub today: CivilDate,
 	pub net_worth_today: Money,
 	pub balances_today: BTreeMap<AccountId, Money>,
@@ -195,9 +197,12 @@ impl<'a> Forecaster<'a> {
 		&self,
 		today: CivilDate,
 		known: &[KnownFlow],
-		scenario: &Scenario,
+		scenario: Option<&Scenario>,
 	) -> Result<Projection, CoreError> {
-		scenario.validate(today)?;
+		if let Some(scenario) = scenario {
+			validate(scenario, today)?;
+		}
+		let overlay = Overlay::new(scenario);
 		let current = today.year_month();
 		let series = self.baselined_series(known);
 		let baselines = self.baselines(today, known)?;
@@ -207,7 +212,7 @@ impl<'a> Forecaster<'a> {
 		let mut worth = net_worth(&self.classification, today)?.minor();
 		let net_worth_today = worth;
 		let last = Period::month(current.offset(LAST_HORIZON)?).last();
-		let scenario_flows = scenario.flows(today, last)?;
+		let scenario_flows = overlay.flows(today, last)?;
 		let (asset_purchases, asset_purchase_total) = self.asset_purchases(current)?;
 
 		let mut months = Vec::new();
@@ -244,7 +249,7 @@ impl<'a> Forecaster<'a> {
 			let mut baselined = 0i64;
 			let mut baseline_income: BTreeMap<&CategoryId, i64> = BTreeMap::new();
 			for baseline in &baselines {
-				let forecast = scenario.adjust_baseline(
+				let forecast = overlay.adjust_baseline(
 					&baseline.category,
 					month,
 					baseline.forecast_plus(month)?,
@@ -275,7 +280,7 @@ impl<'a> Forecaster<'a> {
 				post(&mut running, &flow.account, flow.amount.minor())?;
 				scenario_net = add(scenario_net, flow.amount.minor())?;
 			}
-			for (account, category, change) in scenario.income_changes(month) {
+			for (account, category, change) in overlay.income_changes(month) {
 				let delta = match change {
 					IncomeDelta::Amount(amount) => amount.minor(),
 					IncomeDelta::Percent(bp) => {
@@ -336,7 +341,7 @@ impl<'a> Forecaster<'a> {
 		}
 
 		Ok(Projection {
-			scenario: scenario.name.clone(),
+			scenario: scenario.map(|scenario| scenario.id.clone()),
 			today,
 			net_worth_today: Money::from_minor(net_worth_today),
 			balances_today: money_map(&start),
@@ -361,7 +366,7 @@ impl<'a> Forecaster<'a> {
 		&self,
 		today: CivilDate,
 		known: &[KnownFlow],
-		scenarios: &[Scenario],
+		scenarios: &[&Scenario],
 	) -> Result<Comparison, CoreError> {
 		if scenarios.len() > MAX_COMPARED {
 			return Err(CoreError::Invalid(format!(
@@ -369,10 +374,10 @@ impl<'a> Forecaster<'a> {
 			)));
 		}
 		Ok(Comparison {
-			baseline: self.project(today, known, &Scenario::baseline())?,
+			baseline: self.project(today, known, None)?,
 			scenarios: scenarios
 				.iter()
-				.map(|scenario| self.project(today, known, scenario))
+				.map(|scenario| self.project(today, known, Some(scenario)))
 				.collect::<Result<_, _>>()?,
 		})
 	}

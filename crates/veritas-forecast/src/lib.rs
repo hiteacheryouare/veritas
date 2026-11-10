@@ -27,7 +27,7 @@ pub use history::Side;
 pub use projection::{
 	Comparison, Forecaster, HORIZONS, HorizonForecast, MonthForecast, Projection,
 };
-pub use scenario::{Cadence, IncomeDelta, MAX_COMPARED, Scenario, ScenarioEvent};
+pub use scenario::{MAX_COMPARED, cadence_dates, validate as validate_scenario};
 pub use suggest::{Basis, Envelope, Suggestion, Suggestions};
 pub use wrapped::{
 	CategoryRank, Change, GroupRank, NoSpend, PayeeRank, PriorYear, Redacted, Streak, Wrapped,
