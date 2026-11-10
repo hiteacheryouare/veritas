@@ -376,6 +376,7 @@ impl<'a> BudgetEditor<'a> {
 
 	/// Move budget (`budget/transfer-category`): no clamping, so a negative
 	/// amount moves the other way. Moving to To Budget only lowers `from`.
+	/// Moving an envelope to itself is refused: Actual would add the amount.
 	pub fn move_budget(
 		&self,
 		month: YearMonth,
@@ -383,6 +384,11 @@ impl<'a> BudgetEditor<'a> {
 		from: &CategoryId,
 		to: &Envelope,
 	) -> Result<BudgetWrites, CoreError> {
+		if *to == Envelope::Category(from.clone()) {
+			return Err(CoreError::Invalid(
+				"Pick a different envelope to move this budget to.".to_owned(),
+			));
+		}
 		let amount = amount.minor();
 		let mut writes = BudgetWrites::default();
 		writes.amount(month, from, sub(self.budgeted(month, from), amount)?)?;

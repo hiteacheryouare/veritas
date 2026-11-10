@@ -233,10 +233,12 @@ impl Session {
 				to,
 			} => {
 				let month = self.month(month);
-				self.edit(|e| {
-					e.move_budget(month, cents(amount), &cat(category_at(from)), &envelope(to))
-						.unwrap()
-				});
+				if to != Some(from) {
+					self.edit(|e| {
+						e.move_budget(month, cents(amount), &cat(category_at(from)), &envelope(to))
+							.unwrap()
+					});
+				}
 			}
 			Op::CoverOverspending { month, to, from } => {
 				let month = self.month(month);

@@ -508,6 +508,16 @@ fn income_auto_hold_and_its_resets() {
 	);
 }
 
+/// Actual would add the amount to the envelope; Veritas refuses instead.
+#[test]
+fn moving_an_envelope_to_itself_is_refused() {
+	let budget = small_fixture();
+	let sheet = budget.sheet(TODAY);
+	let editor = BudgetEditor::new(&budget.0, &sheet, NumberFormat::CommaDot, false);
+	let result = editor.move_budget(ym("2026-10"), cents(100), &cat("rent"), &to("rent"));
+	assert!(matches!(result, Err(CoreError::Invalid(_))));
+}
+
 #[test]
 fn amounts_beyond_actuals_safe_range_are_refused() {
 	let budget = small_fixture();
