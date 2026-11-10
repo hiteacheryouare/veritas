@@ -170,7 +170,7 @@ The spec for `docs/forecast-eval.md` (WS-FORECAST produces it from synthetic his
 
 **Method.** Rolling origin. For each origin month `o` with at least 6 complete months before it (3 for the uncertain-spending series), forecast months `o+1 .. o+h` for `h` in {1, 3, 6, 10, 12}, using only data before `o`. Compare with what happened.
 
-**Targets.** (a) total uncertain net flow per month. (b) cumulative net-worth change over `h` months excluding non-cash changes (ST-4 lines E3, E4, E5 and E6), because the model does not predict them.
+**Targets.** (a) total uncertain net flow per month. (b) cumulative net-worth change over `h` months excluding non-cash changes (ST-4 lines E3, E4, E5, E6 and E7), because the model does not predict them.
 
 **Metrics, per horizon (each reports `n`, the number of origins):**
 
@@ -203,7 +203,7 @@ The spec for `docs/forecast-eval.md` (WS-FORECAST produces it from synthetic his
 | No-spend count | Number of no-spend days in the evaluated range |
 | Longest no-spend streak | Longest run of consecutive no-spend dates. Ties: earliest start. Also report the current streak as of today for the current year |
 | Goals completed | Number of goals whose stored `reached_month` (DEBT-8.2) falls in `Y`. A goal reached in an earlier year is not counted again. Closed goals count. A goal spent after being reached still counts, because `reached` never reverts |
-| Net-worth change | `NW(end) - NW(start)` where `start` is the day before the period (ST-2). If the first row is inside the period, `NW(start) = 0`. Optional breakdown: ST-4 lines E1 to E6 |
+| Net-worth change | `NW(end) - NW(start)` where `start` is the day before the period (ST-2). If the first row is inside the period, `NW(start) = 0`. Optional breakdown: ST-4 lines E1 to E7 |
 | Prior-year change | `round_half_away((cur - prev) * 10000 / |prev|)` basis points. `prev = 0`: "new this year" |
 | Biggest month vs typical | `round_half_away((max - median) * 10000 / median)` basis points, median over months with data. `median <= 0`: not shown |
 | Fun comparisons | Computed only from the user's own numbers: vs prior year, vs own median month, share of total. No external benchmark ("average household") appears unless a primary source is cited here |

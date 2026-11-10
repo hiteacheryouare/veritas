@@ -1,9 +1,9 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use veritas_domain::{BudgetData, CoreError, ReadOnlyReason};
-
-use crate::change::{Change, EntityRef, Row};
+use veritas_domain::{
+	BudgetData, Change, CoreError, EntityRef, ReadOnlyReason, Row, Store, StoreTransaction,
+};
 
 /// A user action. `plan` validates against the loaded budget and returns the
 /// rows that should exist afterwards, without touching anything.
@@ -18,22 +18,6 @@ where
 	fn plan(&self, data: &BudgetData) -> Result<Vec<Row>, CoreError> {
 		self(data)
 	}
-}
-
-/// Durable storage for the loaded budget. One command is one transaction.
-pub trait Store {
-	type Transaction<'a>: StoreTransaction
-	where
-		Self: 'a;
-
-	fn begin(&mut self) -> Result<Self::Transaction<'_>, CoreError>;
-}
-
-/// If `apply` or `commit` fails, nothing from this transaction may persist.
-pub trait StoreTransaction {
-	fn apply(&mut self, change: &Change) -> Result<(), CoreError>;
-	fn commit(self) -> Result<(), CoreError>;
-	fn rollback(self) -> Result<(), CoreError>;
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
