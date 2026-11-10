@@ -2,20 +2,13 @@
 
 mod backup;
 mod bus;
-mod change;
 mod fsio;
 mod lock;
 mod retention;
 mod snapshot;
 
 pub use backup::write_backup;
-pub use bus::{
-	ChangeListener, ChangeSet, Command, CommandBus, Store, StoreTransaction, Subscription,
-};
-pub use change::{
-	AccountMetaRow, CategoryMapping, CategoryMetaRow, Change, Delta, EntityRef, Hold, Note,
-	PayeeMapping, Record, Retired, Row, TransactionMetaRow,
-};
+pub use bus::{ChangeListener, ChangeSet, Command, CommandBus, Subscription};
 pub use lock::{Access, LOCK_FILE, WriterLock, acquire};
 pub use retention::{RetentionPolicy, expired};
 pub use snapshot::{
