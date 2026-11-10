@@ -8,6 +8,7 @@ use rusqlite::{Connection, OpenFlags};
 use veritas_domain::CoreError;
 
 use crate::fsio::{io_error, storage_error, sync_dir, sync_file, utf8};
+use crate::lock::WriterLock;
 use crate::retention::{RetentionPolicy, expired};
 
 pub const SNAPSHOTS_DIR: &str = "snapshots";
@@ -181,14 +182,18 @@ pub fn prune_snapshots(
 }
 
 /// Replaces `db` with `snapshot` in one call. The current database is
-/// snapshotted first, so a restore can itself be undone. Nothing else may
-/// have `db` open: the session closes its connection before calling this.
+/// snapshotted first, so a restore can itself be undone. It deletes the
+/// `-wal` and `-shm` files, which would corrupt any other connection, so it
+/// takes the budget's writer lock and the session closes its own connection
+/// before calling it.
 pub fn restore_snapshot(
+	lock: &WriterLock,
 	snapshot: &Path,
 	db: &Path,
 	snapshots_dir: &Path,
 	at: DateTime<Utc>,
 ) -> Result<Option<Snapshot>, CoreError> {
+	lock.covers(db)?;
 	ensure_intact(snapshot)?;
 	let safety = if db.exists() {
 		checkpoint(db)?;

@@ -15,15 +15,23 @@ use rusqlite::Connection;
 use support::{TempDir, entries};
 use veritas_domain::CoreError;
 use veritas_session::{
-	RetentionPolicy, SNAPSHOTS_DIR, SnapshotReason, list_snapshots, prune_snapshots,
-	restore_snapshot, take_snapshot,
+	Access, LOCK_FILE, RetentionPolicy, SNAPSHOTS_DIR, SnapshotReason, WriterLock, acquire,
+	list_snapshots, prune_snapshots, restore_snapshot, take_snapshot,
 };
 
 fn at(text: &str) -> DateTime<Utc> {
 	DateTime::parse_from_rfc3339(text).unwrap().to_utc()
 }
 
+fn writer(dir: &TempDir) -> WriterLock {
+	match acquire(dir.path()).unwrap() {
+		Access::Writer(lock) => lock,
+		Access::ReadOnly(reason) => panic!("expected the writer lock, got {reason:?}"),
+	}
+}
+
 struct Budget {
+	lock: WriterLock,
 	dir: TempDir,
 	db: PathBuf,
 	snapshots: PathBuf,
@@ -43,7 +51,15 @@ fn budget(label: &str) -> (Budget, Connection) {
 			INSERT INTO accounts VALUES ('checking', 'Checking', 120000);",
 		)
 		.unwrap();
-	(Budget { dir, db, snapshots }, connection)
+	(
+		Budget {
+			lock: writer(&dir),
+			dir,
+			db,
+			snapshots,
+		},
+		connection,
+	)
 }
 
 fn balance(db: &Path) -> i64 {
@@ -120,6 +136,7 @@ fn restore_brings_back_the_exact_prior_state_in_one_call() {
 	drop(connection);
 
 	let safety = restore_snapshot(
+		&budget.lock,
 		&before_import.path,
 		&budget.db,
 		&budget.snapshots,
@@ -131,7 +148,10 @@ fn restore_brings_back_the_exact_prior_state_in_one_call() {
 	assert_eq!(balance(&budget.db), 120_000);
 	assert_eq!(safety.reason, SnapshotReason::Restore);
 	assert_eq!(balance(&safety.path), 1);
-	assert_eq!(entries(budget.dir.path()), ["db.sqlite", "snapshots"]);
+	assert_eq!(
+		entries(budget.dir.path()),
+		["db.sqlite", "snapshots", LOCK_FILE]
+	);
 	let integrity: String = Connection::open(&budget.db)
 		.unwrap()
 		.query_row("PRAGMA integrity_check", [], |row| row.get(0))
@@ -149,6 +169,7 @@ fn a_damaged_snapshot_is_refused_and_the_budget_is_untouched() {
 	fs::write(&damaged, b"not a database at all, just bytes").unwrap();
 
 	let result = restore_snapshot(
+		&budget.lock,
 		&damaged,
 		&budget.db,
 		&budget.snapshots,
@@ -181,6 +202,7 @@ fn restore_refuses_while_the_budget_is_still_open() {
 	set_balance(&connection, 7);
 
 	let result = restore_snapshot(
+		&budget.lock,
 		&snapshot.path,
 		&budget.db,
 		&budget.snapshots,
@@ -303,7 +325,15 @@ fn realistic_budget(label: &str) -> (Budget, Connection) {
 			)
 			.unwrap();
 	}
-	(Budget { dir, db, snapshots }, connection)
+	(
+		Budget {
+			lock: writer(&dir),
+			dir,
+			db,
+			snapshots,
+		},
+		connection,
+	)
 }
 
 /// Every schema object and every row, read through a fresh connection, so two
@@ -388,6 +418,7 @@ fn restoring_after_a_bulk_edit_brings_back_every_row_and_schema_object() {
 	assert_ne!(after_edit, before_edit);
 
 	let safety = restore_snapshot(
+		&budget.lock,
 		&snapshot.path,
 		&budget.db,
 		&budget.snapshots,
@@ -405,6 +436,7 @@ fn restoring_after_a_bulk_edit_brings_back_every_row_and_schema_object() {
 	assert_eq!(dump(&safety.path), after_edit);
 
 	restore_snapshot(
+		&budget.lock,
 		&safety.path,
 		&budget.db,
 		&budget.snapshots,
@@ -556,6 +588,7 @@ fn a_snapshot_taken_before_a_risky_operation_survives_the_next_prune_in_the_same
 
 	drop(connection);
 	let safety = restore_snapshot(
+		&budget.lock,
 		&before_import.path,
 		&budget.db,
 		&budget.snapshots,
@@ -575,4 +608,32 @@ fn a_snapshot_taken_before_a_risky_operation_survives_the_next_prune_in_the_same
 		safety.path.exists(),
 		"the restore's safety snapshot was pruned"
 	);
+}
+
+#[test]
+fn restore_refuses_a_lock_held_for_another_budget() {
+	// The lock is what keeps every other connection away while -wal and
+	// -shm are deleted, so it has to be this budget's lock.
+	let (mine, connection) = budget("snap-other-lock");
+	let snapshot = take_snapshot(
+		&mine.db,
+		&mine.snapshots,
+		SnapshotReason::Open,
+		at("2026-11-09T20:00:00Z"),
+	)
+	.unwrap();
+	set_balance(&connection, 3);
+	drop(connection);
+	let (other, _other_connection) = budget("snap-other-lock-2");
+
+	let result = restore_snapshot(
+		&other.lock,
+		&snapshot.path,
+		&mine.db,
+		&mine.snapshots,
+		at("2026-11-09T21:00:00Z"),
+	);
+
+	assert!(matches!(result, Err(CoreError::Internal(_))), "{result:?}");
+	assert_eq!(balance(&mine.db), 3);
 }

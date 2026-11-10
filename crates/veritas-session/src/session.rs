@@ -7,7 +7,7 @@ use veritas_domain::{BudgetData, BudgetType, CoreError, ReadOnlyReason, Store};
 use veritas_interop::{Manifest, import_actual_zip};
 use veritas_store::{LoadReport, Loaded};
 
-use crate::bus::{ChangeListener, ChangeSet, Command, CommandBus, Listeners, Subscription};
+use crate::bus::{ChangeListener, ChangeSet, Command, CommandBus, Listeners, Permit, Subscription};
 use crate::lock::{Access, WriterLock, acquire};
 use crate::retention::RetentionPolicy;
 use crate::snapshot::{
@@ -85,7 +85,7 @@ impl<B: Backend> Session<B> {
 		}
 		let lock = acquire_with_retry(dir)?;
 		let (bus, load_report) =
-			open_bus(&db, lock.is_some(), Listeners::default()).map_err(|(error, _)| error)?;
+			open_bus(&db, lock.as_ref(), Listeners::default()).map_err(|(error, _)| error)?;
 		let mut session = Session {
 			dir: dir.to_path_buf(),
 			db,
@@ -211,7 +211,16 @@ impl<B: Backend> Session<B> {
 		self.ensure_writer()?;
 		let snapshot = self.find_snapshot(snapshot_id)?;
 		let listeners = self.close_bus();
-		let restored = restore_snapshot(&snapshot.path, &self.db, &self.snapshots, self.now());
+		let restored = match &self.lock {
+			Some(lock) => restore_snapshot(
+				lock,
+				&snapshot.path,
+				&self.db,
+				&self.snapshots,
+				(self.options.clock)(),
+			),
+			None => Err(CoreError::ReadOnly(ReadOnlyReason::OpenElsewhere)),
+		};
 		let reopened = self.reopen(listeners);
 		let safety = restored?;
 		reopened?;
@@ -252,8 +261,7 @@ impl<B: Backend> Session<B> {
 	}
 
 	fn reopen(&mut self, listeners: Listeners) -> Result<(), CoreError> {
-		let writable = self.lock.is_some();
-		match open_bus(&self.db, writable, listeners) {
+		match open_bus(&self.db, self.lock.as_ref(), listeners) {
 			Ok((bus, report)) => {
 				self.state = State::Open(Box::new(bus));
 				self.load_report = report;
@@ -324,9 +332,10 @@ fn acquire_with_retry(dir: &Path) -> Result<Option<WriterLock>, CoreError> {
 /// goes away on its own. On failure the listeners come back.
 fn open_bus<B: Backend>(
 	db: &Path,
-	writable: bool,
+	lock: Option<&WriterLock>,
 	listeners: Listeners,
 ) -> Result<(CommandBus<B>, LoadReport), (CoreError, Listeners)> {
+	let writable = lock.is_some();
 	let opened = (|| {
 		let mut backend = B::open(db)?;
 		let mut reason = match Manifest::supported()?.check(&backend.migration_ids()?)? {
@@ -353,10 +362,16 @@ fn open_bus<B: Backend>(
 		Ok((backend, loaded, reason))
 	})();
 	match opened {
-		Ok((backend, loaded, reason)) => Ok((
-			CommandBus::with_listeners(loaded.data, backend, reason, listeners),
-			loaded.report,
-		)),
+		Ok((backend, loaded, reason)) => {
+			let permit = match (reason, lock) {
+				(None, Some(lock)) => Permit::Write(lock),
+				(reason, _) => Permit::ReadOnly(reason.unwrap_or(ReadOnlyReason::OpenElsewhere)),
+			};
+			Ok((
+				CommandBus::with_listeners(loaded.data, backend, permit, listeners),
+				loaded.report,
+			))
+		}
 		Err(error) => Err((error, listeners)),
 	}
 }

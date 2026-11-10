@@ -10,7 +10,7 @@ mod shared;
 mod snapshot;
 
 pub use backup::write_backup;
-pub use bus::{ChangeListener, ChangeSet, Command, CommandBus, Listeners, Subscription};
+pub use bus::{ChangeListener, ChangeSet, Command, CommandBus, Listeners, Permit, Subscription};
 pub use lock::{Access, LOCK_FILE, WriterLock, acquire};
 pub use retention::{RetentionPolicy, expired};
 pub use session::{Backend, Clock, DB_FILE, Session, SessionOptions};

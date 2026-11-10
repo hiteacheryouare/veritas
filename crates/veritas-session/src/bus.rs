@@ -5,6 +5,7 @@ use veritas_domain::{
 	BudgetData, Change, CoreError, EntityRef, ReadOnlyReason, Row, Store, StoreTransaction,
 };
 
+use crate::lock::WriterLock;
 use crate::snapshot::SnapshotReason;
 
 /// A user action. `plan` validates against the loaded budget and returns the
@@ -93,6 +94,13 @@ impl Listeners {
 	}
 }
 
+/// What a bus may do. Writing takes the budget's lock, so only the process
+/// that holds it can build a writable bus.
+pub enum Permit<'a> {
+	Write(&'a WriterLock),
+	ReadOnly(ReadOnlyReason),
+}
+
 /// Applies commands to memory and storage together, keeps unlimited undo and
 /// redo, and tells subscribers which rows changed after every commit.
 pub struct CommandBus<S: Store> {
@@ -125,20 +133,23 @@ impl Intent<'_> {
 }
 
 impl<S: Store> CommandBus<S> {
-	pub fn new(data: BudgetData, store: S, read_only: Option<ReadOnlyReason>) -> Self {
-		CommandBus::with_listeners(data, store, read_only, Listeners::default())
+	pub fn new(data: BudgetData, store: S, permit: Permit<'_>) -> Self {
+		CommandBus::with_listeners(data, store, permit, Listeners::default())
 	}
 
 	pub fn with_listeners(
 		data: BudgetData,
 		store: S,
-		read_only: Option<ReadOnlyReason>,
+		permit: Permit<'_>,
 		listeners: Listeners,
 	) -> Self {
 		CommandBus {
 			data,
 			store,
-			read_only,
+			read_only: match permit {
+				Permit::Write(_) => None,
+				Permit::ReadOnly(reason) => Some(reason),
+			},
 			undo: Vec::new(),
 			redo: Vec::new(),
 			listeners,
@@ -168,6 +179,12 @@ impl<S: Store> CommandBus<S> {
 
 	pub fn read_only(&self) -> Option<ReadOnlyReason> {
 		self.read_only
+	}
+
+	/// Stops all writes, for example when a background check finds damage.
+	/// There is no way back without reopening with the lock.
+	pub fn make_read_only(&mut self, reason: ReadOnlyReason) {
+		self.read_only = Some(reason);
 	}
 
 	pub fn can_undo(&self) -> bool {
