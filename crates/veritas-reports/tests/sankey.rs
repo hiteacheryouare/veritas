@@ -409,7 +409,7 @@ fn st8_rule_1_categories_net_across_the_whole_range() {
 }
 
 #[test]
-fn st8_uncategorized_spending_is_its_own_outflow() {
+fn st8_rule_0_uncategorized_spending_is_its_own_outflow_needing_review() {
 	let mut book = book();
 	book.row("Pay", "CHK", "2027-03-01", 100_000)
 		.in_category("Paycheck");
@@ -417,4 +417,21 @@ fn st8_uncategorized_spending_is_its_own_outflow() {
 	let (graph, _) = graph(&book, month("2027-03"));
 	assert_eq!(value(&graph, NodeKind::CategoryGroup(None)), 3_000);
 	assert_eq!(value(&graph, NodeKind::Category(None)), 3_000);
+	for kind in [NodeKind::CategoryGroup(None), NodeKind::Category(None)] {
+		assert!(
+			graph.node(&kind).unwrap().labels.needs_review,
+			"ST-8 rule 0"
+		);
+	}
+}
+
+#[test]
+fn st8_rule_0_uncategorized_refunds_follow_rule_3() {
+	let mut book = book();
+	book.row("Pay", "CHK", "2027-03-01", 100_000)
+		.in_category("Paycheck");
+	book.row("Mystery", "CHK", "2027-03-02", 3_000);
+	let (graph, _) = graph(&book, month("2027-03"));
+	assert_eq!(value(&graph, NodeKind::CategoryGroup(None)), 0);
+	assert_eq!(value(&graph, NodeKind::RefundsAndWithdrawals), 3_000);
 }

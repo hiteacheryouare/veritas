@@ -213,9 +213,10 @@ fn plain(kind: NodeKind, value: Money, rows: &[TransactionId]) -> Node {
 	}
 }
 
-fn group_labels(budget: &BudgetData, group: Option<&CategoryGroupId>) -> CategoryLabels {
-	let group = group.and_then(|id| budget.category_groups.get(id));
+fn group_labels(budget: &BudgetData, id: Option<&CategoryGroupId>) -> CategoryLabels {
+	let group = id.and_then(|id| budget.category_groups.get(id));
 	CategoryLabels {
+		needs_review: id.is_none(),
 		hidden: group.is_some_and(|group| group.hidden),
 		deleted: group.is_some_and(|group| group.tombstone),
 		..CategoryLabels::default()

@@ -22,6 +22,8 @@ pub struct CategoryLabels {
 	pub archived: bool,
 	pub deleted: bool,
 	pub closed_goal: bool,
+	/// The uncategorized line: its rows wait for a category.
+	pub needs_review: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -171,10 +173,13 @@ impl Accumulator {
 			.into_iter()
 			.map(|(category, (sum, rows))| {
 				Ok(CategoryLine {
-					labels: category
-						.as_ref()
-						.map(|category| labels(budget, category))
-						.unwrap_or_default(),
+					labels: category.as_ref().map_or(
+						CategoryLabels {
+							needs_review: true,
+							..CategoryLabels::default()
+						},
+						|category| labels(budget, category),
+					),
 					category,
 					total: magnitude(sum)?,
 					rows,
@@ -206,6 +211,7 @@ pub(crate) fn labels(budget: &BudgetData, id: &CategoryId) -> CategoryLabels {
 			.goals
 			.values()
 			.any(|goal| &goal.category == id && goal.status == GoalStatus::Closed),
+		needs_review: false,
 	}
 }
 
