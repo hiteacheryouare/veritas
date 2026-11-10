@@ -170,6 +170,20 @@ impl<B: Backend> Session<B> {
 		self.snapshot_problem.as_ref()
 	}
 
+	/// True while the full integrity check and open snapshot still run.
+	pub fn open_check_pending(&self) -> bool {
+		self.open_check.is_some()
+	}
+
+	pub fn retention(&self) -> RetentionPolicy {
+		self.options.retention
+	}
+
+	/// Takes effect at the next prune.
+	pub fn set_retention(&mut self, retention: RetentionPolicy) {
+		self.options.retention = retention;
+	}
+
 	/// Picks up the background open check if it has finished. Returns what
 	/// subscribers were told when it turned the budget read-only.
 	pub fn poll(&mut self) -> Option<ChangeSet> {

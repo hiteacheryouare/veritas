@@ -10,13 +10,13 @@ use crate::session::{Backend, Session};
 /// mid-call can leave memory half-changed while storage rolled back, so the
 /// session reloads from disk before it serves anything else.
 pub struct SharedSession<B: Backend> {
-	inner: Mutex<Session<B>>,
+	inner: Mutex<Option<Session<B>>>,
 }
 
 impl<B: Backend> SharedSession<B> {
 	pub fn new(session: Session<B>) -> Self {
 		SharedSession {
-			inner: Mutex::new(session),
+			inner: Mutex::new(Some(session)),
 		}
 	}
 
@@ -24,8 +24,11 @@ impl<B: Backend> SharedSession<B> {
 		&self,
 		call: impl FnOnce(&mut Session<B>) -> Result<T, CoreError>,
 	) -> Result<T, CoreError> {
-		let mut session = self.lock()?;
-		match catch_unwind(AssertUnwindSafe(|| call(&mut session))) {
+		let mut guard = self.lock()?;
+		let Some(session) = guard.as_mut() else {
+			return Err(closed());
+		};
+		match catch_unwind(AssertUnwindSafe(|| call(session))) {
 			Ok(result) => result,
 			Err(payload) => {
 				let detail = panic_detail(payload.as_ref());
@@ -41,17 +44,31 @@ impl<B: Backend> SharedSession<B> {
 		}
 	}
 
-	fn lock(&self) -> Result<MutexGuard<'_, Session<B>>, CoreError> {
+	/// Closes the budget: its connection and its writer lock go now, not when
+	/// the last reference to this value does. Later calls fail.
+	pub fn close(&self) -> Result<(), CoreError> {
+		let session = self.lock()?.take();
+		drop(session);
+		Ok(())
+	}
+
+	fn lock(&self) -> Result<MutexGuard<'_, Option<Session<B>>>, CoreError> {
 		match self.inner.lock() {
-			Ok(session) => Ok(session),
+			Ok(guard) => Ok(guard),
 			Err(poisoned) => {
 				self.inner.clear_poison();
-				let mut session = poisoned.into_inner();
-				session.reload()?;
-				Ok(session)
+				let mut guard = poisoned.into_inner();
+				if let Some(session) = guard.as_mut() {
+					session.reload()?;
+				}
+				Ok(guard)
 			}
 		}
 	}
+}
+
+fn closed() -> CoreError {
+	CoreError::Invalid("this budget is closed. Open it again to keep working".to_owned())
 }
 
 fn panic_detail(payload: &(dyn Any + Send)) -> String {

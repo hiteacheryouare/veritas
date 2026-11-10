@@ -22,7 +22,7 @@ use veritas_domain::{
 };
 use veritas_session::{
 	Access, Backend, ChangeListener, ChangeSet, Command, Session, SessionOptions, SharedSession,
-	SnapshotReason, acquire,
+	SnapshotReason, StoreBackend, acquire,
 };
 use veritas_store::Loaded;
 
@@ -618,4 +618,49 @@ fn a_failed_open_snapshot_is_reported_without_blocking_the_budget() {
 	);
 	assert_eq!(session.read_only(), None);
 	session.perform(&rename("Still editable")).unwrap();
+}
+
+#[test]
+fn the_store_backend_opens_a_real_budget_and_refuses_writes_cleanly() {
+	// Until veritas-store can write, a command must fail without changing
+	// memory or leaving an undo step behind (R-REL-1).
+	let (_root, dir) = imported("session-store-backend");
+	let mut session = Session::<StoreBackend>::open(&dir, TestClock::new().options()).unwrap();
+	assert_eq!(session.wait_for_open_check(), None);
+	assert_eq!(session.read_only(), None);
+	assert_eq!(reasons_of(&session), [SnapshotReason::Open]);
+	let before = session.data().unwrap().clone();
+
+	let result = session.perform(&rename("Not yet"));
+
+	assert!(matches!(result, Err(CoreError::Storage(_))), "{result:?}");
+	assert_eq!(session.data().unwrap(), &before);
+	assert!(!session.can_undo());
+}
+
+#[test]
+fn closing_a_shared_session_frees_the_budget_at_once() {
+	// R-REL-6: the next window gets the writer lock without waiting for the
+	// last reference to the closed session to go away.
+	let (_root, dir) = imported("session-close");
+	let shared = SharedSession::new(TestSession::open(&dir, TestClock::new().options()).unwrap());
+	assert!(matches!(acquire(&dir).unwrap(), Access::ReadOnly(_)));
+
+	shared.close().unwrap();
+
+	assert!(matches!(acquire(&dir).unwrap(), Access::Writer(_)));
+	assert!(matches!(
+		shared.with(|session| session.data().cloned()),
+		Err(CoreError::Invalid(_))
+	));
+}
+
+fn reasons_of<B: Backend>(session: &Session<B>) -> Vec<SnapshotReason> {
+	session
+		.snapshots()
+		.unwrap()
+		.into_iter()
+		.rev()
+		.map(|snapshot| snapshot.reason)
+		.collect()
 }
