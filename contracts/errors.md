@@ -6,7 +6,7 @@ Every failure is a typed error. The core never panics across the FFI (R-REL-7). 
 |---|---|---|
 | `NotFound { entity, id }` | A command names a row that doesn't exist or is tombstoned | Refreshes the screen. The row was likely changed elsewhere. |
 | `Invalid(message)` | Input fails validation: a bad date, an amount out of range, an impossible schedule | Shows `message` inline next to the field. Messages are written for Ryan, not developers. |
-| `ReadOnly(reason)` | A write to a budget opened read-only | Shows the banner for that reason: `NewerActualVersion` (R-IO-7), `TrackingBudget` (R-BUD-2), `OpenElsewhere` (R-REL-6) or `AuditFailed` (R-REL-2). |
+| `ReadOnly(reason)` | A write to a budget opened read-only | Shows the banner for that reason: `NewerActualVersion` (R-IO-7), `TrackingBudget` (R-BUD-2), `OpenElsewhere` (R-REL-6), `AuditFailed` (R-REL-2) or `NewerVeritasSchema` (its `veritas_meta.schema_version` is newer than this build knows). |
 | `UpgradeInActualFirst { required }` | Import of a file missing migration ids Veritas expects (R-IO-7) | Explains: "Open this budget in Actual {required} or newer, then export it again." |
 | `AuditFailed { violations }` | The invariant audit found problems on open, import or export | Opens the audit report. Nothing is auto-fixed. |
 | `NotAnActualBudget(message)` | A zip without `db.sqlite` and `metadata.json` laid out the way Actual's importer accepts (R-IO-1) | Explains what was found instead. |
