@@ -499,7 +499,13 @@ fn no_odd_value_in_any_modeled_column_aborts_the_load_or_drops_a_row_silently() 
 				{
 					continue;
 				}
-				let rows = count(&raw, &format!("SELECT count(*) FROM {table}"));
+				// A NULL note is how Actual clears one, so it is no row at all.
+				let present = if table == "notes" {
+					" WHERE note IS NOT NULL"
+				} else {
+					""
+				};
+				let rows = count(&raw, &format!("SELECT count(*) FROM {table}{present}"));
 				drop(raw);
 
 				let loaded = Store::open(&db_path)
