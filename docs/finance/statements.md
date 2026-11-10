@@ -63,7 +63,7 @@ Every reconciling line is defined here. There are no others, and there is never 
 | E3 | Starting balances | sum of `amount` for kind `starting_balance` (all accounts) | New accounts bring opening wealth |
 | E4 | Reconciliation adjustments | sum of `amount` for kind `adjustment`, source `reconciliation` | Unexplained cash difference found at reconcile |
 | E5 | Off-budget revaluations | sum of `amount` for kind `adjustment`, source `offbudget_revaluation` | Asset value changes (house, brokerage). Non-cash |
-| E6 | Unpaired transfer legs | sum of `amount` of rows flagged `unpaired` whose kind is `internal_transfer`, `debt_principal` or `savings_contribution` (all accounts) | One side of a transfer is missing (edge case 4), so net worth moved with no matching partner. Zero on a clean file. A flagged problem, not a plug |
+| E6 | Unpaired transfer legs | sum of `amount` of rows flagged `unpaired` whose kind is `internal_transfer`, `debt_principal` or `savings_contribution` (all accounts, both rows of a one-way link) | One side of a transfer is missing or the link is not reciprocal (edge case 4), so net worth moved with no matching partner. Zero on a clean file. A flagged problem, not a plug |
 
 **Closing equity = opening equity + E1 + E2 + E3 + E4 + E5 + E6**, to the cent.
 
