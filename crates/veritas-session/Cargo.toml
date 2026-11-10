@@ -14,6 +14,11 @@ veritas-engine = { path = "../veritas-engine" }
 veritas-rules = { path = "../veritas-rules" }
 veritas-reports = { path = "../veritas-reports" }
 veritas-forecast = { path = "../veritas-forecast" }
+chrono.workspace = true
+rusqlite.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
 
 [lints]
 workspace = true
