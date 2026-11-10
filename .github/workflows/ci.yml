@@ -119,3 +119,36 @@ jobs:
       - name: Swift tests
         working-directory: apps/macos/Packages/VeritasKit
         run: swift test
+
+  # The app needs the macOS 27 SDK, which only GitHub's xcode-27 preview image has.
+  # Not a required check while the image is in preview. UI tests are allowed to fail
+  # until automation mode is proven on hosted runners.
+  app:
+    name: app
+    runs-on: xcode-27
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Toolchains
+        run: |
+          sudo xcode-select -s /Applications/Xcode_27.2.app
+          rustup show active-toolchain
+          swift --version
+          sw_vers
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Generate the Swift bindings
+        run: cargo xtask bindings
+
+      - name: Swift tests
+        working-directory: apps/macos/Packages/VeritasKit
+        run: swift test
+
+      - name: Build the app
+        run: cargo xtask app
+
+      - name: UI tests
+        continue-on-error: true
+        run: cargo xtask app-test
