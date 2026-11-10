@@ -235,3 +235,8 @@ Every decision behind Veritas, so no question gets asked twice. D1–D24 are PLA
 - **Options:** —
 - **Decision:** A leading `-` appends, like Actual (`100.00` then `-5` gives `95.00`). Empty input and malformed input such as `(5` keep the old value (D37). A budget with no income group opens with income 0 and an audit warning; Actual crashes on such a file.
 - **Date:** 2026-11-09
+
+### D47. How does Veritas evaluate Actual's regex `matches` rule conditions?
+- **Options:** add the `regex` crate / keep those rules read-only
+- **Decision:** Add `regex` (rust-lang) to Appendix B. JS-only constructs it can't express, such as lookaround and backreferences, still flag the transaction "may need Actual".
+- **Date:** 2026-11-10
