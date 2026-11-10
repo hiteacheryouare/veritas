@@ -5,6 +5,23 @@ use crate::math::{ceil_div, median};
 use crate::scenario::Scenario;
 
 const PACE_MONTHS: i32 = 3;
+/// ETAs further out than 100 years are reported as too far, not computed.
+const MAX_MONTHS: i32 = 1200;
+
+enum Reach {
+	At(YearMonth),
+	Never,
+	TooFar,
+}
+
+impl Reach {
+	fn month(self) -> Option<YearMonth> {
+		match self {
+			Reach::At(month) => Some(month),
+			Reach::Never | Reach::TooFar => None,
+		}
+	}
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EtaStatus {
@@ -13,6 +30,8 @@ pub enum EtaStatus {
 	NoHistory,
 	/// The median pace is 0 or less.
 	NotAdding,
+	/// The median pace takes more than 100 years.
+	TooFar,
 	Eta {
 		month: YearMonth,
 		optimistic: YearMonth,
@@ -40,6 +59,7 @@ impl GoalEta {
 			EtaStatus::Reached => "Reached".to_owned(),
 			EtaStatus::NoHistory => "No ETA yet".to_owned(),
 			EtaStatus::NotAdding => "No ETA: nothing is being added".to_owned(),
+			EtaStatus::TooFar => "No ETA: more than 100 years at this pace".to_owned(),
 			EtaStatus::Eta {
 				month,
 				optimistic,
@@ -136,11 +156,12 @@ pub fn goal_eta(
 		_ if remaining == Money::ZERO => EtaStatus::Reached,
 		None => EtaStatus::NoHistory,
 		Some((mid, max, min)) => match eta(mid)? {
-			None => EtaStatus::NotAdding,
-			Some(month) => EtaStatus::Eta {
+			Reach::Never => EtaStatus::NotAdding,
+			Reach::TooFar => EtaStatus::TooFar,
+			Reach::At(month) => EtaStatus::Eta {
 				month,
-				optimistic: eta(max)?.unwrap_or(month),
-				pessimistic: eta(min)?,
+				optimistic: eta(max)?.month().unwrap_or(month),
+				pessimistic: eta(min)?.month(),
 			},
 		},
 	};
@@ -174,28 +195,31 @@ fn months_to_go(
 	goal: &GoalId,
 	current: YearMonth,
 	scenario: &Scenario,
-) -> Result<Option<YearMonth>, CoreError> {
+) -> Result<Reach, CoreError> {
 	let remaining = i128::from(remaining.minor());
 	let mut simulated = 0i32;
 	let mut saved = 0i128;
 	for (start, end) in scenario.goal_contribution_months(goal) {
 		let last = end.unwrap_or(start);
-		simulated = simulated.max(months_between(current, last)?.saturating_add(1));
+		let span = months_between(current, last)?.min(MAX_MONTHS - 1) + 1;
+		simulated = simulated.max(span);
 	}
-	for step in 1..=simulated.min(1200) {
+	for step in 1..=simulated {
 		let month = current.offset(step)?;
 		saved += i128::from(pace) + i128::from(scenario.goal_contribution(goal, month)?.minor());
 		if saved >= remaining {
-			return current.offset(step).map(Some);
+			return Ok(Reach::At(month));
 		}
 	}
-	let after = current.offset(simulated.max(0) + 1)?;
+	let after = current.offset(simulated + 1)?;
 	let steady = i128::from(pace) + i128::from(scenario.goal_contribution(goal, after)?.minor());
 	if steady <= 0 {
-		return Ok(None);
+		return Ok(Reach::Never);
 	}
-	let more = ceil_div(remaining - saved, steady);
-	let total =
-		i32::try_from(i128::from(simulated.max(0)) + more).map_err(|_| CoreError::Overflow)?;
-	current.offset(total).map(Some)
+	let total = i128::from(simulated) + ceil_div(remaining - saved, steady);
+	if total > i128::from(MAX_MONTHS) {
+		return Ok(Reach::TooFar);
+	}
+	let total = i32::try_from(total).map_err(|_| CoreError::Overflow)?;
+	current.offset(total).map(Reach::At)
 }

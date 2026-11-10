@@ -49,22 +49,12 @@ pub struct Suggestions {
 	/// Known income flows plus income baselines for the month.
 	pub expected_income: Money,
 	pub exceeds_income_by: Option<Money>,
+	/// "Suggestions exceed expected income by $X", in whole dollars.
+	pub notice: Option<String>,
 }
 
-impl Suggestions {
-	pub fn notice(&self) -> Option<String> {
-		self.exceeds_income_by.map(|by| {
-			format!(
-				"Suggestions exceed expected income by {}",
-				dollars(round_dollars(by))
-			)
-		})
-	}
-}
-
-fn round_dollars(amount: Money) -> Money {
-	let rounded = round_half_up(i128::from(amount.minor().max(0)), 100) * 100;
-	Money::from_minor(i64::try_from(rounded).unwrap_or(i64::MAX))
+fn round_dollars(amount: Money) -> Result<Money, CoreError> {
+	to_money(round_half_up(i128::from(amount.minor().max(0)), 100) * 100)
 }
 
 fn dollars(amount: Money) -> String {
@@ -89,11 +79,11 @@ impl Forecaster<'_> {
 			.iter()
 			.filter(|flow| period.contains(flow.date))
 			.collect();
-		let baselines: BTreeMap<CategoryId, Baseline> = self
-			.baselines(today, known)?
-			.into_iter()
+		let all_baselines = self.baselines(today, known)?;
+		let baselines: BTreeMap<&CategoryId, &Baseline> = all_baselines
+			.iter()
 			.filter(|baseline| baseline.side == Side::Spending)
-			.map(|baseline| (baseline.category.clone(), baseline))
+			.map(|baseline| (&baseline.category, baseline))
 			.collect();
 
 		let mut categories: Vec<_> = self
@@ -128,11 +118,12 @@ impl Forecaster<'_> {
 				.budget_cells
 				.get(&(month, id.clone()))
 				.map_or(Money::ZERO, |cell| cell.budgeted);
+			let kept = dollars(round_dollars(current)?);
 			let keeping = |basis: Basis, text: &str| Suggestion {
 				category: id.clone(),
 				amount: None,
 				basis,
-				reason: format!("{text}, keeping {}", dollars(round_dollars(current))),
+				reason: format!("{text}, keeping {kept}"),
 			};
 			let goal = self.budget.goals.values().find(|goal| &goal.category == id);
 			let item = match (category_kind(self.budget, id), goal) {
@@ -167,13 +158,13 @@ impl Forecaster<'_> {
 					name,
 					month,
 					&in_month,
-					baselines.get(id),
+					baselines.get(id).copied(),
 					&keeping,
 				)?,
 				(CategoryKind::DebtPrincipal, _) => match self.last_principal(id, today)? {
 					None => keeping(Basis::NoHistory, &format!("{name}: no history yet")),
 					Some(principal) => {
-						let amount = round_dollars(principal);
+						let amount = round_dollars(principal)?;
 						Suggestion {
 							category: id.clone(),
 							amount: Some(amount),
@@ -196,7 +187,7 @@ impl Forecaster<'_> {
 				.checked_add(flow.amount.minor())
 				.ok_or(CoreError::Overflow)?;
 		}
-		for baseline in self.baselines(today, known)? {
+		for baseline in &all_baselines {
 			if baseline.side == Side::Income {
 				expected_income = expected_income
 					.checked_add(baseline.forecast(month)?.minor())
@@ -205,11 +196,20 @@ impl Forecaster<'_> {
 		}
 		let suggested = Money::checked_sum(items.iter().filter_map(|item| item.amount))?;
 		let excess = suggested.checked_sub(Money::from_minor(expected_income))?;
+		let exceeds_income_by = (excess > Money::ZERO).then_some(excess);
+		let notice = match exceeds_income_by {
+			Some(by) => Some(format!(
+				"Suggestions exceed expected income by {}",
+				dollars(round_dollars(by)?)
+			)),
+			None => None,
+		};
 		Ok(Suggestions {
 			month,
 			items,
 			expected_income: Money::from_minor(expected_income),
-			exceeds_income_by: (excess > Money::ZERO).then_some(excess),
+			exceeds_income_by,
+			notice,
 		})
 	}
 
@@ -238,7 +238,7 @@ impl Forecaster<'_> {
 			Some(baseline) if has_history => baseline.forecast(month)?,
 			_ => Money::ZERO,
 		};
-		let amount = round_dollars(bill_total.checked_add(forecast)?.max(Money::ZERO));
+		let amount = round_dollars(bill_total.checked_add(forecast)?.max(Money::ZERO))?;
 		let median = baseline.map(Baseline::label).unwrap_or_default();
 		let (basis, reason) = if bills.is_empty() {
 			let index = baseline.map_or(10_000, |baseline| baseline.index(month));
@@ -277,7 +277,7 @@ impl Forecaster<'_> {
 				),
 			)
 		} else {
-			let bills_rounded = round_dollars(bill_total);
+			let bills_rounded = round_dollars(bill_total)?;
 			let rest = amount.checked_sub(bills_rounded)?.max(Money::ZERO);
 			(
 				Basis::BillsAndBaseline,
@@ -322,7 +322,9 @@ impl Forecaster<'_> {
 		let outstanding = match &row.transfer_account {
 			Some(loan) => balances(self.budget, &self.classification, today)?
 				.get(loan)
-				.map(|balance| Money::from_minor(balance.saturating_neg().max(0))),
+				.map(|balance| Money::from_minor(*balance).checked_neg())
+				.transpose()?
+				.map(|owed| owed.max(Money::ZERO)),
 			None => None,
 		};
 		Ok(Some(

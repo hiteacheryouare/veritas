@@ -203,3 +203,15 @@ fn hidden_debt_and_scheduled_income_categories_get_no_baseline() {
 	assert!(!categories.contains(&cat("Paycheck")));
 	assert!(categories.contains(&cat("Side gigs")));
 }
+
+#[test]
+fn r_rel_7_a_month_too_large_to_sum_is_an_overflow_not_a_clamp() {
+	let mut book = Book::household();
+	book.spend("Groceries", "2026-12-01", -(i64::MAX / 2 + 1));
+	book.row("VISA", "2026-12-02", -(i64::MAX / 2 + 1)).category = Some(cat("Groceries"));
+	let forecaster = Forecaster::new(&book.budget).unwrap();
+	assert!(matches!(
+		forecaster.baselines(date("2027-01-15"), &[]),
+		Err(veritas_domain::CoreError::Overflow)
+	));
+}

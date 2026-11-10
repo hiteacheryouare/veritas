@@ -15,7 +15,8 @@ use veritas_forecast::{
 const TODAY: &str = "2027-01-15";
 
 /// FC-3's worked example: checking holds 388800 on 2027-01-15 after rent
-/// and pay posted on the 1st and 20000 of groceries.
+/// and pay posted on the 1st and 20000 of groceries. January's occurrences
+/// are posted, so the known flows start in February.
 fn fc_3_book() -> Book {
 	let mut book = Book::household();
 	book.opening("CHK", "2026-06-30", 531800);
@@ -38,10 +39,10 @@ fn fc_3_book() -> Book {
 }
 
 fn fc_3_flows() -> Vec<KnownFlow> {
-	let mut flows = monthly_flows("2027-01", 13, "Rent", -165000, FlowKind::Expense);
+	let mut flows = monthly_flows("2027-02", 12, "Rent", -165000, FlowKind::Expense);
 	flows.extend(monthly_flows(
-		"2027-01",
-		13,
+		"2027-02",
+		12,
 		"Paycheck",
 		300000,
 		FlowKind::Income,
@@ -66,7 +67,7 @@ fn fc_3_worked_example_single_account() {
 	assert_eq!(
 		january.known_net_income,
 		cents(0),
-		"Jan 1 flows already posted"
+		"January's occurrences are posted"
 	);
 	assert_eq!(january.net_worth, cents(365800));
 	let february = &projection.months[1];
@@ -447,4 +448,170 @@ fn r_fc_2_rejects_a_change_that_ends_before_it_starts() {
 			.unwrap()
 			.project(date(TODAY), &fc_3_flows(), &scenario);
 	assert!(matches!(result, Err(CoreError::Invalid(_))));
+}
+
+#[test]
+fn fc_3_unpaid_flows_due_today_or_overdue_count_now() {
+	let book = fc_3_book();
+	let baseline = project(&book, &fc_3_flows(), &Scenario::baseline());
+	let mut flows = fc_3_flows();
+	flows.push(known("2027-01-14", "Electric", -12000, FlowKind::Expense));
+	flows.push(known("2027-01-15", "Fun", -3000, FlowKind::Expense));
+	flows.push(known("2026-12-20", "Side gigs", 5000, FlowKind::Income));
+	let projection = project(&book, &flows, &Scenario::baseline());
+	assert_eq!(
+		projection.months[0].net_worth.minor(),
+		baseline.months[0].net_worth.minor() - 12000 - 3000 + 5000
+	);
+	assert_eq!(
+		projection.months[0].balances[&acct("CHK")],
+		cents(365800 - 10000)
+	);
+	let overdue: Vec<&str> = projection
+		.overdue
+		.iter()
+		.map(|flow| flow.name.as_str())
+		.collect();
+	assert_eq!(overdue, ["Electric", "Side gigs"]);
+}
+
+#[test]
+fn r_fc_2_what_ifs_count_from_today_and_reject_the_past() {
+	let book = fc_3_book();
+	let today = Scenario {
+		name: "Today".to_owned(),
+		events: vec![
+			ScenarioEvent::OneTime {
+				date: date(TODAY),
+				account: acct("CHK"),
+				category: None,
+				amount: cents(-7000),
+			},
+			ScenarioEvent::Recurring {
+				start: date("2026-12-01"),
+				end_month: None,
+				cadence: Cadence::EveryWeeks(1),
+				account: acct("CHK"),
+				category: None,
+				amount: cents(100),
+			},
+		],
+	};
+	let projection = project(&book, &fc_3_flows(), &today);
+	assert_eq!(
+		projection.months[0].scenario_net_income,
+		cents(-7000 + 2 * 100)
+	);
+	let past = Scenario {
+		name: "Past".to_owned(),
+		events: vec![ScenarioEvent::OneTime {
+			date: date("2027-01-14"),
+			account: acct("CHK"),
+			category: None,
+			amount: cents(-7000),
+		}],
+	};
+	let result = Forecaster::new(&book.budget)
+		.unwrap()
+		.project(date(TODAY), &fc_3_flows(), &past);
+	assert!(matches!(result, Err(CoreError::Invalid(_))));
+}
+
+#[test]
+fn fc_2_interest_above_the_payment_capitalizes_on_the_loan() {
+	let loan = LoanPayment {
+		from: acct("CHK"),
+		loan: acct("LOAN"),
+		name: "Student loan".to_owned(),
+		payment: cents(10000),
+		rate_bps: Some(1000),
+		last_interest: cents(0),
+		outstanding: cents(1_500_000),
+		interest_category: Some(cat("Loan interest")),
+		principal_category: Some(cat("Loan principal")),
+	};
+	let flows = loan.flows(&[date("2027-02-10")]).unwrap();
+	let parts: Vec<_> = flows
+		.iter()
+		.map(|flow| {
+			(
+				flow.account.as_str(),
+				flow.amount.minor(),
+				flow.kind.clone(),
+			)
+		})
+		.collect();
+	assert_eq!(
+		parts,
+		[
+			("CHK", -10000, FlowKind::Expense),
+			("LOAN", -2500, FlowKind::Expense)
+		]
+	);
+	assert_eq!(flows[1].name, "Student loan: capitalized interest");
+
+	let mut book = Book::household();
+	book.opening("CHK", "2026-12-31", 100000);
+	book.opening("LOAN", "2026-12-31", -1_500_000);
+	let projection = project(&book, &flows, &Scenario::baseline());
+	let february = &projection.months[1];
+	assert_eq!(february.net_income, cents(-12500));
+	assert_eq!(february.balances[&acct("CHK")], cents(90000));
+	assert_eq!(february.balances[&acct("LOAN")], cents(-1_502_500));
+}
+
+#[test]
+fn fc_2_a_negative_loan_payment_is_rejected_not_wrapped() {
+	let loan = LoanPayment {
+		from: acct("CHK"),
+		loan: acct("LOAN"),
+		name: "Odd".to_owned(),
+		payment: cents(i64::MIN),
+		rate_bps: Some(980),
+		last_interest: cents(0),
+		outstanding: cents(980000),
+		interest_category: None,
+		principal_category: None,
+	};
+	assert!(matches!(
+		loan.flows(&[date("2027-02-10")]),
+		Err(CoreError::Invalid(_))
+	));
+}
+
+#[test]
+fn fc_1_an_uncategorized_income_schedule_feeds_its_posted_category() {
+	let mut book = Book::household();
+	for month in [
+		"2026-07", "2026-08", "2026-09", "2026-10", "2026-11", "2026-12",
+	] {
+		book.spend("Paycheck", &format!("{month}-01"), 300000)
+			.bill("pay");
+	}
+	let mut flow = known("2027-02-01", "Paycheck", 300000, FlowKind::Income);
+	flow.category = None;
+	flow.schedule = Some(ScheduleId::new("pay"));
+	let projection = project(&book, &[flow], &Scenario::baseline());
+	assert_eq!(projection.months[1].net_income, cents(300000));
+	assert!(
+		projection
+			.baselines
+			.iter()
+			.all(|baseline| baseline.category != cat("Paycheck"))
+	);
+}
+
+#[test]
+fn fc_2_warns_when_an_income_baseline_sits_next_to_an_income_flow() {
+	let mut book = Book::household();
+	for month in [
+		"2026-07", "2026-08", "2026-09", "2026-10", "2026-11", "2026-12",
+	] {
+		book.spend("Paycheck", &format!("{month}-01"), 300000);
+	}
+	let mut flow = known("2027-02-01", "Paycheck", 300000, FlowKind::Income);
+	flow.category = None;
+	flow.schedule = Some(ScheduleId::new("new pay"));
+	let projection = project(&book, &[flow], &Scenario::baseline());
+	assert_eq!(projection.possible_double_counts, [cat("Paycheck")]);
 }

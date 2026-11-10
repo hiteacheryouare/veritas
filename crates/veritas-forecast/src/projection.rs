@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use veritas_domain::{AccountId, BudgetData, CategoryId, CivilDate, CoreError, Money, YearMonth};
+use veritas_domain::{
+	AccountId, BudgetData, CategoryId, CivilDate, CoreError, Money, ScheduleId, YearMonth,
+};
 use veritas_reports::{Classification, Decision, Period, classify};
 
 use crate::band::{Band, band};
@@ -50,6 +52,8 @@ pub struct Projection {
 	/// The current month's remainder first, then 12 complete months.
 	pub months: Vec<MonthForecast>,
 	pub horizons: Vec<HorizonForecast>,
+	/// Known flows dated before today, counted as due now.
+	pub overdue: Vec<KnownFlow>,
 	/// Categories whose unlinked median is at least half an active bill's
 	/// amount, where a hand-typed bill may be counted twice (FC-2).
 	pub possible_double_counts: Vec<CategoryId>,
@@ -88,13 +92,33 @@ impl<'a> Forecaster<'a> {
 	}
 
 	/// The series that get a baseline: income categories fed by an income
-	/// schedule are known flows instead (FC-1).
+	/// schedule are known flows instead (FC-1). A schedule with no category
+	/// feeds the categories of the rows it posted.
 	pub(crate) fn baselined_series(&self, known: &[KnownFlow]) -> Vec<&Series> {
-		let scheduled_income: BTreeSet<&CategoryId> = known
+		let schedules: BTreeSet<&ScheduleId> = known
+			.iter()
+			.filter(|flow| flow.kind == FlowKind::Income)
+			.filter_map(|flow| flow.schedule.as_ref())
+			.collect();
+		let mut scheduled_income: BTreeSet<&CategoryId> = known
 			.iter()
 			.filter(|flow| flow.kind == FlowKind::Income)
 			.filter_map(|flow| flow.category.as_ref())
 			.collect();
+		scheduled_income.extend(
+			self.budget
+				.transactions
+				.values()
+				.filter(|row| {
+					!row.tombstone
+						&& row
+							.schedule
+							.as_ref()
+							.is_some_and(|schedule| schedules.contains(schedule))
+				})
+				.filter_map(|row| row.category.as_ref())
+				.filter_map(|category| self.budget.resolve_category(category)),
+		);
 		self.history
 			.series
 			.iter()
@@ -121,7 +145,7 @@ impl<'a> Forecaster<'a> {
 		known: &[KnownFlow],
 		scenario: &Scenario,
 	) -> Result<Projection, CoreError> {
-		scenario.validate()?;
+		scenario.validate(today)?;
 		let current = today.year_month();
 		let series = self.baselined_series(known);
 		let baselines = self.baselines(today, known)?;
@@ -137,7 +161,15 @@ impl<'a> Forecaster<'a> {
 		for step in 0..=LAST_HORIZON {
 			let month = current.offset(step)?;
 			let period = Period::month(month);
-			let in_month = |date: CivilDate| period.contains(date) && date > today;
+			// Unpaid flows dated today or earlier are due now (step 0); the
+			// caller has already removed occurrences that were posted.
+			let in_month = |date: CivilDate| {
+				if step == 0 {
+					date <= period.last()
+				} else {
+					period.contains(date)
+				}
+			};
 			let mut known_net = 0i64;
 			let mut known_income: BTreeMap<Option<&CategoryId>, i64> = BTreeMap::new();
 			for flow in known.iter().filter(|flow| in_month(flow.date)) {
@@ -234,12 +266,13 @@ impl<'a> Forecaster<'a> {
 			let Some(month) = months.get(usize::try_from(horizon).unwrap_or(0)) else {
 				continue;
 			};
-			let band = band.offsets(horizon)?.map(|(low, high)| {
-				(
-					Money::from_minor(month.net_worth.minor().saturating_add(low.minor())),
-					Money::from_minor(month.net_worth.minor().saturating_add(high.minor())),
-				)
-			});
+			let band = match band.offsets(horizon)? {
+				Some((low, high)) => Some((
+					month.net_worth.checked_add(low)?,
+					month.net_worth.checked_add(high)?,
+				)),
+				None => None,
+			};
 			horizons.push(HorizonForecast {
 				months: horizon,
 				month: month.month,
@@ -254,6 +287,11 @@ impl<'a> Forecaster<'a> {
 			today,
 			net_worth_today: Money::from_minor(net_worth_today),
 			balances_today: money_map(&start),
+			overdue: known
+				.iter()
+				.filter(|flow| flow.date < today)
+				.cloned()
+				.collect(),
 			possible_double_counts: double_counts(&baselines, known),
 			capitalized_transfers: self.capitalized_transfers(&baselines, current)?,
 			baselines,
@@ -337,16 +375,29 @@ fn money_map(balances: &BTreeMap<AccountId, i64>) -> BTreeMap<AccountId, Money> 
 		.collect()
 }
 
+/// A spending baseline next to a bill in the same category, or an income
+/// baseline next to an income flow in it or in no category.
 fn double_counts(baselines: &[Baseline], known: &[KnownFlow]) -> Vec<CategoryId> {
 	baselines
 		.iter()
-		.filter(|baseline| baseline.side == Side::Spending && baseline.level > Money::ZERO)
+		.filter(|baseline| baseline.level > Money::ZERO)
 		.filter(|baseline| {
 			known.iter().any(|flow| {
-				flow.kind == FlowKind::Expense
-					&& flow.category.as_ref() == Some(&baseline.category)
-					&& i128::from(baseline.level.minor()) * 2
-						>= i128::from(flow.amount.minor()).abs()
+				let same = match baseline.side {
+					Side::Spending => {
+						flow.kind == FlowKind::Expense
+							&& flow.category.as_ref() == Some(&baseline.category)
+					}
+					Side::Income => {
+						flow.kind == FlowKind::Income
+							&& flow
+								.category
+								.as_ref()
+								.is_none_or(|category| category == &baseline.category)
+					}
+				};
+				same && i128::from(baseline.level.minor()) * 2
+					>= i128::from(flow.amount.minor()).abs()
 			})
 		})
 		.map(|baseline| baseline.category.clone())

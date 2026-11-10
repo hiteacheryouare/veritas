@@ -31,23 +31,28 @@ impl Series {
 		self.first.map(CivilDate::year_month)
 	}
 
-	pub fn month(&self, month: YearMonth) -> i64 {
+	pub fn month(&self, month: YearMonth) -> Result<i64, CoreError> {
 		let period = Period::month(month);
 		self.sum(period.first(), period.last())
 	}
 
-	pub fn sum(&self, first: CivilDate, last: CivilDate) -> i64 {
+	pub fn sum(&self, first: CivilDate, last: CivilDate) -> Result<i64, CoreError> {
 		if first > last {
-			return 0;
+			return Ok(0);
 		}
 		self.days
 			.range(first..=last)
-			.fold(0i64, |total, (_, x)| total.saturating_add(*x))
+			.try_fold(0i64, |total, (_, x)| total.checked_add(*x))
+			.ok_or(CoreError::Overflow)
 	}
 
 	/// The account with the largest `|amount|` over `months`, ties to the
 	/// lower account sort order (FC-3).
-	pub fn account(&self, budget: &BudgetData, months: &[YearMonth]) -> Option<AccountId> {
+	pub fn account(
+		&self,
+		budget: &BudgetData,
+		months: &[YearMonth],
+	) -> Result<Option<AccountId>, CoreError> {
 		let mut totals: BTreeMap<&AccountId, i64> = BTreeMap::new();
 		for month in months {
 			for ((_, account), value) in self
@@ -56,7 +61,7 @@ impl Series {
 				.take_while(|((at, _), _)| at == month)
 			{
 				let total = totals.entry(account).or_default();
-				*total = total.saturating_add(*value);
+				*total = total.checked_add(*value).ok_or(CoreError::Overflow)?;
 			}
 		}
 		let order = |account: &AccountId| {
@@ -65,14 +70,14 @@ impl Series {
 				.get(account)
 				.map_or(f64::MAX, |account| account.sort_order)
 		};
-		totals
+		Ok(totals
 			.into_iter()
 			.max_by(|(a, x), (b, y)| {
 				x.cmp(y)
 					.then_with(|| order(b).total_cmp(&order(a)))
 					.then_with(|| b.cmp(a))
 			})
-			.map(|(account, _)| account.clone())
+			.map(|(account, _)| account.clone()))
 	}
 }
 

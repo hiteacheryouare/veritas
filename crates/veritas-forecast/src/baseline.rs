@@ -45,7 +45,10 @@ impl Baseline {
 			.unwrap_or(0)
 			.max(0);
 		let window = complete_months(current, history_months.min(WINDOW))?;
-		let values: Vec<i64> = window.iter().map(|month| series.month(*month)).collect();
+		let values = window
+			.iter()
+			.map(|month| series.month(*month))
+			.collect::<Result<Vec<i64>, _>>()?;
 		let level = median(&values).unwrap_or(0);
 		let seasonal_index = if history_months >= SEASON_MIN {
 			seasonal_index(series, current, history_months)?
@@ -70,7 +73,7 @@ impl Baseline {
 			None => None,
 		};
 		let month_to_date = match today {
-			Some(today) => series.sum(current.first_day(), today),
+			Some(today) => series.sum(current.first_day(), today)?,
 			None => 0,
 		};
 		Ok(Baseline {
@@ -82,12 +85,12 @@ impl Baseline {
 			seasonal_index,
 			deseasonalized_level,
 			month_to_date: Money::from_minor(month_to_date),
-			account: match series.account(budget, &window) {
+			account: match series.account(budget, &window)? {
 				Some(account) => Some(account),
 				None => {
 					let mut months = complete_months(current, history_months)?;
 					months.push(current);
-					series.account(budget, &months)
+					series.account(budget, &months)?
 				}
 			},
 		})
@@ -156,23 +159,27 @@ fn index_for(index: &[i64; 12], month: YearMonth) -> i64 {
 
 /// Raw indices of one 12-month window, or `None` when the window fails
 /// `sum12 > 0` or `INDEX_ACTIVE_MIN` (FC-1 step 1).
-fn raw_window(series: &Series, months: &[YearMonth]) -> Option<[i64; 12]> {
-	let values: Vec<(YearMonth, i64)> = months
+fn raw_window(series: &Series, months: &[YearMonth]) -> Result<Option<[i64; 12]>, CoreError> {
+	let values = months
 		.iter()
-		.map(|month| (*month, series.month(*month)))
-		.collect();
+		.map(|month| Ok((*month, series.month(*month)?)))
+		.collect::<Result<Vec<(YearMonth, i64)>, CoreError>>()?;
 	let sum12: i128 = values.iter().map(|(_, x)| i128::from(*x)).sum();
 	let active = values.iter().filter(|(_, x)| *x != 0).count();
 	if sum12 <= 0 || active < INDEX_ACTIVE_MIN {
-		return None;
+		return Ok(None);
 	}
 	let mut raw = [TYPICAL; 12];
 	for (month, x) in values {
-		let slot = usize::try_from(month.month()).ok()?.checked_sub(1)?;
 		let value = round_half_up(i128::from(x.max(0)) * 120_000, sum12);
-		*raw.get_mut(slot)? = i64::try_from(value).ok()?;
+		let slot = usize::try_from(month.month())
+			.ok()
+			.and_then(|month| month.checked_sub(1))
+			.and_then(|slot| raw.get_mut(slot))
+			.ok_or(CoreError::Overflow)?;
+		*slot = i64::try_from(value).map_err(|_| CoreError::Overflow)?;
 	}
-	Some(raw)
+	Ok(Some(raw))
 }
 
 fn seasonal_index(
@@ -181,12 +188,12 @@ fn seasonal_index(
 	history_months: i32,
 ) -> Result<Option<[i64; 12]>, CoreError> {
 	let latest = complete_months(current, 12)?;
-	let Some(raw) = raw_window(series, &latest) else {
+	let Some(raw) = raw_window(series, &latest)? else {
 		return Ok(None);
 	};
 	let previous = if history_months >= 25 {
 		let months = complete_months(current, 24)?;
-		raw_window(series, months.get(..12).unwrap_or_default())
+		raw_window(series, months.get(..12).unwrap_or_default())?
 	} else {
 		None
 	};

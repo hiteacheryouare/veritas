@@ -49,46 +49,51 @@ impl Band {
 		}
 	}
 
-	pub(crate) fn from_residuals(mut residuals: Vec<i64>, actuals: &[i64]) -> Band {
+	pub(crate) fn from_residuals(
+		mut residuals: Vec<i64>,
+		actuals: &[i64],
+	) -> Result<Band, CoreError> {
 		residuals.sort_unstable();
 		if residuals.len() >= BAND_MIN_RESIDUALS {
-			return Band {
+			return Ok(Band {
 				method: BandMethod::Residuals,
 				months: residuals.len(),
 				low: Money::from_minor(percentile(&residuals, 1).unwrap_or(0)),
 				high: Money::from_minor(percentile(&residuals, 9).unwrap_or(0)),
-			};
+			});
 		}
 		let (Some(mid), Some(min), Some(max)) =
 			(median(actuals), actuals.iter().min(), actuals.iter().max())
 		else {
-			return Band {
+			return Ok(Band {
 				method: BandMethod::NoHistory,
 				months: 0,
 				low: Money::ZERO,
 				high: Money::ZERO,
-			};
+			});
 		};
-		Band {
+		Ok(Band {
 			method: BandMethod::Range,
 			months: actuals.len(),
-			low: Money::from_minor(min.saturating_sub(mid)),
-			high: Money::from_minor(max.saturating_sub(mid)),
-		}
+			low: Money::from_minor(*min).checked_sub(Money::from_minor(mid))?,
+			high: Money::from_minor(*max).checked_sub(Money::from_minor(mid))?,
+		})
 	}
 }
 
-fn signed(side: Side, value: i64) -> i64 {
+fn signed(side: Side, value: i64) -> Result<i64, CoreError> {
 	match side {
-		Side::Income => value,
-		Side::Spending => value.saturating_neg(),
+		Side::Income => Ok(value),
+		Side::Spending => value.checked_neg().ok_or(CoreError::Overflow),
 	}
 }
 
 /// The actual uncertain net flow `F_t` of a month: baselined income minus spending.
-pub(crate) fn actual_flow(series: &[&Series], month: YearMonth) -> i64 {
-	series.iter().fold(0i64, |total, series| {
-		total.saturating_add(signed(series.side, series.month(month)))
+pub(crate) fn actual_flow(series: &[&Series], month: YearMonth) -> Result<i64, CoreError> {
+	series.iter().try_fold(0i64, |total, series| {
+		total
+			.checked_add(signed(series.side, series.month(month)?)?)
+			.ok_or(CoreError::Overflow)
 	})
 }
 
@@ -109,7 +114,7 @@ pub(crate) fn forecast_flow(baselines: &[Baseline], month: YearMonth) -> Result<
 	let mut total = 0i64;
 	for baseline in baselines {
 		total = total
-			.checked_add(signed(baseline.side, baseline.forecast(month)?.minor()))
+			.checked_add(signed(baseline.side, baseline.forecast(month)?.minor())?)
 			.ok_or(CoreError::Overflow)?;
 	}
 	Ok(total)
@@ -130,19 +135,19 @@ pub(crate) fn band(
 	current: YearMonth,
 ) -> Result<Band, CoreError> {
 	let Some(first) = first_month(series) else {
-		return Ok(Band::from_residuals(Vec::new(), &[]));
+		return Band::from_residuals(Vec::new(), &[]);
 	};
 	let months = complete_months(current, months_between(first, current)?)?;
-	let actuals: Vec<i64> = months
+	let actuals = months
 		.iter()
 		.map(|month| actual_flow(series, *month))
-		.collect();
+		.collect::<Result<Vec<i64>, _>>()?;
 	let mut residuals = Vec::new();
 	for (month, actual) in months.iter().zip(&actuals).skip(MIN_MONTHS_BEFORE) {
 		let forecast = forecast_flow(&baselines_at(budget, series, *month)?, *month)?;
-		residuals.push(actual.saturating_sub(forecast));
+		residuals.push(actual.checked_sub(forecast).ok_or(CoreError::Overflow)?);
 	}
-	Ok(Band::from_residuals(residuals, &actuals))
+	Band::from_residuals(residuals, &actuals)
 }
 
 #[cfg(test)]
@@ -158,7 +163,7 @@ mod tests {
 
 	#[test]
 	fn fc_4_worked_example_percentiles_and_scaling() {
-		let band = Band::from_residuals(RESIDUALS.to_vec(), &[]);
+		let band = Band::from_residuals(RESIDUALS.to_vec(), &[]).unwrap();
 		assert_eq!(band.method, BandMethod::Residuals);
 		assert_eq!((band.low.minor(), band.high.minor()), (-8000, 4000));
 		assert_eq!(offsets(&band, 1), (-8000, 4000));
@@ -169,7 +174,7 @@ mod tests {
 
 	#[test]
 	fn fc_4_3_fallback_with_few_residuals() {
-		let band = Band::from_residuals(vec![1, 2], &[-1000, 0, 2000]);
+		let band = Band::from_residuals(vec![1, 2], &[-1000, 0, 2000]).unwrap();
 		assert_eq!(band.method, BandMethod::Range);
 		assert_eq!(offsets(&band, 1), (-1000, 2000));
 		assert_eq!(
@@ -180,7 +185,7 @@ mod tests {
 
 	#[test]
 	fn fc_4_3_no_history_means_no_band() {
-		let band = Band::from_residuals(Vec::new(), &[]);
+		let band = Band::from_residuals(Vec::new(), &[]).unwrap();
 		assert_eq!(band.method, BandMethod::NoHistory);
 		assert_eq!(band.offsets(3).unwrap(), None);
 		assert_eq!(band.label(), "No history yet");

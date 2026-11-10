@@ -202,7 +202,7 @@ fn fc_5_notice_when_suggestions_exceed_expected_income() {
 	assert_eq!(suggestions.expected_income, cents(200000));
 	assert_eq!(suggestions.exceeds_income_by, Some(cents(8000)));
 	assert_eq!(
-		suggestions.notice().unwrap(),
+		suggestions.notice.as_deref().unwrap(),
 		"Suggestions exceed expected income by $80"
 	);
 }
@@ -429,4 +429,27 @@ fn r_fc_2_goal_contribution_scenario_moves_the_eta() {
 	};
 	let result = eta(&book, 0, &open);
 	assert!(matches!(result.status, EtaStatus::Eta { month, .. } if month == ym("2027-07")));
+}
+
+#[test]
+fn fc_6_a_pace_slower_than_100_years_has_no_eta() {
+	let book = laptop_book(&[("2026-12", 1)]);
+	let result = eta(&book, 0, &Scenario::baseline());
+	assert_eq!(result.status, EtaStatus::TooFar);
+	assert_eq!(result.text(), "No ETA: more than 100 years at this pace");
+}
+
+#[test]
+fn fc_6_a_contribution_ending_past_100_years_is_capped() {
+	let book = laptop_book(&[("2026-12", 0)]);
+	let long = Scenario {
+		name: "Drip".to_owned(),
+		events: vec![ScenarioEvent::GoalContribution {
+			goal: GoalId::new("laptop"),
+			amount: cents(100),
+			start_month: ym("2027-02"),
+			end_month: Some(ym("2200-01")),
+		}],
+	};
+	assert_eq!(eta(&book, 0, &long).status, EtaStatus::TooFar);
 }

@@ -121,8 +121,17 @@ pub struct LoanPayment {
 impl LoanPayment {
 	/// An interest expense and a principal transfer per date. Interest is
 	/// `round_half_up(outstanding * rate_bps / 120000)`; principal is the rest,
-	/// capped at what is still owed, so the last payment is smaller.
+	/// capped at what is still owed, so the last payment is smaller. Interest
+	/// the payment doesn't cover capitalizes: it is an expense on the loan
+	/// account, which then owes more.
 	pub fn flows(&self, dates: &[CivilDate]) -> Result<Vec<KnownFlow>, CoreError> {
+		let payment = self.payment.minor();
+		if payment < 0 {
+			return Err(CoreError::Invalid(format!(
+				"{}: a loan payment can't be negative",
+				self.name
+			)));
+		}
 		let mut outstanding = self.outstanding.minor().max(0);
 		let mut flows = Vec::new();
 		for date in dates {
@@ -138,28 +147,54 @@ impl LoanPayment {
 				None => self.last_interest.minor(),
 			}
 			.max(0);
-			let principal = (self.payment.minor() - interest).clamp(0, outstanding);
-			outstanding -= principal;
-			let flow = |amount: i64, kind: FlowKind, category: &Option<CategoryId>| KnownFlow {
+			let paid_interest = interest.min(payment);
+			let capitalized = interest - paid_interest;
+			let principal = (payment - paid_interest).min(outstanding);
+			outstanding = outstanding
+				.checked_sub(principal)
+				.and_then(|owed| owed.checked_add(capitalized))
+				.ok_or(CoreError::Overflow)?;
+			let flow = |account: &AccountId,
+			            amount: i64,
+			            kind: FlowKind,
+			            category: &Option<CategoryId>,
+			            name: String| KnownFlow {
 				date: *date,
-				account: self.from.clone(),
+				account: account.clone(),
 				amount: Money::from_minor(-amount),
 				kind,
 				category: category.clone(),
 				schedule: None,
-				name: self.name.clone(),
+				name,
 				certainty: Certainty::Exact,
 			};
-			if interest > 0 {
-				flows.push(flow(interest, FlowKind::Expense, &self.interest_category));
+			if paid_interest > 0 {
+				flows.push(flow(
+					&self.from,
+					paid_interest,
+					FlowKind::Expense,
+					&self.interest_category,
+					self.name.clone(),
+				));
+			}
+			if capitalized > 0 {
+				flows.push(flow(
+					&self.loan,
+					capitalized,
+					FlowKind::Expense,
+					&self.interest_category,
+					format!("{}: capitalized interest", self.name),
+				));
 			}
 			if principal > 0 {
 				flows.push(flow(
+					&self.from,
 					principal,
 					FlowKind::Transfer {
 						counterpart: self.loan.clone(),
 					},
 					&self.principal_category,
+					self.name.clone(),
 				));
 			}
 		}

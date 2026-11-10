@@ -125,11 +125,18 @@ impl Scenario {
 		Scenario::default()
 	}
 
-	pub fn validate(&self) -> Result<(), CoreError> {
+	/// A what-if is about the future: a one-time event dated before `today`
+	/// is rejected rather than moved.
+	pub fn validate(&self, today: CivilDate) -> Result<(), CoreError> {
 		let invalid = |text: &str| Err(CoreError::Invalid(format!("{}: {text}", self.name)));
 		for event in &self.events {
 			let (start, end) = match event {
-				ScenarioEvent::OneTime { .. } => continue,
+				ScenarioEvent::OneTime { date, .. } => {
+					if *date < today {
+						return invalid("a one-time change can't be dated before today");
+					}
+					continue;
+				}
 				ScenarioEvent::Recurring {
 					start,
 					end_month,
@@ -166,10 +173,11 @@ impl Scenario {
 		Ok(())
 	}
 
-	/// One-time and recurring flows dated after `after` through `last`.
+	/// One-time and recurring flows dated `today` through `last`. A recurring
+	/// change that started earlier keeps its anchor and contributes from today.
 	pub(crate) fn flows(
 		&self,
-		after: CivilDate,
+		today: CivilDate,
 		last: CivilDate,
 	) -> Result<Vec<ScenarioFlow>, CoreError> {
 		let mut flows = Vec::new();
@@ -181,7 +189,7 @@ impl Scenario {
 					amount,
 					..
 				} => {
-					if after < *date && *date <= last {
+					if today <= *date && *date <= last {
 						flows.push(ScenarioFlow {
 							date: *date,
 							account: account.clone(),
@@ -198,7 +206,7 @@ impl Scenario {
 					..
 				} => {
 					for date in cadence.dates(*start, last)? {
-						if after < date && end_month.is_none_or(|end| date.year_month() <= end) {
+						if today <= date && end_month.is_none_or(|end| date.year_month() <= end) {
 							flows.push(ScenarioFlow {
 								date,
 								account: account.clone(),
