@@ -3,12 +3,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use veritas_domain::{
 	AccountId, BudgetData, CategoryId, CivilDate, CoreError, Money, ScheduleId, YearMonth,
 };
-use veritas_reports::{Classification, Decision, Period, classify};
+use veritas_reports::{Classification, Decision, Period, classify, net_worth};
 
 use crate::band::{Band, band};
 use crate::baseline::{Baseline, WINDOW, complete_months};
 use crate::flows::{FlowKind, KnownFlow};
-use crate::history::{History, Series, Side, balances, bill_linked, net_worth};
+use crate::history::{History, Series, Side, balances, bill_linked};
 use crate::math::{round_half_away, to_money};
 use crate::scenario::{IncomeDelta, MAX_COMPARED, Scenario};
 
@@ -152,7 +152,7 @@ impl<'a> Forecaster<'a> {
 		let band = band(self.budget, &series, current)?;
 		let start = balances(self.budget, &self.classification, today)?;
 		let mut running = start.clone();
-		let mut worth = net_worth(&start)?;
+		let mut worth = net_worth(&self.classification, today)?.minor();
 		let net_worth_today = worth;
 		let last = Period::month(current.offset(LAST_HORIZON)?).last();
 		let scenario_flows = scenario.flows(today, last)?;

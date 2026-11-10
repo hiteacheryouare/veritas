@@ -4,7 +4,7 @@ use veritas_domain::{
 	AccountId, BudgetData, CategoryId, CategoryKind, CivilDate, CoreError, TransactionId,
 	TransactionKind, YearMonth,
 };
-use veritas_reports::{Classification, ClassifiedRow, Period};
+use veritas_reports::{Classification, ClassifiedRow, Period, account_balances};
 
 /// Whether a baseline forecasts money spent or money earned. Both are
 /// positive magnitudes: a spending baseline of 43000 is $430 out.
@@ -204,33 +204,14 @@ pub(crate) fn bill_linked(budget: &BudgetData, row: &ClassifiedRow) -> bool {
 	linked(&row.id) || row.parent.as_ref().is_some_and(linked)
 }
 
-/// Balance of every account at the end of `on` (ST-2): all classified rows,
-/// mirror legs included, orphans excluded.
+/// ST-2's balance of every account at the end of `on`, from veritas-reports.
 pub(crate) fn balances(
 	budget: &BudgetData,
 	classification: &Classification,
 	on: CivilDate,
 ) -> Result<BTreeMap<AccountId, i64>, CoreError> {
-	let mut balances: BTreeMap<AccountId, i64> = budget
-		.accounts
-		.keys()
-		.map(|account| (account.clone(), 0))
-		.collect();
-	for row in classification.rows() {
-		if row.date > on {
-			break;
-		}
-		let balance = balances.entry(row.account.clone()).or_default();
-		*balance = balance
-			.checked_add(row.amount.minor())
-			.ok_or(CoreError::Overflow)?;
-	}
-	Ok(balances)
-}
-
-pub(crate) fn net_worth(balances: &BTreeMap<AccountId, i64>) -> Result<i64, CoreError> {
-	balances
-		.values()
-		.try_fold(0i64, |total, balance| total.checked_add(*balance))
-		.ok_or(CoreError::Overflow)
+	Ok(account_balances(budget, classification, on)?
+		.into_iter()
+		.map(|line| (line.account, line.balance.minor()))
+		.collect())
 }
