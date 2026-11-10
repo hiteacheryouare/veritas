@@ -27,6 +27,11 @@ fn io_error(path: &Path, error: &std::io::Error) -> CoreError {
 /// the importing device takes a fresh CRDT node id. Everything else stays.
 fn export_metadata(metadata_path: &Path) -> Result<Vec<u8>, CoreError> {
 	let bytes = std::fs::read(metadata_path).map_err(|error| io_error(metadata_path, &error))?;
+	if bytes.len() as u64 > crate::archive::MAX_METADATA_SIZE {
+		return Err(CoreError::Invalid(
+			"the budget's metadata.json is larger than 1 MB".to_owned(),
+		));
+	}
 	let mut metadata = json::parse(&String::from_utf8_lossy(&bytes))
 		.map_err(|reason| CoreError::Invalid(reason.to_owned()))?;
 	let Value::Object(entries) = &mut metadata else {

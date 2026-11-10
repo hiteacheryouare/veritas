@@ -309,3 +309,22 @@ fn an_inconsistent_budget_imports_with_its_audit_report_r_rel_2() {
 	assert_eq!(budget.audit.violations.len(), 2, "{:?}", budget.audit);
 	assert!(budget.dir.exists());
 }
+
+#[test]
+fn an_oversized_metadata_file_is_refused() {
+	let scratch = Scratch::new("import-big-metadata");
+	let (db_path, _) = unpack(&fixture("small"), scratch.path());
+	let db = std::fs::read(&db_path).unwrap();
+	let big = format!("{{\"budgetName\":\"{}\"}}", "x".repeat(2 * 1024 * 1024));
+	let zip_path = scratch.join("big.zip");
+	write_zip(
+		&zip_path,
+		&[("db.sqlite", &db), ("metadata.json", big.as_bytes())],
+	);
+	let target = scratch.join("budget");
+	assert!(matches!(
+		import_actual_zip(&zip_path, &target),
+		Err(CoreError::NotAnActualBudget(_))
+	));
+	assert!(!target.exists());
+}

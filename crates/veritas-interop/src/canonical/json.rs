@@ -1,9 +1,10 @@
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::io::{self, Write};
 
 /// A string as JSON.parse produces it: UTF-16 units, so a lone surrogate from
 /// a `\ud800` escape survives. Strings read from SQLite are always valid UTF-8.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Str {
 	Utf8(String),
 	Utf16(Vec<u16>),
@@ -290,34 +291,33 @@ const MAX_DEPTH: usize = 512;
 /// `JSON.parse`, for metadata.json: numbers become doubles, duplicate keys
 /// keep the last value, and strings keep lone surrogates.
 pub(crate) fn parse(text: &str) -> Result<Value, &'static str> {
-	let mut parser = Parser {
-		chars: text.chars().collect(),
-		at: 0,
-	};
+	let mut parser = Parser { text, at: 0 };
 	parser.skip_whitespace();
 	let value = parser.value(0)?;
 	parser.skip_whitespace();
-	if parser.at != parser.chars.len() {
+	if parser.at != parser.text.len() {
 		return Err("metadata.json has text after its JSON value");
 	}
 	Ok(value)
 }
 
-struct Parser {
-	chars: Vec<char>,
+/// `at` is a byte offset into `text`. Only ASCII is ever stepped over with
+/// `at += 1`; everything else goes through `next`.
+struct Parser<'a> {
+	text: &'a str,
 	at: usize,
 }
 
 const INVALID: &str = "metadata.json isn't valid JSON";
 
-impl Parser {
+impl Parser<'_> {
 	fn peek(&self) -> Option<char> {
-		self.chars.get(self.at).copied()
+		self.text.get(self.at..)?.chars().next()
 	}
 
 	fn next(&mut self) -> Result<char, &'static str> {
 		let c = self.peek().ok_or(INVALID)?;
-		self.at += 1;
+		self.at += c.len_utf8();
 		Ok(c)
 	}
 
@@ -361,6 +361,7 @@ impl Parser {
 	fn object(&mut self, depth: usize) -> Result<Value, &'static str> {
 		self.expect('{')?;
 		let mut entries: Vec<(Str, Value)> = Vec::new();
+		let mut index: HashMap<Str, usize> = HashMap::new();
 		self.skip_whitespace();
 		if self.peek() == Some('}') {
 			self.at += 1;
@@ -373,9 +374,12 @@ impl Parser {
 			self.expect(':')?;
 			self.skip_whitespace();
 			let value = self.value(depth + 1)?;
-			match entries.iter_mut().find(|(existing, _)| *existing == key) {
-				Some(entry) => entry.1 = value,
-				None => entries.push((key, value)),
+			match index.get(&key) {
+				Some(&at) => entries[at].1 = value,
+				None => {
+					index.insert(key.clone(), entries.len());
+					entries.push((key, value));
+				}
 			}
 			self.skip_whitespace();
 			match self.next()? {
@@ -480,8 +484,10 @@ impl Parser {
 				return Err(INVALID);
 			}
 		}
-		let text: String = self.chars[start..self.at].iter().collect();
-		text.parse::<f64>().map(Value::Number).map_err(|_| INVALID)
+		self.text[start..self.at]
+			.parse::<f64>()
+			.map(Value::Number)
+			.map_err(|_| INVALID)
 	}
 }
 
@@ -626,6 +632,17 @@ mod tests {
 			String::from_utf8(out).unwrap(),
 			"{\"b\":true,\"a\":[null,\"\\ud800\"]}"
 		);
+	}
+
+	#[test]
+	fn many_keys_parse_in_linear_time() {
+		let keys: Vec<String> = (0..50_000).map(|n| format!("\"k{n}\":{n}")).collect();
+		let started = std::time::Instant::now();
+		let Value::Object(entries) = parse(&format!("{{{}}}", keys.join(","))).unwrap() else {
+			panic!("not an object");
+		};
+		assert_eq!(entries.len(), 50_000);
+		assert!(started.elapsed() < std::time::Duration::from_secs(2));
 	}
 
 	#[test]
