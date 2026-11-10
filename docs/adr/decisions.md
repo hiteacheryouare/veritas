@@ -31,7 +31,7 @@ Every decision behind Veritas, so no question gets asked twice. D1–D24 are PLA
 
 ### D6. Which budget types does the v1 UI support?
 - **Options:** envelope and tracking / envelope only, tracking preserved read-only
-- **Decision:** Envelope only. Tracking ("reflect") files are preserved losslessly and open read-only.
+- **Decision:** Envelope only. Tracking ("reflect") files are preserved losslessly and open read-only. An assumption, since Ryan uses envelopes.
 - **Date:** 2026-11-09
 
 ### D7. When is money counted as spent?
@@ -46,7 +46,7 @@ Every decision behind Veritas, so no question gets asked twice. D1–D24 are PLA
 
 ### D9. What does closing a goal or deleting a category do to history?
 - **Options:** re-file transactions like Actual's delete / budget move plus hide, never re-file
-- **Decision:** Closing a goal is a budget move plus hide. Deleting a category with history defaults to Archive. A real delete is only behind an explicit confirmation.
+- **Decision:** Closing a goal is a budget move plus hide. Deleting a category with history defaults to Archive. A real delete is only behind an explicit confirmation. The theory that Actual re-files history on delete is checked in P0.4 (`docs/actual-format.md`).
 - **Date:** 2026-11-09
 
 ### D10. How are recurring bills stored?
@@ -76,7 +76,7 @@ Every decision behind Veritas, so no question gets asked twice. D1–D24 are PLA
 
 ### D15. Actual's budget templates and automations?
 - **Options:** execute them / preserve without executing
-- **Decision:** Preserved but not executed in v1.
+- **Decision:** Preserved but not executed in v1. An assumption Ryan didn't state.
 - **Date:** 2026-11-09
 
 ### D16. Platform order?
@@ -101,7 +101,7 @@ Every decision behind Veritas, so no question gets asked twice. D1–D24 are PLA
 
 ### D20. Name and pins?
 - **Options:** —
-- **Decision:** Veritas. Actual v26.11.0, macOS 27, GitHub repo `veritas`.
+- **Decision:** Veritas. Actual v26.11.0, macOS 27, GitHub repo `veritas` (planned private, made public in D28).
 - **Date:** 2026-11-09
 
 ### D21. Who does the work?

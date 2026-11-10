@@ -24,7 +24,7 @@ Also diff `server/budget/`, `server/transactions/`, `server/rules/`, `server/sch
 
 ## 2. Move the pins
 
-1. **Manifest.** Rename `crates/veritas-interop/manifest/actual-OLDVER.json` to `actual-NEWVER.json`. Update `actualTag`, `actualCommit` (`git -C reference/actual rev-parse NEW^{commit}`) and `apiVersion`, then regenerate `migrations` from the migration file prefixes. Check `additiveOnlyCutoff` against `ADDITIVE_ONLY_CUTOFF` in `packages/loot-core/src/server/migrate/migrations.ts`.
+1. **Manifest.** Rename `crates/veritas-interop/manifest/actual-OLDVER.json` to `actual-NEWVER.json`. Update `actualTag`, `actualCommit` (`git -C reference/actual rev-parse NEW^{commit}`) and `apiVersion`, then regenerate `migrations` from the numeric prefixes of `packages/loot-core/migrations/*` (skip `README.md`). Check `additiveOnlyCutoff` against `ADDITIVE_ONLY_CUTOFF` in `packages/loot-core/src/server/migrate/migrations.ts`.
 2. **Reference.** Delete the checkout, then recreate it: `rm -rf reference/actual && cargo xtask reference`.
 3. **Oracle.** In `tools/actual-oracle/`, run `npm install --save-exact @actual-app/api@NEWVER`. Commit the lockfile. If Actual raised its Node engine floor, update `.nvmrc`.
 4. **Notices.** Bump the pinned version in THIRD_PARTY_NOTICES.md.
