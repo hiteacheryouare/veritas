@@ -50,8 +50,7 @@ impl Manifest {
 		})
 	}
 
-	/// R-IO-7, with Actual's own `checkDatabaseValidity` rules
-	/// (docs/actual-format.md §3.7): a file Actual itself would refuse is not
+	/// Applies Actual's own `checkDatabaseValidity` rules: a file Actual itself would refuse is not
 	/// a budget; one with unknown post-cutoff ids is from a newer Actual and
 	/// opens read-only; one with ids still to apply is from an older Actual.
 	pub fn check(&self, applied: &[i64]) -> Result<Access, CoreError> {

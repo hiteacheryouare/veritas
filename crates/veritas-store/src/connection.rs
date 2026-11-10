@@ -99,7 +99,7 @@ impl Store {
 		load::load(&self.conn)
 	}
 
-	/// One command's writes, as one SQLite transaction (R-REL-1). Dropping the
+	/// One command's writes, as one SQLite transaction. Dropping the
 	/// writer without committing rolls everything back.
 	pub fn writer(&mut self) -> Result<Writer<'_>, CoreError> {
 		self.ensure_writable()?;
@@ -114,7 +114,7 @@ impl Store {
 		integrity_check(&self.conn)
 	}
 
-	/// R-REL-2 on open: SQLite's integrity check, then, when the file is
+	/// SQLite's integrity check, then, when the file is
 	/// sound, the load and the invariant audit of what it loaded.
 	pub fn open_audit(&self) -> Result<(Option<Loaded>, AuditReport), CoreError> {
 		audit_connection(&self.conn)

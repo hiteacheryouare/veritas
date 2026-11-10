@@ -20,7 +20,7 @@ pub struct ImportedBudget {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ImportOutcome {
 	Imported(ImportedBudget),
-	/// SQLite found the copy damaged, so Veritas didn't keep it (PLAN §6.6).
+	/// SQLite found the copy damaged, so Veritas didn't keep it.
 	/// The report is all that remains.
 	Refused(AuditReport),
 }
@@ -29,8 +29,8 @@ fn io_error(path: &Path, error: &std::io::Error) -> CoreError {
 	CoreError::Io(format!("{}: {error}", path.display()))
 }
 
-/// R-IO-1, R-IO-8: copies an Actual export into `budget_dir`, which must not
-/// exist yet, then checks and audits the copy (R-IO-7, R-REL-2). The zip is
+/// Copies an Actual export into `budget_dir`, which must not exist yet, then
+/// checks and audits the copy. The zip is
 /// only ever read. Unless the budget is imported, the new folder is removed,
 /// so nothing is left behind.
 pub fn import_actual_zip(zip_path: &Path, budget_dir: &Path) -> Result<ImportOutcome, CoreError> {

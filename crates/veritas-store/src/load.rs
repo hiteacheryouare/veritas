@@ -257,7 +257,7 @@ pub fn load(conn: &Connection) -> Result<Loaded, CoreError> {
 	)?;
 
 	// Holds are an envelope feature; Actual doesn't read them for tracking
-	// budgets (sheet.ts:258).
+	// budgets.
 	if data.budget_type == BudgetType::Envelope {
 		each_row(
 			conn,

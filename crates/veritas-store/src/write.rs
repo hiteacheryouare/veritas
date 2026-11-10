@@ -277,7 +277,7 @@ fn quote(name: &str) -> String {
 /// One SQLite transaction of row writes, in Actual's style: an insert names
 /// only the columns Veritas has a value for, so every other column keeps its
 /// SQL default, and an update sets only the columns that changed, so columns
-/// Veritas doesn't know about survive (R-IO-5). Actual rows are never deleted
+/// Veritas doesn't know about survive. Actual rows are never deleted
 /// or replaced; a delete is `tombstone = 1`.
 pub struct Writer<'conn> {
 	tx: SqlTransaction<'conn>,

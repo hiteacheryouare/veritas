@@ -13,7 +13,7 @@ use crate::scratch::ScratchDir;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExportOutcome {
 	/// The zip is at the requested path. The audit ran first and found no
-	/// damage; anything else it found is here (R-REL-2).
+	/// damage; anything else it found is here.
 	Exported(AuditReport),
 	/// SQLite found the working copy damaged, so nothing was written.
 	Refused(AuditReport),
@@ -78,7 +78,7 @@ fn write_zip(path: &Path, db_path: &Path, metadata: &[u8]) -> Result<(), CoreErr
 	file.sync_all().map_err(|error| io_error(path, &error))
 }
 
-/// R-IO-2: writes an Actual export of the budget to `to`, shaped like
+/// Writes an Actual export of the budget to `to`, shaped like
 /// Actual's own: `db.sqlite` and `metadata.json` at the zip root. The zip is
 /// written beside `to` and renamed into place, so `to` is either the old file
 /// or the complete new one. The invariant audit runs first.

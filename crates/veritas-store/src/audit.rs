@@ -13,7 +13,7 @@ pub enum Check {
 	/// The load couldn't represent the row; the reason says why.
 	Unrepresentable(&'static str),
 	/// A transfer row whose link isn't reciprocal, live and between the two
-	/// accounts its payees name (docs/finance/classification.md CLS-1 "Pair").
+	/// accounts its payees name.
 	UnpairedTransfer,
 	/// A row links to a counterpart but its payee isn't a transfer payee.
 	StrayTransferLink,
@@ -46,7 +46,7 @@ pub struct Violation {
 	pub related: Option<String>,
 }
 
-/// The invariant audit (R-REL-2). It reports and never repairs.
+/// The invariant audit. It reports and never repairs.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AuditReport {
 	pub violations: Vec<Violation>,
@@ -410,7 +410,7 @@ fn references(data: &BudgetData, findings: &mut Findings) {
 		}
 	}
 
-	// R-IO-6: Veritas's own rows may outlive what Actual deletes.
+	// Veritas's own rows may outlive what Actual deletes.
 	for row_category in data.category_meta.keys() {
 		let exists = category(row_category.as_str()).map(|_| false);
 		reference(

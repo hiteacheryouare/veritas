@@ -44,15 +44,14 @@ fn has_non_finite_number(value: &Value) -> bool {
 	}
 }
 
-/// The raw part of the canonical dump (contracts/canonical-dump.md,
-/// docs/oracle.md "Canonical dump, version 1") of an Actual export zip. It is
+/// The raw part of the canonical dump of an Actual export zip. It is
 /// byte-identical to `tools/actual-oracle dump --raw-only`.
 pub fn canonical_dump(zip_path: &Path, out: impl Write) -> Result<(), CoreError> {
 	dump_zip(zip_path, Scope::Everything, out)
 }
 
-/// The dump without the `veritas_*` tables, which is what the R-IO-3 round
-/// trip compares (contracts/canonical-dump.md).
+/// The dump without the `veritas_*` tables, which is what the round trip
+/// compares.
 pub fn canonical_dump_of_actual_tables(zip_path: &Path) -> Result<Vec<u8>, CoreError> {
 	let mut out = Vec::new();
 	dump_zip(zip_path, Scope::ActualTables, &mut out)?;
