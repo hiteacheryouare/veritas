@@ -1,4 +1,7 @@
-use veritas_domain::{BudgetData, CoreError, GoalId, Money, Scenario, YearMonth};
+use veritas_domain::{
+	BudgetData, CivilDate, CoreError, GoalId, GoalStatus, Money, Scenario, YearMonth,
+};
+use veritas_engine::EnvelopeSheet;
 
 use crate::baseline::months_between;
 use crate::math::{ceil_div, median};
@@ -224,4 +227,26 @@ fn months_to_go(
 	}
 	let total = i32::try_from(total).map_err(|_| CoreError::Overflow)?;
 	current.offset(total).map(Reach::At)
+}
+
+/// The ETA of every goal that isn't closed, with `available` read from the
+/// envelope sheet for the current month.
+pub fn goal_etas(
+	budget: &BudgetData,
+	sheet: &EnvelopeSheet,
+	today: CivilDate,
+	scenario: Option<&Scenario>,
+) -> Result<Vec<GoalEta>, CoreError> {
+	let current = today.year_month();
+	budget
+		.goals
+		.values()
+		.filter(|goal| goal.status != GoalStatus::Closed)
+		.map(|goal| {
+			let available = sheet
+				.category(current, &goal.category)
+				.map_or(Money::ZERO, |cell| cell.balance);
+			goal_eta(budget, &goal.id, current, available, scenario)
+		})
+		.collect()
 }

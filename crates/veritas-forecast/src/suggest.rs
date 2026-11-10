@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use veritas_domain::{
 	CategoryId, CategoryKind, CivilDate, CoreError, Money, TransactionKind, YearMonth,
 };
+use veritas_engine::EnvelopeSheet;
 use veritas_reports::Period;
 
 use crate::baseline::Baseline;
@@ -18,6 +19,32 @@ pub struct Envelope {
 	/// Money already in the envelope when next month starts, before its own
 	/// budgeted amount: DEBT-8.1's carry for next month.
 	pub carry_into_next: Money,
+}
+
+/// Every category's envelope for the month after `today`, from Actual's
+/// math: DEBT-8.1's carry is that month's available minus its own budgeted
+/// amount, so it already nets out spending and Actual's carryover rules.
+pub fn next_month_envelopes(
+	sheet: &EnvelopeSheet,
+	today: CivilDate,
+) -> Result<BTreeMap<CategoryId, Envelope>, CoreError> {
+	let month = today.year_month().offset(1)?;
+	let Some(sheet) = sheet.month(month) else {
+		return Ok(BTreeMap::new());
+	};
+	sheet
+		.categories
+		.iter()
+		.filter(|(_, cell)| !cell.is_income)
+		.map(|(category, cell)| {
+			Ok((
+				category.clone(),
+				Envelope {
+					carry_into_next: cell.balance.checked_sub(cell.budgeted)?,
+				},
+			))
+		})
+		.collect()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -9,9 +9,10 @@ use std::collections::BTreeMap;
 
 use support::*;
 use veritas_domain::{CategoryKind, GoalId, Scenario, ScenarioChange};
+use veritas_engine::EnvelopeSheet;
 use veritas_forecast::{
 	Basis, Envelope, EtaStatus, FlowKind, Forecaster, KnownFlow, ScheduleAmount, Suggestion,
-	Suggestions, goal_eta,
+	Suggestions, goal_eta, goal_etas, next_month_envelopes,
 };
 
 fn six(category: &str, book: &mut Book, x: i64) {
@@ -512,4 +513,55 @@ fn fc_5_sg_7_a_negative_forecast_suggests_zero() {
 	let fun = item(&suggest(&book, "2027-01-15", &[]), "Fun").clone();
 	assert_eq!(fun.amount, Some(cents(0)));
 	assert_eq!(fun.reason, "Fun $0, 6-month median");
+}
+
+#[test]
+fn debt_8_1_carry_comes_from_actuals_envelope_math() {
+	let mut book = laptop_book(&[("2027-01", 25000), ("2027-02", 25000)]);
+	book.budgeted("2027-01", "Dining", 1000);
+	book.spend("Dining", "2027-01-05", -5000);
+	let today = date("2027-01-20");
+	let sheet = EnvelopeSheet::compute(&book.budget, today).unwrap();
+	let envelopes = next_month_envelopes(&sheet, today).unwrap();
+	assert_eq!(
+		envelopes[&cat("New laptop")].carry_into_next,
+		cents(25000),
+		"G-1b"
+	);
+	assert_eq!(
+		envelopes[&cat("Dining")].carry_into_next,
+		cents(0),
+		"overspending doesn't carry"
+	);
+	assert!(!envelopes.contains_key(&cat("Paycheck")));
+	let laptop = item(
+		&suggest_with(&book, "2027-01-20", &[], &envelopes),
+		"New laptop",
+	)
+	.clone();
+	assert_eq!(
+		laptop.reason,
+		"New laptop $250.00: $1250.00 left over 5 months"
+	);
+}
+
+#[test]
+fn fc_6_goal_etas_read_available_from_the_sheet() {
+	let mut book = laptop_book(&[
+		("2026-10", 25000),
+		("2026-11", 25000),
+		("2026-12", 20000),
+		("2027-01", 42000),
+	]);
+	book.category("Old goal", "Goals");
+	book.goal("old", "Old goal", 1000, None).status = veritas_domain::GoalStatus::Closed;
+	let today = date("2027-01-20");
+	let sheet = EnvelopeSheet::compute(&book.budget, today).unwrap();
+	let etas = goal_etas(&book.budget, &sheet, today, None).unwrap();
+	assert_eq!(etas.len(), 1);
+	assert_eq!(etas[0].remaining, cents(38000));
+	assert!(
+		matches!(etas[0].status, EtaStatus::Eta { month, .. } if month == ym("2027-03")),
+		"E-1"
+	);
 }
