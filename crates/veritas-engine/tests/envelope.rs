@@ -116,6 +116,7 @@ impl Budget {
 				date: day(date),
 				amount: cents(amount),
 				payee: None,
+				imported_payee: None,
 				category: category.map(cat),
 				notes: None,
 				cleared: true,
