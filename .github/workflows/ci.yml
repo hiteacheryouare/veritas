@@ -55,3 +55,27 @@ jobs:
 
       - name: Merge-bar tests
         run: node --test '.github/scripts/*.test.ts'
+
+  # Actual's real engine, pinned. The offline test uses macOS sandbox-exec to deny
+  # all network access, so this job runs on macOS too.
+  oracle:
+    name: oracle
+    runs-on: macos-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: tools/actual-oracle
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: tools/actual-oracle/package-lock.json
+
+      - name: Install the pinned oracle
+        run: npm ci --no-fund --no-audit
+
+      - name: Oracle tests
+        run: npm test
