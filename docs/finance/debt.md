@@ -29,7 +29,7 @@ Rules:
 - **DEBT-2.2** Principal must not be negative. If a payment is smaller than the interest owed, the wizard blocks and says so. Unpaid interest added to the loan balance is recorded by the user as an `adjustment` on the loan account (a non-cash change), never as a negative principal.
 - **DEBT-2.3** Principal larger than outstanding principal is a warning, not an error (a refund or escrow credit can explain it). The loan balance would turn positive and the account would move to the asset side by ST-2. The wizard shows "This pays off the loan and leaves a credit of $X".
 - **DEBT-2.4** Net Profit sees interest, escrow and fees as expenses and principal as Debt paydown (ST-1). Escrow is its own category and never lands in principal or interest.
-- **DEBT-2.5** Escrow is booked as an expense when paid to the servicer (simple, matches how a household budgets). It is not modeled as an off-budget escrow asset in v1. Default awaiting Ryan's confirmation (FIN-3 in classification.md CLS-11). The alternative is an off-budget escrow asset account.
+- **DEBT-2.5** Escrow is booked as an expense when paid to the servicer (simple, matches how a household budgets). It is not modeled as an off-budget escrow asset in v1. Resolved by Ryan at Gate 0 (FIN-3 in classification.md CLS-11). The alternative is an off-budget escrow asset account.
 - **DEBT-2.6** Interest is booked when paid. Interest accrued but unpaid is not recorded. The loan balance the user sees moves only by principal, so it can differ from the lender's statement by accrued interest. This is a stated simplification of D7.
 
 ## DEBT-3 Pre-fill from the last payment (R-DEBT-2)

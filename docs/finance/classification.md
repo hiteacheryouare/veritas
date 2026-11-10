@@ -240,8 +240,8 @@ Check: 400000 - 50000 - 20000 - 30600 - 40000 - 10000 - 15000 = 234400. `income_
 
 | Id | Question | Status |
 |---|---|---|
-| FIN-1 | Unmarked on->off transfers in existing data: count as expense with a review count and a one-time per-category wizard | Resolved by Ryan: yes (CLS-4.2) |
-| FIN-2 | Off-budget purchases booked with an ordinary expense category (rows 8 and 9) are expense, with equity line E2. Alternative: a new excluded kind | Default as written, awaiting Ryan's confirmation |
-| FIN-3 | Escrow is an expense when paid to the servicer. Alternative: an off-budget escrow asset account | Default as written, awaiting Ryan's confirmation |
-| FIN-4 | Paychecks recorded gross with splits (CLS-10) | Resolved by Ryan |
-| FIN-5 | No-spend days ignore bill-linked rows and loan-payment parts (FC-8) | Default as written, awaiting Ryan's confirmation |
+| FIN-1 | Unmarked on->off transfers in existing data: count as expense with a review count and a one-time per-category wizard | Resolved by Ryan (Gate 0, 2026-11-09): yes (CLS-4.2) |
+| FIN-2 | Off-budget purchases booked with an ordinary expense category (rows 8 and 9) are expense, with equity line E2. Alternative: a new excluded kind | Resolved by Ryan (Gate 0, 2026-11-09): default accepted |
+| FIN-3 | Escrow is an expense when paid to the servicer. Alternative: an off-budget escrow asset account | Resolved by Ryan (Gate 0, 2026-11-09): default accepted |
+| FIN-4 | Paychecks recorded gross with splits (CLS-10) | Resolved by Ryan (Gate 0, 2026-11-09) |
+| FIN-5 | No-spend days ignore bill-linked rows and loan-payment parts (FC-8) | Resolved by Ryan (Gate 0, 2026-11-09): default accepted |
