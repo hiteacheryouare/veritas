@@ -259,9 +259,13 @@ impl Book {
 
 	/// Marks a row as made by Veritas's reconcile flow (CLS-5).
 	pub fn mark_adjustment(&mut self, id: &str) {
-		self.budget
-			.transaction_meta
-			.insert(TransactionId::new(id), TransactionMeta { adjustment: true });
+		self.budget.transaction_meta.insert(
+			TransactionId::new(id),
+			TransactionMeta {
+				adjustment: true,
+				needs_actual: None,
+			},
+		);
 	}
 
 	pub fn classify(&self) -> Classification {

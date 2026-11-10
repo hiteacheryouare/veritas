@@ -101,18 +101,6 @@ pub fn oracle_raw_dump(zip_path: &Path) -> Option<Vec<u8>> {
 	oracle(&["dump".as_ref(), zip_path.as_os_str(), "--raw-only".as_ref()])
 }
 
-/// CI sets VERITAS_REQUIRE_ORACLE so a missing oracle fails the run instead of
-/// letting a parity test pass without comparing anything.
-fn skip_without_oracle(what: &str) {
-	assert!(
-		std::env::var_os("VERITAS_REQUIRE_ORACLE").is_none(),
-		"VERITAS_REQUIRE_ORACLE is set but tools/actual-oracle/node_modules is missing"
-	);
-	eprintln!(
-		"skipping {what}: tools/actual-oracle/node_modules is missing, run `cargo xtask oracle setup`"
-	);
-}
-
 /// Runs `tools/actual-oracle` with these arguments and returns its stdout, or
 /// `None` (with a note on stderr) when the oracle isn't installed.
 pub fn oracle(args: &[&std::ffi::OsStr]) -> Option<Vec<u8>> {
