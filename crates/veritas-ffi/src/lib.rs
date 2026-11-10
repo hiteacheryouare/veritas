@@ -39,6 +39,7 @@ pub enum ReadOnlyKind {
 	TrackingBudget,
 	OpenElsewhere,
 	AuditFailed,
+	NewerVeritasSchema,
 }
 
 impl From<CoreError> for FfiError {
@@ -55,6 +56,7 @@ impl From<CoreError> for FfiError {
 					ReadOnlyReason::TrackingBudget => ReadOnlyKind::TrackingBudget,
 					ReadOnlyReason::OpenElsewhere => ReadOnlyKind::OpenElsewhere,
 					ReadOnlyReason::AuditFailed => ReadOnlyKind::AuditFailed,
+					ReadOnlyReason::NewerVeritasSchema => ReadOnlyKind::NewerVeritasSchema,
 				},
 			},
 			CoreError::UpgradeInActualFirst { required } => {
