@@ -14,14 +14,16 @@ Conventions used in all finance specs:
 | Term | Meaning |
 |---|---|
 | Row | One row of Actual's `v_transactions_internal_alive` with `is_parent = 0`. That view drops tombstoned rows and children whose parent is tombstoned or missing (`docs/actual-format.md` §4, `reference/actual/packages/loot-core/src/server/aql/schema/index.ts:404-412`). A split parent is never classified; its children are. Children sum to the parent, so nothing is lost or doubled. Balances use the same rows. |
-| Category of a row | The row's `category` resolved through `category_mapping`, as `v_transactions_internal` does. A merged or deleted category's history therefore classifies under its target's kind, as Actual's budget sums do (`budget/base.ts:138-143`). No resolvable category means uncategorized. |
+| Category of a row | The row's `category` resolved through `category_mapping`, as `v_transactions_internal` does. A merged or deleted category's history therefore classifies under its target's kind, as Actual's budget sums do (`budget/base.ts:138-143`). No resolvable category means uncategorized. A category deleted with no transfer target maps to itself and is tombstoned: the row still counts as categorized, classified by the tombstoned row's kind, and is labeled `(deleted) <name>` (edge case 3). This follows Actual's budget sums, and differs from `v_transactions`, which shows such rows as uncategorized. |
 | Transfer row | A row whose payee (resolved through `payee_mapping`) has `transfer_acct` set. The counterpart account is `payees.transfer_acct`, never inferred from the counterpart row. |
-| Pair | The two rows of one transfer, linked by `transferred_id`. A transfer row is **paired** if its `transferred_id` points to a live row in the `transfer_acct` account. Otherwise it is **unpaired** (edge case 4): it is still classified by the table below using `transfer_acct`, and carries flag `unpaired`. |
+| Pair | The two rows of one transfer, linked by `transferred_id`. Two rows are **paired** only if the link is reciprocal: A's `transferred_id` is B, B's `transferred_id` is A, both are live rows (see Row), and each is in the other's `transfer_acct` account. A split parent never counts as a partner. If the link is one-way, **both** rows are unpaired, so E6 (ST-4) adds the two amounts together and nets to zero like a pair does. The audit (R-REL-2) reports every unpaired row. Any other transfer row is **unpaired** (edge case 4): it is still classified by the table below using `transfer_acct`, and carries flag `unpaired`. |
 | On-budget / off-budget | The account's current `accounts.offbudget` flag, applied to all of history. Actual does the same (`reference/actual/packages/loot-core/src/server/budget/base.ts:81,142`). |
+| Orphaned row | A row whose own account is missing from the budget data. No account holds it, so it is **excluded from every total**: balances, net worth, flow totals and every equity and cash flow line. It is not classified (like a split parent), carries `needs_review`, and is listed by the audit. If only the row's `transfer_acct` account is missing, the row is not orphaned: its own account holds it and balances include it. It is an unpaired transfer, and the missing counterpart account is treated as off-budget for rows 4-10. |
+| Hidden and archived | Hidden means the category or its group is hidden. Archived means any `archived_on` value, regardless of the report period. Both are labels on historical reports, never filters. |
 | Primary leg | For an on-budget <-> off-budget pair, the on-budget row. It carries the category and the kind. |
-| Mirror leg | The other row of an on<->off pair. **A pair is classified once, from the on-budget row's category.** The mirror never has a category (Actual never gives the off-budget side one, `docs/actual-format.md` §4.2), so it is never evaluated against rows 6-10. It copies the primary leg's kind, is marked `leg = mirror`, and is skipped by every flow total. It still counts in balances and net worth. An off-budget row whose on-budget partner is missing has no primary to copy from: it is classified as `internal_transfer`, `leg = primary`, flags `unpaired` and `needs_review`. |
+| Mirror leg | The other row of an on<->off pair. **A pair is classified once, from the on-budget row's category.** The mirror never has a category (Actual never gives the off-budget side one, `docs/actual-format.md` §4.2), so it is never evaluated against rows 6-10. It copies the primary leg's kind, is marked `leg = mirror`, and is skipped by every flow total. It still counts in balances and net worth. An off-budget row whose on-budget partner is missing or not reciprocal has no primary to copy from: it is classified as `internal_transfer`, `leg = primary`, flags `unpaired` and `needs_review`. |
 | Kind | Exactly one of the seven values in CLS-2. Decided once, in the classification function, never re-derived by a report. |
-| Flags | Zero or more of `needs_review`, `misfiled`, `kind_conflict`, `unpaired`. Flags never change a kind, they only surface a problem. |
+| Flags | Zero or more of `needs_review`, `misfiled`, `kind_conflict`, `unpaired`. Flags never change a kind, they only surface a problem. Flags live on the primary leg. A mirror carries none of its own (a row 10 primary's `needs_review` is not repeated on its mirror). `kind_conflict` is set only when the category's kind decided the row (rows 6-9 and 12-14). |
 
 ## CLS-2 Transaction kinds
 
@@ -60,15 +62,15 @@ Evaluate top to bottom. The first matching row decides the kind. Inputs: split p
 | # | Condition | Kind | Leg | Flags |
 |---|---|---|---|---|
 | 1 | Split parent | not classified | - | - |
-| 2 | `starting_balance_flag = 1` | `starting_balance` | primary | - |
-| 3 | Reconciliation marker (CLS-5), any account, any category | `adjustment` (source `reconciliation`) | primary | - |
-| 4 | Transfer, both accounts on-budget | `internal_transfer` | both primary | `needs_review` if a category is present |
-| 5 | Transfer, both accounts off-budget | `internal_transfer` | both primary | `needs_review` if a category is present |
-| 6 | Transfer on<->off, category kind `debt_principal` | `debt_principal` | on-budget row primary, other mirror | - |
-| 7 | Transfer on<->off, category kind `savings` | `savings_contribution` | on-budget row primary, other mirror | - |
-| 8 | Transfer on<->off, category kind `expense` | `expense` | on-budget row primary, other mirror | - |
-| 9 | Transfer on<->off, category kind `income` | `income` | on-budget row primary, other mirror | - |
-| 10 | Transfer on<->off, no category | `internal_transfer` | on-budget row primary, other mirror | `needs_review` |
+| 2 | `starting_balance_flag = 1`, and the row is not a paired transfer | `starting_balance` | primary | `needs_review` if the row is an unpaired transfer |
+| 3 | Reconciliation marker (CLS-5), any account, any category, and the row is not a paired transfer | `adjustment` (source `reconciliation`) | primary | `needs_review` if the row is an unpaired transfer |
+| 4 | Transfer, both accounts on-budget | `internal_transfer` | both primary | `needs_review` if a category is present; also `needs_review` on both rows if the starting-balance flag or a reconciliation marker was set |
+| 5 | Transfer, both accounts off-budget | `internal_transfer` | both primary | `needs_review` if a category is present; also `needs_review` on both rows if the starting-balance flag or a reconciliation marker was set |
+| 6 | Transfer on<->off, category kind `debt_principal` | `debt_principal` | on-budget row primary, other mirror | `needs_review` on the primary leg if the starting-balance flag or a reconciliation marker was set |
+| 7 | Transfer on<->off, category kind `savings` | `savings_contribution` | on-budget row primary, other mirror | `needs_review` on the primary leg if the starting-balance flag or a reconciliation marker was set |
+| 8 | Transfer on<->off, category kind `expense` | `expense` | on-budget row primary, other mirror | `needs_review` on the primary leg if the starting-balance flag or a reconciliation marker was set |
+| 9 | Transfer on<->off, category kind `income` | `income` | on-budget row primary, other mirror | `needs_review` on the primary leg if the starting-balance flag or a reconciliation marker was set |
+| 10 | Transfer on<->off, no category | `internal_transfer` | on-budget row primary, other mirror | `needs_review` on the primary leg |
 | 11 | Not a transfer, account off-budget | `adjustment` (source `offbudget_revaluation`) | primary | - |
 | 12 | Not a transfer, on-budget, category kind `income` | `income` | primary | - |
 | 13 | Not a transfer, on-budget, category kind `expense` | `expense` | primary | - |
@@ -76,6 +78,8 @@ Evaluate top to bottom. The first matching row decides the kind. Inputs: split p
 | 15 | Not a transfer, on-budget, no category | `expense` | primary | `needs_review` |
 
 Why the unusual rows:
+
+- **Rows 2 and 3 yield to pairs.** A paired transfer is net-worth neutral, so it can never be an opening balance or an adjustment. If a flagged row is a paired transfer, rows 4-10 decide it and it gets `needs_review`. A flagged row with no partner (unpaired) moves net worth, so rows 2 and 3 apply to it.
 
 - **Row 8 and 9 (capitalized transfers).** Moving money on->off with an ordinary expense category (say, a $500 car purchase into an off-budget Car asset) is `expense`, the same as Actual's envelope treats it. The asset shows up on the balance sheet, so statements add one named reconciling line (ST-4, "capitalized transfers"). It is explicit, never a plug.
 - **Row 14.** A principal or savings category only makes sense when money actually lands in another account. Without a transfer partner the balance sheet would drop with no matching asset or liability. We book it as `expense` (conservative) and flag it. Never silently treat it as paydown.

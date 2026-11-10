@@ -44,6 +44,7 @@ pub enum ReadOnlyReason {
 	TrackingBudget,
 	OpenElsewhere,
 	AuditFailed,
+	NewerVeritasSchema,
 }
 
 impl std::fmt::Display for ReadOnlyReason {
@@ -57,6 +58,7 @@ impl std::fmt::Display for ReadOnlyReason {
 			}
 			ReadOnlyReason::OpenElsewhere => "it's open in another Veritas window",
 			ReadOnlyReason::AuditFailed => "its integrity audit found problems",
+			ReadOnlyReason::NewerVeritasSchema => "it was saved by a newer version of Veritas",
 		})
 	}
 }
