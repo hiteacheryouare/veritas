@@ -1,0 +1,30 @@
+# Rust
+target/
+**/*.rs.bk
+
+# Node (only tools/actual-oracle has a package.json)
+node_modules/
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+*.log
+
+# Swift packages and Xcode
+.build/
+.swiftpm/
+xcuserdata/
+DerivedData/
+
+# Claude Code agent worktrees
+.claude/worktrees/
+
+# The pinned Actual checkout. `cargo xtask reference` recreates it.
+reference/
+
+# Ryan's real budget. Never commit, upload or quote it.
+fixtures/private/
+
+# Project-contained toolchains (RUSTUP_HOME / CARGO_HOME), never global installs.
+.tooling/

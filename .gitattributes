@@ -1,2 +1,33 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# Authored text is stored LF and checked out CRLF, matching .editorconfig.
+# Extensions are listed explicitly rather than with a `*` rule: a CRLF shebang
+# makes a shell script unrunnable, and insta snapshots are compared byte for byte.
+
+*.rs text eol=crlf
+*.toml text eol=crlf
+*.json text eol=crlf
+*.md text eol=crlf
+*.yml text eol=crlf
+*.yaml text eol=crlf
+*.ts text eol=crlf
+*.js text eol=crlf
+*.mjs text eol=crlf
+*.swift text eol=crlf
+*.sql text eol=crlf
+*.css text eol=crlf
+*.html text eol=crlf
+*.svg text eol=crlf
+
+*.sh text eol=lf
+*.txt text eol=lf
+*.snap text eol=lf
+.nvmrc text eol=lf
+
+# A text rule must never reach these: normalizing CR LF inside a binary corrupts it.
+*.zip binary
+*.sqlite binary
+*.db binary
+*.png binary
+*.jpg binary
+*.pdf binary
+*.ico binary
+*.icns binary
