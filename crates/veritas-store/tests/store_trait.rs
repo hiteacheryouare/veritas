@@ -214,3 +214,21 @@ fn a_failed_change_leaves_nothing_behind_r_rel_1() {
 	assert_eq!(data, original);
 	assert_eq!(store.load().unwrap().data, original);
 }
+
+#[test]
+fn dropping_a_transaction_without_committing_rolls_it_back() {
+	let scratch = Scratch::new("trait-drop");
+	let db = fixture_db("small", &scratch);
+	let mut store = Store::open(&db, Access::ReadWrite).unwrap();
+	let data = store.load().unwrap().data;
+	let edited = Transaction {
+		amount: Money::from_minor(1),
+		..data.transactions.values().next().unwrap().clone()
+	};
+	{
+		let mut tx = store.begin().unwrap();
+		tx.apply(&Change::put(&data, Row::Transaction(edited)))
+			.unwrap();
+	}
+	assert_eq!(store.load().unwrap().data, data);
+}

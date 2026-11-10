@@ -564,3 +564,59 @@ fn no_odd_value_in_any_modeled_column_aborts_the_load_or_drops_a_row_silently() 
 	}
 	assert!(exercised > 400, "only {exercised} cases ran");
 }
+
+#[test]
+fn retired_rule_stages_load_as_pre_and_stay_in_the_file() {
+	let scratch = Scratch::new("legacy-stages");
+	let db_path = fixture_db("small", &scratch);
+	let raw = Connection::open(&db_path).unwrap();
+	raw.execute_batch(
+		"INSERT INTO rules (id, stage, conditions, actions) VALUES
+		   ('old-cleanup', 'cleanup', '[]', '[]'), ('old-modify', 'modify', '[]', '[]'),
+		   ('unknown-stage', 'later', '[]', '[]');",
+	)
+	.unwrap();
+	let mut store = Store::open(&db_path, Access::ReadWrite).unwrap();
+	let data = store.load().unwrap().data;
+	let stage = |id: &str| data.rules[&veritas_domain::RuleId::new(id)].stage;
+	assert_eq!(stage("old-cleanup"), veritas_domain::RuleStage::Pre);
+	assert_eq!(stage("old-modify"), veritas_domain::RuleStage::Pre);
+	assert_eq!(stage("unknown-stage"), veritas_domain::RuleStage::Default);
+
+	let rule = data.rules[&veritas_domain::RuleId::new("old-cleanup")].clone();
+	let renamed = veritas_domain::Rule {
+		actions_json: "[{\"op\":\"set\",\"field\":\"notes\",\"value\":\"x\"}]".to_owned(),
+		..rule.clone()
+	};
+	let mut writer = store.writer().unwrap();
+	writer.put_rule(Some(&rule), Some(&renamed)).unwrap();
+	writer.commit().unwrap();
+	let stored: String = raw
+		.query_row(
+			"SELECT stage FROM rules WHERE id = 'old-cleanup'",
+			[],
+			|row| row.get(0),
+		)
+		.unwrap();
+	assert_eq!(stored, "cleanup", "an edit leaves the stage column alone");
+}
+
+#[test]
+fn rules_and_schedules_read_a_null_tombstone_as_deleted() {
+	let scratch = Scratch::new("null-tombstones");
+	let db_path = fixture_db("small", &scratch);
+	Connection::open(&db_path)
+		.unwrap()
+		.execute_batch(
+			"INSERT INTO rules (id, conditions, actions, tombstone) VALUES ('null-rule', '[]', '[]', NULL);
+			 INSERT INTO schedules (id, rule, tombstone) VALUES ('null-schedule', 'null-rule', NULL);",
+		)
+		.unwrap();
+	let data = Store::open(&db_path, Access::ReadWrite)
+		.unwrap()
+		.load()
+		.unwrap()
+		.data;
+	assert!(data.rules[&veritas_domain::RuleId::new("null-rule")].tombstone);
+	assert!(data.schedules[&ScheduleId::new("null-schedule")].tombstone);
+}

@@ -283,7 +283,8 @@ pub fn load(conn: &Connection) -> Result<Loaded, CoreError> {
 			let rule = Rule {
 				id: id.clone(),
 				stage: match text(at(row, 1)?)?.as_deref() {
-					Some("pre") => RuleStage::Pre,
+					// Actual's loadRules still reads two retired stage names as pre.
+					Some("pre" | "cleanup" | "modify") => RuleStage::Pre,
 					Some("post") => RuleStage::Post,
 					_ => RuleStage::Default,
 				},
