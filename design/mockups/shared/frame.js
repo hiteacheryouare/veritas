@@ -86,19 +86,41 @@ document.querySelectorAll('.stage[data-theme="light"]').forEach((stage) => {
 	stage.after(dark);
 });
 
+const accents = ['graphite', 'petrol', 'olive'];
+const params = new URLSearchParams(location.search);
+
+const storedAccent = () => {
+	try {
+		return localStorage.getItem('veritas-accent');
+	} catch {
+		return null;
+	}
+};
+
+const setAccent = (accent) => {
+	const chosen = accents.includes(accent) ? accent : 'graphite';
+	document.documentElement.dataset.accent = chosen;
+	try {
+		localStorage.setItem('veritas-accent', chosen);
+	} catch {}
+	document.querySelectorAll('.accent-switch button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.accent === chosen)));
+};
+
 const setView = (view) => {
 	document.body.dataset.view = view;
-	document.querySelectorAll('.view-switch button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
+	document.querySelectorAll('.view-switch:not(.accent-switch) button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
 };
 
 const bar = document.querySelector('.page-bar');
 if (bar) {
 	bar.insertAdjacentHTML('afterbegin', '<a href="index.html">All screens</a>');
-	bar.insertAdjacentHTML('beforeend', '<div class="view-switch" role="group" aria-label="Appearance"><button type="button" data-view="both">Both</button><button type="button" data-view="light">Light</button><button type="button" data-view="dark">Dark</button></div>');
-	bar.querySelectorAll('.view-switch button').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
+	bar.insertAdjacentHTML('beforeend', `<div class="bar-controls"><div class="view-switch accent-switch" role="group" aria-label="Accent">${accents.map((a) => `<button type="button" data-accent="${a}">${a[0].toUpperCase()}${a.slice(1)}</button>`).join('')}</div><div class="view-switch" role="group" aria-label="Appearance"><button type="button" data-view="both">Both</button><button type="button" data-view="light">Light</button><button type="button" data-view="dark">Dark</button></div></div>`);
+	bar.querySelectorAll('.view-switch:not(.accent-switch) button').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
+	bar.querySelectorAll('.accent-switch button').forEach((b) => b.addEventListener('click', () => setAccent(b.dataset.accent)));
 }
 
-const params = new URLSearchParams(location.search);
+setAccent(params.get('accent') || storedAccent());
+
 if (params.has('embed')) {
 	document.body.classList.add('embed');
 	const theme = params.get('view') || 'light';

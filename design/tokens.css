@@ -24,13 +24,13 @@
 	--color-text-primary: #1c1c21;
 	--color-text-secondary: #66666f;
 	--color-text-tertiary: #9c9ca5;
-	--color-text-on-accent: #f7f7ff;
 	--color-text-paper: #23232a;
 
-	--color-accent: #5146d8;
-	--color-accent-fill: #5146d8;
-	--color-accent-soft: rgba(81, 70, 216, 0.11);
-	--color-focus-ring: #5146d8;
+	--color-accent: #3b3d45;
+	--color-accent-fill: #2f3138;
+	--color-accent-soft: rgba(40, 42, 52, 0.09);
+	--color-focus-ring: #3b3d45;
+	--color-text-on-accent: #f5f5f7;
 
 	--color-track: rgba(20, 22, 30, 0.08);
 
@@ -47,14 +47,14 @@
 	--color-chart-expense: #6e6e78;
 	--color-chart-expense-soft: rgba(110, 110, 120, 0.28);
 	--color-chart-savings: #26a066;
-	--color-chart-debt-paydown: #9b3f8a;
+	--color-chart-debt-paydown: #8b5e34;
 	--color-chart-unallocated: rgba(47, 132, 220, 0.35);
-	--color-chart-band: rgba(81, 70, 216, 0.12);
+	--color-chart-band: rgba(58, 58, 66, 0.1);
 	--color-chart-grid: rgba(20, 22, 30, 0.07);
 	--color-scenario-baseline: #3a3a42;
 	--color-scenario-1: #2f84dc;
-	--color-scenario-2: #9b3f8a;
-	--color-scenario-3: #c77a08;
+	--color-scenario-2: #8b5e34;
+	--color-scenario-3: #0f8a9a;
 
 	--shadow-window: 0 30px 80px rgba(20, 30, 50, 0.28), 0 4px 14px rgba(20, 30, 50, 0.14);
 	--shadow-sheet: 0 24px 60px rgba(20, 30, 50, 0.28), 0 0 0 1px rgba(20, 22, 30, 0.08);
@@ -87,13 +87,13 @@
 	--color-text-primary: #ececf0;
 	--color-text-secondary: #a2a2ab;
 	--color-text-tertiary: #74747d;
-	--color-text-on-accent: #f7f7ff;
 	--color-text-paper: #23232a;
 
-	--color-accent: #8f87ff;
-	--color-accent-fill: #5c53e0;
-	--color-accent-soft: rgba(143, 135, 255, 0.18);
-	--color-focus-ring: #8f87ff;
+	--color-accent: #d9dae0;
+	--color-accent-fill: #e2e3e8;
+	--color-accent-soft: rgba(240, 240, 250, 0.11);
+	--color-focus-ring: #d9dae0;
+	--color-text-on-accent: #1c1c21;
 
 	--color-track: rgba(240, 240, 250, 0.09);
 
@@ -110,19 +110,55 @@
 	--color-chart-expense: #a5a5ae;
 	--color-chart-expense-soft: rgba(165, 165, 174, 0.3);
 	--color-chart-savings: #3fb06d;
-	--color-chart-debt-paydown: #d272bf;
+	--color-chart-debt-paydown: #c99a6b;
 	--color-chart-unallocated: rgba(94, 170, 245, 0.4);
-	--color-chart-band: rgba(143, 135, 255, 0.16);
+	--color-chart-band: rgba(226, 226, 232, 0.1);
 	--color-chart-grid: rgba(240, 240, 250, 0.07);
 	--color-scenario-baseline: #e2e2e8;
 	--color-scenario-1: #5eaaf5;
-	--color-scenario-2: #d272bf;
-	--color-scenario-3: #eda23a;
+	--color-scenario-2: #c99a6b;
+	--color-scenario-3: #4cc0cf;
 
 	--shadow-window: 0 30px 80px rgba(0, 0, 10, 0.55), 0 4px 14px rgba(0, 0, 10, 0.35);
 	--shadow-sheet: 0 24px 60px rgba(0, 0, 10, 0.6), 0 0 0 1px rgba(240, 240, 250, 0.1);
 	--shadow-popover: 0 8px 24px rgba(0, 0, 10, 0.5), 0 0 0 1px rgba(240, 240, 250, 0.1);
 	--shadow-control: 0 1px 3px rgba(0, 0, 10, 0.3);
+}
+
+:root[data-accent="petrol"],
+:root[data-accent="petrol"] [data-theme="light"] {
+	--color-accent: #0c6b78;
+	--color-accent-fill: #0c6b78;
+	--color-accent-soft: rgba(12, 107, 120, 0.11);
+	--color-focus-ring: #0c6b78;
+	--color-text-on-accent: #f3fafb;
+}
+
+:root[data-accent="petrol"][data-theme="dark"],
+:root[data-accent="petrol"] [data-theme="dark"] {
+	--color-accent: #4cb3c2;
+	--color-accent-fill: #13808f;
+	--color-accent-soft: rgba(76, 179, 194, 0.18);
+	--color-focus-ring: #4cb3c2;
+	--color-text-on-accent: #f3fafb;
+}
+
+:root[data-accent="olive"],
+:root[data-accent="olive"] [data-theme="light"] {
+	--color-accent: #5a6614;
+	--color-accent-fill: #5a6614;
+	--color-accent-soft: rgba(90, 102, 20, 0.12);
+	--color-focus-ring: #5a6614;
+	--color-text-on-accent: #fafbf2;
+}
+
+:root[data-accent="olive"][data-theme="dark"],
+:root[data-accent="olive"] [data-theme="dark"] {
+	--color-accent: #b4c24e;
+	--color-accent-fill: #6c7a1a;
+	--color-accent-soft: rgba(180, 194, 78, 0.18);
+	--color-focus-ring: #b4c24e;
+	--color-text-on-accent: #fafbf2;
 }
 
 :root {
