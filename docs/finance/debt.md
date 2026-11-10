@@ -71,13 +71,9 @@ Standard payment: $400 = $320 principal + $80 interest. Loan balance -980000, `r
 | L-9 Payment below interest | total 5000, interest 8000 | blocked (principal would be -3000) |
 | L-10 Zero-history loan | no loan metadata, no earlier payment | nothing pre-filled, wizard asks for total and interest |
 
-## DEBT-6 How the payment is stored: two variants
+## DEBT-6 Payment storage (verified in P0.4)
 
-The wizard produces one `LoanPayment { account, date, payee, parts[] }`. How it is stored depends on one fact still being researched in P0.4: **whether Actual lets a split child be a transfer.** Evidence so far: `reference/actual/packages/loot-core/src/server/transactions/transfer.ts:48-53` says "For split transactions, we should create transfers using child transactions", which suggests variant A. This file specifies both fully. When the fact is known, the other variant and this paragraph get deleted.
-
-Classification of the rows is identical in both variants (CLS-4 rows 6 and 13), so all reports and the January master scenario give the same numbers.
-
-### DEBT-6A Variant A: split parent with a transfer child
+The wizard produces one `LoanPayment { account, date, payee, parts[] }`, stored as a split parent with a transfer child. Classification is CLS-4 rows 6 and 13.
 
 Rows for L-1 (CHK paying 40000, parts principal 32000, interest 8000):
 
@@ -95,29 +91,8 @@ Rules:
 - **A.1** Children sum to the parent: 32000 + 8000 = 40000 (audit rule, R-REL-2).
 - **A.2** Editing the payment replaces the children and the counterpart in one SQLite transaction (R-REL-1, R-XFER-3). Deleting the parent tombstones the children and the counterpart.
 - **A.3** Register shows one payment row "Loan payment -$400.00" expandable to its parts. The principal child renders `-> To Car Loan` (R-XFER-2).
-- **A.4** The loan wizard is available only when Actual's transfer logic accepts the child (to verify in P0.4 with the oracle: add the split through the API, read back `transferred_id` on the loan side).
-
-### DEBT-6B Variant B: two linked transactions (fallback)
-
-Same example:
-
-| Row | Account | Amount | Detail |
-|---|---|---|---|
-| Principal | CHK | -32000 | transfer to LOAN, category Loan principal, no split |
-| Counterpart | LOAN | +32000 | created by Actual's transfer logic |
-| Interest | CHK | -8000 | payee = lender, category Loan interest |
-
-The two top-level CHK rows share a Veritas link (`veritas_loan_payment`, one group id with its member transaction ids). Escrow and fees are further linked rows.
-
-Rules:
-
-- **B.1** The link is Veritas-only data (R-IO-6). If Actual drops it, the rows are still valid and classify correctly. Veritas then shows two ordinary rows and offers "Link as loan payment".
-- **B.2** The payment total (40000) is derived as the sum of the linked rows. No parent exists, so audit rule "children sum to parent" does not apply. The audit instead checks that every link points to live rows and that the principal row has a counterpart.
-- **B.3** Editing or deleting any linked row prompts to apply to the group. Applied together in one SQLite transaction. Undo restores the group.
-- **B.4** Both rows are dated alike (the wizard sets them equal). If a user edits one date, Net Profit sees them on separate dates, which is correct.
-- **B.5** Pre-fill (DEBT-3) reads the group, or falls back to the last `debt_principal` row plus the adjacent interest row when no link exists.
-
-Differences between variants a test must cover: A has a parent row and B has none. Totals, kinds and the loan balance are identical.
+- **A.4** Confirmed in Actual: `addTransfer` refuses only split parents (`reference/actual/packages/loot-core/src/server/transactions/transfer.ts:48-54`); a child with `transferred_id` and a standalone counterpart is tested at `transfer.test.ts:172-219`.
+- **A.5** Deleting the *loan-side* counterpart does not delete the child. Actual unlinks it (payee and `transferred_id` set to null, `transfer.ts:103-111`), leaving an ordinary categorized child. R-XFER-3 "deleting one side deletes both" therefore holds from the checking side only. Veritas, deleting the loan-side row, must either delete the whole payment (parent, children) after confirmation or accept the unlink. Recommendation: confirm, then delete the whole payment in one SQLite transaction.
 
 ## DEBT-7 Credit cards (R-DEBT-3)
 
@@ -141,7 +116,7 @@ These are the finance rules for goals (R-GOAL-1, R-GOAL-4, edge case 8). Envelop
 
 | Term | Meaning |
 |---|---|
-| Goal | A category in a Goals group with `veritas_goal(target_cents, target_date?, status)`. Category kind `expense` (CLS-3.3). |
+| Goal | A category in a Goals group with `veritas_goal(target_cents, target_date?, status)`. Category kind `expense` (CLS-3.3). Actual cannot express target dates. It can hold the target amount as a long-term goal (`goal_def` with `template_settings.source = "ui"`, or `zero_budgets.goal` with `long_goal = 1`), and shows progress only when its experimental goal-templates flag is on. Veritas never depends on that display. |
 | Available | The goal category's available balance for a month from Actual's envelope sheet (`leftover-<category>`). Not recomputed by Veritas. |
 | Status | Stored: `active` or `closed`. Derived at read time: `reached` when status is `active` and available >= target. "Spent" is the sum of the category's net spending (CLS-6 `expense_total`) shown on the card. |
 | Months left | Number of budget months from the current month through the month containing `target_date`, counting both, minimum 1. No target date: no suggestion. |

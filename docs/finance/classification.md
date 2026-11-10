@@ -127,7 +127,7 @@ One function in `veritas-reports`: `classify(row, context) -> { kind, leg, sourc
 
 Master scenario (used again in statements.md). Accounts: CHK Checking (on), VISA Visa (on, liability), SAV Savings (off), LOAN Car Loan (off, liability), BRK Brokerage (off), CAR Car asset (off), CD Emergency CD (off, opened Jan 15). Opening balances at 2026-12-31: CHK 200000, VISA 0, SAV 500000, LOAN -980000, BRK 1000000, CAR 0, CD does not exist yet.
 
-January 2027 rows (variant A of the loan split; see debt.md for variant B):
+January 2027 rows (loan payment stored as in debt.md DEBT-6):
 
 | Id | Date | Account | Amount | Detail | Row | Kind | Leg |
 |---|---|---|---|---|---|---|---|
@@ -166,7 +166,7 @@ Nasty cases, each a test:
 |---|---|---|
 | C-1 Refund crosses a period boundary | 2027-03-28 VISA -10000 Clothing. 2027-04-05 VISA +10000 Clothing refund. No other April spending. | March `expense_total` 10000. April `expense_total` **-10000** (negative expense). April `income_total` 0 (refund is never income). |
 | C-2 Refund larger than the month's spending | April as above plus 2027-04-10 VISA -2000 Clothing | April `expense_total` -8000 |
-| C-3 Starting balance never income | New on-budget account, balance 50000. Actual files it under an income category named "Starting Balances", or else the first income category (`reference/actual/packages/loot-core/src/server/accounts/payees.ts:19-29`, `app.ts:580-590`) | Row 2 wins: `starting_balance`, `income_total` unchanged |
+| C-3 Starting balance never report income (intentional divergence from the budget sheet) | New on-budget account, balance 50000. Actual files it under an income category named "Starting Balances", or else the first income category (`reference/actual/packages/loot-core/src/server/accounts/payees.ts:19-29`, `app.ts:580-590`) | Row 2 wins: `starting_balance`, `income_total` unchanged. Actual's envelope sheet still counts a categorized starting balance as budget income, so To Budget rises by 50000 in the budget screen while report income does not. Reports differ from the budget sheet on purpose (PLAN edge case 16). Veritas does not change the budget math (R-BUD-1) |
 | C-4 Principal on a non-transfer row | CHK -32000, category Loan principal, no transfer | Row 14: `expense`, flag `misfiled` |
 | C-5 Uncategorized positive | CHK +4000, no category, no transfer | Row 15: `expense` (-4000 contribution to `expense_total`), flag `needs_review` |
 | C-6 On->off transfer, no category | CHK -10000 to BRK, no category | Row 10: `internal_transfer`, `needs_review`. Does not touch `net_profit`. Appears in cash flow line ST-6 |
@@ -175,3 +175,7 @@ Nasty cases, each a test:
 | C-9 Hidden category with activity | Category "Old Gym" hidden, 2027-01-04 CHK -3000 | Row 13: `expense`, included, labeled archived (R-REP-3) |
 | C-10 Kind conflict | `is_income = 0`, metadata kind `income`, row +5000 | effective kind `expense`, `kind_conflict`, row is row 13 |
 | C-11 Split with mixed kinds | Parent CHK -10000: child -7000 Groceries, child -3000 Dining | Two `expense` rows. Parent not classified. Sum of kinds' amounts = -10000 |
+
+## CLS-9 Reports vs the budget sheet (intentional divergence)
+
+Actual's envelope sheet counts categorized starting balances as income and counts hidden categories, spent split children in on-budget accounts only, and feeds To Budget from the first income group only (`reference/actual/` budget math notes, P0.4 C-budget-math). Veritas reports follow this file, not the sheet. Where they differ, the budget screen keeps Actual's number and reports keep ours. Example: a 50000 starting balance in a new on-budget account raises To Budget by 50000 and leaves `income_total` at 0. Hidden categories count fully in both.
