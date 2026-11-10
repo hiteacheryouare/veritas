@@ -7,6 +7,7 @@
 
 mod support;
 
+use std::cell::Cell;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -18,8 +19,8 @@ use veritas_domain::{
 	AccountId, BudgetData, Change, CoreError, ReadOnlyReason, Row, Store, StoreTransaction,
 };
 use veritas_session::{
-	Access, Backend, ChangeListener, ChangeSet, Command, Session, SessionOptions, SnapshotReason,
-	acquire,
+	Access, Backend, ChangeListener, ChangeSet, Command, Session, SessionOptions, SharedSession,
+	SnapshotReason, acquire,
 };
 use veritas_store::Loaded;
 
@@ -47,8 +48,17 @@ impl Store for ReadPath {
 	}
 }
 
+thread_local! {
+	/// Makes the store panic on the nth write of this thread's next command.
+	static PANIC_ON_WRITE: Cell<Option<usize>> = const { Cell::new(None) };
+}
+
 impl StoreTransaction for Counted<'_> {
 	fn apply(&mut self, _: &Change) -> Result<(), CoreError> {
+		if PANIC_ON_WRITE.get() == Some(self.pending) {
+			PANIC_ON_WRITE.set(None);
+			panic!("index out of bounds: the len is 0 but the index is 7");
+		}
 		self.pending += 1;
 		Ok(())
 	}
@@ -408,4 +418,67 @@ fn restoring_a_snapshot_that_does_not_exist_changes_nothing() {
 		);
 	}
 	assert_eq!(session.data().unwrap(), &before);
+}
+
+#[test]
+fn a_panic_in_a_command_reloads_the_budget_and_the_session_keeps_working() {
+	// R-REL-7
+	let (_root, dir) = imported("session-panic-plan");
+	let shared = SharedSession::new(TestSession::open(&dir, TestClock::new().options()).unwrap());
+	let listener = Arc::new(Recorder::default());
+	shared
+		.with(|session| {
+			session.subscribe(listener.clone());
+			Ok(())
+		})
+		.unwrap();
+	let before = shared.with(|session| session.data().cloned()).unwrap();
+
+	let buggy = |_: &BudgetData| -> Result<Vec<Row>, CoreError> { panic!("a bug in a command") };
+	let result = shared.with(|session| session.perform(&buggy));
+
+	match result {
+		Err(CoreError::Internal(message)) => {
+			assert!(message.contains("a bug in a command"), "{message}");
+			assert!(message.contains("reloaded"), "{message}");
+		}
+		other => panic!("expected an internal error, got {other:?}"),
+	}
+	assert_eq!(
+		shared.with(|session| session.data().cloned()).unwrap(),
+		before
+	);
+	assert!(listener.0.lock().unwrap().iter().any(|set| set.everything));
+	shared
+		.with(|session| session.perform(&rename("After the bug")))
+		.unwrap();
+}
+
+#[test]
+fn a_store_that_panics_mid_command_leaves_memory_matching_the_disk() {
+	// R-REL-1, R-REL-7: the first row reached memory before the second write
+	// panicked; the reload puts memory back to what the file holds.
+	let (_root, dir) = imported("session-panic-store");
+	let shared = SharedSession::new(TestSession::open(&dir, TestClock::new().options()).unwrap());
+	let on_disk = shared.with(|session| session.data().cloned()).unwrap();
+	let two_rows = |data: &BudgetData| -> Result<Vec<Row>, CoreError> {
+		let mut rows = Vec::new();
+		for (index, account) in data.accounts.values().take(2).enumerate() {
+			let mut account = account.clone();
+			account.name = format!("Half done {index}");
+			rows.push(Row::Account(account));
+		}
+		assert_eq!(rows.len(), 2);
+		Ok(rows)
+	};
+
+	PANIC_ON_WRITE.set(Some(1));
+	let result = shared.with(|session| session.perform(&two_rows));
+
+	assert!(matches!(result, Err(CoreError::Internal(_))), "{result:?}");
+	assert_eq!(
+		shared.with(|session| session.data().cloned()).unwrap(),
+		on_disk
+	);
+	assert!(!shared.with(|session| Ok(session.can_undo())).unwrap());
 }
