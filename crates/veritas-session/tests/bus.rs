@@ -9,17 +9,15 @@ use std::sync::{Arc, Mutex};
 
 use proptest::prelude::*;
 use veritas_domain::{
-	Account, AccountGroup, AccountGroupId, AccountId, AccountKind, AccountMeta, BudgetCell,
-	BudgetData, BudgetType, Category, CategoryGroup, CategoryGroupId, CategoryId, CategoryKind,
-	CategoryMeta, CivilDate, ConditionsOp, CoreError, Goal, GoalId, GoalStatus, Money, Payee,
-	PayeeId, ReadOnlyReason, Rule, RuleId, RuleStage, Schedule, ScheduleId, SplitRole, Tag, TagId,
-	Transaction, TransactionId, TransactionMeta, YearMonth,
+	Account, AccountGroup, AccountGroupId, AccountId, AccountKind, AccountMeta, AccountMetaRow,
+	BudgetCell, BudgetData, BudgetType, Category, CategoryGroup, CategoryGroupId, CategoryId,
+	CategoryKind, CategoryMapping, CategoryMeta, CategoryMetaRow, Change, CivilDate, ConditionsOp,
+	CoreError, EntityRef, Goal, GoalId, GoalStatus, Hold, Money, Note, Payee, PayeeId,
+	PayeeMapping, ReadOnlyReason, Row, Rule, RuleId, RuleStage, Schedule, ScheduleId, SplitRole,
+	Store, StoreTransaction, Tag, TagId, Transaction, TransactionId, TransactionMeta,
+	TransactionMetaRow, YearMonth,
 };
-use veritas_session::{
-	AccountMetaRow, CategoryMapping, CategoryMetaRow, Change, ChangeListener, ChangeSet,
-	CommandBus, EntityRef, Hold, Note, PayeeMapping, Row, Store, StoreTransaction,
-	TransactionMetaRow,
-};
+use veritas_session::{ChangeListener, ChangeSet, CommandBus};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Failure {

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 
-use veritas_domain::{
+use crate::{
 	Account, AccountGroup, AccountGroupId, AccountId, AccountMeta, BudgetCell, BudgetData,
 	Category, CategoryGroup, CategoryGroupId, CategoryId, CategoryMeta, Goal, GoalId, Money, Payee,
 	PayeeId, Rule, RuleId, Schedule, ScheduleId, Tag, TagId, Transaction, TransactionId,
@@ -158,7 +158,8 @@ macro_rules! rows {
 		}
 
 		impl Change {
-			pub(crate) fn put(data: &BudgetData, row: Row) -> Change {
+			/// The change that makes `row` exist, starting from what `data` holds.
+			pub fn put(data: &BudgetData, row: Row) -> Change {
 				match row {
 					$(Row::$variant(after) => {
 						Change::$variant(Delta::against(data, after.key(), Some(after)))
@@ -166,25 +167,27 @@ macro_rules! rows {
 				}
 			}
 
-			pub(crate) fn undo(&self, data: &BudgetData) -> Option<Change> {
+			/// The change that takes this one back, or `None` when Actual keeps the row.
+			pub fn undo(&self, data: &BudgetData) -> Option<Change> {
 				match self {
 					$(Change::$variant(delta) => delta.undo(data).map(Change::$variant),)*
 				}
 			}
 
-			pub(crate) fn redo(&self, data: &BudgetData) -> Change {
+			pub fn redo(&self, data: &BudgetData) -> Change {
 				match self {
 					$(Change::$variant(delta) => Change::$variant(delta.redo(data)),)*
 				}
 			}
 
-			pub(crate) fn revert(&self, data: &mut BudgetData) {
+			/// Puts `before` back exactly, for rolling back a failed transaction.
+			pub fn revert(&self, data: &mut BudgetData) {
 				match self {
 					$(Change::$variant(delta) => delta.revert(data),)*
 				}
 			}
 
-			pub(crate) fn is_noop(&self) -> bool {
+			pub fn is_noop(&self) -> bool {
 				match self {
 					$(Change::$variant(delta) => delta.is_noop(),)*
 				}
