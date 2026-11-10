@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Forecast and what-ifs</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="shared/frame.css">
+<style>
+.head { display: flex; align-items: baseline; gap: var(--space-3); margin-bottom: var(--space-4); }
+.head .hero-label { font-size: var(--text-heading); font-weight: var(--weight-semibold); color: var(--color-text-secondary); }
+.head h2 { margin: 0 0 2px; font-size: var(--text-body); font-weight: var(--weight-medium); color: var(--color-text-secondary); }
+.head .hero { font-family: var(--font-figures); font-size: var(--text-display); font-weight: var(--weight-bold); line-height: 1.1; }
+.head p { margin: 4px 0 0; color: var(--color-text-secondary); }
+.head p .fig { color: var(--color-money-available); font-weight: var(--weight-semibold); }
+.chart-card { padding: var(--space-3) var(--space-4) var(--space-2); margin-bottom: var(--space-4); }
+.forecast { width: 100%; display: block; }
+.forecast .grid { stroke: var(--color-chart-grid); }
+.forecast .axis { fill: var(--color-text-tertiary); font-size: 11px; font-family: var(--font-figures); }
+.forecast .month { fill: var(--color-text-secondary); font-family: var(--font-text); }
+.forecast .today { stroke: var(--color-text-tertiary); stroke-dasharray: 2 3; }
+.forecast .today-label { fill: var(--color-text-secondary); font-family: var(--font-text); }
+.forecast .band { fill: var(--color-chart-band); }
+.forecast .series { fill: none; stroke-width: 2.25; stroke-linejoin: round; stroke-linecap: round; }
+.forecast .history { stroke: var(--color-scenario-baseline); stroke-width: 2.5; }
+.forecast .baseline { stroke: var(--color-scenario-baseline); stroke-dasharray: 6 4; }
+.forecast .s1 { stroke: var(--color-scenario-1); }
+.forecast .s2 { stroke: var(--color-scenario-2); }
+.forecast .end { font-size: 12px; font-weight: 600; font-family: var(--font-figures); }
+.forecast .end.baseline { fill: var(--color-scenario-baseline); }
+.forecast .end.s1 { fill: var(--color-scenario-1); }
+.forecast .end.s2 { fill: var(--color-scenario-2); }
+.chart-legend { display: flex; align-items: center; gap: 6px; justify-content: flex-end; font-size: var(--text-caption); color: var(--color-text-secondary); }
+.compare-head { display: flex; align-items: baseline; justify-content: space-between; margin: 0 0 var(--space-2); padding: 0 var(--space-1); }
+.compare-head h2 { margin: 0; font-size: var(--text-heading); font-weight: var(--weight-semibold); }
+.compare-head p { margin: 0; color: var(--color-text-secondary); }
+.scenario { display: grid; grid-template-columns: 28px 1fr 120px 120px 90px; align-items: center; column-gap: var(--space-3); height: 48px; padding: 0 var(--space-4); position: relative; }
+.scenario + .scenario::before { content: ""; position: absolute; top: 0; left: var(--space-4); right: var(--space-4); border-top: 1px solid var(--color-separator); }
+.swatch { width: 22px; height: 0; border-top: 2.5px solid; }
+.swatch.baseline { border-color: var(--color-scenario-baseline); border-top-style: dashed; }
+.swatch.s1 { border-color: var(--color-scenario-1); }
+.swatch.s2 { border-color: var(--color-scenario-2); }
+.swatch.band { height: 12px; border: 0; border-radius: 3px; background: var(--color-chart-band); }
+.sc-name { font-weight: var(--weight-medium); }
+.sc-name span { display: block; font-weight: var(--weight-regular); color: var(--color-text-secondary); font-size: var(--text-caption); margin-top: 2px; }
+.sc-value { text-align: right; font-weight: var(--weight-semibold); }
+.delta { display: inline-flex; align-items: center; justify-content: flex-end; gap: 4px; font-weight: var(--weight-semibold); }
+.scenario .button { justify-self: end; }
+.add-row { display: flex; align-items: center; justify-content: space-between; padding: var(--space-3) var(--space-1) 0; color: var(--color-text-secondary); }
+</style>
+</head>
+<body>
+<header class="page-bar"><h1>Forecast and what-ifs</h1></header>
+<main>
+<section class="stage" data-theme="light">
+<div class="window">
+	<nav class="sidebar" aria-label="Sections" data-current="insights/forecast"></nav>
+	<div class="main">
+		<div class="toolbar">
+			<h1 class="toolbar-title" style="margin-left: var(--space-2)">Forecast</h1>
+			<div class="toolbar-gap"></div>
+			<div class="popup" style="height:32px;border-radius:16px;padding:0 10px 0 14px"><span>Net worth</span><svg class="icon"><use href="#i-chev-updown"/></svg></div>
+			<div class="segmented" role="group" aria-label="Horizon"><button type="button" aria-pressed="false">3 months</button><button type="button" aria-pressed="false">6 months</button><button type="button" aria-pressed="false">10 months</button><button type="button" aria-pressed="true">12 months</button></div>
+			<div class="search"><svg class="icon"><use href="#i-search"/></svg>Go to anything<kbd>⌘K</kbd></div>
+		</div>
+		<div class="content">
+			<div class="head">
+				<span class="hero fig">$32,130</span><span class="hero-label">net worth in November 2027</span>
+			</div>
+			<div class="chart-card grouped">
+<div class="chart-legend"><span class="swatch band"></span>Likely range</div>
+				<svg class="forecast" viewBox="0 0 940 330" role="img" aria-label="Net worth forecast for 12 months with two what-ifs"><line class="grid" x1="64" x2="920" y1="300.0" y2="300.0"/><text class="axis" x="54" y="304.0" text-anchor="end">20k</text><line class="grid" x1="64" x2="920" y1="259.4" y2="259.4"/><text class="axis" x="54" y="263.4" text-anchor="end">22k</text><line class="grid" x1="64" x2="920" y1="218.9" y2="218.9"/><text class="axis" x="54" y="222.9" text-anchor="end">24k</text><line class="grid" x1="64" x2="920" y1="178.3" y2="178.3"/><text class="axis" x="54" y="182.3" text-anchor="end">26k</text><line class="grid" x1="64" x2="920" y1="137.7" y2="137.7"/><text class="axis" x="54" y="141.7" text-anchor="end">28k</text><line class="grid" x1="64" x2="920" y1="97.1" y2="97.1"/><text class="axis" x="54" y="101.1" text-anchor="end">30k</text><line class="grid" x1="64" x2="920" y1="56.6" y2="56.6"/><text class="axis" x="54" y="60.6" text-anchor="end">32k</text><line class="grid" x1="64" x2="920" y1="16.0" y2="16.0"/><text class="axis" x="54" y="20.0" text-anchor="end">34k</text><path class="band" d="M315.8,209.7 L366.1,191.5 L416.5,176.3 L466.8,161.6 L517.2,147.2 L567.5,133.0 L617.9,118.9 L668.2,104.9 L718.6,90.9 L768.9,77.1 L819.3,63.2 L869.6,49.4 L920.0,35.7 L920.0,72.2 L869.6,84.4 L819.3,96.6 L768.9,108.7 L718.6,120.8 L668.2,132.8 L617.9,144.7 L567.5,156.6 L517.2,168.3 L466.8,179.9 L416.5,191.2 L366.1,202.0 L315.8,209.7 Z"/><line class="today" x1="315.8" x2="315.8" y1="16" y2="300"/><text class="axis today-label" x="321.8" y="26">Today</text><path class="series history" d="M64.0,261.9 L114.4,253.1 L164.7,258.6 L215.1,237.0 L265.4,223.3 L315.8,209.7"/><path class="series baseline" d="M315.8,209.7 L366.1,196.7 L416.5,183.8 L466.8,170.8 L517.2,157.8 L567.5,144.8 L617.9,131.8 L668.2,118.8 L718.6,105.9 L768.9,92.9 L819.3,79.9 L869.6,66.9 L920.0,53.9"/><path class="series s1" d="M315.8,209.7 L366.1,196.7 L416.5,183.8 L466.8,170.8 L517.2,157.8 L567.5,144.8 L617.9,131.8 L668.2,124.9 L718.6,118.0 L768.9,111.1 L819.3,104.2 L869.6,97.3 L920.0,90.4"/><path class="series s2" d="M315.8,209.7 L366.1,196.7 L416.5,183.8 L466.8,170.8 L517.2,157.8 L567.5,144.8 L617.9,131.8 L668.2,118.8 L718.6,105.9 L768.9,133.4 L819.3,120.5 L869.6,107.5 L920.0,94.5"/><text class="axis month" x="64.0" y="322" text-anchor="middle">Jun</text><text class="axis month" x="164.7" y="322" text-anchor="middle">Aug</text><text class="axis month" x="265.4" y="322" text-anchor="middle">Oct</text><text class="axis month" x="366.1" y="322" text-anchor="middle">Dec</text><text class="axis month" x="466.8" y="322" text-anchor="middle">Feb</text><text class="axis month" x="567.5" y="322" text-anchor="middle">Apr</text><text class="axis month" x="668.2" y="322" text-anchor="middle">Jun</text><text class="axis month" x="768.9" y="322" text-anchor="middle">Aug</text><text class="axis month" x="869.6" y="322" text-anchor="middle">Oct</text><text class="axis month" x="920.0" y="322" text-anchor="middle">Nov</text><text class="end baseline" x="914.0" y="45.9" text-anchor="end">32,130</text></svg>
+			</div>
+			<div class="compare-head"><h2>Compare at 12 months</h2></div>
+			<div class="grouped">
+				<div class="scenario"><span class="swatch baseline"></span><span class="sc-name">Baseline</span><span class="fig sc-value">32,130</span><span></span><span></span></div>
+				<div class="scenario"><span class="swatch s1"></span><span class="sc-name">Rent +$300/mo from June</span><span class="fig sc-value">30,330</span><span class="fig is-overspent delta"><svg class="icon small"><use href="#i-over"/></svg>−1,800</span><button class="button small" type="button">Remove</button></div>
+				<div class="scenario"><span class="swatch s2"></span><span class="sc-name">$2,000 vacation in August</span><span class="fig sc-value">30,130</span><span class="fig is-overspent delta"><svg class="icon small"><use href="#i-over"/></svg>−2,000</span><button class="button small" type="button">Remove</button></div>
+			</div>
+			<div class="add-row"><span></span><button class="button small" type="button"><svg class="icon"><use href="#i-plus"/></svg>Add what-if</button></div>
+		</div>
+	</div>
+</div>
+</section>
+</main>
+<script src="shared/frame.js"></script>
+</body>
+</html>
