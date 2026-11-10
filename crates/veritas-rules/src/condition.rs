@@ -233,37 +233,35 @@ fn js_length(text: &str) -> usize {
 	text.encode_utf16().count()
 }
 
-/// `parseDateString` (`rule-utils.ts:239-266`).
+/// `parseDateString` (`rule-utils.ts:239-266`). Only the lengths decide for
+/// sure: Actual turns away any other length, and a plain `YYYY-MM-DD` or
+/// `YYYY-MM` that names no real day or month fails `parseISO`. Any other
+/// string of the right length might be one of `parseISO`'s other forms, so
+/// Actual may well run the rule; Veritas leaves it to Actual.
 fn parse_date_string(text: &str) -> Result<DateValue, Gap> {
 	let digits = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
-	let exotic_iso = text.starts_with(['+', '-']) || text.contains('W');
+	let shaped = |parts: &[usize]| {
+		let pieces: Vec<&str> = text.split('-').collect();
+		pieces.len() == parts.len()
+			&& pieces
+				.iter()
+				.zip(parts)
+				.all(|(piece, len)| piece.len() == *len && digits(piece))
+	};
+	let other_form = || unsupported(format!("{text:?} is a date form Veritas doesn't read"));
 	match js_length(text) {
 		10 => match js::strict_date(text) {
 			Some(date) => Ok(DateValue::Day(date)),
-			None if exotic_iso => {
-				unsupported(format!("{text:?} is an ISO date form Veritas doesn't read"))
-			}
-			None => rejected(format!("{text:?} is not a date")),
+			None if shaped(&[4, 2, 2]) => rejected(format!("{text:?} is not a date")),
+			None => other_form(),
 		},
-		7 => {
-			let month = text
-				.split_once('-')
-				.filter(|(year, month)| {
-					year.len() == 4 && month.len() == 2 && digits(year) && digits(month)
-				})
-				.and_then(|_| YearMonth::parse(text).ok());
-			match month {
-				Some(month) => Ok(DateValue::Month(month)),
-				None if exotic_iso => unsupported(format!(
-					"{text:?} is an ISO month form Veritas doesn't read"
-				)),
-				None => rejected(format!("{text:?} is not a month")),
-			}
-		}
-		4 if digits(text) => text
-			.parse()
-			.map(DateValue::Year)
-			.or_else(|_| rejected(format!("{text:?} is not a year"))),
+		7 => match YearMonth::parse(text).ok().filter(|_| shaped(&[4, 2])) {
+			Some(month) => Ok(DateValue::Month(month)),
+			None if shaped(&[4, 2]) => rejected(format!("{text:?} is not a month")),
+			None => other_form(),
+		},
+		4 if digits(text) => text.parse().map(DateValue::Year).or_else(|_| other_form()),
+		4 => other_form(),
 		_ => rejected(format!("{text:?} is not a date")),
 	}
 }
@@ -721,6 +719,19 @@ mod tests {
 			parse_gap("is", "date", json!("2020-0")),
 			Gap::RejectedByActual(_)
 		));
+		// Odd forms parseISO may accept are Actual's to run, not rejected.
+		for odd in [
+			"2020-W33-1",
+			"+002020-08",
+			"2020/08/10",
+			"2020-8-100",
+			"20-0",
+		] {
+			assert!(
+				matches!(parse_gap("is", "date", json!(odd)), Gap::Unsupported(_)),
+				"{odd}"
+			);
+		}
 
 		let day = condition("is", "date", json!("2020-08-10"));
 		assert!(!eval(&day, text("2020-08-05")));
