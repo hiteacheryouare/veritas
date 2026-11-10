@@ -9,7 +9,9 @@ commands:
 	oracle <args...>   run the Actual oracle CLI (dump, apply, generate)
 	fixtures           regenerate fixtures/synthetic with the oracle
 	bindings           build the core and generate its Swift bindings into VeritasKit
-	ci                 run every check CI runs";
+	app                build the macOS app into target/xcode
+	app-test           run the macOS app's UI tests
+	ci                 run every check CI runs, plus the app build";
 
 const FIXTURE_SPECS: [&str; 3] = ["small", "all-features", "perf-100k"];
 
@@ -22,6 +24,8 @@ fn main() -> ExitCode {
 		Some("oracle") => oracle(&args[1..]),
 		Some("fixtures") => fixtures(),
 		Some("bindings") => bindings(),
+		Some("app") => xcodebuild("build"),
+		Some("app-test") => xcodebuild("test"),
 		Some("ci") => ci(),
 		_ => Err(USAGE.to_owned()),
 	};
@@ -165,6 +169,7 @@ fn fixtures() -> Result {
 }
 
 const VERITAS_KIT: &str = "apps/macos/Packages/VeritasKit";
+const XCODE_PROJECT: &str = "apps/macos/Veritas.xcodeproj";
 const FFI_MODULE_MAP: &str =
 	"module VeritasCoreFFI {\n\theader \"VeritasCoreFFI.h\"\n\texport *\n}\n";
 
@@ -253,6 +258,41 @@ fn write(path: &Path, contents: &str) -> Result {
 	std::fs::write(path, contents).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+fn xcodebuild(action: &str) -> Result {
+	let root = root();
+	if !root
+		.join(VERITAS_KIT)
+		.join("VeritasCoreFFI.xcframework")
+		.exists()
+	{
+		bindings()?;
+	}
+	let derived_data = root.join("target/xcode");
+	run(
+		&root,
+		"xcodebuild",
+		&[
+			"-quiet",
+			"-project",
+			XCODE_PROJECT,
+			"-scheme",
+			"Veritas",
+			"-destination",
+			"platform=macOS",
+			"-derivedDataPath",
+			&derived_data.to_string_lossy(),
+			action,
+		],
+	)?;
+	if action == "build" {
+		eprintln!(
+			"Veritas.app is in {}",
+			derived_data.join("Build/Products/Debug").display()
+		);
+	}
+	Ok(())
+}
+
 fn ci() -> Result {
 	let root = root();
 	run(&root, "cargo", &["fmt", "--all", "--check"])?;
@@ -272,6 +312,7 @@ fn ci() -> Result {
 	run(&root, "node", &["--test", ".github/scripts/*.test.ts"])?;
 	bindings()?;
 	run(&root.join(VERITAS_KIT), "swift", &["test", "--quiet"])?;
+	xcodebuild("build")?;
 	if oracle_dir().join("node_modules").exists() {
 		run(&oracle_dir(), "npm", &["test", "--silent"])?;
 	} else {
