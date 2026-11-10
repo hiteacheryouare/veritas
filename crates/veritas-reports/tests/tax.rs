@@ -387,11 +387,11 @@ fn tax5_summary_and_detail_csv() {
 	);
 	assert_eq!(
 		detail_csv(&book.budget, &summary),
-		"tax_year,bucket,source,date,account,payee,category,amount_cents,counted_cents,notes,transaction_id,parent_id\n\
-		 2027,charitable,category,2027-02-01,CHK,Lender,Donations,-10000,10000,\"'=SUM(A1), \"\"gift\"\"\",a,\n\
-		 2027,charitable,category,2027-03-01,CHK,,Donations,2050,-2050,,b,\n\
-		 2027,conflict,tag,2027-05-01,CHK,SAV,Groceries,-500,,#medical#education,t,\n\
-		 2027,interest_income,category,2027-04-01,CHK,,Interest,1234,1234,'@bank,c,\n"
+		"tax_year,bucket,source,date,account,payee,category,category_status,amount_cents,counted_cents,notes,transaction_id,parent_id\n\
+		 2027,charitable,category,2027-02-01,CHK,Lender,Donations,,-10000,10000,\"'=SUM(A1), \"\"gift\"\"\",a,\n\
+		 2027,charitable,category,2027-03-01,CHK,,Donations,,2050,-2050,,b,\n\
+		 2027,conflict,tag,2027-05-01,CHK,SAV,Groceries,,-500,,#medical#education,t,\n\
+		 2027,interest_income,category,2027-04-01,CHK,,Interest,,1234,1234,'@bank,c,\n"
 	);
 	assert!(!summary_csv(&summary).starts_with('\u{FEFF}'));
 	assert_eq!(
@@ -401,5 +401,95 @@ fn tax5_summary_and_detail_csv() {
 			.filter(|row| row.counted.is_some())
 			.count(),
 		3
+	);
+}
+
+#[test]
+fn tax3_5_an_unknown_tag_bucket_falls_through_to_the_category() {
+	let mut book = book();
+	tag(&mut book, "deductible", "write_off");
+	spend(
+		&mut book,
+		"g",
+		"2027-02-01",
+		-4_000,
+		"Donations",
+		Some("#deductible"),
+	);
+	spend(
+		&mut book,
+		"m",
+		"2027-02-02",
+		-1_000,
+		"Groceries",
+		Some("#deductible #medical"),
+	);
+	let summary = summary(&book, 2027);
+	assert_eq!(total(&summary, Bucket::Charitable), Some((4_000, 1)));
+	assert_eq!(total(&summary, Bucket::Medical), Some((1_000, 1)));
+	assert_eq!(summary.conflicts().count(), 0);
+	let donation = summary
+		.detail
+		.iter()
+		.find(|row| row.row.as_str() == "g")
+		.unwrap();
+	assert_eq!(donation.source, Source::Category);
+}
+
+#[test]
+fn tax3_5_an_unknown_category_bucket_means_no_bucket() {
+	let mut book = book();
+	bucket_of(&mut book, "Groceries", "food_stamps");
+	spend(&mut book, "g", "2027-02-01", -4_000, "Groceries", None);
+	assert!(summary(&book, 2027).detail.is_empty());
+}
+
+#[test]
+fn tax5_category_status_keeps_the_label_without_renaming() {
+	let mut book = book();
+	book.category("Old charity", "Giving", None)
+		.category("Gone charity", "Giving", None)
+		.category("Archived charity", "Giving", None);
+	for category in ["Old charity", "Gone charity", "Archived charity"] {
+		bucket_of(&mut book, category, "charitable");
+	}
+	book.budget
+		.categories
+		.get_mut(&cat("Old charity"))
+		.unwrap()
+		.hidden = true;
+	let gone = book
+		.budget
+		.categories
+		.get_mut(&cat("Gone charity"))
+		.unwrap();
+	gone.tombstone = true;
+	gone.hidden = true;
+	book.budget
+		.category_meta
+		.get_mut(&cat("Archived charity"))
+		.unwrap()
+		.archived_on = Some(date("2027-06-01"));
+	spend(&mut book, "a", "2027-02-01", -100, "Donations", None);
+	spend(&mut book, "b", "2027-02-02", -200, "Old charity", None);
+	spend(&mut book, "c", "2027-02-03", -300, "Gone charity", None);
+	spend(&mut book, "d", "2027-02-04", -400, "Archived charity", None);
+	let csv = detail_csv(&book.budget, &summary(&book, 2027));
+	let statuses: Vec<(&str, &str)> = csv
+		.lines()
+		.skip(1)
+		.map(|line| {
+			let cells: Vec<&str> = line.split(',').collect();
+			(cells[6], cells[7])
+		})
+		.collect();
+	assert_eq!(
+		statuses,
+		[
+			("Donations", ""),
+			("Old charity", "hidden"),
+			("Gone charity", "deleted"),
+			("Archived charity", "archived"),
+		]
 	);
 }

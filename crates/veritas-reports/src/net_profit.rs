@@ -190,7 +190,7 @@ impl Accumulator {
 	}
 }
 
-fn labels(budget: &BudgetData, id: &CategoryId) -> CategoryLabels {
+pub(crate) fn labels(budget: &BudgetData, id: &CategoryId) -> CategoryLabels {
 	let category = budget.categories.get(id);
 	let group_hidden = category
 		.and_then(|category| budget.category_groups.get(&category.group))

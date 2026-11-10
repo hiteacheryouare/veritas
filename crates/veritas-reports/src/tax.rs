@@ -2,7 +2,8 @@ use std::collections::BTreeSet;
 
 use veritas_domain::{BudgetData, CivilDate, CoreError, Money, TransactionId, TransactionKind};
 
-use crate::{Classification, ClassifiedRow, Period};
+use crate::net_profit::labels;
+use crate::{CategoryLabels, Classification, ClassifiedRow, Period};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Bucket {
@@ -324,6 +325,7 @@ pub fn detail_csv(budget: &BudgetData, summary: &TaxSummary) -> String {
 		"account",
 		"payee",
 		"category",
+		"category_status",
 		"amount_cents",
 		"counted_cents",
 		"notes",
@@ -346,11 +348,14 @@ pub fn detail_csv(budget: &BudgetData, summary: &TaxSummary) -> String {
 					.and_then(|account| budget.accounts.get(account))
 					.map_or_else(|| payee.name.clone(), |account| account.name.clone())
 			});
-		let category = transaction
+		let category_id = transaction
 			.and_then(|transaction| transaction.category.as_ref())
 			.and_then(|category| budget.resolve_category(category))
+			.filter(|category| budget.categories.contains_key(*category));
+		let category = category_id
 			.and_then(|category| budget.categories.get(category))
 			.map(|category| category.name.clone());
+		let status = category_id.map_or("", |category| category_status(labels(budget, category)));
 		let parent = transaction.and_then(|transaction| match &transaction.split {
 			veritas_domain::SplitRole::Child { parent } => Some(parent.to_string()),
 			_ => None,
@@ -369,6 +374,7 @@ pub fn detail_csv(budget: &BudgetData, summary: &TaxSummary) -> String {
 			Cell::Text(account.unwrap_or_default()),
 			Cell::Text(payee.unwrap_or_default()),
 			Cell::Text(category.unwrap_or_default()),
+			Cell::Text(status.to_owned()),
 			Cell::Number(row.amount.minor().to_string()),
 			Cell::Number(
 				row.counted
@@ -385,6 +391,20 @@ pub fn detail_csv(budget: &BudgetData, summary: &TaxSummary) -> String {
 		]);
 	}
 	csv.finish()
+}
+
+/// One word per category, the most serious first: a deleted category may
+/// also be hidden, and an archived one usually is.
+fn category_status(labels: CategoryLabels) -> &'static str {
+	if labels.deleted {
+		"deleted"
+	} else if labels.archived {
+		"archived"
+	} else if labels.hidden {
+		"hidden"
+	} else {
+		""
+	}
 }
 
 fn direction_id(direction: Direction) -> &'static str {
