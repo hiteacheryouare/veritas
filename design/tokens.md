@@ -26,8 +26,8 @@ Every color has a light and a dark value. There is no pure black or white anywhe
 
 | Token | Light | Dark | Use |
 |---|---|---|---|
-| `color-accent` | #5146d8 | #8f87ff | Selection, focus ring, primary buttons, sidebar icons. Never money |
-| `color-accent-fill` | #5146d8 | #5c53e0 | Primary button fill (darker in dark mode so its label keeps contrast) |
+| `color-accent` | #3b3d45 | #d9dae0 | Graphite, the default. Selection, focus ring, primary buttons, sidebar icons. Never money |
+| `color-accent-fill` | #2f3138 | #e2e3e8 | Primary button fill. In dark mode it is light, so `color-text-on-accent` flips to dark |
 | `color-money-available` | #127a49 | #4cc47a | Available amounts above the low threshold, on-track goals |
 | `color-money-low` | #9a5a00 | #eda23a | Envelope at or under 20% left, goals behind schedule |
 | `color-money-overspent` | #c4262e | #ff6a64 | Overspent envelopes, losses, shortfalls |
@@ -36,12 +36,33 @@ Every color has a light and a dark value. There is no pure black or white anywhe
 | `color-money-*-fill` | | | Bar, ring and chart fills for the same four states (brighter, for large areas) |
 | `color-chart-expense` | #6e6e78 | #a5a5ae | Spending in charts. Spending is not a warning, so it is graphite |
 | `color-chart-savings` | #26a066 | #3fb06d | Savings in Net Profit and the Sankey |
-| `color-chart-debt-paydown` | #9b3f8a | #d272bf | Debt paydown in Net Profit and the Sankey |
-| `color-scenario-1..3` | blue, plum, amber | | What-if lines. Baseline uses `color-scenario-baseline` |
+| `color-chart-debt-paydown` | #8b5e34 | #c99a6b | Debt paydown in Net Profit and the Sankey |
+| `color-scenario-1..3` | blue, umber, teal | | What-if lines. Baseline uses `color-scenario-baseline` |
 | `color-surface-*` | | | window, sidebar (glass), grouped, raised (sheets, popovers), field, paper, scrim |
 | `color-text-*` | | | primary, secondary, tertiary, on-accent, paper |
 
-Color is never the only signal. Low and overspent always carry an icon (`low`: arrow into a circle, `over`: triangle) and words ("Low, $8.80 left", "Overspent by $34.75"). Income carries the tray glyph and the word "received" or "Income". Available is the default state: its words are the column head "Available", and a positive amount never gets an icon, so the warnings stand out. Negatives always use a real minus sign (U+2212): −34.75. Statements are the exception: they follow accounting layout and show a loss in parentheses (docs/finance/statements.md ST-3).
+### Accent candidates
+
+Purple is out because Actual's brand is purple. Blue, green, amber and red belong to money. `index.html` has a switcher; pages honor `?accent=` and remember the last choice.
+
+| Accent | Light | Dark | Why |
+|---|---|---|---|
+| Graphite (default) | #3b3d45 | #d9dae0 | The UI stays neutral, so the only color on screen is money |
+| Petrol | #0c6b78 | #4cb3c2 | A cool chromatic accent that sits between income blue and available green without matching either |
+| Olive | #5a6614 | #b4c24e | A warm accent that nothing else in a finance app uses, clear of amber and green |
+
+### Money states
+
+Color is never the only signal. Every money state has an icon and a word next to the amount:
+
+| State | Icon | Word | Example |
+|---|---|---|---|
+| Available | check in a circle | left | 93.38 left |
+| Low (20% or less left) | arrow into a circle | low | 8.80 low |
+| Overspent | triangle | over | −34.75 over |
+| Income | tray | To Budget, Income | $312.40 To Budget |
+
+The icon is 12 px at 80% opacity and the word is caption size, so a column of available amounts stays quiet. A zero amount is neutral grey with no icon or word. Negatives always use a real minus sign (U+2212). Statements follow accounting layout: liabilities are positive numbers under their own heading.
 
 ## Drain bars
 

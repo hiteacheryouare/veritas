@@ -1,6 +1,6 @@
 # Interaction notes
 
-Keyboard flows, the arithmetic field and motion. Shortcuts marked *proposed* are not in PLAN.md yet and need Ryan's yes.
+Keyboard flows, the arithmetic field and motion.
 
 ## Global shortcuts
 
@@ -9,16 +9,16 @@ Keyboard flows, the arithmetic field and motion. Shortcuts marked *proposed* are
 | ⌘K | Command palette: "Go to account", "New bill", "Move money", any envelope, any screen |
 | ⌘N | Quick entry sheet, from anywhere |
 | ⌘← / ⌘→ | Previous / next month on Budget, Net Profit, Sankey and the register's month filter |
-| ⌘1 … ⌘6 | Budget, Accounts, Bills, Goals, Reports, Insights *(proposed)* |
-| ⌘F | Search the current list *(proposed)* |
+| ⌘1 … ⌘6 | Budget, Accounts, Bills, Goals, Reports, Insights |
+| ⌘F | Search the current list |
 | Esc | Close the top sheet or popover, or leave edit mode |
 
 ## Budget
 
 - ↑ / ↓ move the selection between envelope rows. Group heads are skipped.
-- ⌥↑ / ⌥↓ jump to the previous or next group *(proposed)*.
+- ⌥↑ / ⌥↓ jump to the previous or next group.
 - Return, or typing any digit or operator, opens the Budgeted field of the selected row.
-- The Dense toggle (⌘D, *proposed*) keeps the selection and the scroll position.
+- ⌘D toggles Dense. It keeps the selection and the scroll position.
 - Move budget opens with the selected envelope as From.
 
 ## Arithmetic fields
@@ -45,7 +45,7 @@ Every amount field (budgeted, quick entry, Move money, Paid, split amounts) beha
 ## Quick entry (⌘N)
 
 - Payee first. Picking a known payee fills the envelope and amount from that payee's history, and the amount is selected so it can be typed over or appended to.
-- Tab walks Payee, Amount, Envelope, Account, Date, Notes. Return saves and closes. ⌘Return saves and opens a fresh entry *(proposed)*.
+- Tab walks Payee, Amount, Envelope, Account, Date, Notes. Return saves and closes. ⌘Return saves and opens a fresh entry.
 
 ## Bills
 
@@ -61,7 +61,7 @@ Every amount field (budgeted, quick entry, Move money, Paid, split amounts) beha
 
 - Every number in Net Profit and every Sankey node can take focus. Return opens its transactions, the same as a click.
 - Forecast: the horizon control is a segmented control (←/→ when focused). Up to three what-ifs; the add button says how many are left.
-- Wrapped: ← / → change cards, Space pauses, H toggles Hide amounts *(proposed)*.
+- Wrapped: ← / → change cards, Space pauses.
 
 ## Motion
 
