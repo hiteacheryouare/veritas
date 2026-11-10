@@ -78,5 +78,7 @@ CREATE TABLE IF NOT EXISTS veritas_scenario_event (
 	on_date INTEGER,
 	start_month TEXT NOT NULL,
 	end_month TEXT,
-	every_months INTEGER CHECK (every_months > 0)
+	every_months INTEGER CHECK (every_months > 0),
+	every_weeks INTEGER CHECK (every_weeks > 0),
+	CHECK (every_months IS NULL OR every_weeks IS NULL)
 );
