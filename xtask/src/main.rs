@@ -59,6 +59,14 @@ fn output(dir: &Path, program: &str, args: &[&str]) -> Result<String> {
 		.current_dir(dir)
 		.output()
 		.map_err(|e| format!("could not start {program}: {e}"))?;
+	if !out.status.success() {
+		return Err(format!(
+			"{program} {} failed in {}: {}",
+			args.join(" "),
+			dir.display(),
+			String::from_utf8_lossy(&out.stderr).trim()
+		));
+	}
 	Ok(String::from_utf8_lossy(&out.stdout).trim().to_owned())
 }
 

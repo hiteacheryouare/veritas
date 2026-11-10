@@ -4,10 +4,10 @@
 <!--
 PRs target `dev`, stay inside one workstream's directories, and ship tests.
 Merges are merge commits, so your commit messages survive. Write them properly.
-The merge-bar check reads the Claims line below; list every R-ID this PR implements.
 -->
 
-Claims: <!-- R-IO-1, R-IO-3 — or "none" -->
+<!-- List every R-ID this PR implements, e.g. "Claims: R-IO-1, R-IO-3". -->
+Claims: none
 
 ## What this changes
 

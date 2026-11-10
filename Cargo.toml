@@ -33,6 +33,9 @@ unsafe_code = "deny"
 unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
 
 [profile.release]
 strip = "symbols"

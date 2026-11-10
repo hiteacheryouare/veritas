@@ -17,8 +17,9 @@ node_modules/
 xcuserdata/
 DerivedData/
 
-# Claude Code agent worktrees
+# Claude Code agent worktrees and per-agent memory
 .claude/worktrees/
+.claude/agent-memory/
 
 # The pinned Actual checkout. `cargo xtask reference` recreates it.
 reference/

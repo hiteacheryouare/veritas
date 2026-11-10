@@ -10,6 +10,7 @@ export interface Signoff {
 
 export interface PullRequest {
 	baseRef: string;
+	headRef: string;
 	headSha: string;
 	body: string;
 	labels: string[];
@@ -24,8 +25,10 @@ const SIGNOFF = /^merge-bar:\s*(reviewer|cowboy|fred|architect)\s+(approve|rejec
 const REQUIREMENT = /\bR-[A-Z]+-\d+\b/g;
 const TRUSTED = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
 
+const prose = (markdown: string) => markdown.replace(/<!--[\s\S]*?-->/g, '').replace(/^(`{3,}|~{3,})[\s\S]*?^\1/gm, '');
+
 export const parseSignoffs = (text: string): Signoff[] =>
-	[...text.matchAll(SIGNOFF)].map(([, role, verdict, sha, rest]) => ({
+	[...prose(text).matchAll(SIGNOFF)].map(([, role, verdict, sha, rest]) => ({
 		role: role.toLowerCase() as Role,
 		verdict: verdict.toLowerCase() as Signoff['verdict'],
 		sha: sha.toLowerCase(),
@@ -36,13 +39,15 @@ export const trustedSignoffs = (posts: { body: string | null; authorAssociation:
 	posts.filter((post) => TRUSTED.has(post.authorAssociation)).flatMap((post) => parseSignoffs(post.body ?? ''));
 
 export const claimedRequirements = (body: string): string[] => {
-	const line = body.split(/\r?\n/).find((text) => /^\s*claims:/i.test(text));
+	const line = prose(body).split(/\r?\n/).find((text) => /^\s*claims:/i.test(text));
 	return [...new Set(line?.match(REQUIREMENT) ?? [])].sort();
 };
 
 export const evaluate = (pr: PullRequest, signoffs: Signoff[]): Verdict => {
 	if (pr.baseRef === 'main') {
-		return { state: 'success', description: 'Gate PR into main: Ryan merges these himself' };
+		return pr.headRef === 'dev'
+			? { state: 'success', description: 'Gate PR from dev: Ryan merges these himself' }
+			: { state: 'pending', description: 'Only dev merges into main' };
 	}
 	const latest = new Map<Role, Signoff>();
 	for (const signoff of signoffs) {

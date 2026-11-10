@@ -35,7 +35,7 @@ const paged = async (path: string) => {
 const pull = await api(`/pulls/${PR_NUMBER}`);
 const comments = await paged(`/issues/${PR_NUMBER}/comments`);
 const reviews = await paged(`/pulls/${PR_NUMBER}/reviews`);
-const posts = [...comments, ...reviews]
+const posts = [...comments, ...reviews.filter((review) => review.state !== 'DISMISSED')]
 	.map((post) => ({
 		body: post.body,
 		authorAssociation: post.author_association,
@@ -46,6 +46,7 @@ const posts = [...comments, ...reviews]
 const verdict = evaluate(
 	{
 		baseRef: pull.base.ref,
+		headRef: pull.head.ref,
 		headSha: pull.head.sha,
 		body: pull.body ?? '',
 		labels: pull.labels.map((label: { name: string }) => label.name)

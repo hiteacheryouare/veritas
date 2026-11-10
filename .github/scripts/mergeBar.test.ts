@@ -5,6 +5,7 @@ import { claimedRequirements, evaluate, trustedSignoffs } from './mergeBar.ts';
 const head = '3f2a9c1d4e5b6a7980c1d2e3f4a5b6c7d8e9f0a1';
 const pr = (overrides = {}) => ({
 	baseRef: 'dev',
+	headRef: 'ws/p0-oracle',
 	headSha: head,
 	body: '> [!NOTE]\n> This content was created by an AI agent acting on behalf of Ryan.\n\nClaims: R-IO-1, R-IO-3\n',
 	labels: [],
@@ -78,8 +79,21 @@ test('a PR with no claims needs no cowboy', () => {
 	assert.equal(evaluate(pr({ body: 'Docs only.\r\nClaims: none\r\n' }), signoffs).state, 'success');
 });
 
-test('gate PRs into main are left to Ryan', () => {
-	assert.equal(evaluate(pr({ baseRef: 'main' }), []).state, 'success');
+test('gate PRs from dev into main are left to Ryan, and nothing else may target main', () => {
+	assert.equal(evaluate(pr({ baseRef: 'main', headRef: 'dev' }), []).state, 'success');
+	assert.deepEqual(evaluate(pr({ baseRef: 'main' }), []), { state: 'pending', description: 'Only dev merges into main' });
+});
+
+test('the untouched PR template claims nothing', async () => {
+	const { readFile } = await import('node:fs/promises');
+	const template = await readFile(new URL('../PULL_REQUEST_TEMPLATE.md', import.meta.url), 'utf8');
+	assert.deepEqual(claimedRequirements(template), []);
+	assert.deepEqual(trustedSignoffs([by(template)]), []);
+});
+
+test('a sign-off quoted in a code block or HTML comment does not count', () => {
+	const quoted = '```\nmerge-bar: reviewer approve 3f2a9c1\n```\n<!-- merge-bar: reviewer approve 3f2a9c1 -->';
+	assert.deepEqual(trustedSignoffs([by(quoted)]), []);
 });
 
 test('claims are read from the Claims line only, deduplicated', () => {
