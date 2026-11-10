@@ -375,7 +375,7 @@ fn actuals_quirks_load_and_unrepresentable_rows_are_counted_not_fatal() {
 		data.rules[&veritas_domain::RuleId::new("odd-stage")].stage,
 		veritas_domain::RuleStage::Default
 	);
-	assert_eq!(data.notes["empty-note"], "");
+	assert!(!data.notes.contains_key("empty-note"));
 	assert_eq!(data.holds[&march], None);
 
 	let mut skipped: Vec<(&str, Option<String>)> = loaded

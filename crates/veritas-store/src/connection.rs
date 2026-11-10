@@ -1,12 +1,14 @@
 use std::path::Path;
 use std::time::Duration;
 
-use rusqlite::{Connection, ErrorCode, OpenFlags};
+use rusqlite::{Connection, ErrorCode, OpenFlags, TransactionBehavior};
+use veritas_domain::BudgetType;
 use veritas_domain::CoreError;
 
 use crate::audit::{AuditReport, audit};
 use crate::load::{self, Loaded};
 use crate::schema;
+use crate::write::Writer;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -23,6 +25,7 @@ pub(crate) fn storage(error: rusqlite::Error) -> CoreError {
 /// Actual source file: those go through [`open_read_only`].
 pub struct Store {
 	conn: Connection,
+	budget_type: BudgetType,
 }
 
 impl Store {
@@ -43,7 +46,8 @@ impl Store {
 		}
 		conn.execute_batch("PRAGMA synchronous = FULL; PRAGMA foreign_keys = OFF;")
 			.map_err(storage)?;
-		Ok(Store { conn })
+		let budget_type = load::budget_type(&conn)?;
+		Ok(Store { conn, budget_type })
 	}
 
 	/// Creates any missing veritas_* tables and records the schema version.
@@ -54,6 +58,16 @@ impl Store {
 
 	pub fn load(&self) -> Result<Loaded, CoreError> {
 		load::load(&self.conn)
+	}
+
+	/// One command's writes, as one SQLite transaction (R-REL-1). Dropping the
+	/// writer without committing rolls everything back.
+	pub fn writer(&mut self) -> Result<Writer<'_>, CoreError> {
+		let tx = self
+			.conn
+			.transaction_with_behavior(TransactionBehavior::Immediate)
+			.map_err(storage)?;
+		Ok(Writer::new(tx, self.budget_type))
 	}
 
 	pub fn integrity_check(&self) -> Result<Vec<String>, CoreError> {

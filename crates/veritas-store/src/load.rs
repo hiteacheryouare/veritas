@@ -75,7 +75,7 @@ fn table_exists(conn: &Connection, table: &str) -> Result<bool, CoreError> {
 
 /// Actual treats a file as tracking only when `budgetType` is exactly
 /// `'tracking'`; a missing row or any other value is envelope.
-fn budget_type(conn: &Connection) -> Result<BudgetType, CoreError> {
+pub(crate) fn budget_type(conn: &Connection) -> Result<BudgetType, CoreError> {
 	if !table_exists(conn, "preferences")? {
 		return Ok(BudgetType::Envelope);
 	}
@@ -345,8 +345,10 @@ pub fn load(conn: &Connection) -> Result<Loaded, CoreError> {
 		&mut skipped,
 		|row| {
 			let id = id(row, 0)?;
-			data.notes
-				.insert(id, text(at(row, 1)?)?.unwrap_or_default());
+			// Actual clears a note by writing NULL, so a NULL note is no note.
+			if let Some(note) = text(at(row, 1)?)? {
+				data.notes.insert(id, note);
+			}
 			Ok(())
 		},
 	)?;
