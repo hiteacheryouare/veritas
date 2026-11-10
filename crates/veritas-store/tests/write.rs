@@ -482,3 +482,75 @@ fn a_write_protected_file_is_never_opened_for_writing() {
 	drop(store);
 	std::fs::set_permissions(&db, writable).unwrap();
 }
+
+#[test]
+fn an_edit_to_a_duplicated_budget_cell_lands_in_the_row_the_loader_reads() {
+	let scratch = Scratch::new("write-duplicate-cell");
+	let db = fixture_db("small", &scratch);
+	let category = loaded(&db)
+		.categories
+		.values()
+		.find(|c| !c.is_income)
+		.unwrap()
+		.id
+		.clone();
+	Connection::open(&db)
+		.unwrap()
+		.execute_batch(&format!(
+			"INSERT INTO zero_budgets (id, month, category, amount) VALUES
+			   ('2019-05-{category}', 201905, '{category}', 100),
+			   ('201905-{category}', 201905, '{category}', 200);"
+		))
+		.unwrap();
+	let may = YearMonth::parse("2019-05").unwrap();
+	let before = loaded(&db).budget_cells[&(may, category.clone())].clone();
+	assert_eq!(
+		before.budgeted,
+		Money::from_minor(200),
+		"the later row is the one Actual's sheet shows"
+	);
+	let after = BudgetCell {
+		budgeted: Money::from_minor(300),
+		..before.clone()
+	};
+	let mut store = Store::open(&db, Access::ReadWrite).unwrap();
+	let mut writer = store.writer().unwrap();
+	writer.put_budget_cell(Some(&before), Some(&after)).unwrap();
+	writer.commit().unwrap();
+	assert_eq!(loaded(&db).budget_cells[&(may, category)], after);
+}
+
+#[test]
+fn a_schedule_date_edit_lands_in_the_next_date_row_the_loader_reads() {
+	let scratch = Scratch::new("write-duplicate-next-date");
+	let db = fixture_db("all-features", &scratch);
+	let data = loaded(&db);
+	let before = data
+		.schedules
+		.values()
+		.find(|s| s.next_date.is_some())
+		.unwrap()
+		.clone();
+	// A tombstoned row ahead of the live one, as a sync can leave behind.
+	Connection::open(&db)
+		.unwrap()
+		.execute_batch(&format!(
+			"CREATE TEMP TABLE live AS SELECT * FROM schedules_next_date WHERE schedule_id = '{id}';
+			 DELETE FROM schedules_next_date WHERE schedule_id = '{id}';
+			 INSERT INTO schedules_next_date (id, schedule_id, local_next_date, local_next_date_ts, base_next_date, base_next_date_ts, tombstone)
+			   VALUES ('dead-row', '{id}', 20200101, 1, 20200101, 1, 1);
+			 INSERT INTO schedules_next_date SELECT * FROM live;",
+			id = before.id
+		))
+		.unwrap();
+	assert_eq!(loaded(&db).schedules[&before.id], before);
+	let after = veritas_domain::Schedule {
+		next_date: Some(CivilDate::new(2027, 2, 1).unwrap()),
+		..before.clone()
+	};
+	let mut store = Store::open(&db, Access::ReadWrite).unwrap();
+	let mut writer = store.writer().unwrap();
+	writer.put_schedule(Some(&before), Some(&after)).unwrap();
+	writer.commit().unwrap();
+	assert_eq!(loaded(&db).schedules[&before.id], after);
+}

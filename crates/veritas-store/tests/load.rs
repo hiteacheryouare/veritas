@@ -424,7 +424,7 @@ fn actuals_quirks_load_and_unrepresentable_rows_are_counted_not_fatal() {
 			("transactions", some("no-account")),
 			("transactions", some("no-date")),
 			("transactions", some("orphan-child")),
-			("zero_budgets", Some(format!("2019-04-{category}"))),
+			("zero_budgets", Some(format!("201904-{category}"))),
 		]
 	);
 }

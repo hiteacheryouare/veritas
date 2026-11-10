@@ -165,7 +165,7 @@ fn every_broken_invariant_is_reported_and_nothing_is_fixed_r_rel_2() {
 		(Check::MappingChain, payees[0].clone(), some(&payees[1])),
 		(
 			Check::DuplicateBudgetCell,
-			format!("2026-10-{category}"),
+			format!("202610-{category}"),
 			None,
 		),
 		(

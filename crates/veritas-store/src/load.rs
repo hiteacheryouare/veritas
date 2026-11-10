@@ -37,7 +37,17 @@ pub struct Loaded {
 }
 
 pub(crate) const DUPLICATE_BUDGET_CELL: &str =
-	"repeats an earlier row's month and category, and replaces it";
+	"a later row for the same month and category replaces it";
+
+/// Budget rows are matched by (month, category), never by id, because Actual
+/// wrote two id formats over the years. When a corrupt file repeats a pair,
+/// the last row counts, as in Actual's sheet. The loader and the writer both
+/// pick with this ordering, so an edit lands in the row that is read back.
+pub(crate) const BUDGET_CELL_PICK: &str = "rowid DESC";
+
+/// Of several `schedules_next_date` rows for one schedule, the first live one
+/// counts. Shared by the loader and the writer, like [`BUDGET_CELL_PICK`].
+pub(crate) const NEXT_DATE_PICK: &str = "CASE WHEN tombstone = 0 THEN 0 ELSE 1 END, rowid";
 
 fn at<'r>(row: &'r Row<'_>, index: usize) -> Cell<ValueRef<'r>> {
 	row.get_ref(index).map_err(|_| "a column is missing")
@@ -227,7 +237,9 @@ pub fn load(conn: &Connection) -> Result<Loaded, CoreError> {
 		conn,
 		budget_table,
 		&format!(
-			"SELECT id, month, category, amount, carryover, goal, long_goal FROM {budget_table} ORDER BY rowid"
+			"SELECT id, month, category, amount, carryover, goal, long_goal, \
+			 row_number() OVER (PARTITION BY month, category ORDER BY {BUDGET_CELL_PICK}) \
+			 FROM {budget_table} ORDER BY rowid"
 		),
 		&mut skipped,
 		|row| {
@@ -242,17 +254,12 @@ pub fn load(conn: &Connection) -> Result<Loaded, CoreError> {
 				goal: money(at(row, 5)?)?,
 				long_goal: flag(at(row, 6)?),
 			};
-			// Rows are matched by (month, category) and never by id, because
-			// Actual wrote two id formats over the years. A repeated pair is
-			// corrupt; the later row wins, as in Actual's sheet, and is the
-			// one reported.
-			let shadowed = data
-				.budget_cells
-				.insert((cell.month, cell.category.clone()), cell);
-			match shadowed {
-				Some(_) => Err(DUPLICATE_BUDGET_CELL),
-				None => Ok(()),
+			if integer(at(row, 7)?)? != Some(1) {
+				return Err(DUPLICATE_BUDGET_CELL);
 			}
+			data.budget_cells
+				.insert((cell.month, cell.category.clone()), cell);
+			Ok(())
 		},
 	)?;
 
@@ -310,7 +317,7 @@ pub fn load(conn: &Connection) -> Result<Loaded, CoreError> {
 		|row| {
 			let id = ScheduleId::new(id(row, 0)?);
 			let schedule = Schedule {
-				next_date: next_dates.get(&id).and_then(|next| next.date),
+				next_date: next_dates.get(&id).copied().flatten(),
 				id: id.clone(),
 				name: text(at(row, 1)?)?,
 				rule: RuleId::new(required_text(at(row, 2)?, "the schedule has no rule")?),
@@ -439,23 +446,22 @@ fn transaction(row: &Row<'_>) -> Cell<Transaction> {
 	})
 }
 
-struct NextDate {
-	date: Option<CivilDate>,
-	tombstone: bool,
-}
-
 /// `v_schedules.next_date`: the local date when both timestamps are set and
 /// equal, otherwise the base date.
 fn next_dates(
 	conn: &Connection,
 	skipped: &mut Vec<SkippedRow>,
-) -> Result<BTreeMap<ScheduleId, NextDate>, CoreError> {
-	let mut dates: BTreeMap<ScheduleId, NextDate> = BTreeMap::new();
+) -> Result<BTreeMap<ScheduleId, Option<CivilDate>>, CoreError> {
+	let mut dates = BTreeMap::new();
 	each_row(
 		conn,
 		"schedules_next_date",
-		"SELECT id, schedule_id, local_next_date, local_next_date_ts, base_next_date, \
-		 base_next_date_ts, tombstone FROM schedules_next_date ORDER BY rowid",
+		&format!(
+			"SELECT id, schedule_id, local_next_date, local_next_date_ts, base_next_date, \
+			 base_next_date_ts FROM (SELECT *, row_number() OVER \
+			 (PARTITION BY schedule_id ORDER BY {NEXT_DATE_PICK}) AS pick FROM schedules_next_date) \
+			 WHERE pick = 1"
+		),
 		skipped,
 		|row| {
 			let schedule =
@@ -467,17 +473,7 @@ fn next_dates(
 			} else {
 				at(row, 4)?
 			};
-			let next = NextDate {
-				date: integer(chosen)?.map(date_from_int).transpose()?,
-				tombstone: tombstone(at(row, 6)?),
-			};
-			let replace = match dates.get(&schedule) {
-				None => true,
-				Some(existing) => existing.tombstone && !next.tombstone,
-			};
-			if replace {
-				dates.insert(schedule, next);
-			}
+			dates.insert(schedule, integer(chosen)?.map(date_from_int).transpose()?);
 			Ok(())
 		},
 	)?;

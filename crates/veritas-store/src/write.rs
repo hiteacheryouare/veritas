@@ -11,6 +11,7 @@ use veritas_domain::{
 };
 
 use crate::connection::storage;
+use crate::load::{BUDGET_CELL_PICK, NEXT_DATE_PICK};
 
 /// A row as the columns Veritas models, in a fixed order per table.
 type Columns = Vec<(&'static str, Value)>;
@@ -600,7 +601,10 @@ impl<'conn> Writer<'conn> {
 		let existing: Option<(String, Option<i64>)> = self
 			.tx
 			.query_row(
-				"SELECT id, base_next_date_ts FROM schedules_next_date WHERE schedule_id = ?1 ORDER BY rowid LIMIT 1",
+				&format!(
+					"SELECT id, base_next_date_ts FROM schedules_next_date WHERE schedule_id = ?1 \
+					 ORDER BY {NEXT_DATE_PICK} LIMIT 1"
+				),
 				[&id],
 				|row| Ok((row.get(0)?, row.get(1)?)),
 			)
@@ -682,7 +686,8 @@ impl<'conn> Writer<'conn> {
 			.tx
 			.query_row(
 				&format!(
-					"SELECT id FROM {table} WHERE month = ?1 AND category = ?2 ORDER BY rowid LIMIT 1"
+					"SELECT id FROM {table} WHERE month = ?1 AND category = ?2 \
+					 ORDER BY {BUDGET_CELL_PICK} LIMIT 1"
 				),
 				params_from_iter([Value::Integer(month), owned(after.category.as_str())]),
 				|row| row.get(0),
