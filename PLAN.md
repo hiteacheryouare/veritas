@@ -160,7 +160,7 @@ Priority: **P0** = required for the first daily-driver release (v1, end of Phase
 | R-GOAL-3 | Lifecycle: `active → reached → closed`. Spending on the goal means categorizing the purchase to the goal's category. | P0 |
 | R-GOAL-4 | **Close goal** releases any leftover (positive or negative) to an envelope Ryan picks, as a budget move in the current month, never as a transaction. It then hides the category. It never deletes, merges or re-categorizes anything. | P0 |
 | R-GOAL-5 | Closed goals stay visible in all reports, Sankey, Wrapped and a Goal Archive, with their spend history ("New laptop: $1,480 spent, closed Mar 2027"). | P0 |
-| R-GOAL-6 | Goals survive a round trip. In Actual a goal is a normal (possibly hidden) category. If Actual's long-term-goal template format allows it (**VERIFY** `goal_def`), Veritas also writes the target there so Actual shows progress natively. | P0 |
+| R-GOAL-6 | Goals survive a round trip. In Actual a goal is a normal (possibly hidden) category. Actual can hold the target amount natively (a `#goal <amount>` note line, `goal_def` with `template_settings.source = 'ui'`, or per-month `zero_budgets.goal`/`long_goal = 1` rows, which are the only thing its display reads), but it has no target date, and it shows goal progress only behind the experimental `goalTemplatesEnabled` flag. The date lives in `veritas_*`. Whether Veritas also writes the target natively is an open question for Ryan (see docs/actual-format.md). | P0 |
 | R-GOAL-7 | Recurring sinking-fund goals that auto-restart. Ryan didn't select this. | P2 |
 
 ## 4.4 Accounts, transactions, transfers, debt (R-ACC, R-XFER, R-DEBT)
@@ -175,11 +175,11 @@ Priority: **P0** = required for the first daily-driver release (v1, end of Phase
 | R-ACC-6 | Global quick-add hotkey and a menu-bar extra. | P2 |
 | R-XFER-1 | One **Move money** flow. *From* and *To* pickers show live balances and the projected balance after the move. Direction is explicit in the UI copy. | P0 |
 | R-XFER-2 | In registers, transfer rows show `→ To <Account>` (outflow) or `← From <Account>` (inflow) with a glyph. A bare "Transfer: X" payee label never appears. | P0 |
-| R-XFER-3 | Editing either side of a transfer edits the pair atomically (amount, date, accounts). Deleting one side deletes both. | P0 |
-| R-XFER-4 | An on-budget → off-budget transfer, which Actual requires to carry a category, makes Veritas ask: *Loan/debt payment* (→ R-DEBT-2), *Saving/investing*, or *Other* (pick a category). The answer maps to Actual's required category. | P0 |
+| R-XFER-3 | Editing either side of a transfer edits the pair atomically (amount, date, accounts). Deleting one side deletes both. Actual itself doesn't sync dates (only amount, account and notes; date sync is an opt-in client preference, `sync-transfer-date`). Veritas does sync them and leaves that preference untouched (see docs/actual-format.md). | P0 |
+| R-XFER-4 | An on-budget → off-budget transfer makes Veritas ask: *Loan/debt payment* (→ R-DEBT-2), *Saving/investing*, or *Other* (pick a category). The answer maps to the category on the on-budget side. Actual doesn't require that category (only its close-account dialog does) and shows the row as uncategorized without one; Veritas still asks (see docs/actual-format.md). | P0 |
 | R-XFER-5 | A consistent glossary throughout the app (see §5.4). | P0 |
 | R-DEBT-1 | Loan account setup (off-budget) with optional metadata in `veritas_*`: rate, payment amount, payment day, lender. | P0 |
-| R-DEBT-2 | Loan payment wizard. One payment from checking = a split: principal as a transfer to the loan account (category kind *debt principal*) + interest as an expense. Pre-fills from the last payment. **VERIFY** whether Actual supports transfers inside split children. If not, the fallback is two linked transactions. | P0 |
+| R-DEBT-2 | Loan payment wizard. One payment from checking = a split: principal as a transfer to the loan account (category kind *debt principal*) + interest as an expense. Pre-fills from the last payment. Actual supports transfers inside split children: the principal child gets a standalone counterpart in the loan account, so no fallback is needed. In Actual that on→off child keeps its category and counts as activity in that category's budget (see docs/actual-format.md). | P0 |
 | R-DEBT-3 | Credit cards stay **on-budget**, Ryan's current setup. Purchases are spending at swipe. Card payments are on→on transfers and never count as spending. | P0 |
 
 ## 4.5 Bills and rules (R-BILL, R-RULE)
@@ -191,7 +191,7 @@ Priority: **P0** = required for the first daily-driver release (v1, end of Phase
 | R-BILL-3 | Upcoming tray and timeline. **Paid** posts the transaction with an editable amount and date. Skip one occurrence. Pause or end. | P0 |
 | R-BILL-4 | Bills are stored as Actual schedules plus their owned rule, so they round-trip natively. Veritas validates inputs so it's impossible to build a schedule that Actual would mis-evaluate. Rules are never shown in the bill flow. | P0 |
 | R-BILL-5 | Income can be a "bill" too (paychecks), which feeds the forecast. | P0 |
-| R-RULE-1 | Rules run with Actual's semantics (stages pre/default/post, conditions op, actions) at the same trigger points as Actual, including manual entry if Actual does that (**VERIFY**). | P0 |
+| R-RULE-1 | Rules run with Actual's semantics (stages pre/default/post, then ascending specificity and id within a stage, chained; conditions op; actions) at the same trigger points as Actual. Actual runs rules on manually added transactions, in its client, on new rows only and filling only empty fields; it never runs them when an existing transaction is edited (see docs/actual-format.md). | P0 |
 | R-RULE-2 | Friendly rule editor in sentence form: *When payee contains "AMZN" → rename payee to Amazon, set category Shopping.* "Apply to existing" shows a preview first. | P0 |
 | R-RULE-3 | Rules with conditions or actions Veritas doesn't support (for example, Handlebars templating) are shown read-only with "Edit in Actual" and preserved byte-identical. | P0 |
 
@@ -592,7 +592,7 @@ Shared rule: views go in `VeritasMacUI`, view models in `VeritasKit`, and no bus
 |---|---|---|
 | **WS-MAC-SHELL** | App shell, sidebar, toolbar, menus, ⌘K palette, open/import/export, settings (backups, interop, AI, appearance), snapshot restore UI, read-only mode banners, error presentation | R-IO-*, R-REL-3/4/6, §5.2 |
 | **WS-MAC-BUDGET** | Budget screen, envelope rows, arithmetic field component (**reused by every amount field app-wide**: build it first and publish it to the others), move budget, cover overspending, dense mode, goal cards + create/close/archive flows | R-BUD-*, R-GOAL-* |
-| **WS-MAC-ACCOUNTS** | Account list, `NSTableView` register, quick entry ⌘N with payee memory, Move money sheet, transfer rendering, on→off "what is this?" prompt, loan setup + payment wizard, reconcile flow, payee manager | R-ACC-*, R-XFER-*, R-DEBT-* |
+| **WS-MAC-ACCOUNTS** | Account list, `NSTableView` register, quick entry ⌘N with payee memory, Move money sheet, transfer rendering, on→off "what is this?" prompt, loan setup + payment wizard, reconcile flow, payee manager, account close (Actual's flow: an optional closing transfer moves the balance to the chosen account; see docs/actual-format.md) | R-ACC-*, R-XFER-*, R-DEBT-* |
 | **WS-MAC-BILLS** | Bills list/editor, upcoming tray, Paid/skip, sentence-style rule editor, read-only unsupported rules | R-BILL-*, R-RULE-* |
 | **WS-MAC-REPORTS** | Dashboard (Actual widgets, native), Net Profit, standard reports, custom report viewer/editor, Sankey canvas, drilldowns | R-REP-1 to 6 |
 | **WS-MAC-INSIGHTS** | Forecast + what-if compare, budget suggestions, Wrapped story + image export, Statements + PDF, Tax summary export, on-device AI panel | R-FC-*, R-WRAP-*, R-AI-1, R-REP-7/8 |
@@ -639,7 +639,7 @@ Shared rule: views go in `VeritasMacUI`, view models in `VeritasKit`, and no bus
 11. A second window or instance on the same budget → read-only (R-REL-6).
 
 **Math & dates**
-12. Arithmetic: divide by zero, `1,234.56+10`, `(5`, `^` right-associativity, negative results, pasted currency symbols. Behavior matches Actual exactly, including the "invalid → keep old value" fallback.
+12. Arithmetic: divide by zero, `1,234.56+10`, `(5`, `^` right-associativity, negative results, pasted currency symbols. Behavior matches Actual exactly. Actual's invalid-input fallback depends on the field: transaction amounts keep the old value, budget cells save 0. Which rule Veritas follows is an open question for Ryan (see docs/actual-format.md).
 13. Bills on the 29th, 30th or 31st, Feb 29, and skip-weekend crossing a month boundary.
 14. "Today" = the local civil date, recomputed on wake or midnight. Time zones never shift transaction dates.
 15. Refunds in expense categories reduce expenses. A refund larger than the month's spending gives negative expense, not income.
@@ -702,7 +702,7 @@ Shared rule: views go in `VeritasMacUI`, view models in `VeritasKit`, and no bus
 | D6 | Envelope budgeting only in the v1 UI. Tracking budgets are preserved and read-only. | Assumption (Ryan uses envelopes) |
 | D7 | Spending is counted at swipe. Loan interest = expense, principal = debt paydown line. Card payments are never spending. | Ryan |
 | D8 | Credit cards stay on-budget and loans off-budget, matching Ryan's current setup. No forced migration. | Ryan |
-| D9 | Goal close = budget move + hide. It never re-files transactions. Category delete defaults to Archive. | Ryan + root-cause hypothesis (VERIFY) |
+| D9 | Goal close = budget move + hide. It never re-files transactions. Category delete defaults to Archive. | Ryan + root-cause hypothesis, confirmed: deleting a category with a transfer target re-maps all its history and budgets to the target (see docs/actual-format.md) |
 | D10 | Bills = Actual schedules, with a per-bill auto/confirm choice. | Ryan |
 | D11 | AI is optional, off by default, on-device only, read-only. | Ryan |
 | D12 | "Native but opinionated" UI. SwiftUI + AppKit tables. Minimum macOS 27. | Ryan |
@@ -738,38 +738,36 @@ New questions found during the build go to Ryan as they come up (§0.1). Agents 
 
 # Appendix A: Actual internals cheat sheet
 
-Read from `actualbudget/actual` master @ `3519dcb7` on 2026-11-09. Phase 0 re-verifies everything against the pinned tag.
+Verified against tag v26.11.0 (sha 1766241e3f4b) in P0.4. This is a summary. [docs/actual-format.md](docs/actual-format.md) has the details, the file:line citations and the Architect's decisions.
 
-- **Export** (`loot-core/src/server/cloud-storage.ts` `exportBuffer`): a zip of exactly `db.sqlite` + `metadata.json`. The db is the raw file with `kvcache`/`kvcache_key` emptied. Export sets `resetClock: true`.
-- **metadata.json** (`types/prefs.ts` `MetadataPrefs`): `budgetName, id, lastUploaded, cloudFileId, groupId, encryptKeyId, lastSyncedTimestamp, resetClock, lastScheduleRun, userId`.
-- **Import** (`importers/actual.ts` → `cloud-storage.ts` `importBuffer`):
-  - Accepts files at the root or in one shared subfolder.
-  - Assigns a new local id and nulls `cloudFileId`, `groupId` and `encryptKeyId`.
-  - Writes the db bytes verbatim.
-  - On load (`server/update.ts`), runs pending migrations and rebuilds the `v_*` views, and `resetClock` assigns a new CRDT node id.
-  - **Extra tables and columns survive.**
-- **Migration guard** (`server/migrate/migrations.ts`): unknown `__migrations__` ids ≤ `ADDITIVE_ONLY_CUTOFF = 1780606215001` make the file invalid. → **Veritas never writes `__migrations__`.**
-  - There are about 61 migrations, roughly one a month recently.
-- **Key tables** (`server/aql/schema/index.ts`, `server/sql/init.sql`):
-  - `transactions`: `acct`, `category`, `amount` (int), `description` (= payee id), `notes`, `date` (int), `financial_id`, `imported_description`, `transferred_id`, `isParent`, `isChild`, `parent_id`, `cleared`, `reconciled`, `schedule`, `starting_balance_flag`, `sort_order` (REAL), `tombstone`.
-  - `accounts`: `offbudget`, `closed`, `account_group_id`, bank-sync columns.
-  - `categories`: `is_income`, `hidden`, `cat_group`, `goal_def`, `cleanup_def`, `template_settings`.
-  - `payees`: `transfer_acct`, `learn_categories`.
-  - `payee_mapping` and `category_mapping`.
-  - `rules`: `stage`, `conditions_op`, `conditions` JSON, `actions` JSON.
-  - `schedules`: `rule` (required), `posts_transaction`, `completed`.
-  - `schedules_next_date` and `schedules_json_paths`.
-  - `zero_budgets` / `reflect_budgets`: `month`, `category`, `amount`, `carryover`, `goal`, `long_goal`.
-  - Also: `notes`, `preferences`, `custom_reports`, `dashboard_pages`, `dashboard`, `tags`, `payee_locations`, `account_groups`, `messages_crdt`, `messages_clock`.
-- **Soft delete:** `tombstone = 1`. Views filter on it.
-- **CRDT messages** are written only when sync is enabled with a server. Local-only budgets don't log them.
+- **New budgets** copy `default-db.sqlite`, which already holds seed rows with fixed ids (3 category groups, 7 categories including "Starting Balances", 7 identity `category_mapping` rows), and run every migration on first load, which adds 12 dashboard widgets on one `Main` page. → Veritas creates budgets from a pinned template db that the oracle generates.
+- **Migrations:** exactly **60** (57 up to `ADDITIVE_ONLY_CUTOFF = 1780606215001`, 3 after). `checkDatabaseValidity` fails a file with `out-of-sync-migrations` when it has applied ids but no migrations exist, has an unknown id ≤ the cutoff, has any unknown id while missing a known one, has a post-cutoff id while missing a pre-cutoff one, or its pre-cutoff ids aren't an exact ordered prefix. Otherwise missing ids are applied on load. → **Veritas never writes `__migrations__`.**
+- **Export** (`exportBuffer`): a zip of exactly `db.sqlite` + `metadata.json` at the root. The db is a SQLite **backup copy** with `kvcache`/`kvcache_key` emptied, not the raw file. `metadata.json` is copied from disk with `resetClock: true`. No export at all when `budgetName` is missing.
+- **metadata.json** (`MetadataPrefs`): `budgetName, id, lastUploaded, cloudFileId, groupId, encryptKeyId, lastSyncedTimestamp, resetClock, lastScheduleRun, userId`. Import requires none of them, only valid JSON.
+- **Import** (`importBuffer`): both files at the root or in exactly one shared subfolder, zip safety checks on every entry. New local id; `cloudFileId` is **removed** (not nulled); `groupId` and `encryptKeyId` become null; `lastUploaded` = today; everything else carries over. The db bytes are written verbatim, then `kvcache`/`kvcache_key` are emptied. Extra tables and columns survive.
+- **Load** runs migrations, rebuilds `v_*` views only when `__meta__.view-hash` differs, applies `resetClock` (new CRDT node id), rewrites `metadata.json` (`userId`, `resetClock: false`, `lastScheduleRun`), and auto-posts due schedules once a day, **even for a local-only budget**.
+- **Encodings:** amounts INTEGER cents (×100 for every currency), outflow negative; dates INTEGER `YYYYMMDD`; budget months INTEGER `YYYYMM`; `zero_budget_months.id` the string `'YYYY-MM'`; booleans 0/1.
+- **Key tables** (full DDL in docs/actual-format.md):
+  - `transactions`: `acct`, `category`, `amount`, `description` (= payee id), `notes`, `date`, `financial_id`, `imported_description`, `transferred_id`, `isParent`, `isChild`, `parent_id`, `error` (split-imbalance JSON), `cleared` (default **1**; desktop new rows write 0), `reconciled`, `schedule`, `starting_balance_flag`, `sort_order` (REAL), `tombstone`, `pending`, `raw_synced_data`, legacy `type`/`location`. `amount` and `sort_order` (`Date.now()` ms) have no SQL default; Actual's model layer fills them. Parents always read `category = NULL`.
+  - `accounts`: `offbudget`, `closed`, `sort_order`, `type`, `last_reconciled`, `account_group_id`, bank-sync columns.
+  - `categories`: `is_income`, `hidden`, `cat_group`, `goal_def`, `cleanup_def`, `template_settings` (default `{"source": "notes"}`).
+  - `payees`: `transfer_acct` (one transfer payee per account, `name ''`, display name from the account), `favorite`, `learn_categories`, legacy `category`.
+  - `payee_mapping` and `category_mapping`: no tombstone; every read resolves ids through them.
+  - `rules`: `stage` (`'pre'`, NULL, `'post'`), `conditions_op`, `conditions`/`actions` JSON with **internal field names** (`acct`, `description`, `imported_description`).
+  - `schedules`: `rule` (nullable in SQL, required by the model), `active` (unused), `completed`, `posts_transaction`, `name`, `custom_upcoming_length`, `sort_order`. No `next_date` column: it comes from `schedules_next_date` (local/base pair). `schedules_json_paths` is derived; Actual rebuilds it on load.
+  - `zero_budgets` / `reflect_budgets`: `month`, `category`, `amount`, `carryover`, `goal`, `long_goal`. Two id formats, so match rows by (month, category). No tombstone.
+  - `zero_budget_months`: `buffered` ("hold for next month").
+  - Also: `notes`, `preferences` (`budgetType` missing or anything but `'tracking'` = envelope), `custom_reports`, `dashboard` (14 widget types), `dashboard_pages`, `tags`, `payee_locations`, `account_groups`, `banks`, `transaction_filters`, `cleanup_groups`, `messages_crdt`, `messages_clock`, `messages_pending`, `kvcache`, `kvcache_key`, `__meta__`, `__migrations__`; unused legacy `created_budgets` and `pending_transactions`.
+- **Soft delete:** `tombstone = 1`. Only the transaction views filter on it; `v_categories` and `v_payees` don't.
+- **CRDT:** `messages_crdt` is written whenever a sync server URL is configured on the device, even for a budget never uploaded. `messages_clock` is written on first load and on `resetClock`, even local-only.
+- **Rules** run in Actual's client on new manual rows only, filling empty fields. Order: stage pre → default → post, then ascending specificity, then id.
 - **Arithmetic** (`loot-core/src/shared/arithmetic.ts` `evalArithmetic`):
-  - `+ - * /` and right-associative `^`, plus parentheses.
-  - Unary minus on numbers only.
-  - Number tokens may include `, . ' ’`, NBSP and currency symbols.
-  - Invalid input → default value.
-  - A *leading* `+` doesn't parse, so the "append to the current value" behavior comes from the field holding its current text (**VERIFY** in desktop-client).
-- **`@actual-app/api`** (`packages/api`, v26.11.0, Node ≥ 22): `init`, `importBudget(path|buffer, {type:'actual'})`, `loadBudget`, `exportBudget()` → zip bytes, `aqlQuery`, CRUD for everything, budget month values. It appears usable offline and headless (**VERIFY** in P0.3).
+  - `+ - * /` and right-associative `^`, plus parentheses. Unary minus on numbers only. All whitespace is stripped first.
+  - Number tokens may include `, . ' ’`, NBSP, U+202F, space and currency symbols. Trailing junk is ignored. Invalid input → default value; `1/0` → `Infinity`.
+  - A *leading* `+` doesn't parse. The "append to the current value" behavior comes from the field selecting all its text on focus, plus a rule that turns a lone typed operator into `<old text><op>`.
+  - Invalid input in a field: transaction amounts keep the old value, budget cells save 0.
+- **Rounding:** ports use JS `Math.round` (halves toward +∞), never Rust's `f64::round`.
+- **`@actual-app/api`** (`packages/api`, v26.11.0, Node ≥ 22): `init`, `importBudget(path|buffer, {type:'actual'})`, `loadBudget`, `exportBudget()` → zip bytes, `aqlQuery`, CRUD for everything, budget month values (its `forNextMonth` is the manual hold only). It appears usable offline and headless (**VERIFY** in P0.3).
 
 # Appendix B: Dependencies (approved by Ryan, 2026-11-09)
 
