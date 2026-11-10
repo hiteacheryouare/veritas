@@ -2,10 +2,12 @@
 
 mod backup;
 mod fsio;
+mod lock;
 mod retention;
 mod snapshot;
 
 pub use backup::write_backup;
+pub use lock::{Access, LOCK_FILE, WriterLock, acquire};
 pub use retention::{RetentionPolicy, expired};
 pub use snapshot::{
 	SNAPSHOTS_DIR, Snapshot, SnapshotReason, list_snapshots, prune_snapshots, restore_snapshot,
