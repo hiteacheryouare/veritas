@@ -17,5 +17,8 @@ veritas-session = { path = "../veritas-session" }
 thiserror.workspace = true
 uniffi.workspace = true
 
+[dev-dependencies]
+veritas-store = { path = "../veritas-store" }
+
 [lints]
 workspace = true

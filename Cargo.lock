@@ -1109,6 +1109,7 @@ dependencies = [
  "uniffi",
  "veritas-domain",
  "veritas-session",
+ "veritas-store",
 ]
 
 [[package]]

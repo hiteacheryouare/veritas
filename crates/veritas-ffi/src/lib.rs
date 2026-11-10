@@ -1,8 +1,18 @@
 //! The only surface the apps see: commands, queries and the change-event stream, exported through UniFFI.
 
+mod commands;
+mod records;
+mod session;
+
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use veritas_domain::{CoreError, ReadOnlyReason, YearMonth};
+use veritas_domain::{CoreError, YearMonth};
+
+pub use commands::Command;
+pub use records::{
+	Change, EntityKind, EntityRef, Retention, SessionState, SnapshotInfo, SnapshotKind,
+};
+pub use session::{ChangeListener, Session};
 
 uniffi::setup_scaffolding!();
 
@@ -51,13 +61,7 @@ impl From<CoreError> for FfiError {
 			},
 			CoreError::Invalid(message) => FfiError::Invalid { message },
 			CoreError::ReadOnly(reason) => FfiError::ReadOnly {
-				reason: match reason {
-					ReadOnlyReason::NewerActualVersion => ReadOnlyKind::NewerActualVersion,
-					ReadOnlyReason::TrackingBudget => ReadOnlyKind::TrackingBudget,
-					ReadOnlyReason::OpenElsewhere => ReadOnlyKind::OpenElsewhere,
-					ReadOnlyReason::AuditFailed => ReadOnlyKind::AuditFailed,
-					ReadOnlyReason::NewerVeritasSchema => ReadOnlyKind::NewerVeritasSchema,
-				},
+				reason: reason.into(),
 			},
 			CoreError::UpgradeInActualFirst { required } => {
 				FfiError::UpgradeInActualFirst { required }
@@ -77,7 +81,7 @@ impl From<CoreError> for FfiError {
 
 /// Every export runs through here, so a bug in the core becomes an
 /// `Internal` error the app can show instead of a crash (R-REL-7).
-fn guard<T>(call: impl FnOnce() -> Result<T, CoreError>) -> Result<T, FfiError> {
+pub(crate) fn guard<T>(call: impl FnOnce() -> Result<T, CoreError>) -> Result<T, FfiError> {
 	match catch_unwind(AssertUnwindSafe(call)) {
 		Ok(result) => result.map_err(FfiError::from),
 		Err(payload) => {
