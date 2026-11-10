@@ -81,6 +81,8 @@ enum MirrorState {
 	Missing,
 	Tombstoned,
 	OneWay,
+	Dated((u32, u32)),
+	OffBy(i64),
 }
 
 fn kind() -> impl Strategy<Value = Option<CategoryKind>> {
@@ -146,6 +148,8 @@ fn op() -> impl Strategy<Value = Op> {
 				1 => Just(MirrorState::Missing),
 				1 => Just(MirrorState::Tombstoned),
 				1 => Just(MirrorState::OneWay),
+				2 => day().prop_map(MirrorState::Dated),
+				1 => (1i64..5_000).prop_map(MirrorState::OffBy),
 			],
 		)
 			.prop_map(|(from, to, day, amount, category, mirror)| Op::Transfer {
@@ -336,6 +340,14 @@ fn build(scenario: &Scenario) -> Book {
 							.unwrap()
 							.transfer = None;
 					}
+					MirrorState::Dated(other_day) => {
+						book.budget.transactions.get_mut(&mirror_id).unwrap().date =
+							date(&on(*other_day));
+					}
+					MirrorState::OffBy(delta) => {
+						let mirror = book.budget.transactions.get_mut(&mirror_id).unwrap();
+						mirror.amount = Money::from_minor(mirror.amount.minor() + delta);
+					}
 				}
 			}
 			Op::Split {
@@ -488,6 +500,7 @@ proptest! {
 					"a mirror's link must be reciprocal"
 				);
 				prop_assert_eq!(primary.decision, row.decision);
+				prop_assert_eq!(primary.amount.minor() + row.amount.minor(), 0);
 			}
 			if row.adjustment_source().is_some() {
 				prop_assert_eq!(row.kind(), TransactionKind::Adjustment);

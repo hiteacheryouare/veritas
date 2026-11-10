@@ -74,11 +74,11 @@ pub(crate) fn describe(
 				.account_meta
 				.get(&account.id)
 				.and_then(|meta| meta.kind);
-			let side = match stored {
-				Some(AccountKind::Liability) => Side::Liability,
-				Some(AccountKind::Asset) => Side::Asset,
-				None if balance.is_negative() => Side::Liability,
-				None => Side::Asset,
+			let side = match balance.minor().signum() {
+				1 => Side::Asset,
+				-1 => Side::Liability,
+				_ if stored == Some(AccountKind::Liability) => Side::Liability,
+				_ => Side::Asset,
 			};
 			AccountBalance {
 				account: account.id.clone(),

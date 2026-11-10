@@ -12,8 +12,8 @@ mod statements;
 
 pub use balances::{AccountBalance, Side, account_balances, net_worth};
 pub use classify::{
-	AdjustmentSource, Classification, ClassifiedRow, Decision, Flags, Leg, RECONCILIATION_NOTE,
-	classify,
+	AdjustmentSource, Classification, ClassifiedRow, Decision, Flags, Leg, Partner,
+	RECONCILIATION_NOTE, classify,
 };
 pub use net_profit::{CategoryLabels, CategoryLine, Line, NetProfit, Section, net_profit};
 pub use period::{Period, months};

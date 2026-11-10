@@ -8,6 +8,7 @@ mod support;
 
 use support::*;
 use veritas_domain::{AccountId, AccountKind, AccountMeta, Money, YearMonth};
+use veritas_reports::Period;
 use veritas_reports::{
 	BalanceSheet, OwnersEquity, Side, account_balances, balance_sheet, cash_flow,
 	net_profit_by_month, net_worth, net_worth_by_month, owners_equity,
@@ -27,7 +28,7 @@ fn equity(book: &Book, period: &str) -> OwnersEquity {
 	equity
 }
 
-fn lines(equity: &OwnersEquity) -> [i64; 8] {
+fn lines(equity: &OwnersEquity) -> [i64; 9] {
 	[
 		equity.opening.minor(),
 		equity.net_income.total.minor(),
@@ -36,6 +37,7 @@ fn lines(equity: &OwnersEquity) -> [i64; 8] {
 		equity.reconciliation_adjustments.total.minor(),
 		equity.revaluations.total.minor(),
 		equity.unpaired_transfers.total.minor(),
+		equity.in_transit.total.minor(),
 		equity.closing.minor(),
 	]
 }
@@ -104,7 +106,7 @@ fn st5_master_january_equity_reconciles_to_the_cent() {
 	assert_eq!(
 		lines(&equity),
 		[
-			720_000, 234_500, 50_000, 100_000, -1_200, 15_000, 0, 1_118_300
+			720_000, 234_500, 50_000, 100_000, -1_200, 15_000, 0, 0, 1_118_300
 		]
 	);
 	assert_eq!(equity.capitalized_transfers.rows, ids(&["T8"]));
@@ -119,7 +121,7 @@ fn st5_master_february_chains_from_january() {
 	let equity = equity(&book, "2027-02");
 	assert_eq!(
 		lines(&equity),
-		[1_118_300, 297_500, 0, 0, 0, 0, 0, 1_415_800]
+		[1_118_300, 297_500, 0, 0, 0, 0, 0, 0, 1_415_800]
 	);
 	assert_eq!(sheet(&book, "2027-02-28").net_worth.minor(), 1_415_800);
 	assert_eq!(
@@ -207,7 +209,7 @@ fn st7_s2_off_budget_revaluation_alone() {
 	let mut book = master_book();
 	book.row("Up", "BRK", "2027-01-25", 15_000);
 	let equity = equity(&book, "2027-01");
-	assert_eq!(lines(&equity), [720_000, 0, 0, 0, 0, 15_000, 0, 735_000]);
+	assert_eq!(lines(&equity), [720_000, 0, 0, 0, 0, 15_000, 0, 0, 735_000]);
 }
 
 #[test]
@@ -216,7 +218,10 @@ fn st7_s3_starting_balance_is_equity_not_income() {
 	book.row("Open", "CD", "2027-01-15", 100_000)
 		.starting_balance = true;
 	let equity = equity(&book, "2027-01");
-	assert_eq!(lines(&equity), [720_000, 0, 0, 100_000, 0, 0, 0, 820_000]);
+	assert_eq!(
+		lines(&equity),
+		[720_000, 0, 0, 100_000, 0, 0, 0, 0, 820_000]
+	);
 }
 
 #[test]
@@ -244,7 +249,7 @@ fn st7_s5_debt_payment_moves_net_worth_by_the_interest_only() {
 		.in_category("Loan interest")
 		.child_of("Pay");
 	let equity = equity(&book, "2027-01");
-	assert_eq!(lines(&equity), [720_000, -8_000, 0, 0, 0, 0, 0, 712_000]);
+	assert_eq!(lines(&equity), [720_000, -8_000, 0, 0, 0, 0, 0, 0, 712_000]);
 	assert!(balances(&book, "2027-01-31").contains(&("LOAN".to_owned(), -948_000)));
 }
 
@@ -283,7 +288,10 @@ fn st7_s8_unpaired_transfer_is_line_e6() {
 		.in_category("Savings")
 		.payee = Some(Book::transfer_payee("SAV"));
 	let equity = equity(&book, "2027-05");
-	assert_eq!(lines(&equity), [720_000, 0, 0, 0, 0, 0, -10_000, 710_000]);
+	assert_eq!(
+		lines(&equity),
+		[720_000, 0, 0, 0, 0, 0, -10_000, 0, 710_000]
+	);
 	assert_eq!(equity.unpaired_transfers.rows, ids(&["U"]));
 	assert_eq!(sheet(&book, "2027-05-31").net_worth, equity.closing);
 }
@@ -300,32 +308,36 @@ fn st4_e6_one_way_link_counts_both_rows_and_nets_to_zero() {
 }
 
 #[test]
-fn st2_liability_metadata_wins_and_otherwise_a_negative_balance_is_owed() {
+fn st7_s12_the_balance_sign_decides_the_side_and_metadata_only_places_zero() {
 	let mut book = master_book();
-	book.budget.account_meta.insert(
-		AccountId::new("LOAN"),
-		AccountMeta {
-			kind: Some(AccountKind::Liability),
-			..AccountMeta::default()
-		},
-	);
-	book.budget.account_meta.insert(
-		AccountId::new("BRK"),
-		AccountMeta {
-			kind: Some(AccountKind::Asset),
-			..AccountMeta::default()
-		},
-	);
-	book.row("Paid off", "LOAN", "2027-01-05", 985_000);
+	book.account("MORT", true);
+	for (account, kind) in [
+		("LOAN", AccountKind::Liability),
+		("MORT", AccountKind::Liability),
+		("BRK", AccountKind::Asset),
+	] {
+		book.budget.account_meta.insert(
+			AccountId::new(account),
+			AccountMeta {
+				kind: Some(kind),
+				..AccountMeta::default()
+			},
+		);
+	}
+	book.row("Overpaid", "LOAN", "2027-01-05", 985_000);
 	book.row("Margin", "BRK", "2027-01-05", -1_100_000);
-	book.row("Swipe", "VISA", "2027-01-05", -100)
-		.in_category("Groceries");
+	let before = sheet(&book, "2027-01-04").net_worth;
 	let sheet = sheet(&book, "2027-01-31");
+	let assets = sheet_accounts(&sheet, Side::Asset);
+	assert!(
+		assets.contains(&("LOAN".to_owned(), 5_000)),
+		"an overpaid loan is an asset"
+	);
 	assert_eq!(
 		sheet_accounts(&sheet, Side::Liability),
-		named(&[("VISA", 100), ("LOAN", -5_000)])
+		named(&[("BRK", 100_000), ("MORT", 0)])
 	);
-	assert!(sheet_accounts(&sheet, Side::Asset).contains(&("BRK".to_owned(), -100_000)));
+	assert!(assets.contains(&("CD".to_owned(), 0)));
 	assert_eq!(
 		sheet
 			.total_assets
@@ -333,6 +345,128 @@ fn st2_liability_metadata_wins_and_otherwise_a_negative_balance_is_owed() {
 			.unwrap(),
 		sheet.net_worth
 	);
+	assert_eq!(
+		sheet.net_worth.minor(),
+		before.minor() + 985_000 - 1_100_000
+	);
+}
+
+#[test]
+fn st7_s9_savings_transfer_legs_on_different_dates_are_in_transit() {
+	let mut book = master_book();
+	book.transfer("S", "CHK", "SAV", "2027-01-31", -20_000)
+		.in_category("Savings");
+	book.get("Sm").date = date("2027-02-01");
+	let classification = book.classify();
+	assert_row(
+		&classification,
+		"S",
+		7,
+		veritas_domain::TransactionKind::SavingsContribution,
+		veritas_reports::Leg::Primary,
+	);
+	assert!(!row(&classification, "S").flags.unpaired);
+	assert_eq!(
+		book.net_profit(month("2027-01")).savings.total.minor(),
+		20_000
+	);
+	assert_eq!(book.net_profit(month("2027-02")).savings.total.minor(), 0);
+
+	let january = equity(&book, "2027-01");
+	assert_eq!(january.in_transit.total.minor(), -20_000);
+	assert_eq!(january.in_transit.rows, ids(&["S"]));
+	assert_eq!(january.closing.minor() - january.opening.minor(), -20_000);
+	let february = equity(&book, "2027-02");
+	assert_eq!(february.in_transit.total.minor(), 20_000);
+	assert_eq!(february.in_transit.rows, ids(&["Sm"]));
+	let both = owners_equity(
+		&book.budget,
+		&book.classify(),
+		Period::new(date("2027-01-01"), date("2027-02-28")).unwrap(),
+	)
+	.unwrap();
+	assert_eq!(both.in_transit.total, Money::ZERO);
+	assert_eq!(both.unexplained().unwrap(), Money::ZERO);
+}
+
+#[test]
+fn st7_s9_a_capitalized_purchase_split_across_months_still_closes() {
+	let mut book = master_book();
+	book.transfer("Car", "CHK", "CAR", "2027-01-31", -50_000)
+		.in_category("Car purchase");
+	book.get("Carm").date = date("2027-02-01");
+	let january = equity(&book, "2027-01");
+	assert_eq!(
+		lines(&january),
+		[720_000, -50_000, 50_000, 0, 0, 0, 0, -50_000, 670_000]
+	);
+	let february = equity(&book, "2027-02");
+	assert_eq!(
+		lines(&february),
+		[670_000, 0, 0, 0, 0, 0, 0, 50_000, 720_000]
+	);
+}
+
+#[test]
+fn st7_s10_card_payment_legs_on_different_dates_are_in_transit_in_cash_flow() {
+	let mut book = master_book();
+	book.transfer("Pay", "CHK", "VISA", "2027-01-31", -7_500);
+	book.get("Paym").date = date("2027-02-01");
+	let flow = |period: &str| cash_flow(&book.budget, &book.classify(), month(period)).unwrap();
+	let january = flow("2027-01");
+	assert_eq!(january.in_transit.total.minor(), -7_500);
+	assert_eq!(january.closing.minor() - january.opening.minor(), -7_500);
+	assert_eq!(january.unexplained().unwrap(), Money::ZERO);
+	let february = flow("2027-02");
+	assert_eq!(february.in_transit.total.minor(), 7_500);
+	assert_eq!(february.unexplained().unwrap(), Money::ZERO);
+	assert_eq!(equity(&book, "2027-01").in_transit.total.minor(), -7_500);
+	assert_eq!(equity(&book, "2027-02").in_transit.total.minor(), 7_500);
+	assert_eq!(
+		book.net_profit(month("2027-01")).net_cash_flow.total,
+		Money::ZERO
+	);
+}
+
+#[test]
+fn st7_s11_amounts_that_do_not_net_to_zero_are_unpaired() {
+	let mut book = master_book();
+	book.transfer("S", "CHK", "SAV", "2027-01-12", -20_000)
+		.in_category("Savings");
+	book.get("Sm").amount = Money::from_minor(19_000);
+	let classification = book.classify();
+	assert!(row(&classification, "S").flags.unpaired);
+	assert!(row(&classification, "Sm").flags.unpaired);
+	assert_eq!(
+		row(&classification, "Sm").leg,
+		veritas_reports::Leg::Primary
+	);
+	let equity = equity(&book, "2027-01");
+	assert_eq!(equity.unpaired_transfers.total.minor(), -1_000);
+	assert_eq!(equity.closing.minor() - equity.opening.minor(), -1_000);
+}
+
+#[test]
+fn st7_s13_deleted_account_with_live_rows_stays_labeled_deleted() {
+	let mut book = master_book();
+	book.budget
+		.accounts
+		.get_mut(&AccountId::new("BRK"))
+		.unwrap()
+		.tombstone = true;
+	book.row("Up", "BRK", "2027-01-25", 15_000);
+	let classification = book.classify();
+	assert!(classification.orphans().is_empty());
+	let sheet = sheet(&book, "2027-01-31");
+	let line = sheet
+		.assets
+		.iter()
+		.flat_map(|section| &section.accounts)
+		.find(|line| line.account == AccountId::new("BRK"))
+		.unwrap();
+	assert!(line.deleted);
+	assert_eq!(line.amount.minor(), 1_015_000);
+	assert_eq!(equity(&book, "2027-01").revaluations.total.minor(), 15_000);
 }
 
 #[test]

@@ -117,12 +117,14 @@ pub struct OwnersEquity {
 	pub reconciliation_adjustments: Line,
 	pub revaluations: Line,
 	pub unpaired_transfers: Line,
+	/// Paired legs dated in the period whose partner is dated outside it.
+	pub in_transit: Line,
 	/// Net worth on the last day of the period.
 	pub closing: Money,
 }
 
 impl OwnersEquity {
-	pub fn lines(&self) -> [&Line; 6] {
+	pub fn lines(&self) -> [&Line; 7] {
 		[
 			&self.net_income,
 			&self.capitalized_transfers,
@@ -130,6 +132,7 @@ impl OwnersEquity {
 			&self.reconciliation_adjustments,
 			&self.revaluations,
 			&self.unpaired_transfers,
+			&self.in_transit,
 		]
 	}
 
@@ -151,8 +154,12 @@ pub fn owners_equity(
 	let mut reconciliation = Lines::default();
 	let mut revaluations = Lines::default();
 	let mut unpaired = Lines::default();
+	let mut in_transit = Lines::default();
 	for row in classification.within(period) {
 		let kind = row.kind();
+		if row.in_transit(period) {
+			in_transit.add(row, row.amount)?;
+		}
 		if row.is_primary()
 			&& !row.flags.unpaired
 			&& matches!(
@@ -193,6 +200,7 @@ pub fn owners_equity(
 		reconciliation_adjustments: reconciliation.0,
 		revaluations: revaluations.0,
 		unpaired_transfers: unpaired.0,
+		in_transit: in_transit.0,
 		closing: balances::net_worth(classification, period.last())?,
 	})
 }
@@ -210,6 +218,8 @@ pub struct CashFlow {
 	pub net_cash_flow: Line,
 	pub unreviewed_transfers: Line,
 	pub change_from_operations: Money,
+	/// On↔on legs dated in the period whose partner is dated outside it.
+	pub in_transit: Line,
 	pub starting_balances: Line,
 	pub reconciliation_adjustments: Line,
 	pub closing: Money,
@@ -219,6 +229,7 @@ impl CashFlow {
 	pub fn unexplained(&self) -> Result<Money, CoreError> {
 		let explained = self
 			.change_from_operations
+			.checked_add(self.in_transit.total)?
 			.checked_add(self.starting_balances.total)?
 			.checked_add(self.reconciliation_adjustments.total)?;
 		self.closing
@@ -235,11 +246,15 @@ pub fn cash_flow(
 	let report = net_profit(budget, classification, period)?;
 	let mut starting = Lines::default();
 	let mut reconciliation = Lines::default();
+	let mut in_transit = Lines::default();
 	for row in classification
 		.within(period)
 		.iter()
 		.filter(|row| row.on_budget)
 	{
+		if row.decision == Decision::OnBudgetTransfer && row.in_transit(period) {
+			in_transit.add(row, row.amount)?;
+		}
 		match row.kind() {
 			TransactionKind::StartingBalance => starting.add(row, row.amount)?,
 			TransactionKind::Adjustment => reconciliation.add(row, row.amount)?,
@@ -270,6 +285,7 @@ pub fn cash_flow(
 		net_cash_flow: report.net_cash_flow,
 		unreviewed_transfers: unreviewed,
 		change_from_operations,
+		in_transit: in_transit.0,
 		starting_balances: starting.0,
 		reconciliation_adjustments: reconciliation.0,
 		closing: on_budget(classification.through(period.last()))?,
