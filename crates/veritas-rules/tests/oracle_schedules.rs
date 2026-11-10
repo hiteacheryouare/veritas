@@ -5,10 +5,10 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
+mod common;
 
 use chrono::{Days, NaiveDate};
+use common::{Rng, apply_and_dump, oracle_dir, repo_root, scratch_dir};
 use serde_json::{Value, json};
 use veritas_domain::CivilDate;
 use veritas_rules::{Op, next_date_from, parse_date_value, schedule_dates, validate_schedule_date};
@@ -16,39 +16,6 @@ use veritas_rules::{Op, next_date_from, parse_date_value, schedule_dates, valida
 const UPCOMING: usize = 12;
 const CASES_PER_TODAY: usize = 400;
 const TODAYS: [&str; 4] = ["2026-11-09", "2025-12-31", "2027-02-27", "2028-02-29"];
-
-fn repo_root() -> PathBuf {
-	Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
-}
-
-fn oracle_dir() -> Option<PathBuf> {
-	let dir = repo_root().join("tools/actual-oracle");
-	dir.join("node_modules").exists().then_some(dir)
-}
-
-/// xorshift64*: deterministic, so a failure names a case that reproduces.
-struct Rng(u64);
-
-impl Rng {
-	fn next(&mut self) -> u64 {
-		self.0 ^= self.0 >> 12;
-		self.0 ^= self.0 << 25;
-		self.0 ^= self.0 >> 27;
-		self.0.wrapping_mul(0x2545_f491_4f6c_dd1d)
-	}
-
-	fn below(&mut self, n: u64) -> u64 {
-		self.next() % n
-	}
-
-	fn chance(&mut self, percent: u64) -> bool {
-		self.below(100) < percent
-	}
-
-	fn pick<'a, T>(&mut self, items: &'a [T]) -> &'a T {
-		&items[self.below(items.len() as u64) as usize]
-	}
-}
 
 fn random_start(rng: &mut Rng) -> String {
 	let year = 2023 + rng.below(6) as i32;
@@ -161,25 +128,6 @@ fn creatable(date: &Value, today: CivilDate) -> bool {
 	parse_date_value(op, Some(date)).is_ok_and(|parsed| next_date_from(&parsed, today).is_ok())
 }
 
-fn run(command: &mut Command) -> String {
-	let output = command
-		.output()
-		.unwrap_or_else(|error| panic!("running {command:?}: {error}"));
-	assert!(
-		output.status.success(),
-		"{command:?} failed:\n{}",
-		String::from_utf8_lossy(&output.stderr)
-	);
-	String::from_utf8_lossy(&output.stdout).into_owned()
-}
-
-fn oracle(oracle: &Path, args: &[&str]) -> String {
-	run(Command::new("node")
-		.current_dir(oracle)
-		.arg("src/main.ts")
-		.args(args))
-}
-
 fn day(text: &str) -> CivilDate {
 	CivilDate::from(NaiveDate::parse_from_str(text, "%Y-%m-%d").unwrap_or_default())
 }
@@ -222,8 +170,7 @@ fn schedule_dates_match_the_oracle() {
 		return;
 	};
 	let base = repo_root().join("fixtures/synthetic/small.zip");
-	let scratch = std::env::temp_dir().join(format!("veritas-rules-oracle-{}", std::process::id()));
-	std::fs::create_dir_all(&scratch).unwrap_or_else(|error| panic!("{error}"));
+	let scratch = scratch_dir("schedules");
 
 	let mut rng = Rng(0x5eed_0000_0000_0013);
 	let mut compared = 0;
@@ -248,26 +195,14 @@ fn schedule_dates_match_the_oracle() {
 			"{skipped} generated configs were not creatable"
 		);
 
-		let ops_path = scratch.join(format!("ops-{t}.json"));
-		let zip_path = scratch.join(format!("applied-{t}.zip"));
-		std::fs::write(&ops_path, json!({"version": 1, "ops": ops}).to_string())
-			.unwrap_or_else(|error| panic!("{error}"));
-		let (ops_arg, zip_arg, base_arg) = (
-			ops_path.to_string_lossy().into_owned(),
-			zip_path.to_string_lossy().into_owned(),
-			base.to_string_lossy().into_owned(),
-		);
-		oracle(
+		let dump = apply_and_dump(
 			&oracle_dir,
-			&[
-				"apply", &base_arg, &ops_arg, "--out", &zip_arg, "--today", today_text,
-			],
+			&scratch,
+			&format!("schedules-{t}"),
+			&base,
+			ops.clone(),
+			today_text,
 		);
-		let dump: Value = serde_json::from_str(&oracle(
-			&oracle_dir,
-			&["dump", &zip_arg, "--today", today_text],
-		))
-		.unwrap_or_else(|error| panic!("the dump isn't JSON: {error}"));
 		let conditions = rule_conditions(&dump);
 
 		for op in &ops {

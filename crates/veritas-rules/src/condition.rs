@@ -346,6 +346,30 @@ impl Condition {
 		})
 	}
 
+	/// Points `is`, `isNot`, `oneOf` and `notOneOf` on ids at their merge
+	/// targets, like `migrateIds` does when Actual loads rules.
+	pub(crate) fn migrate_ids(&mut self, map: &impl Fn(&str) -> Option<String>) {
+		let remap = |id: &Option<String>| match id {
+			Some(id) => map(id)
+				.filter(|target| !target.is_empty())
+				.or(Some(id.clone())),
+			None => None,
+		};
+		match (&self.op, &mut self.value) {
+			(Op::Is | Op::IsNot, ConditionValue::Id(id)) => *id = remap(id),
+			(Op::OneOf | Op::NotOneOf, ConditionValue::IdList(ids)) => {
+				let mut seen = Vec::new();
+				for id in ids.iter().map(remap) {
+					if !seen.contains(&id) {
+						seen.push(id);
+					}
+				}
+				*ids = seen;
+			}
+			_ => {}
+		}
+	}
+
 	/// `Condition.eval`. A recurrence that can't be expanded is an error,
 	/// as it would throw out of Actual's `runRules`.
 	pub fn eval(
