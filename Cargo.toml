@@ -1,0 +1,43 @@
+[workspace]
+members = [
+	"crates/veritas-domain",
+	"crates/veritas-store",
+	"crates/veritas-interop",
+	"crates/veritas-engine",
+	"crates/veritas-rules",
+	"crates/veritas-reports",
+	"crates/veritas-forecast",
+	"crates/veritas-session",
+	"crates/veritas-ffi",
+	"xtask",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "ISC"
+publish = false
+
+# Dependency versions live here so every crate agrees, which UniFFI requires
+# between veritas-ffi and the bindings generator. Only Appendix B entries.
+[workspace.dependencies]
+serde_json = "1"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+# R-REL-7: the core never panics. clippy.toml relaxes these inside tests.
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+
+[profile.release]
+strip = "symbols"
+lto = "thin"
+codegen-units = 1
