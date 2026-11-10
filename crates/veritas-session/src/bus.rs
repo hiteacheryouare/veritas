@@ -5,10 +5,18 @@ use veritas_domain::{
 	BudgetData, Change, CoreError, EntityRef, ReadOnlyReason, Row, Store, StoreTransaction,
 };
 
+use crate::snapshot::SnapshotReason;
+
 /// A user action. `plan` validates against the loaded budget and returns the
 /// rows that should exist afterwards, without touching anything.
 pub trait Command {
 	fn plan(&self, data: &BudgetData) -> Result<Vec<Row>, CoreError>;
+
+	/// Bulk edits and rule applies return a reason, and the session snapshots
+	/// the budget before running them.
+	fn snapshot_first(&self) -> Option<SnapshotReason> {
+		None
+	}
 }
 
 impl<F> Command for F
@@ -20,20 +28,31 @@ where
 	}
 }
 
+/// What a commit changed. `everything` is set when the whole budget was
+/// reloaded, after a restore for example, and every view should refetch.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ChangeSet {
 	pub entities: BTreeSet<EntityRef>,
+	pub everything: bool,
 }
 
 impl ChangeSet {
 	fn of(changes: &[Change]) -> Self {
 		ChangeSet {
 			entities: changes.iter().map(Change::entity).collect(),
+			everything: false,
+		}
+	}
+
+	pub fn everything() -> Self {
+		ChangeSet {
+			entities: BTreeSet::new(),
+			everything: true,
 		}
 	}
 
 	pub fn is_empty(&self) -> bool {
-		self.entities.is_empty()
+		!self.everything && self.entities.is_empty()
 	}
 }
 
@@ -44,6 +63,36 @@ pub trait ChangeListener: Send + Sync {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Subscription(u64);
 
+/// The subscribers to one budget. They outlive any one bus, so they carry
+/// over when the session reopens the budget.
+#[derive(Default)]
+pub struct Listeners {
+	entries: Vec<(Subscription, Arc<dyn ChangeListener>)>,
+	next: u64,
+}
+
+impl Listeners {
+	pub fn subscribe(&mut self, listener: Arc<dyn ChangeListener>) -> Subscription {
+		let subscription = Subscription(self.next);
+		self.next += 1;
+		self.entries.push((subscription, listener));
+		subscription
+	}
+
+	pub fn unsubscribe(&mut self, subscription: Subscription) {
+		self.entries.retain(|(id, _)| *id != subscription);
+	}
+
+	pub fn notify(&self, changed: &ChangeSet) {
+		if changed.is_empty() {
+			return;
+		}
+		for (_, listener) in &self.entries {
+			listener.changed(changed);
+		}
+	}
+}
+
 /// Applies commands to memory and storage together, keeps unlimited undo and
 /// redo, and tells subscribers which rows changed after every commit.
 pub struct CommandBus<S: Store> {
@@ -52,8 +101,7 @@ pub struct CommandBus<S: Store> {
 	read_only: Option<ReadOnlyReason>,
 	undo: Vec<Vec<Change>>,
 	redo: Vec<Vec<Change>>,
-	listeners: Vec<(Subscription, Arc<dyn ChangeListener>)>,
-	next_subscription: u64,
+	listeners: Listeners,
 }
 
 #[expect(
@@ -78,15 +126,32 @@ impl Intent<'_> {
 
 impl<S: Store> CommandBus<S> {
 	pub fn new(data: BudgetData, store: S, read_only: Option<ReadOnlyReason>) -> Self {
+		CommandBus::with_listeners(data, store, read_only, Listeners::default())
+	}
+
+	pub fn with_listeners(
+		data: BudgetData,
+		store: S,
+		read_only: Option<ReadOnlyReason>,
+		listeners: Listeners,
+	) -> Self {
 		CommandBus {
 			data,
 			store,
 			read_only,
 			undo: Vec::new(),
 			redo: Vec::new(),
-			listeners: Vec::new(),
-			next_subscription: 0,
+			listeners,
 		}
+	}
+
+	/// Closes the store and hands back the subscribers.
+	pub fn into_listeners(self) -> Listeners {
+		self.listeners
+	}
+
+	pub fn listeners(&self) -> &Listeners {
+		&self.listeners
 	}
 
 	pub fn data(&self) -> &BudgetData {
@@ -178,14 +243,11 @@ impl<S: Store> CommandBus<S> {
 	}
 
 	pub fn subscribe(&mut self, listener: Arc<dyn ChangeListener>) -> Subscription {
-		let subscription = Subscription(self.next_subscription);
-		self.next_subscription += 1;
-		self.listeners.push((subscription, listener));
-		subscription
+		self.listeners.subscribe(listener)
 	}
 
 	pub fn unsubscribe(&mut self, subscription: Subscription) {
-		self.listeners.retain(|(id, _)| *id != subscription);
+		self.listeners.unsubscribe(subscription);
 	}
 
 	fn ensure_writable(&self) -> Result<(), CoreError> {
@@ -196,12 +258,7 @@ impl<S: Store> CommandBus<S> {
 	}
 
 	fn notify(&self, changed: &ChangeSet) {
-		if changed.is_empty() {
-			return;
-		}
-		for (_, listener) in &self.listeners {
-			listener.changed(changed);
-		}
+		self.listeners.notify(changed);
 	}
 }
 
