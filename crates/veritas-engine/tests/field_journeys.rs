@@ -288,3 +288,27 @@ fn committing_an_untouched_negative_field_keeps_its_value() {
 		);
 	}
 }
+
+#[test]
+fn pasting_a_negative_amount_replaces_the_value() {
+	assert_eq!(
+		Field::click(10_000, CommaDot)
+			.paste("-45.00")
+			.press_return(),
+		saved(-4_500)
+	);
+	assert_eq!(
+		Field::click(-5_000, CommaDot)
+			.paste("-$1,234.56")
+			.press_return(),
+		saved(-123_456)
+	);
+}
+
+#[test]
+fn typing_minus_over_a_negative_value_subtracts_from_it() {
+	let mut field = Field::click(-5_000, CommaDot);
+	field.type_keys("-5");
+	assert_eq!(field.shows(), "-50.00-5");
+	assert_eq!(field.press_return(), saved(-5_500));
+}
