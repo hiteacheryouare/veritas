@@ -10,6 +10,7 @@ publish.workspace = true
 veritas-domain = { path = "../veritas-domain" }
 
 [dev-dependencies]
+proptest.workspace = true
 serde_json.workspace = true
 
 [lints]
