@@ -316,6 +316,8 @@ fn actuals_quirks_load_and_unrepresentable_rows_are_counted_not_fatal() {
 		 INSERT INTO zero_budgets (id, month, category, amount) VALUES ('2019-04-{category}', 201904, '{category}', 99);
 		 INSERT INTO transactions (id, acct, amount, date, description) VALUES ('null-amount', '{account}', NULL, 20261101, NULL);
 		 INSERT INTO transactions (id, acct, amount, date) VALUES ('no-date', '{account}', 100, NULL);
+		 INSERT INTO transactions (id, acct, amount, date, tombstone) VALUES ('null-tombstone', '{account}', 1, 20261101, NULL);
+		 INSERT INTO categories (id, name, cat_group, tombstone) VALUES ('null-tombstone', 'Gone', '{group}', NULL);
 		 INSERT INTO transactions (id, acct, amount, date, imported_description) VALUES ('imported', '{account}', -100, 20261101, 'ACME*STORE 123');
 		 INSERT INTO transactions (id, acct, amount, date) VALUES ('bad-date', '{account}', 100, 20270230);
 		 INSERT INTO transactions (id, acct, amount, date) VALUES ('fraction', '{account}', 12.5, 20261101);
@@ -376,6 +378,9 @@ fn actuals_quirks_load_and_unrepresentable_rows_are_counted_not_fatal() {
 		veritas_domain::RuleStage::Default
 	);
 	assert!(!data.notes.contains_key("empty-note"));
+	// Actual's transaction views use IFNULL(tombstone, 0); every other read is tombstone = 0.
+	assert!(!transaction("null-tombstone").unwrap().tombstone);
+	assert!(data.categories[&CategoryId::new("null-tombstone")].tombstone);
 	assert_eq!(data.holds[&march], None);
 
 	let mut skipped: Vec<(&str, Option<String>)> = loaded

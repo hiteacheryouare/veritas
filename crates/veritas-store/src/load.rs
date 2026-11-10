@@ -12,7 +12,7 @@ use veritas_domain::{
 
 use crate::cells::{
 	Cell, date, date_from_int, db_month, flag, integer, money, required_text, sort_order, text,
-	text_month, tombstone,
+	text_month, tombstone, transaction_tombstone,
 };
 use crate::connection::storage;
 
@@ -428,7 +428,7 @@ fn transaction(row: &Row<'_>) -> Cell<Transaction> {
 		schedule: text(at(row, 13)?)?.map(ScheduleId::new),
 		starting_balance: flag(at(row, 14)?),
 		sort_order: sort_order(at(row, 15)?)?,
-		tombstone: tombstone(at(row, 16)?),
+		tombstone: transaction_tombstone(at(row, 16)?),
 	})
 }
 

@@ -42,9 +42,15 @@ pub(crate) fn flag(value: ValueRef<'_>) -> bool {
 	number(value) == Some(1.0)
 }
 
-/// The views treat a row as alive when `IFNULL(tombstone, 0) = 0`.
+/// Actual reads every table but transactions with `tombstone = 0`, so a NULL
+/// or any other value is a deleted row.
 pub(crate) fn tombstone(value: ValueRef<'_>) -> bool {
-	!matches!(value, ValueRef::Null) && number(value) != Some(0.0)
+	number(value) != Some(0.0)
+}
+
+/// The transaction views keep a row when `IFNULL(tombstone, 0) = 0`.
+pub(crate) fn transaction_tombstone(value: ValueRef<'_>) -> bool {
+	!matches!(value, ValueRef::Null) && tombstone(value)
 }
 
 pub(crate) fn sort_order(value: ValueRef<'_>) -> Cell<f64> {
@@ -103,12 +109,16 @@ mod tests {
 	}
 
 	#[test]
-	fn tombstones_are_anything_but_null_or_zero() {
-		assert!(!tombstone(ValueRef::Null));
-		assert!(!tombstone(ValueRef::Integer(0)));
-		assert!(tombstone(ValueRef::Integer(1)));
-		assert!(tombstone(ValueRef::Integer(2)));
-		assert!(tombstone(ValueRef::Text(b"yes")));
+	fn only_transactions_read_a_null_tombstone_as_alive() {
+		assert!(!transaction_tombstone(ValueRef::Null));
+		assert!(tombstone(ValueRef::Null));
+		for read in [tombstone, transaction_tombstone] {
+			assert!(!read(ValueRef::Integer(0)));
+			assert!(!read(ValueRef::Real(0.0)));
+			assert!(read(ValueRef::Integer(1)));
+			assert!(read(ValueRef::Integer(2)));
+			assert!(read(ValueRef::Text(b"0")));
+		}
 	}
 
 	#[test]
