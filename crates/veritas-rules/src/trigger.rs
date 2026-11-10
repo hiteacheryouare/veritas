@@ -106,6 +106,11 @@ pub fn merge_manual_entry(
 	if ruled.deleted && !entered.deleted {
 		merged.deleted = true;
 	}
+	// A split rule's lines fill a row that had none; the user's own payee
+	// stays on the parent, since a split only empties it on the rule's copy.
+	if entered.splits.is_empty() && !ruled.splits.is_empty() {
+		merged.splits = ruled.splits.clone();
+	}
 	merged
 }
 
@@ -153,6 +158,8 @@ mod tests {
 			reconciled: None,
 			schedule: None,
 			deleted: false,
+			splits: Vec::new(),
+			is_child: false,
 		}
 	}
 
@@ -175,6 +182,21 @@ mod tests {
 			merged.category, None,
 			"a field the user cleared stays empty"
 		);
+	}
+
+	#[test]
+	fn a_split_from_rules_fills_a_new_row_but_keeps_its_payee() {
+		let mut ruled = entered();
+		ruled.payee = None;
+		ruled.splits = vec![crate::action::SplitLine {
+			amount: Money::from_minor(-1250),
+			payee: Some(PayeeId::new("cafe")),
+			category: Some(CategoryId::new("dining")),
+			notes: None,
+		}];
+		let merged = merge_manual_entry(&entered(), &ruled, &[]);
+		assert_eq!(merged.splits, ruled.splits);
+		assert_eq!(merged.payee, Some(PayeeId::new("cafe")));
 	}
 
 	#[test]

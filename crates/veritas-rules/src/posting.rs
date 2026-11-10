@@ -208,6 +208,8 @@ impl Planner<'_> {
 			reconciled: None,
 			schedule: Some(facts.schedule.id.clone()),
 			deleted: false,
+			splits: Vec::new(),
+			is_child: false,
 		};
 		let outcome = self.book.run(&draft, self.budget, self.payees);
 		self.plan.posts.push(Posting {

@@ -13,7 +13,7 @@ mod run;
 mod schedule;
 mod trigger;
 
-pub use action::{Action, RuleTransaction, SetField};
+pub use action::{Action, RuleTransaction, SetField, SplitLine, SplitMethod};
 pub use bill::{
 	Bill, BillAmount, BillDate, BillView, EditedRule, JsonPaths, Repeat, RepeatEnd, RepeatPattern,
 	ScheduleRule, WeekendMove, bill_from_schedule, json_paths, schedule_name, scheduled_amount,
