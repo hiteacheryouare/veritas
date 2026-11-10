@@ -194,14 +194,16 @@ pub struct BudgetData {
 	pub payees: BTreeMap<PayeeId, Payee>,
 	pub transactions: BTreeMap<TransactionId, Transaction>,
 	pub budget_cells: BTreeMap<(YearMonth, CategoryId), BudgetCell>,
-	/// Actual's manual hold for next month (`zero_budget_months.buffered`).
-	pub holds: BTreeMap<YearMonth, Money>,
+	/// Actual's manual hold for next month (`zero_budget_months.buffered`). A row
+	/// whose value is NULL is `None`, which Actual reads as "ignore the auto hold".
+	pub holds: BTreeMap<YearMonth, Option<Money>>,
 	pub rules: BTreeMap<RuleId, Rule>,
 	pub schedules: BTreeMap<ScheduleId, Schedule>,
 	pub tags: BTreeMap<TagId, Tag>,
 	/// Actual's `notes` table: category, account and budget-month notes by id.
 	pub notes: BTreeMap<String, String>,
-	/// Where a deleted or merged category or payee now points.
+	/// Where each category or payee id reads as, including self-mappings. A
+	/// deleted or merged id points at its replacement.
 	pub category_mapping: BTreeMap<CategoryId, CategoryId>,
 	pub payee_mapping: BTreeMap<PayeeId, PayeeId>,
 	pub category_meta: BTreeMap<CategoryId, CategoryMeta>,
@@ -235,29 +237,15 @@ impl BudgetData {
 		}
 	}
 
-	/// Follows `category_mapping` the way Actual's reads do. Chains from repeated
-	/// deletes are followed, and a cycle (corrupt input, flagged by the audit)
-	/// stops at the first repeat instead of looping.
-	pub fn resolve_category(&self, id: &CategoryId) -> CategoryId {
-		let mut current = id.clone();
-		for _ in 0..=self.category_mapping.len() {
-			match self.category_mapping.get(&current) {
-				Some(next) if next != &current => current = next.clone(),
-				_ => break,
-			}
-		}
-		current
+	/// One lookup, exactly as Actual's views join `category_mapping`: Actual keeps
+	/// the table flattened when it deletes, and a category with no mapping row
+	/// resolves to nothing, so its transactions count nowhere.
+	pub fn resolve_category(&self, id: &CategoryId) -> Option<&CategoryId> {
+		self.category_mapping.get(id)
 	}
 
-	pub fn resolve_payee(&self, id: &PayeeId) -> PayeeId {
-		let mut current = id.clone();
-		for _ in 0..=self.payee_mapping.len() {
-			match self.payee_mapping.get(&current) {
-				Some(next) if next != &current => current = next.clone(),
-				_ => break,
-			}
-		}
-		current
+	pub fn resolve_payee(&self, id: &PayeeId) -> Option<&PayeeId> {
+		self.payee_mapping.get(id)
 	}
 }
 
@@ -266,25 +254,13 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn deleted_categories_resolve_through_chains_of_mappings() {
+	fn categories_resolve_with_one_lookup_like_actuals_views() {
 		let mut budget = BudgetData::empty(BudgetType::Envelope);
 		let id = CategoryId::new;
+		budget.category_mapping.insert(id("food"), id("food"));
 		budget.category_mapping.insert(id("dining"), id("food"));
-		budget.category_mapping.insert(id("food"), id("everyday"));
-		budget
-			.category_mapping
-			.insert(id("everyday"), id("everyday"));
-		assert_eq!(budget.resolve_category(&id("dining")), id("everyday"));
-		assert_eq!(budget.resolve_category(&id("rent")), id("rent"));
-	}
-
-	#[test]
-	fn a_corrupt_mapping_cycle_terminates() {
-		let mut budget = BudgetData::empty(BudgetType::Envelope);
-		let id = PayeeId::new;
-		budget.payee_mapping.insert(id("a"), id("b"));
-		budget.payee_mapping.insert(id("b"), id("a"));
-		let resolved = budget.resolve_payee(&id("a"));
-		assert!(resolved == id("a") || resolved == id("b"));
+		assert_eq!(budget.resolve_category(&id("dining")), Some(&id("food")));
+		assert_eq!(budget.resolve_category(&id("food")), Some(&id("food")));
+		assert_eq!(budget.resolve_category(&id("unmapped")), None);
 	}
 }
