@@ -95,7 +95,8 @@ export const evaluate = (pr: PullRequest, signoffs: Signoff[]): Verdict => {
 	if (pr.labels.includes('finance') && !approved('fred')) {
 		missing.push('fred');
 	}
-	if (pr.labels.includes('contract') && !approved('architect')) {
+	const architectAuthored = pr.labels.includes('architect-authored');
+	if (pr.labels.includes('contract') && !architectAuthored && !approved('architect')) {
 		missing.push('architect');
 	}
 
