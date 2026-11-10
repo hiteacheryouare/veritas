@@ -7,6 +7,7 @@ use veritas_domain::{BudgetData, BudgetType, CoreError, ReadOnlyReason, Store};
 use veritas_interop::{Manifest, import_actual_zip};
 use veritas_store::{LoadReport, Loaded};
 
+use crate::background::{OpenCheck, Pending};
 use crate::bus::{ChangeListener, ChangeSet, Command, CommandBus, Listeners, Permit, Subscription};
 use crate::lock::{Access, WriterLock, acquire};
 use crate::retention::RetentionPolicy;
@@ -26,8 +27,13 @@ const SNAPSHOT_INTERVAL: TimeDelta = TimeDelta::hours(1);
 pub trait Backend: Store + Sized {
 	fn open(db: &Path) -> Result<Self, CoreError>;
 	fn migration_ids(&self) -> Result<Vec<i64>, CoreError>;
-	/// What `PRAGMA integrity_check` reports. Empty means the file is sound.
-	fn integrity_problems(&self) -> Result<Vec<String>, CoreError>;
+	/// What `PRAGMA quick_check` reports, fast enough to run while opening.
+	/// Empty means the file looks sound.
+	fn quick_problems(&self) -> Result<Vec<String>, CoreError>;
+	/// The full `PRAGMA integrity_check` and the invariant audit, on a
+	/// connection of its own. The session runs it on a background thread
+	/// after opening. Empty means the file is sound.
+	fn verify(db: &Path) -> Result<Vec<String>, CoreError>;
 	/// Creates the veritas_* tables. Only ever called on a writable budget.
 	/// Tables from a newer Veritas return `ReadOnly(NewerVeritasSchema)`.
 	fn adopt(&mut self) -> Result<(), CoreError>;
@@ -69,12 +75,17 @@ pub struct Session<B: Backend> {
 	load_report: LoadReport,
 	dirty: bool,
 	last_snapshot: Option<DateTime<Utc>>,
+	open_check: Option<Pending>,
+	snapshot_problem: Option<CoreError>,
 }
 
 impl<B: Backend> Session<B> {
 	/// Opens a budget directory. Another writer, a file from a newer Actual, a
-	/// failed integrity check or a tracking budget all open read-only. A
-	/// writable budget is snapshotted before anything else happens.
+	/// failed quick check or a tracking budget all open read-only. The full
+	/// integrity check, the audit and the open snapshot then run in the
+	/// background. Commands are allowed meanwhile, because the quick check
+	/// passed. If the full check fails, the budget turns read-only and
+	/// subscribers are told to refetch.
 	pub fn open(dir: &Path, options: SessionOptions) -> Result<Self, CoreError> {
 		let db = dir.join(DB_FILE);
 		if !db.is_file() {
@@ -96,10 +107,21 @@ impl<B: Backend> Session<B> {
 			load_report,
 			dirty: false,
 			last_snapshot: None,
+			open_check: None,
+			snapshot_problem: None,
 		};
-		if session.read_only().is_none() {
-			session.snapshot(SnapshotReason::Open)?;
-		}
+		let take_snapshot = session.read_only().is_none();
+		session.open_check = Some(
+			OpenCheck {
+				db: session.db.clone(),
+				snapshots: session.snapshots.clone(),
+				retention: session.options.retention,
+				clock: session.options.clock.clone(),
+				take_snapshot,
+				verify: B::verify,
+			}
+			.start(),
+		);
 		Ok(session)
 	}
 
@@ -142,7 +164,25 @@ impl<B: Backend> Session<B> {
 		self.bus().is_ok_and(CommandBus::can_redo)
 	}
 
+	/// Why the background open snapshot failed, until a later snapshot works.
+	/// A failed open snapshot never stops the budget opening.
+	pub fn snapshot_problem(&self) -> Option<&CoreError> {
+		self.snapshot_problem.as_ref()
+	}
+
+	/// Picks up the background open check if it has finished. Returns what
+	/// subscribers were told when it turned the budget read-only.
+	pub fn poll(&mut self) -> Option<ChangeSet> {
+		self.settle_open_check(false)
+	}
+
+	/// Waits for the background open check, for callers that need its verdict.
+	pub fn wait_for_open_check(&mut self) -> Option<ChangeSet> {
+		self.settle_open_check(true)
+	}
+
 	pub fn perform<C: Command + ?Sized>(&mut self, command: &C) -> Result<ChangeSet, CoreError> {
+		self.poll();
 		if let Some(reason) = command.snapshot_first() {
 			self.snapshot(reason)?;
 		}
@@ -152,12 +192,14 @@ impl<B: Backend> Session<B> {
 	}
 
 	pub fn undo(&mut self) -> Result<ChangeSet, CoreError> {
+		self.poll();
 		let changed = self.bus_mut()?.undo()?;
 		self.dirty |= !changed.is_empty();
 		Ok(changed)
 	}
 
 	pub fn redo(&mut self) -> Result<ChangeSet, CoreError> {
+		self.poll();
 		let changed = self.bus_mut()?.redo()?;
 		self.dirty |= !changed.is_empty();
 		Ok(changed)
@@ -180,6 +222,10 @@ impl<B: Backend> Session<B> {
 	/// Takes the hourly snapshot when the budget changed and the last snapshot
 	/// is an hour old. The app calls this on a timer.
 	pub fn snapshot_if_due(&mut self) -> Result<Option<Snapshot>, CoreError> {
+		self.poll();
+		if self.open_check.is_some() {
+			return Ok(None);
+		}
 		let due = self
 			.last_snapshot
 			.is_none_or(|last| self.now() - last >= SNAPSHOT_INTERVAL);
@@ -194,6 +240,7 @@ impl<B: Backend> Session<B> {
 		self.ensure_writer()?;
 		let now = self.now();
 		let snapshot = take_snapshot(&self.db, &self.snapshots, reason, now)?;
+		self.snapshot_problem = None;
 		self.dirty = false;
 		self.last_snapshot = Some(now);
 		prune_snapshots(&self.snapshots, &self.options.retention, now)?;
@@ -210,6 +257,7 @@ impl<B: Backend> Session<B> {
 	pub fn restore(&mut self, snapshot_id: &str) -> Result<ChangeSet, CoreError> {
 		self.ensure_writer()?;
 		let snapshot = self.find_snapshot(snapshot_id)?;
+		self.settle_open_check(true);
 		let listeners = self.close_bus();
 		let restored = match &self.lock {
 			Some(lock) => restore_snapshot(
@@ -234,9 +282,40 @@ impl<B: Backend> Session<B> {
 	/// Drops everything in memory and loads the budget from disk again, for
 	/// recovering after a bug left memory in doubt. Undo history is cleared.
 	pub fn reload(&mut self) -> Result<ChangeSet, CoreError> {
+		self.settle_open_check(true);
 		let listeners = self.close_bus();
 		self.reopen(listeners)?;
 		Ok(self.announce_reload())
+	}
+
+	fn settle_open_check(&mut self, wait: bool) -> Option<ChangeSet> {
+		let pending = self.open_check.take()?;
+		if !wait && !pending.is_finished() {
+			self.open_check = Some(pending);
+			return None;
+		}
+		let checked = pending.wait();
+		match checked.snapshot {
+			Some(Ok(snapshot)) => {
+				self.last_snapshot = Some(snapshot.taken_at);
+				self.snapshot_problem = None;
+			}
+			Some(Err(error)) => self.snapshot_problem = Some(error),
+			None => {}
+		}
+		if checked.sound {
+			return None;
+		}
+		let State::Open(bus) = &mut self.state else {
+			return None;
+		};
+		if rank(Some(ReadOnlyReason::AuditFailed)) >= rank(bus.read_only()) {
+			return None;
+		}
+		bus.make_read_only(ReadOnlyReason::AuditFailed);
+		let changed = ChangeSet::everything();
+		bus.listeners().notify(&changed);
+		Some(changed)
 	}
 
 	fn bus(&self) -> Result<&CommandBus<B>, CoreError> {
@@ -307,6 +386,19 @@ impl<B: Backend> Session<B> {
 	}
 }
 
+/// Lower ranks win: a reason about the file itself beats one about who else
+/// has it open.
+fn rank(reason: Option<ReadOnlyReason>) -> u8 {
+	match reason {
+		Some(ReadOnlyReason::NewerActualVersion) => 0,
+		Some(ReadOnlyReason::AuditFailed) => 1,
+		Some(ReadOnlyReason::NewerVeritasSchema) => 2,
+		Some(ReadOnlyReason::TrackingBudget) => 3,
+		Some(ReadOnlyReason::OpenElsewhere) => 4,
+		None => 5,
+	}
+}
+
 fn closed() -> CoreError {
 	CoreError::Storage("the budget couldn't be reopened. Close it and open it again".to_owned())
 }
@@ -342,7 +434,7 @@ fn open_bus<B: Backend>(
 			veritas_interop::Access::ReadWrite => None,
 			veritas_interop::Access::ReadOnly(reason) => Some(reason),
 		};
-		if reason.is_none() && !backend.integrity_problems()?.is_empty() {
+		if reason.is_none() && !backend.quick_problems()?.is_empty() {
 			reason = Some(ReadOnlyReason::AuditFailed);
 		}
 		if reason.is_none() && writable {
