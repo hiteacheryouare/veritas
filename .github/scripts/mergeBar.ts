@@ -12,6 +12,8 @@ export interface PullRequest {
 	baseRef: string;
 	headRef: string;
 	headSha: string;
+	reviewedSha: string;
+	fromFork: boolean;
 	body: string;
 	labels: string[];
 }
@@ -43,15 +45,31 @@ export const claimedRequirements = (body: string): string[] => {
 	return [...new Set(line?.match(REQUIREMENT) ?? [])].sort();
 };
 
+export interface Commit {
+	sha: string;
+	parents: string[];
+}
+
+export const reviewedCommit = (commits: Commit[], baseAncestors: Set<string>): string | undefined => {
+	for (let i = commits.length - 1; i >= 0; i--) {
+		const { sha, parents } = commits[i];
+		const syncsBase = parents.length === 2 && baseAncestors.has(parents[1]);
+		if (!syncsBase) {
+			return sha;
+		}
+	}
+	return commits[0]?.sha;
+};
+
 export const evaluate = (pr: PullRequest, signoffs: Signoff[]): Verdict => {
 	if (pr.baseRef === 'main') {
-		return pr.headRef === 'dev'
+		return pr.headRef === 'dev' && !pr.fromFork
 			? { state: 'success', description: 'Gate PR from dev: Ryan merges these himself' }
 			: { state: 'pending', description: 'Only dev merges into main' };
 	}
 	const latest = new Map<Role, Signoff>();
 	for (const signoff of signoffs) {
-		if (pr.headSha.startsWith(signoff.sha)) {
+		if (pr.headSha.startsWith(signoff.sha) || pr.reviewedSha.startsWith(signoff.sha)) {
 			latest.set(signoff.role, signoff);
 		}
 	}

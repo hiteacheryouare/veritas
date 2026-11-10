@@ -1,4 +1,4 @@
-import { evaluate, trustedSignoffs } from './mergeBar.ts';
+import { evaluate, reviewedCommit, trustedSignoffs } from './mergeBar.ts';
 
 const { GITHUB_TOKEN, GITHUB_REPOSITORY, PR_NUMBER, GITHUB_SERVER_URL, GITHUB_RUN_ID } = process.env;
 if (!GITHUB_TOKEN || !GITHUB_REPOSITORY || !PR_NUMBER) {
@@ -33,6 +33,17 @@ const paged = async (path: string) => {
 };
 
 const pull = await api(`/pulls/${PR_NUMBER}`);
+const commits = (await paged(`/pulls/${PR_NUMBER}/commits`)).map((commit) => ({
+	sha: commit.sha,
+	parents: commit.parents.map((parent: { sha: string }) => parent.sha)
+}));
+const baseAncestors = new Set<string>();
+for (const { parents } of commits.filter((commit) => commit.parents.length === 2)) {
+	const comparison = await api(`/compare/${parents[1]}...${pull.base.sha}`);
+	if (comparison.status === 'ahead' || comparison.status === 'identical') {
+		baseAncestors.add(parents[1]);
+	}
+}
 const comments = await paged(`/issues/${PR_NUMBER}/comments`);
 const reviews = await paged(`/pulls/${PR_NUMBER}/reviews`);
 const posts = [...comments, ...reviews.filter((review) => review.state !== 'DISMISSED')]
@@ -48,6 +59,8 @@ const verdict = evaluate(
 		baseRef: pull.base.ref,
 		headRef: pull.head.ref,
 		headSha: pull.head.sha,
+		reviewedSha: reviewedCommit(commits, baseAncestors) ?? pull.head.sha,
+		fromFork: pull.head.repo?.full_name !== GITHUB_REPOSITORY,
 		body: pull.body ?? '',
 		labels: pull.labels.map((label: { name: string }) => label.name)
 	},
