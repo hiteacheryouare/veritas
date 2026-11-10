@@ -330,9 +330,9 @@ This is the key decision. Veritas's working file is an **Actual-schema SQLite da
 Why:
 
 - **Round trip by construction.** Actual data never gets translated into another model and back. What we don't model, we never touch (R-IO-3, R-IO-5).
-- **Export is trivial and safe:** `VACUUM INTO` a temp file, zip it with `metadata.json`, rename it atomically.
+- **Export is trivial and safe:** `VACUUM INTO` a temp file, empty `kvcache`/`kvcache_key`, set `journal_mode=DELETE`, zip it with `metadata.json`, rename it atomically.
 - **Reversibility.** Ryan's backups stay Actual-compatible forever. If Veritas dies, Actual opens the data.
-- **The research confirms it works.** Actual's import writes the db bytes verbatim, and its export reads the raw file. Extra tables and columns survive both directions (Appendix A).
+- **The research confirms it works.** Actual's import writes the db bytes as they are (then clears the kvcache), and its export writes a SQLite backup copy with `kvcache`/`kvcache_key` emptied. Extra tables and columns survive both directions (see docs/actual-format.md).
 
 The cost is that we inherit Actual's quirks: `transactions.description` holds the payee id, mapping tables, tombstones. We also inherit its schema churn of about one migration a month. Both are contained:
 
@@ -342,7 +342,7 @@ The cost is that we inherit Actual's quirks: `transactions.description` holds th
 - **Side tables are maintained like Actual maintains them:** `payee_mapping`, `category_mapping`, transfer payees (one per account), `starting_balance_flag`, `sort_order` conventions.
 - **`v_*` views are left alone.** Veritas queries base tables. Actual rebuilds the views itself.
 - **`veritas_*` schema** is versioned in its own `veritas_meta` table. Veritas never writes into `__migrations__`, so it can't trip Actual's migration validity check.
-- **CRDT.** Local-only Actual doesn't write `messages_crdt`, and neither does Veritas. Veritas leaves `messages_clock` and `messages_crdt` untouched, and export sets `resetClock: true` like Actual does. Being a live peer of an actual-server is a **non-goal** (§11).
+- **CRDT.** Actual writes `messages_crdt` only when the device has a sync server configured, and Veritas never writes it. Veritas leaves `messages_clock` and `messages_crdt` untouched, and export sets `resetClock: true` like Actual does. Being a live peer of an actual-server is a **non-goal** (§11).
 
 ## 6.3 Migration manifest and Actual version bumps
 
@@ -471,7 +471,7 @@ Each workstream runs on its own branch (`ws/<id>`), in its own git worktree, and
 | P0.5 | Contracts v0: domain types, FFI surface skeleton, canonical dump schema, `veritas_*` v1 schema, error taxonomy | `contracts/`, `veritas-domain`, `veritas-ffi` | Compiles; Swift bindings generate |
 | P0.6 | Fixtures: `small`, `all-features`, `perf-100k` via the oracle | `fixtures/synthetic/` | Committed; dumps reproducible |
 | P0.7 | ADRs for every §11 decision; `docs/actual-bump.md` | `docs/adr/` | Written |
-| P0.8 | **Fred** writes the finance specs in `docs/finance/` (§0.2): classification rules per transaction kind, Net Profit/cash flow definitions, statement layouts and the equity reconciliation, tax buckets, debt/loan modeling (including the split-child fallback from P0.4), forecasting methodology and error metrics, and Wrapped metric definitions | `docs/finance/` | Each spec has worked examples with exact numbers that cowboys can turn into tests |
+| P0.8 | **Fred** writes the finance specs in `docs/finance/` (§0.2): classification rules per transaction kind, Net Profit/cash flow definitions, statement layouts and the equity reconciliation, tax buckets, debt/loan modeling (split-child transfers, verified in P0.4), forecasting methodology and error metrics, and Wrapped metric definitions | `docs/finance/` | Each spec has worked examples with exact numbers that cowboys can turn into tests |
 
 **P0.4 verification checklist:**
 
@@ -630,7 +630,7 @@ Shared rule: views go in `VeritasMacUI`, view models in `VeritasKit`, and no bus
 2. A file from a newer or older Actual → read-only / upgrade-first (R-IO-7).
 3. Live rows referencing tombstoned rows (a transaction in a deleted category, a merged payee) → resolve through the mapping tables like Actual does, and render "(deleted) X".
 4. A transfer whose pair is missing or tombstoned (possible in the wild) → the audit flags it, the UI shows it as a one-sided transfer, no crash, no auto-fix.
-5. Changing a transfer's destination from an on-budget to an off-budget account (the category becomes required) and back (the category must be cleared).
+5. Changing a transfer's destination from an on-budget to an off-budget account (Actual keeps the category but doesn't require it; Veritas asks, per R-XFER-4) and back (Actual clears the category automatically).
 6. A split parent whose children don't sum to it (corrupt input) → audit flag. Editing re-balances only with confirmation.
 7. A goal category deleted or merged in Actual between round trips → the goal becomes "orphaned" with a cleanup prompt.
 8. Closing a goal with a *negative* leftover (overspent) → the release pulls from the chosen envelope, and the copy explains it.
