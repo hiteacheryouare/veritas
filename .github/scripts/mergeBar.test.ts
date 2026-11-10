@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { claimedRequirements, evaluate, reviewedCommit, trustedSignoffs } from './mergeBar.ts';
+import { claimedRequirements, evaluate, reviewedCommits, trustedSignoffs } from './mergeBar.ts';
 
 const head = '3f2a9c1d4e5b6a7980c1d2e3f4a5b6c7d8e9f0a1';
 const pr = (overrides = {}) => ({
 	baseRef: 'dev',
 	headRef: 'ws/p0-oracle',
 	headSha: head,
-	reviewedSha: head,
+	reviewedShas: [head],
 	fromFork: false,
 	body: '> [!NOTE]\n> This content was created by an AI agent acting on behalf of Ryan.\n\nClaims: R-IO-1, R-IO-3\n',
 	labels: [],
@@ -97,17 +97,27 @@ test('a clean catch-up merge from dev keeps the sign-offs; anything else drops t
 	const commits = [reviewed, syncDev, newWork, editedMerge];
 	const clean = (commit: { sha: string }) => commit.sha === 'bbbbbbb2';
 
-	assert.equal(reviewedCommit('bbbbbbb2', commits, clean), 'aaaaaaa1');
-	assert.equal(reviewedCommit('ccccccc3', commits, clean), 'ccccccc3');
-	assert.equal(reviewedCommit('ddddddd4', commits, clean), 'ddddddd4');
-	assert.equal(reviewedCommit('notlisted', commits, clean), 'notlisted');
+	assert.deepEqual(reviewedCommits('bbbbbbb2', commits, clean), ['bbbbbbb2', 'aaaaaaa1']);
+	assert.deepEqual(reviewedCommits('ccccccc3', commits, clean), ['ccccccc3']);
+	assert.deepEqual(reviewedCommits('ddddddd4', commits, clean), ['ddddddd4']);
+	assert.deepEqual(reviewedCommits('notlisted', commits, clean), ['notlisted']);
 
 	const signoffs = trustedSignoffs([
 		by('merge-bar: reviewer approve aaaaaaa'),
 		by('merge-bar: cowboy approve aaaaaaa R-IO-1 R-IO-3')
 	]);
-	assert.equal(evaluate(pr({ headSha: 'bbbbbbb2', reviewedSha: 'aaaaaaa1' }), signoffs).state, 'success');
-	assert.equal(evaluate(pr({ headSha: 'ddddddd4', reviewedSha: 'ddddddd4' }), signoffs).state, 'pending');
+	assert.equal(evaluate(pr({ headSha: 'bbbbbbb2', reviewedShas: ['bbbbbbb2', 'aaaaaaa1'] }), signoffs).state, 'success');
+	assert.equal(evaluate(pr({ headSha: 'ddddddd4', reviewedShas: ['ddddddd4'] }), signoffs).state, 'pending');
+});
+
+test('a sign-off on an earlier catch-up merge survives a second catch-up merge', () => {
+	const work = { sha: 'aaaaaaa1', parents: ['0000000'] };
+	const firstSync = { sha: 'bbbbbbb2', parents: ['aaaaaaa1', 'devtip01'] };
+	const secondSync = { sha: 'ccccccc3', parents: ['bbbbbbb2', 'devtip02'] };
+	const chain = reviewedCommits('ccccccc3', [work, firstSync, secondSync], () => true);
+	assert.deepEqual(chain, ['ccccccc3', 'bbbbbbb2', 'aaaaaaa1']);
+	const signoffs = trustedSignoffs([by('merge-bar: reviewer approve bbbbbbb'), by('merge-bar: cowboy approve aaaaaaa R-IO-1 R-IO-3')]);
+	assert.equal(evaluate(pr({ headSha: 'ccccccc3', reviewedShas: chain }), signoffs).state, 'success');
 });
 
 test('a fork branch named dev cannot pass as a gate PR', () => {

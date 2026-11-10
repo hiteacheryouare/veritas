@@ -27,7 +27,7 @@ Rules:
 
 - **DEBT-2.1** Principal, interest, escrow and fees are integers >= 0. The sum must equal the payment total exactly. The wizard computes principal as the remainder, so a leftover cent can never go missing: `principal = total - interest - escrow - fees`.
 - **DEBT-2.2** Principal must not be negative. If a payment is smaller than the interest owed, the wizard blocks and says so. Unpaid interest added to the loan balance is recorded by the user as an `adjustment` on the loan account (a non-cash change), never as a negative principal.
-- **DEBT-2.3** Principal larger than outstanding principal is a warning, not an error (a refund or escrow credit can explain it). The loan balance would turn positive and the account would move to the asset side by ST-2. The wizard shows "This pays off the loan and leaves a credit of $X".
+- **DEBT-2.3** Principal larger than outstanding principal is a warning, not an error (a refund or escrow credit can explain it). The loan balance would turn positive and the account is listed as an asset that day by ST-2 (the side follows the sign of the balance, whatever the metadata says). The wizard shows "This pays off the loan and leaves a credit of $X".
 - **DEBT-2.4** Net Profit sees interest, escrow and fees as expenses and principal as Debt paydown (ST-1). Escrow is its own category and never lands in principal or interest.
 - **DEBT-2.5** Escrow is booked as an expense when paid to the servicer (simple, matches how a household budgets). It is not modeled as an off-budget escrow asset in v1. Resolved by Ryan at Gate 0 (FIN-3 in classification.md CLS-11). The alternative is an off-budget escrow asset account.
 - **DEBT-2.6** Interest is booked when paid. Interest accrued but unpaid is not recorded. The loan balance the user sees moves only by principal, so it can differ from the lender's statement by accrued interest. This is a stated simplification of D7.
@@ -167,6 +167,8 @@ Rules:
 - **GOAL-5** Past reports keep the goal's spending in its own category (R-GOAL-5, R-REP-3). Hiding changes nothing historical.
 - **GOAL-6** If a transaction is categorized to a closed goal later, no release happens. The goal shows "Closed goal has new activity" and the user may reopen or move the budget by hand.
 - **GOAL-7** The move writes Actual's usual movement note, as `transferCategory` does (`addMovementNotes`, `actions.ts:669-675`), so Actual shows the same history. WS-ENGINE owns parity.
+- **GOAL-8** Releasing an overspent goal against To Budget (`L < 0`, source To Budget) is allowed and unclamped: goal budgeted amount `+= |L|`, To Budget falls by `|L|` and may go negative (overbudgeted, which Actual carries forward). Actual's own helpers clamp to To Budget or write a junk row, so Veritas writes the budget cell directly and the movement note (GOAL-7). The sheet warns "To Budget will be $X over" before confirmation, as in GOAL-3. The goal always ends at available 0.
+- **GOAL-9** The `reached_month` backfill for imported goals scans months up to and including the current month only: the first month whose available is at least the target (the current month counts as soon as it is). Budget amounts planned for future months never mark a goal reached.
 
 Worked examples (all in month M, one goal "New laptop", target 150000):
 

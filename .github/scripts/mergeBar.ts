@@ -12,7 +12,8 @@ export interface PullRequest {
 	baseRef: string;
 	headRef: string;
 	headSha: string;
-	reviewedSha: string;
+	/// The head and every clean catch-up merge below it, down to the last real commit.
+	reviewedShas: string[];
 	fromFork: boolean;
 	body: string;
 	labels: string[];
@@ -50,20 +51,19 @@ export interface Commit {
 	parents: string[];
 }
 
-export const reviewedCommit = (headSha: string, commits: Commit[], isCleanSync: (commit: Commit) => boolean): string => {
+export const reviewedCommits = (headSha: string, commits: Commit[], isCleanSync: (commit: Commit) => boolean): string[] => {
 	const bySha = new Map(commits.map((commit) => [commit.sha, commit]));
+	const chain = [headSha];
 	let current = bySha.get(headSha);
-	if (!current) {
-		return headSha;
-	}
-	while (current.parents.length === 2 && isCleanSync(current)) {
+	while (current && current.parents.length === 2 && isCleanSync(current)) {
 		const previous = bySha.get(current.parents[0]);
 		if (!previous) {
-			return current.sha;
+			break;
 		}
+		chain.push(previous.sha);
 		current = previous;
 	}
-	return current.sha;
+	return chain;
 };
 
 export const evaluate = (pr: PullRequest, signoffs: Signoff[]): Verdict => {
@@ -74,7 +74,7 @@ export const evaluate = (pr: PullRequest, signoffs: Signoff[]): Verdict => {
 	}
 	const latest = new Map<Role, Signoff>();
 	for (const signoff of signoffs) {
-		if (pr.headSha.startsWith(signoff.sha) || pr.reviewedSha.startsWith(signoff.sha)) {
+		if (pr.headSha.startsWith(signoff.sha) || pr.reviewedShas.some((sha) => sha.startsWith(signoff.sha))) {
 			latest.set(signoff.role, signoff);
 		}
 	}

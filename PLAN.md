@@ -780,6 +780,7 @@ Verified against tag v26.11.0 (sha 1766241e3f4b) in P0.4. This is a summary. [do
 | `uuid` | Actual uses UUIDv4 ids | Mature |
 | `chrono` | Civil dates | Mature |
 | `thiserror` | Typed errors | dtolnay |
+| `regex` | Actual rule `matches` conditions (approved 2026-11-10, D47) | rust-lang |
 | `proptest`, `insta`, `criterion`, `cargo-fuzz` (dev only) | Differential/property tests, snapshots, benchmarks, fuzzing | Mature |
 | `@actual-app/api` (dev only, pinned, `tools/actual-oracle`) | Test oracle | Actual project |
 | Apple frameworks: SwiftUI, AppKit, Swift Charts, PDFKit, Foundation Models | UI, charts, PDF, on-device AI | System, no install |
