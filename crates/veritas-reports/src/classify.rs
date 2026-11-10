@@ -157,6 +157,18 @@ impl Classification {
 		self.rows.get(start..end).unwrap_or_default()
 	}
 
+	/// Every row dated on or before `date`: what an account balance on that
+	/// date sums.
+	pub fn through(&self, date: CivilDate) -> &[ClassifiedRow] {
+		let end = self.rows.partition_point(|row| row.date <= date);
+		self.rows.get(..end).unwrap_or_default()
+	}
+
+	pub fn before(&self, date: CivilDate) -> &[ClassifiedRow] {
+		let end = self.rows.partition_point(|row| row.date < date);
+		self.rows.get(..end).unwrap_or_default()
+	}
+
 	/// Live rows whose own account is missing from the budget. No account holds
 	/// them, so they are never classified, count in no total, and each one
 	/// needs review.

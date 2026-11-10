@@ -2,9 +2,10 @@
 #![allow(dead_code, clippy::unwrap_used, clippy::panic)]
 
 use veritas_domain::{
-	Account, AccountId, BudgetData, BudgetType, Category, CategoryGroup, CategoryGroupId,
-	CategoryId, CategoryKind, CategoryMeta, CivilDate, Money, Payee, PayeeId, SplitRole,
-	Transaction, TransactionId, TransactionKind, TransactionMeta, YearMonth,
+	Account, AccountGroup, AccountGroupId, AccountId, BudgetData, BudgetType, Category,
+	CategoryGroup, CategoryGroupId, CategoryId, CategoryKind, CategoryMeta, CivilDate, Money,
+	Payee, PayeeId, SplitRole, Transaction, TransactionId, TransactionKind, TransactionMeta,
+	YearMonth,
 };
 use veritas_reports::{
 	Classification, ClassifiedRow, Leg, NetProfit, Period, classify, net_profit,
@@ -74,6 +75,19 @@ impl Book {
 				transfer_account: Some(AccountId::new(id)),
 				favorite: false,
 				learn_categories: true,
+				tombstone: false,
+			},
+		);
+		self
+	}
+
+	pub fn account_group(&mut self, id: &str, sort_order: f64) -> &mut Self {
+		self.budget.account_groups.insert(
+			AccountGroupId::new(id),
+			AccountGroup {
+				id: AccountGroupId::new(id),
+				name: id.to_owned(),
+				sort_order,
 				tombstone: false,
 			},
 		);
