@@ -12,6 +12,8 @@ export interface PullRequest {
 	baseRef: string;
 	headRef: string;
 	headSha: string;
+	reviewedSha: string;
+	fromFork: boolean;
 	body: string;
 	labels: string[];
 }
@@ -43,15 +45,36 @@ export const claimedRequirements = (body: string): string[] => {
 	return [...new Set(line?.match(REQUIREMENT) ?? [])].sort();
 };
 
+export interface Commit {
+	sha: string;
+	parents: string[];
+}
+
+export const reviewedCommit = (headSha: string, commits: Commit[], isCleanSync: (commit: Commit) => boolean): string => {
+	const bySha = new Map(commits.map((commit) => [commit.sha, commit]));
+	let current = bySha.get(headSha);
+	if (!current) {
+		return headSha;
+	}
+	while (current.parents.length === 2 && isCleanSync(current)) {
+		const previous = bySha.get(current.parents[0]);
+		if (!previous) {
+			return current.sha;
+		}
+		current = previous;
+	}
+	return current.sha;
+};
+
 export const evaluate = (pr: PullRequest, signoffs: Signoff[]): Verdict => {
 	if (pr.baseRef === 'main') {
-		return pr.headRef === 'dev'
+		return pr.headRef === 'dev' && !pr.fromFork
 			? { state: 'success', description: 'Gate PR from dev: Ryan merges these himself' }
 			: { state: 'pending', description: 'Only dev merges into main' };
 	}
 	const latest = new Map<Role, Signoff>();
 	for (const signoff of signoffs) {
-		if (pr.headSha.startsWith(signoff.sha)) {
+		if (pr.headSha.startsWith(signoff.sha) || pr.reviewedSha.startsWith(signoff.sha)) {
 			latest.set(signoff.role, signoff);
 		}
 	}

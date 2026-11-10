@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { claimedRequirements, evaluate, trustedSignoffs } from './mergeBar.ts';
+import { claimedRequirements, evaluate, reviewedCommit, trustedSignoffs } from './mergeBar.ts';
 
 const head = '3f2a9c1d4e5b6a7980c1d2e3f4a5b6c7d8e9f0a1';
 const pr = (overrides = {}) => ({
 	baseRef: 'dev',
 	headRef: 'ws/p0-oracle',
 	headSha: head,
+	reviewedSha: head,
+	fromFork: false,
 	body: '> [!NOTE]\n> This content was created by an AI agent acting on behalf of Ryan.\n\nClaims: R-IO-1, R-IO-3\n',
 	labels: [],
 	...overrides
@@ -77,6 +79,31 @@ test('finance and contract labels require Fred and the Architect', () => {
 test('a PR with no claims needs no cowboy', () => {
 	const signoffs = trustedSignoffs([by('merge-bar: reviewer approve 3f2a9c1')]);
 	assert.equal(evaluate(pr({ body: 'Docs only.\r\nClaims: none\r\n' }), signoffs).state, 'success');
+});
+
+test('a clean catch-up merge from dev keeps the sign-offs; anything else drops them', () => {
+	const reviewed = { sha: 'aaaaaaa1', parents: ['0000000'] };
+	const syncDev = { sha: 'bbbbbbb2', parents: ['aaaaaaa1', 'devtip01'] };
+	const newWork = { sha: 'ccccccc3', parents: ['bbbbbbb2'] };
+	const editedMerge = { sha: 'ddddddd4', parents: ['aaaaaaa1', 'devtip01'] };
+	const commits = [reviewed, syncDev, newWork, editedMerge];
+	const clean = (commit: { sha: string }) => commit.sha === 'bbbbbbb2';
+
+	assert.equal(reviewedCommit('bbbbbbb2', commits, clean), 'aaaaaaa1');
+	assert.equal(reviewedCommit('ccccccc3', commits, clean), 'ccccccc3');
+	assert.equal(reviewedCommit('ddddddd4', commits, clean), 'ddddddd4');
+	assert.equal(reviewedCommit('notlisted', commits, clean), 'notlisted');
+
+	const signoffs = trustedSignoffs([
+		by('merge-bar: reviewer approve aaaaaaa'),
+		by('merge-bar: cowboy approve aaaaaaa R-IO-1 R-IO-3')
+	]);
+	assert.equal(evaluate(pr({ headSha: 'bbbbbbb2', reviewedSha: 'aaaaaaa1' }), signoffs).state, 'success');
+	assert.equal(evaluate(pr({ headSha: 'ddddddd4', reviewedSha: 'ddddddd4' }), signoffs).state, 'pending');
+});
+
+test('a fork branch named dev cannot pass as a gate PR', () => {
+	assert.equal(evaluate(pr({ baseRef: 'main', headRef: 'dev', fromFork: true }), []).state, 'pending');
 });
 
 test('gate PRs from dev into main are left to Ryan, and nothing else may target main', () => {
