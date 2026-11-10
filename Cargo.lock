@@ -1115,6 +1115,8 @@ dependencies = [
 name = "veritas-forecast"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "proptest",
  "veritas-domain",
  "veritas-engine",
  "veritas-reports",
