@@ -43,7 +43,7 @@ pub enum BudgetType {
 	Tracking,
 }
 
-/// R-GOAL-3. Only ever moves forward.
+/// R-GOAL-3. Moves forward, except an explicit Reopen (docs/finance/debt.md DEBT-8.2).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum GoalStatus {
 	Active,

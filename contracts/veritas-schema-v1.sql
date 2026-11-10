@@ -10,13 +10,13 @@ CREATE TABLE IF NOT EXISTS veritas_meta (
 	value TEXT NOT NULL
 );
 
--- docs/finance/classification.md CLS-3. A category with no row here defaults
--- from Actual's is_income flag. archived_on is set by Archive (R-BUD-5), which
+-- docs/finance/classification.md CLS-3. A category with no row, or a NULL kind,
+-- defaults from Actual's is_income flag. Bucket ids are TAX-2's. archived_on is set by Archive (R-BUD-5), which
 -- also sets categories.hidden, so reports can label archived vs merely hidden.
 CREATE TABLE IF NOT EXISTS veritas_category_meta (
 	category_id TEXT PRIMARY KEY,
-	kind TEXT NOT NULL CHECK (kind IN ('income', 'expense', 'debt_principal', 'savings')),
-	tax_bucket TEXT,
+	kind TEXT CHECK (kind IN ('income', 'expense', 'debt_principal', 'savings')),
+	tax_bucket TEXT CHECK (tax_bucket IN ('w2_income', 'interest_income', 'business_income', 'business_expense', 'charitable', 'medical', 'education', 'hsa', 'retirement_contribution', 'taxes_withheld')),
 	archived_on INTEGER
 );
 
@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS veritas_account_meta (
 	lender TEXT
 );
 
--- R-GOAL-*, docs/finance/debt.md DEBT-8. status only moves forward.
+-- R-GOAL-*, docs/finance/debt.md DEBT-8. status moves forward, except an explicit Reopen (DEBT-8.2).
 CREATE TABLE IF NOT EXISTS veritas_goal (
 	id TEXT PRIMARY KEY,
 	category_id TEXT NOT NULL UNIQUE,
@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS veritas_transaction_meta (
 -- docs/finance/tax-buckets.md TAX-1: which Actual tags mean which bucket.
 CREATE TABLE IF NOT EXISTS veritas_tax_tag (
 	tag TEXT PRIMARY KEY,
-	bucket TEXT NOT NULL
+	bucket TEXT NOT NULL CHECK (bucket IN ('w2_income', 'interest_income', 'business_income', 'business_expense', 'charitable', 'medical', 'education', 'hsa', 'retirement_contribution', 'taxes_withheld', 'none'))
 );
 
 -- R-FC-2. Scenarios only ever write these two tables.
@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS veritas_scenario_event (
 	goal_id TEXT,
 	amount INTEGER,
 	percent_bp INTEGER,
+	on_date INTEGER,
 	start_month TEXT NOT NULL,
 	end_month TEXT,
 	every_months INTEGER CHECK (every_months > 0)

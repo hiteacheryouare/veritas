@@ -147,7 +147,7 @@ pub struct Tag {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CategoryMeta {
-	pub kind: CategoryKind,
+	pub kind: Option<CategoryKind>,
 	pub tax_bucket: Option<String>,
 	pub archived_on: Option<CivilDate>,
 }
@@ -159,6 +159,12 @@ pub struct AccountMeta {
 	pub loan_payment: Option<Money>,
 	pub loan_payment_day: Option<u8>,
 	pub lender: Option<String>,
+}
+
+/// docs/finance/classification.md CLS-5: a reconciliation adjustment Veritas made.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct TransactionMeta {
+	pub adjustment: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -200,6 +206,7 @@ pub struct BudgetData {
 	pub payee_mapping: BTreeMap<PayeeId, PayeeId>,
 	pub category_meta: BTreeMap<CategoryId, CategoryMeta>,
 	pub account_meta: BTreeMap<AccountId, AccountMeta>,
+	pub transaction_meta: BTreeMap<TransactionId, TransactionMeta>,
 	pub goals: BTreeMap<GoalId, Goal>,
 }
 
@@ -223,6 +230,7 @@ impl BudgetData {
 			payee_mapping: BTreeMap::new(),
 			category_meta: BTreeMap::new(),
 			account_meta: BTreeMap::new(),
+			transaction_meta: BTreeMap::new(),
 			goals: BTreeMap::new(),
 		}
 	}

@@ -1,8 +1,8 @@
 import Testing
 import VeritasCore
 
-@Test func theCoreAnswersAcrossTheBridge() {
-	#expect(coreVersion() == "0.1.0")
+@Test func theCoreAnswersAcrossTheBridge() throws {
+	#expect(try coreVersion() == "0.1.0")
 }
 
 @Test func aValidMonthComesBackAsARecord() throws {

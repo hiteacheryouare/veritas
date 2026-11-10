@@ -69,7 +69,8 @@ impl YearMonth {
 	pub fn parse(text: &str) -> Result<Self, CoreError> {
 		let invalid = || CoreError::Invalid(format!("{text:?} is not a month like 2027-03"));
 		let (year, month) = text.split_once('-').ok_or_else(invalid)?;
-		if year.len() != 4 || month.len() != 2 {
+		let digits = |part: &str| part.bytes().all(|byte| byte.is_ascii_digit());
+		if year.len() != 4 || month.len() != 2 || !digits(year) || !digits(month) {
 			return Err(invalid());
 		}
 		let year = year.parse().map_err(|_| invalid())?;
@@ -124,7 +125,9 @@ mod tests {
 		let march = YearMonth::parse("2027-03").unwrap();
 		assert_eq!((march.year(), march.month()), (2027, 3));
 		assert_eq!(march.to_string(), "2027-03");
-		for bad in ["2027-3", "2027-13", "27-03", "2027/03", "", "2027-00"] {
+		for bad in [
+			"2027-3", "2027-13", "27-03", "2027/03", "", "2027-00", "2027-+3", "+027-03",
+		] {
 			assert!(YearMonth::parse(bad).is_err(), "{bad:?} should be rejected");
 		}
 	}

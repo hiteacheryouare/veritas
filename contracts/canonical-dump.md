@@ -11,7 +11,7 @@ The normative format, version 1, is specified in `docs/oracle.md` ("Canonical du
 
 | Test family | Compares | Ignores |
 |---|---|---|
-| Round trip, R-IO-3 | `dump(export(import(zip)))` with `dump(zip)` | `kvcache*` (already excluded), metadata ids (already normalized) |
+| Round trip, R-IO-3 | `dump(export(import(zip)))` with `dump(zip)` | `kvcache*` (already excluded), metadata ids (already normalized), and the `veritas_*` tables Veritas adds on adopt, because R-IO-3 covers Actual's tables |
 | Differential | The `computed` sections after the same op list | Nothing |
 | Actual acceptance | Actual's import of a Veritas export | `messages_clock`'s node id, which Actual's `resetClock` rewrites |
 
