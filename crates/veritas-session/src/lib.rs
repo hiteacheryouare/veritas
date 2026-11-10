@@ -21,4 +21,4 @@ pub use snapshot::{
 	SNAPSHOTS_DIR, Snapshot, SnapshotReason, list_snapshots, prune_snapshots, restore_snapshot,
 	take_snapshot,
 };
-pub use store_backend::{PendingWrites, StoreBackend};
+pub use store_backend::{StoreBackend, StoreWrite};

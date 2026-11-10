@@ -7,7 +7,7 @@ use veritas_session::{
 };
 
 use crate::commands::Command;
-use crate::records::{Change, Retention, SessionState, SnapshotInfo};
+use crate::records::{AuditFinding, Change, Retention, SessionState, SnapshotInfo};
 use crate::{FfiError, guard};
 
 /// Implemented in Swift. Called after every commit, undo, redo, restore or
@@ -112,7 +112,19 @@ impl<B: Backend> Core<B> {
 				checking: session.open_check_pending(),
 				snapshot_problem: session.snapshot_problem().map(ToString::to_string),
 				skipped_rows: session.load_report().skipped.len() as u64,
+				audit_findings: session
+					.audit_report()
+					.map(|report| report.violations.len() as u64),
 			})
+		})
+	}
+
+	pub(crate) fn audit_report(&self) -> Result<Option<Vec<AuditFinding>>, FfiError> {
+		self.call(|session| {
+			session.poll();
+			Ok(session
+				.audit_report()
+				.map(|report| report.violations.iter().map(AuditFinding::from).collect()))
 		})
 	}
 
@@ -225,6 +237,11 @@ impl Session {
 		self.core.state()
 	}
 
+	/// `None` while the background check still runs, or if it couldn't run.
+	pub fn audit_report(&self) -> Result<Option<Vec<AuditFinding>>, FfiError> {
+		self.core.audit_report()
+	}
+
 	pub fn perform(&self, command: Command) -> Result<Change, FfiError> {
 		self.core.perform(command)
 	}
@@ -283,68 +300,11 @@ mod tests {
 	use std::path::{Path, PathBuf};
 	use std::sync::atomic::{AtomicUsize, Ordering};
 
-	use veritas_domain::{Change as RowChange, StoreTransaction};
 	use veritas_session::SnapshotReason;
-	use veritas_store::Loaded;
 
 	use super::*;
 	use crate::ReadOnlyKind;
 	use crate::records::EntityKind;
-
-	/// veritas-store's read path with writes counted, until the store writes.
-	struct Counting {
-		store: veritas_store::Store,
-	}
-
-	struct CountingTransaction;
-
-	impl veritas_domain::Store for Counting {
-		type Transaction<'a> = CountingTransaction;
-
-		fn begin(&mut self) -> Result<CountingTransaction, CoreError> {
-			Ok(CountingTransaction)
-		}
-	}
-
-	impl StoreTransaction for CountingTransaction {
-		fn apply(&mut self, _: &RowChange) -> Result<(), CoreError> {
-			Ok(())
-		}
-
-		fn commit(self) -> Result<(), CoreError> {
-			Ok(())
-		}
-
-		fn rollback(self) -> Result<(), CoreError> {
-			Ok(())
-		}
-	}
-
-	impl Backend for Counting {
-		fn open(db: &Path) -> Result<Self, CoreError> {
-			veritas_store::Store::open(db).map(|store| Counting { store })
-		}
-
-		fn migration_ids(&self) -> Result<Vec<i64>, CoreError> {
-			self.store.migration_ids()
-		}
-
-		fn quick_problems(&self) -> Result<Vec<String>, CoreError> {
-			Ok(Vec::new())
-		}
-
-		fn verify(_: &Path) -> Result<Vec<String>, CoreError> {
-			Ok(Vec::new())
-		}
-
-		fn adopt(&mut self) -> Result<(), CoreError> {
-			self.store.adopt()
-		}
-
-		fn load(&self) -> Result<Loaded, CoreError> {
-			self.store.load()
-		}
-	}
 
 	struct Scratch(PathBuf);
 
@@ -381,13 +341,14 @@ mod tests {
 			.to_string()
 	}
 
-	fn imported(label: &str) -> (Scratch, Arc<Core<Counting>>) {
+	fn imported(label: &str) -> (Scratch, Arc<Core<StoreBackend>>) {
 		let scratch = Scratch::new(label);
-		let core = Core::<Counting>::import_actual_zip(&small_zip(), &scratch.budget()).unwrap();
+		let core =
+			Core::<StoreBackend>::import_actual_zip(&small_zip(), &scratch.budget()).unwrap();
 		(scratch, Arc::new(core))
 	}
 
-	fn accounts(core: &Core<Counting>) -> Vec<(String, String, bool)> {
+	fn accounts(core: &Core<StoreBackend>) -> Vec<(String, String, bool)> {
 		core.call(|session| {
 			Ok(session
 				.data()?
@@ -405,7 +366,7 @@ mod tests {
 		.unwrap()
 	}
 
-	fn live_account(core: &Core<Counting>) -> String {
+	fn live_account(core: &Core<StoreBackend>) -> String {
 		accounts(core)
 			.into_iter()
 			.find(|(_, _, tombstone)| !tombstone)
@@ -416,7 +377,7 @@ mod tests {
 	/// Calls back into the session from inside the callback, the way a view
 	/// model refetching straight away would.
 	struct Refetcher {
-		core: Mutex<Option<Arc<Core<Counting>>>>,
+		core: Mutex<Option<Arc<Core<StoreBackend>>>>,
 		heard: Mutex<Vec<(Change, bool)>>,
 	}
 
@@ -428,7 +389,7 @@ mod tests {
 		}
 	}
 
-	fn refetcher(core: &Arc<Core<Counting>>) -> Arc<Refetcher> {
+	fn refetcher(core: &Arc<Core<StoreBackend>>) -> Arc<Refetcher> {
 		let listener = Arc::new(Refetcher {
 			core: Mutex::new(Some(core.clone())),
 			heard: Mutex::new(Vec::new()),
@@ -519,7 +480,7 @@ mod tests {
 		assert_eq!(state.snapshot_problem, None);
 		assert!(state.directory.ends_with("budget"));
 
-		let second = Core::<Counting>::open(&scratch.budget()).unwrap();
+		let second = Core::<StoreBackend>::open(&scratch.budget()).unwrap();
 		assert_eq!(
 			second.state().unwrap().read_only,
 			Some(ReadOnlyKind::OpenElsewhere)
@@ -580,7 +541,20 @@ mod tests {
 		let (scratch, core) = imported("close");
 		core.close().unwrap();
 		assert!(matches!(core.state(), Err(FfiError::Invalid { .. })));
-		let reopened = Core::<Counting>::open(&scratch.budget()).unwrap();
+		let reopened = Core::<StoreBackend>::open(&scratch.budget()).unwrap();
 		assert_eq!(reopened.state().unwrap().read_only, None);
+	}
+
+	#[test]
+	fn the_audit_report_reaches_the_shell_once_the_background_check_is_done() {
+		// R-REL-2
+		let (_scratch, core) = imported("audit");
+		core.call(|session| {
+			session.wait_for_open_check();
+			Ok(())
+		})
+		.unwrap();
+		assert_eq!(core.state().unwrap().audit_findings, Some(0));
+		assert_eq!(core.audit_report().unwrap(), Some(Vec::new()));
 	}
 }

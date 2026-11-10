@@ -10,7 +10,8 @@ use veritas_domain::{CoreError, YearMonth};
 
 pub use commands::Command;
 pub use records::{
-	Change, EntityKind, EntityRef, Retention, SessionState, SnapshotInfo, SnapshotKind,
+	AuditCheck, AuditFinding, Change, EntityKind, EntityRef, Retention, SessionState, SnapshotInfo,
+	SnapshotKind,
 };
 pub use session::{ChangeListener, Session};
 

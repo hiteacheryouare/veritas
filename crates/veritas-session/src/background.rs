@@ -2,12 +2,13 @@ use std::path::{Path, PathBuf};
 use std::thread::{self, JoinHandle};
 
 use veritas_domain::CoreError;
+use veritas_store::AuditReport;
 
 use crate::retention::RetentionPolicy;
 use crate::session::Clock;
 use crate::snapshot::{Snapshot, SnapshotReason, prune_snapshots, take_snapshot};
 
-pub(crate) type Verify = fn(&Path) -> Result<Vec<String>, CoreError>;
+pub(crate) type Verify = fn(&Path) -> Result<AuditReport, CoreError>;
 
 /// The slow half of opening a budget: the full integrity check and audit,
 /// then the open snapshot. It runs on its own connections, so the budget is
@@ -23,8 +24,9 @@ pub(crate) struct OpenCheck {
 }
 
 pub(crate) struct Checked {
-	/// False when the check found problems, failed to run, or the thread died.
-	pub(crate) sound: bool,
+	/// `None` when the check couldn't run or its thread died, which the
+	/// session treats like damage: soundness wasn't shown.
+	pub(crate) report: Option<AuditReport>,
 	pub(crate) snapshot: Option<Result<Snapshot, CoreError>>,
 }
 
@@ -35,14 +37,15 @@ pub(crate) enum Pending {
 
 impl OpenCheck {
 	fn run(self) -> Checked {
-		let sound = matches!((self.verify)(&self.db), Ok(problems) if problems.is_empty());
+		let report = (self.verify)(&self.db).ok();
+		let sound = report.as_ref().is_some_and(|report| !report.is_corrupt());
 		let snapshot = (sound && self.take_snapshot).then(|| {
 			let now = (self.clock)();
 			let snapshot = take_snapshot(&self.db, &self.snapshots, SnapshotReason::Open, now)?;
 			prune_snapshots(&self.snapshots, &self.retention, now)?;
 			Ok(snapshot)
 		});
-		Checked { sound, snapshot }
+		Checked { report, snapshot }
 	}
 
 	/// Starts the check on a thread, or runs it here if no thread can start.
@@ -69,7 +72,7 @@ impl Pending {
 	pub(crate) fn wait(self) -> Checked {
 		match self {
 			Pending::Running(handle) => handle.join().unwrap_or(Checked {
-				sound: false,
+				report: None,
 				snapshot: None,
 			}),
 			Pending::Done(checked) => checked,

@@ -1,5 +1,6 @@
 use veritas_domain::{EntityRef as CoreEntity, ReadOnlyReason, YearMonth};
 use veritas_session::{ChangeSet, RetentionPolicy, Snapshot, SnapshotReason};
+use veritas_store::{Check, Violation};
 
 use crate::{Month, ReadOnlyKind};
 
@@ -126,6 +127,72 @@ pub struct SessionState {
 	pub snapshot_problem: Option<String>,
 	/// Rows the loader couldn't represent. They stay in the file untouched.
 	pub skipped_rows: u64,
+	/// What the invariant audit found, once the background check is done.
+	/// `audit_report` lists the findings.
+	pub audit_findings: Option<u64>,
+}
+
+/// One problem the integrity check or invariant audit found. It names rows
+/// by id only, never by amount, name or note.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct AuditFinding {
+	pub check: AuditCheck,
+	/// SQLite's own words for damage, or why a row couldn't be loaded.
+	pub detail: Option<String>,
+	pub table: String,
+	pub id: Option<String>,
+	/// The other row involved, such as the missing one a row points at.
+	pub related: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum AuditCheck {
+	Damage,
+	Unrepresentable,
+	UnpairedTransfer,
+	StrayTransferLink,
+	TransferAmountMismatch,
+	SplitSumMismatch,
+	EmptySplit,
+	ChildOfNonParent,
+	MissingReference,
+	DeletedReference,
+	MappingChain,
+	MappingCycle,
+	DuplicateBudgetCell,
+}
+
+impl From<&Violation> for AuditFinding {
+	fn from(violation: &Violation) -> Self {
+		let (check, detail) = match &violation.check {
+			Check::Integrity(text) => (AuditCheck::Damage, Some(text.clone())),
+			Check::Unrepresentable(reason) => {
+				(AuditCheck::Unrepresentable, Some((*reason).to_owned()))
+			}
+			Check::UnpairedTransfer => (AuditCheck::UnpairedTransfer, None),
+			Check::StrayTransferLink => (AuditCheck::StrayTransferLink, None),
+			Check::TransferAmountMismatch => (AuditCheck::TransferAmountMismatch, None),
+			Check::SplitSumMismatch => (AuditCheck::SplitSumMismatch, None),
+			Check::EmptySplit => (AuditCheck::EmptySplit, None),
+			Check::ChildOfNonParent => (AuditCheck::ChildOfNonParent, None),
+			Check::MissingReference(what) => {
+				(AuditCheck::MissingReference, Some((*what).to_owned()))
+			}
+			Check::DeletedReference(what) => {
+				(AuditCheck::DeletedReference, Some((*what).to_owned()))
+			}
+			Check::MappingChain => (AuditCheck::MappingChain, None),
+			Check::MappingCycle => (AuditCheck::MappingCycle, None),
+			Check::DuplicateBudgetCell => (AuditCheck::DuplicateBudgetCell, None),
+		};
+		AuditFinding {
+			check,
+			detail,
+			table: violation.table.to_owned(),
+			id: violation.id.clone(),
+			related: violation.related.clone(),
+		}
+	}
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]

@@ -4,8 +4,8 @@ use std::time::{Duration, SystemTime};
 
 use chrono::{DateTime, TimeDelta, Utc};
 use veritas_domain::{BudgetData, BudgetType, CoreError, ReadOnlyReason, Store};
-use veritas_interop::{Manifest, import_actual_zip};
-use veritas_store::{LoadReport, Loaded};
+use veritas_interop::{ImportOutcome, Manifest, import_actual_zip};
+use veritas_store::{Access as StoreAccess, AuditReport, LoadReport, Loaded};
 
 use crate::background::{OpenCheck, Pending};
 use crate::bus::{ChangeListener, ChangeSet, Command, CommandBus, Listeners, Permit, Subscription};
@@ -25,15 +25,18 @@ const SNAPSHOT_INTERVAL: TimeDelta = TimeDelta::hours(1);
 /// What a session needs from durable storage beyond writing commands.
 /// veritas-store's working copy is the real one.
 pub trait Backend: Store + Sized {
-	fn open(db: &Path) -> Result<Self, CoreError>;
+	/// A `ReadOnly` open writes nothing, not even the journal mode. The
+	/// session opens every budget that way first, and reopens it `ReadWrite`
+	/// only once it knows the budget may be written.
+	fn open(db: &Path, access: StoreAccess) -> Result<Self, CoreError>;
 	fn migration_ids(&self) -> Result<Vec<i64>, CoreError>;
 	/// What `PRAGMA quick_check` reports, fast enough to run while opening.
 	/// Empty means the file looks sound.
 	fn quick_problems(&self) -> Result<Vec<String>, CoreError>;
-	/// The full `PRAGMA integrity_check` and the invariant audit, on a
-	/// connection of its own. The session runs it on a background thread
-	/// after opening. Empty means the file is sound.
-	fn verify(db: &Path) -> Result<Vec<String>, CoreError>;
+	/// The full `PRAGMA integrity_check` and, when the file is sound, the
+	/// invariant audit, on a connection of its own. The session runs it on a
+	/// background thread after opening.
+	fn verify(db: &Path) -> Result<AuditReport, CoreError>;
 	/// Creates the veritas_* tables. Only ever called on a writable budget.
 	/// Tables from a newer Veritas return `ReadOnly(NewerVeritasSchema)`.
 	fn adopt(&mut self) -> Result<(), CoreError>;
@@ -77,6 +80,7 @@ pub struct Session<B: Backend> {
 	last_snapshot: Option<DateTime<Utc>>,
 	open_check: Option<Pending>,
 	snapshot_problem: Option<CoreError>,
+	audit: Option<AuditReport>,
 }
 
 impl<B: Backend> Session<B> {
@@ -109,6 +113,7 @@ impl<B: Backend> Session<B> {
 			last_snapshot: None,
 			open_check: None,
 			snapshot_problem: None,
+			audit: None,
 		};
 		let take_snapshot = session.read_only().is_none();
 		session.open_check = Some(
@@ -132,8 +137,12 @@ impl<B: Backend> Session<B> {
 		budget_dir: &Path,
 		options: SessionOptions,
 	) -> Result<Self, CoreError> {
-		import_actual_zip(zip, budget_dir)?;
-		Session::open(budget_dir, options)
+		match import_actual_zip(zip, budget_dir)? {
+			ImportOutcome::Imported(_) => Session::open(budget_dir, options),
+			ImportOutcome::Refused(report) => Err(CoreError::AuditFailed {
+				violations: report.violations.len(),
+			}),
+		}
 	}
 
 	pub fn dir(&self) -> &Path {
@@ -168,6 +177,14 @@ impl<B: Backend> Session<B> {
 	/// A failed open snapshot never stops the budget opening.
 	pub fn snapshot_problem(&self) -> Option<&CoreError> {
 		self.snapshot_problem.as_ref()
+	}
+
+	/// What the background check found: SQLite's integrity check and the
+	/// invariant audit. `None` until the check finishes, or when it couldn't
+	/// run. Findings are reported and never fixed; only damage SQLite itself
+	/// finds turns the budget read-only.
+	pub fn audit_report(&self) -> Option<&AuditReport> {
+		self.audit.as_ref()
 	}
 
 	/// True while the full integrity check and open snapshot still run.
@@ -317,7 +334,12 @@ impl<B: Backend> Session<B> {
 			Some(Err(error)) => self.snapshot_problem = Some(error),
 			None => {}
 		}
-		if checked.sound {
+		let sound = checked
+			.report
+			.as_ref()
+			.is_some_and(|report| !report.is_corrupt());
+		self.audit = checked.report;
+		if sound {
 			return None;
 		}
 		let State::Open(bus) = &mut self.state else {
@@ -441,33 +463,7 @@ fn open_bus<B: Backend>(
 	lock: Option<&WriterLock>,
 	listeners: Listeners,
 ) -> Result<(CommandBus<B>, LoadReport), (CoreError, Listeners)> {
-	let writable = lock.is_some();
-	let opened = (|| {
-		let mut backend = B::open(db)?;
-		let mut reason = match Manifest::supported()?.check(&backend.migration_ids()?)? {
-			veritas_interop::Access::ReadWrite => None,
-			veritas_interop::Access::ReadOnly(reason) => Some(reason),
-		};
-		if reason.is_none() && !backend.quick_problems()?.is_empty() {
-			reason = Some(ReadOnlyReason::AuditFailed);
-		}
-		if reason.is_none() && writable {
-			match backend.adopt() {
-				Ok(()) => {}
-				Err(CoreError::ReadOnly(newer)) => reason = Some(newer),
-				Err(error) => return Err(error),
-			}
-		}
-		let loaded = backend.load()?;
-		if reason.is_none() && loaded.data.budget_type == BudgetType::Tracking {
-			reason = Some(ReadOnlyReason::TrackingBudget);
-		}
-		if reason.is_none() && !writable {
-			reason = Some(ReadOnlyReason::OpenElsewhere);
-		}
-		Ok((backend, loaded, reason))
-	})();
-	match opened {
+	match open_backend::<B>(db, lock.is_some()) {
 		Ok((backend, loaded, reason)) => {
 			let permit = match (reason, lock) {
 				(None, Some(lock)) => Permit::Write(lock),
@@ -479,5 +475,43 @@ fn open_bus<B: Backend>(
 			))
 		}
 		Err(error) => Err((error, listeners)),
+	}
+}
+
+/// Reads everything that decides access through a read-only open, so a
+/// budget that turns out read-only is never written. Only a writable one is
+/// reopened for writing and adopted. The data loaded read-only is kept: the
+/// writer lock means nothing else wrote in between, and adopt only adds
+/// empty veritas_* tables.
+fn open_backend<B: Backend>(
+	db: &Path,
+	writable: bool,
+) -> Result<(B, Loaded, Option<ReadOnlyReason>), CoreError> {
+	let reader = B::open(db, StoreAccess::ReadOnly(ReadOnlyReason::OpenElsewhere))?;
+	let mut reason = match Manifest::supported()?.check(&reader.migration_ids()?)? {
+		veritas_interop::Access::ReadWrite => None,
+		veritas_interop::Access::ReadOnly(reason) => Some(reason),
+	};
+	if reason.is_none() && !reader.quick_problems()?.is_empty() {
+		reason = Some(ReadOnlyReason::AuditFailed);
+	}
+	let loaded = reader.load()?;
+	if reason.is_none() && loaded.data.budget_type == BudgetType::Tracking {
+		reason = Some(ReadOnlyReason::TrackingBudget);
+	}
+	if reason.is_some() || !writable {
+		let reason = reason.unwrap_or(ReadOnlyReason::OpenElsewhere);
+		return Ok((reader, loaded, Some(reason)));
+	}
+	drop(reader);
+	let mut writer = B::open(db, StoreAccess::ReadWrite)?;
+	match writer.adopt() {
+		Ok(()) => Ok((writer, loaded, None)),
+		Err(CoreError::ReadOnly(newer)) => {
+			drop(writer);
+			let reader = B::open(db, StoreAccess::ReadOnly(newer))?;
+			Ok((reader, loaded, Some(newer)))
+		}
+		Err(error) => Err(error),
 	}
 }

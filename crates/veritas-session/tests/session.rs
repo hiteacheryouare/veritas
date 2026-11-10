@@ -78,8 +78,8 @@ impl StoreTransaction for Counted<'_> {
 }
 
 impl Backend for ReadPath {
-	fn open(db: &Path) -> Result<Self, CoreError> {
-		veritas_store::Store::open(db).map(|store| ReadPath { store, writes: 0 })
+	fn open(db: &Path, access: veritas_store::Access) -> Result<Self, CoreError> {
+		veritas_store::Store::open(db, access).map(|store| ReadPath { store, writes: 0 })
 	}
 
 	fn migration_ids(&self) -> Result<Vec<i64>, CoreError> {
@@ -95,18 +95,19 @@ impl Backend for ReadPath {
 		})
 	}
 
-	fn verify(db: &Path) -> Result<Vec<String>, CoreError> {
+	fn verify(db: &Path) -> Result<veritas_store::AuditReport, CoreError> {
 		let plan = BACKGROUND_CHECKS.lock().unwrap().remove(db);
 		if let Some(plan) = plan {
 			if let Some(gate) = plan.gate {
 				let _ = gate.recv();
 			}
 			if plan.fails {
-				return Ok(vec!["page 7 is never used".to_owned()]);
+				return Ok(veritas_store::AuditReport::from_integrity(vec![
+					"page 7 is never used".to_owned(),
+				]));
 			}
 		}
-		let conn = veritas_store::open_read_only(db)?;
-		veritas_store::integrity_check(&conn)
+		StoreBackend::verify(db)
 	}
 
 	fn adopt(&mut self) -> Result<(), CoreError> {
@@ -621,21 +622,60 @@ fn a_failed_open_snapshot_is_reported_without_blocking_the_budget() {
 }
 
 #[test]
-fn the_store_backend_opens_a_real_budget_and_refuses_writes_cleanly() {
-	// Until veritas-store can write, a command must fail without changing
-	// memory or leaving an undo step behind (R-REL-1).
+fn edits_through_the_store_backend_survive_closing_and_reopening() {
+	// R-REL-1, R-REL-5 end to end on SQLite: a command, its undo and its redo
+	// each land in the file, and a fresh session loads what memory held.
 	let (_root, dir) = imported("session-store-backend");
-	let mut session = Session::<StoreBackend>::open(&dir, TestClock::new().options()).unwrap();
+	let clock = TestClock::new();
+	let mut session = Session::<StoreBackend>::open(&dir, clock.options()).unwrap();
 	assert_eq!(session.wait_for_open_check(), None);
+	let id = first_account(session.data().unwrap());
+	let original = session.data().unwrap().accounts[&id].name.clone();
+
+	session.perform(&rename("Everyday")).unwrap();
+	let renamed = session.data().unwrap().clone();
+	drop(session);
+	let reopened = Session::<StoreBackend>::open(&dir, clock.options()).unwrap();
+	assert_eq!(reopened.data().unwrap(), &renamed);
+	assert_eq!(reopened.data().unwrap().accounts[&id].name, "Everyday");
+	drop(reopened);
+
+	let mut session = Session::<StoreBackend>::open(&dir, clock.options()).unwrap();
+	session.perform(&rename("Again")).unwrap();
+	session.undo().unwrap();
+	drop(session);
+	let reopened = Session::<StoreBackend>::open(&dir, clock.options()).unwrap();
+	assert_eq!(reopened.data().unwrap().accounts[&id].name, "Everyday");
+	assert_ne!(original, "Everyday");
+}
+
+#[test]
+fn the_open_audit_finds_broken_references_and_keeps_the_report_for_the_shell() {
+	// R-REL-2: opening an already-imported budget audits it, not only import.
+	// A broken reference is reported and left alone; the budget stays
+	// writable, because only damage SQLite itself finds makes it read-only.
+	let (_root, dir) = imported("session-open-audit");
+	sql(
+		&dir,
+		"UPDATE transactions SET acct = 'no-such-account'
+		WHERE id = (SELECT id FROM transactions WHERE tombstone = 0 AND isParent = 0 LIMIT 1);",
+	);
+	let mut session = Session::<StoreBackend>::open(&dir, TestClock::new().options()).unwrap();
+	assert!(session.audit_report().is_none());
+
+	assert_eq!(session.wait_for_open_check(), None);
+
+	let report = session.audit_report().unwrap();
+	assert!(!report.is_corrupt());
+	assert_eq!(report.violations.len(), 1, "{report:?}");
+	let violation = &report.violations[0];
+	assert_eq!(
+		violation.check,
+		veritas_store::Check::MissingReference("account")
+	);
+	assert_eq!(violation.table, "transactions");
+	assert_eq!(violation.related.as_deref(), Some("no-such-account"));
 	assert_eq!(session.read_only(), None);
-	assert_eq!(reasons_of(&session), [SnapshotReason::Open]);
-	let before = session.data().unwrap().clone();
-
-	let result = session.perform(&rename("Not yet"));
-
-	assert!(matches!(result, Err(CoreError::Storage(_))), "{result:?}");
-	assert_eq!(session.data().unwrap(), &before);
-	assert!(!session.can_undo());
 }
 
 #[test]
@@ -653,14 +693,4 @@ fn closing_a_shared_session_frees_the_budget_at_once() {
 		shared.with(|session| session.data().cloned()),
 		Err(CoreError::Invalid(_))
 	));
-}
-
-fn reasons_of<B: Backend>(session: &Session<B>) -> Vec<SnapshotReason> {
-	session
-		.snapshots()
-		.unwrap()
-		.into_iter()
-		.rev()
-		.map(|snapshot| snapshot.reason)
-		.collect()
 }
