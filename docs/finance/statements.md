@@ -173,6 +173,7 @@ Flows are integer cents. Zero-value nodes and flows are omitted.
 
 ### Rules
 
+0. **Uncategorized spending** (CLS-4 row 15, expense kind, no category) is its own outflow group named "Uncategorized" with a single child category "Uncategorized", so every outflow keeps the group-then-category shape. It follows rule 3 like any category (a negative net moves to "Refunds and withdrawals"). It is labeled as needing review.
 1. **Range.** Month, quarter, year or any custom inclusive date range. Categories are netted across the whole range, not month by month.
 2. **Only classified flows.** Rows of kind `internal_transfer`, `starting_balance` and `adjustment` never appear. Capitalized transfers (CLS-4 rows 8, 9) appear as ordinary expense categories.
 3. **Negative nets.** A flow cannot be negative. Any expense category, savings or debt paydown whose net over the range is negative (refund bigger than spending) is dropped from the outflow side and its magnitude is added to the source node "Refunds and withdrawals". A negative-net income category (clawback) is dropped from sources and shown as an outflow node "Income reversals".
