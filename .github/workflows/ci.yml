@@ -79,3 +79,27 @@ jobs:
 
       - name: Oracle tests
         run: npm test
+
+  # The Swift side of the bridge: generate bindings from the core, then run the
+  # package tests against the linked static library.
+  swift:
+    name: swift
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Toolchains
+        run: |
+          rustup show active-toolchain
+          swift --version
+          sw_vers
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Generate the Swift bindings
+        run: cargo xtask bindings
+
+      - name: Swift tests
+        working-directory: apps/macos/Packages/VeritasKit
+        run: swift test

@@ -6,9 +6,16 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+# staticlib is what VeritasKit links; cdylib is what uniffi-bindgen reads the
+# exported interface from.
+[lib]
+crate-type = ["lib", "staticlib", "cdylib"]
+
 [dependencies]
 veritas-domain = { path = "../veritas-domain" }
 veritas-session = { path = "../veritas-session" }
+thiserror.workspace = true
+uniffi.workspace = true
 
 [lints]
 workspace = true
