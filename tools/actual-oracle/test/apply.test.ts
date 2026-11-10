@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
@@ -58,4 +58,16 @@ test('apply refuses an unknown op and names it', t => {
 	const result = runOracle(['apply', join(FIXTURES, 'small.zip'), opsPath, '--out', join(dir, 'out.zip')]);
 	assert.notEqual(result.status, 0);
 	assert.match(result.stderr, /Op #0 has unknown type "launchRocket"/);
+});
+
+test('apply refuses a create whose id is already taken, instead of overwriting that row', t => {
+	const dir = scratchDir(t);
+	const opsPath = join(dir, 'ops.json');
+	const out = join(dir, 'out.zip');
+	const reused = { op: 'createCategory', id: groceries, name: 'Impostor', group: small('group', 'bills') };
+	writeFileSync(opsPath, JSON.stringify({ version: 1, ops: [reused] }));
+	const result = runOracle(['apply', join(FIXTURES, 'small.zip'), opsPath, '--out', out]);
+	assert.notEqual(result.status, 0);
+	assert.match(result.stderr, /Op #0 \(createCategory\) failed: A categories row with id [0-9a-f-]+ already exists/);
+	assert.equal(existsSync(out), false);
 });

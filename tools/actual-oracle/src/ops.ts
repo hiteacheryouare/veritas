@@ -18,6 +18,11 @@ const required = (op: Op, ...fields: string[]) => {
 };
 
 const createWithId = async (session: ActualSession, table: string, id: string, create: () => Promise<unknown>) => {
+	// Actual's insert is a stream of column writes, and a write to an existing row
+	// becomes an UPDATE, so a reused id would silently overwrite that row.
+	if (await session.internal.db.first(`SELECT id FROM ${table} WHERE id = ?`, [id])) {
+		throw new Error(`A ${table} row with id ${id} already exists`);
+	}
 	takeUnusedPrimedIds();
 	primeIds(id);
 	await create();
