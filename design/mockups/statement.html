@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Statement</title>
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="shared/frame.css">
+<style>
+.content { display: flex; justify-content: center; padding-top: var(--space-2); }
+.paper { width: 612px; padding: 48px 72px 56px; background: var(--color-surface-paper); color: var(--color-text-paper); border-radius: 4px; box-shadow: var(--shadow-popover); font-family: var(--font-paper); display: flex; flex-direction: column; }
+.paper header { text-align: center; margin-bottom: 24px; }
+.paper .entity { margin: 0; font-size: 22px; font-weight: 600; }
+.paper .title { margin: 6px 0 2px; font-size: 16px; font-weight: 600; }
+.paper .basis { margin: 0; font-size: 13px; color: #5c5c64; }
+.paper table { width: 100%; border-collapse: collapse; font-size: 13.5px; font-variant-numeric: tabular-nums lining-nums; font-feature-settings: "lnum" 1, "tnum" 1; }
+.paper th, .paper td { padding: 4px 0; text-align: left; font-weight: 400; }
+.paper td { text-align: right; width: 120px; }
+.paper .section th { padding-top: 18px; font-size: 14px; font-weight: 700; }
+.paper .group th { padding-top: 8px; padding-left: 14px; font-style: italic; }
+.paper .line th { padding-left: 28px; }
+.paper .subtotal th { padding-left: 14px; }
+.paper .subtotal td { border-top: 1px solid #8a8a92; }
+.paper .total th, .paper .total td { font-weight: 700; }
+.paper .total td { border-top: 1px solid #23232a; }
+.paper .grand th { padding-top: 20px; font-size: 15px; font-weight: 700; }
+.paper .grand td { padding-top: 20px; font-size: 15px; font-weight: 700; border-bottom: 3px double #23232a; }
+.paper .unaudited { font-weight: 400; font-style: italic; font-size: 16px; color: #5c5c64; }
+</style>
+</head>
+<body>
+<header class="page-bar"><h1>Statement</h1></header>
+<main>
+<section class="stage" data-theme="light">
+<div class="window">
+	<nav class="sidebar" aria-label="Sections" data-current="insights/statements"></nav>
+	<div class="main">
+		<div class="toolbar">
+			<h1 class="toolbar-title" style="margin-left: var(--space-2)">Statements</h1>
+			<div class="toolbar-gap"></div>
+			<div class="segmented" role="group" aria-label="Statement"><button type="button" aria-pressed="true">Balance Sheet</button><button type="button" aria-pressed="false">Income Statement</button><button type="button" aria-pressed="false">Owner's Equity</button><button type="button" aria-pressed="false">Cash Flow</button></div>
+			<div class="popup" style="height:32px;border-radius:16px;padding:0 10px 0 14px"><span>As of Nov 9, 2026</span><svg class="icon"><use href="#i-chev-updown"/></svg></div>
+			<button class="button primary" type="button"><svg class="icon"><use href="#i-export"/></svg>Export PDF</button>
+
+		</div>
+		<div class="content">
+			<article class="paper" aria-label="Balance Sheet preview">
+				<header>
+					<p class="entity">Your Household, LLC <span class="unaudited">(Unaudited. Obviously.)</span></p>
+					<p class="title">Balance Sheet</p>
+					<p class="basis">As of November 9, 2026, in US dollars</p>
+				</header>
+				<table>
+					<tr class="section"><th>Assets</th><td></td></tr>
+					<tr class="group"><th>Cash</th><td></td></tr>
+					<tr class="line"><th>Checking</th><td>2,140.18</td></tr>
+					<tr class="line"><th>Savings</th><td>8,412.00</td></tr>
+					<tr class="subtotal"><th>Total cash</th><td>10,552.18</td></tr>
+					<tr class="group"><th>Investments</th><td></td></tr>
+					<tr class="line"><th>Brokerage</th><td>24,310.55</td></tr>
+					<tr class="total"><th>Total assets</th><td>34,862.73</td></tr>
+					<tr class="section"><th>Liabilities</th><td></td></tr>
+					<tr class="group"><th>Credit</th><td></td></tr>
+					<tr class="line"><th>Visa</th><td>612.33</td></tr>
+					<tr class="group"><th>Loans</th><td></td></tr>
+					<tr class="line"><th>Car loan</th><td>9,800.00</td></tr>
+					<tr class="total"><th>Total liabilities</th><td>10,412.33</td></tr>
+					<tr class="grand"><th>Net worth</th><td>24,450.40</td></tr>
+				</table>
+			</article>
+		</div>
+	</div>
+</div>
+</section>
+</main>
+<script src="shared/frame.js"></script>
+</body>
+</html>
