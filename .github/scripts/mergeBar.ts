@@ -50,15 +50,20 @@ export interface Commit {
 	parents: string[];
 }
 
-export const reviewedCommit = (commits: Commit[], baseAncestors: Set<string>): string | undefined => {
-	for (let i = commits.length - 1; i >= 0; i--) {
-		const { sha, parents } = commits[i];
-		const syncsBase = parents.length === 2 && baseAncestors.has(parents[1]);
-		if (!syncsBase) {
-			return sha;
-		}
+export const reviewedCommit = (headSha: string, commits: Commit[], isCleanSync: (commit: Commit) => boolean): string => {
+	const bySha = new Map(commits.map((commit) => [commit.sha, commit]));
+	let current = bySha.get(headSha);
+	if (!current) {
+		return headSha;
 	}
-	return commits[0]?.sha;
+	while (current.parents.length === 2 && isCleanSync(current)) {
+		const previous = bySha.get(current.parents[0]);
+		if (!previous) {
+			return current.sha;
+		}
+		current = previous;
+	}
+	return current.sha;
 };
 
 export const evaluate = (pr: PullRequest, signoffs: Signoff[]): Verdict => {

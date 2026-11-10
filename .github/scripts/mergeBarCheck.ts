@@ -1,4 +1,5 @@
-import { evaluate, reviewedCommit, trustedSignoffs } from './mergeBar.ts';
+import { execFileSync } from 'node:child_process';
+import { type Commit, evaluate, reviewedCommit, trustedSignoffs } from './mergeBar.ts';
 
 const { GITHUB_TOKEN, GITHUB_REPOSITORY, PR_NUMBER, GITHUB_SERVER_URL, GITHUB_RUN_ID } = process.env;
 if (!GITHUB_TOKEN || !GITHUB_REPOSITORY || !PR_NUMBER) {
@@ -37,13 +38,26 @@ const commits = (await paged(`/pulls/${PR_NUMBER}/commits`)).map((commit) => ({
 	sha: commit.sha,
 	parents: commit.parents.map((parent: { sha: string }) => parent.sha)
 }));
-const baseAncestors = new Set<string>();
-for (const { parents } of commits.filter((commit) => commit.parents.length === 2)) {
-	const comparison = await api(`/compare/${parents[1]}...${pull.base.sha}`);
-	if (comparison.status === 'ahead' || comparison.status === 'identical') {
-		baseAncestors.add(parents[1]);
+
+const git = (...args: string[]) => execFileSync('git', args, { encoding: 'utf8' }).trim();
+const succeeds = (...args: string[]) => {
+	try {
+		git(...args);
+		return true;
+	} catch {
+		return false;
 	}
-}
+};
+
+// A catch-up merge keeps sign-offs only when its second parent is already in the
+// base branch and its tree is exactly what an automatic merge produces, so no
+// hand-edited conflict resolution or extra change can ride along.
+const isCleanSync = ({ sha, parents: [ours, theirs] }: Commit) =>
+	succeeds('merge-base', '--is-ancestor', theirs, pull.base.sha) &&
+	succeeds('merge-tree', '--write-tree', ours, theirs) &&
+	git('merge-tree', '--write-tree', ours, theirs).split('\n')[0] === git('rev-parse', `${sha}^{tree}`);
+
+git('fetch', '--quiet', 'origin', `+refs/pull/${PR_NUMBER}/head`, pull.base.sha);
 const comments = await paged(`/issues/${PR_NUMBER}/comments`);
 const reviews = await paged(`/pulls/${PR_NUMBER}/reviews`);
 const posts = [...comments, ...reviews.filter((review) => review.state !== 'DISMISSED')]
@@ -59,7 +73,7 @@ const verdict = evaluate(
 		baseRef: pull.base.ref,
 		headRef: pull.head.ref,
 		headSha: pull.head.sha,
-		reviewedSha: reviewedCommit(commits, baseAncestors) ?? pull.head.sha,
+		reviewedSha: reviewedCommit(pull.head.sha, commits, isCleanSync),
 		fromFork: pull.head.repo?.full_name !== GITHUB_REPOSITORY,
 		body: pull.body ?? '',
 		labels: pull.labels.map((label: { name: string }) => label.name)

@@ -81,21 +81,25 @@ test('a PR with no claims needs no cowboy', () => {
 	assert.equal(evaluate(pr({ body: 'Docs only.\r\nClaims: none\r\n' }), signoffs).state, 'success');
 });
 
-test('merging dev into the branch keeps the sign-offs; any other new commit drops them', () => {
+test('a clean catch-up merge from dev keeps the sign-offs; anything else drops them', () => {
 	const reviewed = { sha: 'aaaaaaa1', parents: ['0000000'] };
 	const syncDev = { sha: 'bbbbbbb2', parents: ['aaaaaaa1', 'devtip01'] };
 	const newWork = { sha: 'ccccccc3', parents: ['bbbbbbb2'] };
-	const mergeFeature = { sha: 'ddddddd4', parents: ['bbbbbbb2', 'elsewhere'] };
-	const dev = new Set(['devtip01']);
-	assert.equal(reviewedCommit([reviewed, syncDev], dev), 'aaaaaaa1');
-	assert.equal(reviewedCommit([reviewed, syncDev, newWork], dev), 'ccccccc3');
-	assert.equal(reviewedCommit([reviewed, syncDev, mergeFeature], dev), 'ddddddd4');
+	const editedMerge = { sha: 'ddddddd4', parents: ['aaaaaaa1', 'devtip01'] };
+	const commits = [reviewed, syncDev, newWork, editedMerge];
+	const clean = (commit: { sha: string }) => commit.sha === 'bbbbbbb2';
+
+	assert.equal(reviewedCommit('bbbbbbb2', commits, clean), 'aaaaaaa1');
+	assert.equal(reviewedCommit('ccccccc3', commits, clean), 'ccccccc3');
+	assert.equal(reviewedCommit('ddddddd4', commits, clean), 'ddddddd4');
+	assert.equal(reviewedCommit('notlisted', commits, clean), 'notlisted');
 
 	const signoffs = trustedSignoffs([
 		by('merge-bar: reviewer approve aaaaaaa'),
 		by('merge-bar: cowboy approve aaaaaaa R-IO-1 R-IO-3')
 	]);
 	assert.equal(evaluate(pr({ headSha: 'bbbbbbb2', reviewedSha: 'aaaaaaa1' }), signoffs).state, 'success');
+	assert.equal(evaluate(pr({ headSha: 'ddddddd4', reviewedSha: 'ddddddd4' }), signoffs).state, 'pending');
 });
 
 test('a fork branch named dev cannot pass as a gate PR', () => {
