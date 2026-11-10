@@ -13,6 +13,8 @@ veritas-domain = { path = "../veritas-domain" }
 criterion.workspace = true
 proptest.workspace = true
 serde_json.workspace = true
+veritas-interop = { path = "../veritas-interop" }
+veritas-store = { path = "../veritas-store" }
 
 [[bench]]
 name = "sheet"
