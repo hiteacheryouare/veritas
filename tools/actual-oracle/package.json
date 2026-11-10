@@ -1,0 +1,20 @@
+{
+	"name": "actual-oracle",
+	"version": "0.0.0",
+	"private": true,
+	"description": "Dev-only oracle that drives @actual-app/api to dump, edit and generate Actual budget files",
+	"license": "MIT",
+	"type": "module",
+	"engines": {
+		"node": ">=24"
+	},
+	"scripts": {
+		"dump": "node src/main.ts dump",
+		"apply": "node src/main.ts apply",
+		"generate": "node src/main.ts generate",
+		"test": "node --test test/*.test.ts"
+	},
+	"devDependencies": {
+		"@actual-app/api": "26.11.0"
+	}
+}
