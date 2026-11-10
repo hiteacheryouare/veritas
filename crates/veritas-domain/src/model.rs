@@ -249,6 +249,21 @@ impl BudgetData {
 		self.category_mapping.get(id)
 	}
 
+	/// The kind a category acts as (CLS-3.1), from its `is_income` flag and
+	/// its `veritas_category_meta` kind. A category the budget doesn't have
+	/// counts as not income.
+	pub fn category_kind(&self, id: &CategoryId) -> CategoryKind {
+		self.effective_category_kind(id).0
+	}
+
+	/// [`BudgetData::category_kind`] plus CLS-3.1's `kind_conflict`: true when
+	/// the stored kind disagrees with Actual's income/expense flag.
+	pub fn effective_category_kind(&self, id: &CategoryId) -> (CategoryKind, bool) {
+		let is_income = self.categories.get(id).is_some_and(|c| c.is_income);
+		let stored = self.category_meta.get(id).and_then(|meta| meta.kind);
+		CategoryKind::effective(is_income, stored)
+	}
+
 	pub fn resolve_payee(&self, id: &PayeeId) -> Option<&PayeeId> {
 		self.payee_mapping.get(id)
 	}
@@ -257,6 +272,57 @@ impl BudgetData {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	/// CLS-3.1 through the budget: the category's flag plus its stored kind.
+	#[test]
+	fn cls_3_1_category_kinds_come_from_the_flag_and_the_metadata() {
+		let mut budget = BudgetData::empty(BudgetType::Envelope);
+		let id = CategoryId::new;
+		for (name, is_income) in [
+			("salary", true),
+			("loan", false),
+			("odd", false),
+			("rent", false),
+		] {
+			budget.categories.insert(
+				id(name),
+				Category {
+					id: id(name),
+					name: name.to_owned(),
+					group: CategoryGroupId::new("g"),
+					is_income,
+					hidden: false,
+					sort_order: 0.0,
+					tombstone: false,
+				},
+			);
+		}
+		let meta = |kind| CategoryMeta {
+			kind: Some(kind),
+			tax_bucket: None,
+			archived_on: None,
+		};
+		budget
+			.category_meta
+			.insert(id("loan"), meta(CategoryKind::DebtPrincipal));
+		budget
+			.category_meta
+			.insert(id("odd"), meta(CategoryKind::Income));
+		assert_eq!(
+			budget.effective_category_kind(&id("salary")),
+			(CategoryKind::Income, false)
+		);
+		assert_eq!(
+			budget.category_kind(&id("loan")),
+			CategoryKind::DebtPrincipal
+		);
+		assert_eq!(
+			budget.effective_category_kind(&id("odd")),
+			(CategoryKind::Expense, true)
+		);
+		assert_eq!(budget.category_kind(&id("rent")), CategoryKind::Expense);
+		assert_eq!(budget.category_kind(&id("missing")), CategoryKind::Expense);
+	}
 
 	#[test]
 	fn categories_resolve_with_one_lookup_like_actuals_views() {
