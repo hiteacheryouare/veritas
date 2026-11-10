@@ -7,11 +7,17 @@ let package = Package(
 	name: "VeritasKit",
 	platforms: [.macOS("27.0")],
 	products: [
-		.library(name: "VeritasCore", targets: ["VeritasCore"])
+		.library(name: "VeritasCore", targets: ["VeritasCore"]),
+		.library(name: "VeritasKit", targets: ["VeritasKit"]),
+		.library(name: "VeritasDesign", targets: ["VeritasDesign"])
 	],
 	targets: [
 		.binaryTarget(name: "VeritasCoreFFI", path: "VeritasCoreFFI.xcframework"),
 		.target(name: "VeritasCore", dependencies: ["VeritasCoreFFI"]),
-		.testTarget(name: "VeritasCoreTests", dependencies: ["VeritasCore"])
+		.target(name: "VeritasKit", dependencies: ["VeritasCore"]),
+		.target(name: "VeritasDesign"),
+		.testTarget(name: "VeritasCoreTests", dependencies: ["VeritasCore"]),
+		.testTarget(name: "VeritasKitTests", dependencies: ["VeritasKit", "VeritasCore"]),
+		.testTarget(name: "VeritasDesignTests", dependencies: ["VeritasDesign"])
 	]
 )
