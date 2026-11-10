@@ -716,6 +716,9 @@ impl<'conn> Writer<'conn> {
 		before: Option<Option<Money>>,
 		after: Option<Option<Money>>,
 	) -> Result<(), CoreError> {
+		if self.budget_type == BudgetType::Tracking {
+			return Err(invalid("a tracking budget has no hold for next month"));
+		}
 		let key = [("id", owned(&month.to_string()))];
 		let columns = |held: Option<Money>| vec![("buffered", money(held))];
 		match (before, after) {

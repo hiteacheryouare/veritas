@@ -256,18 +256,22 @@ pub fn load(conn: &Connection) -> Result<Loaded, CoreError> {
 		},
 	)?;
 
-	each_row(
-		conn,
-		"zero_budget_months",
-		"SELECT id, buffered FROM zero_budget_months",
-		&mut skipped,
-		|row| {
-			let month = text_month(at(row, 0)?)?.ok_or("the row has no id")?;
-			let held = money(at(row, 1)?)?;
-			data.holds.insert(month, held);
-			Ok(())
-		},
-	)?;
+	// Holds are an envelope feature; Actual doesn't read them for tracking
+	// budgets (sheet.ts:258).
+	if data.budget_type == BudgetType::Envelope {
+		each_row(
+			conn,
+			"zero_budget_months",
+			"SELECT id, buffered FROM zero_budget_months",
+			&mut skipped,
+			|row| {
+				let month = text_month(at(row, 0)?)?.ok_or("the row has no id")?;
+				let held = money(at(row, 1)?)?;
+				data.holds.insert(month, held);
+				Ok(())
+			},
+		)?;
+	}
 
 	each_row(
 		conn,

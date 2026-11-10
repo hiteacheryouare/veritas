@@ -428,6 +428,7 @@ fn a_tracking_budget_reads_reflect_budgets() {
 	let data = Store::open(&db_path).unwrap().load().unwrap().data;
 	assert_eq!(data.budget_type, BudgetType::Tracking);
 	assert_eq!(data.budget_cells.len(), reflect);
+	assert!(data.holds.is_empty(), "tracking budgets have no holds");
 }
 
 #[test]
