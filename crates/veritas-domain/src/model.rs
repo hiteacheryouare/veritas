@@ -75,6 +75,8 @@ pub struct Transaction {
 	pub date: CivilDate,
 	pub amount: Money,
 	pub payee: Option<PayeeId>,
+	/// The payee text from a bank import (`imported_description`), which rules can match.
+	pub imported_payee: Option<String>,
 	pub category: Option<CategoryId>,
 	pub notes: Option<String>,
 	pub cleared: bool,
@@ -209,6 +211,8 @@ pub struct BudgetData {
 	pub category_meta: BTreeMap<CategoryId, CategoryMeta>,
 	pub account_meta: BTreeMap<AccountId, AccountMeta>,
 	pub transaction_meta: BTreeMap<TransactionId, TransactionMeta>,
+	/// `veritas_tax_tag`: Actual tag name (without `#`) to TAX-2 bucket id.
+	pub tax_tags: BTreeMap<String, String>,
 	pub goals: BTreeMap<GoalId, Goal>,
 }
 
@@ -233,6 +237,7 @@ impl BudgetData {
 			category_meta: BTreeMap::new(),
 			account_meta: BTreeMap::new(),
 			transaction_meta: BTreeMap::new(),
+			tax_tags: BTreeMap::new(),
 			goals: BTreeMap::new(),
 		}
 	}

@@ -215,3 +215,23 @@ Every decision behind Veritas, so no question gets asked twice. D1–D24 are PLA
 - **Options:** an independent architect agent / Ryan / the code reviewer alone
 - **Decision:** The code reviewer alone. Those PRs carry the `architect-authored` label, and the merge-bar check then doesn't require an Architect sign-off.
 - **Date:** 2026-11-09
+
+### D43. Gate 1
+- **Options:** approve / approve with changes / not yet
+- **Decision:** Approved on the third round (design/mockups/). Round 1 cut AI-isms and the purple accent. Round 2 added the account balance graph and tags.
+- **Date:** 2026-11-09
+
+### D44. How do tags look?
+- **Options:** colored text / pills like Actual
+- **Decision:** Pills like Actual's: colored rounded badges inline after the note text.
+- **Date:** 2026-11-09
+
+### D45. What does hiding a tag do?
+- **Options:** hide from pickers only / hide everywhere in the UI
+- **Decision:** A hidden tag drops out of the tag filter and the # autocomplete. It still shows in notes and still counts in reports and tax summaries.
+- **Date:** 2026-11-09
+
+### D46. Engine defaults the Architect settled
+- **Options:** —
+- **Decision:** A leading `-` appends, like Actual (`100.00` then `-5` gives `95.00`). Empty input and malformed input such as `(5` keep the old value (D37). A budget with no income group opens with income 0 and an audit warning; Actual crashes on such a file.
+- **Date:** 2026-11-09
