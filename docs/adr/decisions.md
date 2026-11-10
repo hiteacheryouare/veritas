@@ -160,3 +160,8 @@ Every decision behind Veritas, so no question gets asked twice. D1–D24 are PLA
 - **Options:** PLAN.md / the other repos
 - **Decision:** PLAN.md's explicit choices win (`xtask`, `thiserror`, `docs/adr/`). Everything else follows his Lattice & Co repos: tabs, LF stored and CRLF checked out, hard-tab rustfmt, ESM Node tools run with type stripping, and decision records in this format.
 - **Date:** 2026-11-09
+
+### D42. Who signs off a contract PR the Architect wrote?
+- **Options:** an independent architect agent / Ryan / the code reviewer alone
+- **Decision:** The code reviewer alone. Those PRs carry the `architect-authored` label, and the merge-bar check then doesn't require an Architect sign-off.
+- **Date:** 2026-11-09

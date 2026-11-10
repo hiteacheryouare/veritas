@@ -76,6 +76,14 @@ test('finance and contract labels require Fred and the Architect', () => {
 	assert.equal(evaluate(docsOnly, all).state, 'success');
 });
 
+test('a contract PR the Architect wrote needs only the reviewer (D42)', () => {
+	const reviewed = trustedSignoffs([by('merge-bar: reviewer approve 3f2a9c1')]);
+	const ownContract = pr({ body: 'Claims: none', labels: ['contract', 'architect-authored'] });
+	assert.equal(evaluate(ownContract, reviewed).state, 'success');
+	assert.equal(evaluate(ownContract, []).description, 'Needs reviewer on 3f2a9c1');
+	assert.equal(evaluate({ ...ownContract, labels: ['contract'] }, reviewed).description, 'Needs architect on 3f2a9c1');
+});
+
 test('a PR with no claims needs no cowboy', () => {
 	const signoffs = trustedSignoffs([by('merge-bar: reviewer approve 3f2a9c1')]);
 	assert.equal(evaluate(pr({ body: 'Docs only.\r\nClaims: none\r\n' }), signoffs).state, 'success');
