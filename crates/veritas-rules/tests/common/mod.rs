@@ -1,12 +1,18 @@
-//! What the oracle differential tests share: finding the oracle, running it
-//! and a seeded generator.
+//! What the oracle differential tests share: finding the oracle, running it,
+//! a seeded generator, and reading rule and transaction rows the way
+//! `addTransactions` wrote them.
 
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use serde_json::Value;
+use serde_json::{Value, json};
+use veritas_domain::{
+	AccountId, CategoryId, CivilDate, ConditionsOp, Money, PayeeId, Rule, RuleId, RuleStage,
+	ScheduleId,
+};
+use veritas_rules::RuleTransaction;
 
 pub fn repo_root() -> PathBuf {
 	Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -99,4 +105,63 @@ impl Rng {
 
 pub fn uuid(kind: u32, n: usize) -> String {
 	format!("{kind:08x}-0000-4000-8000-{n:012x}")
+}
+
+pub fn rule_from_row(row: &Value) -> Rule {
+	Rule {
+		id: RuleId::new(row["id"].as_str().unwrap()),
+		stage: match row["stage"].as_str() {
+			Some("pre" | "cleanup" | "modify") => RuleStage::Pre,
+			Some("post") => RuleStage::Post,
+			_ => RuleStage::Default,
+		},
+		conditions_op: if row["conditions_op"] == "or" {
+			ConditionsOp::Or
+		} else {
+			ConditionsOp::And
+		},
+		conditions_json: row["conditions"].as_str().unwrap_or_default().to_owned(),
+		actions_json: row["actions"].as_str().unwrap_or_default().to_owned(),
+		tombstone: row["tombstone"] == 1,
+	}
+}
+
+/// What `addTransactions` hands `runRules`: the account it was added to,
+/// a trimmed imported payee, and nothing for keys that weren't given.
+pub fn rule_transaction(input: &Value, account: &str) -> RuleTransaction {
+	let text = |key: &str| input[key].as_str().map(str::to_owned);
+	RuleTransaction {
+		account: AccountId::new(account),
+		date: CivilDate::from(
+			chrono::NaiveDate::parse_from_str(input["date"].as_str().unwrap(), "%Y-%m-%d").unwrap(),
+		),
+		amount: Money::from_minor(input["amount"].as_i64().unwrap()),
+		payee: text("payee").map(PayeeId::new),
+		category: text("category").map(CategoryId::new),
+		notes: text("notes"),
+		imported_payee: text("imported_payee")
+			.map(|payee| payee.trim().to_owned())
+			.filter(|payee| !payee.is_empty()),
+		cleared: input["cleared"].as_bool(),
+		reconciled: None,
+		schedule: None,
+		deleted: false,
+	}
+}
+
+/// The columns `addTransactions` writes after the rules ran: the account
+/// is forced back to the one being added to, and `cleared` defaults to true.
+pub fn expected_row(outcome: &RuleTransaction, account: &str) -> Value {
+	json!({
+		"acct": account,
+		"amount": outcome.amount.minor(),
+		"category": outcome.category.as_ref().map(CategoryId::as_str),
+		"cleared": i64::from(outcome.cleared.unwrap_or(true)),
+		"date": outcome.date.to_string().replace('-', "").parse::<i64>().unwrap(),
+		"description": outcome.payee.as_ref().map(PayeeId::as_str),
+		"imported_description": outcome.imported_payee.as_deref(),
+		"notes": outcome.notes.as_deref(),
+		"schedule": outcome.schedule.as_ref().map(ScheduleId::as_str),
+		"tombstone": i64::from(outcome.deleted),
+	})
 }

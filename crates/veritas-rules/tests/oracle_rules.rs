@@ -9,13 +9,16 @@ mod common;
 
 use std::collections::BTreeMap;
 
-use common::{Rng, apply_and_dump, dump, oracle_dir, repo_root, scratch_dir, uuid};
+use common::{
+	Rng, apply_and_dump, dump, expected_row, oracle_dir, repo_root, rule_from_row,
+	rule_transaction, scratch_dir, uuid,
+};
 use serde_json::{Value, json};
 use veritas_domain::{
-	Account, AccountId, BudgetData, BudgetType, Category, CategoryGroupId, CategoryId, CivilDate,
-	ConditionsOp, Money, Payee, PayeeId, Rule, RuleId, RuleStage,
+	Account, AccountId, BudgetData, BudgetType, Category, CategoryGroupId, CategoryId, Payee,
+	PayeeId,
 };
-use veritas_rules::{ParsedRule, RuleBook, RuleSupport, RuleTransaction};
+use veritas_rules::{ParsedRule, RuleBook, RuleSupport};
 
 const TODAY: &str = "2026-11-09";
 const RULES: usize = 70;
@@ -292,64 +295,6 @@ fn budget_from(world: &World, dump: &Value) -> BudgetData {
 		budget.rules.insert(rule.id.clone(), rule);
 	}
 	budget
-}
-
-fn rule_from_row(row: &Value) -> Rule {
-	Rule {
-		id: RuleId::new(row["id"].as_str().unwrap()),
-		stage: match row["stage"].as_str() {
-			Some("pre" | "cleanup" | "modify") => RuleStage::Pre,
-			Some("post") => RuleStage::Post,
-			_ => RuleStage::Default,
-		},
-		conditions_op: if row["conditions_op"] == "or" {
-			ConditionsOp::Or
-		} else {
-			ConditionsOp::And
-		},
-		conditions_json: row["conditions"].as_str().unwrap_or_default().to_owned(),
-		actions_json: row["actions"].as_str().unwrap_or_default().to_owned(),
-		tombstone: row["tombstone"] == 1,
-	}
-}
-
-/// What `addTransactions` hands `runRules`: the account it was added to,
-/// a trimmed imported payee, and nothing for keys that weren't given.
-fn rule_transaction(input: &Value, account: &str) -> RuleTransaction {
-	let text = |key: &str| input[key].as_str().map(str::to_owned);
-	RuleTransaction {
-		account: AccountId::new(account),
-		date: CivilDate::from(
-			chrono::NaiveDate::parse_from_str(input["date"].as_str().unwrap(), "%Y-%m-%d").unwrap(),
-		),
-		amount: Money::from_minor(input["amount"].as_i64().unwrap()),
-		payee: text("payee").map(PayeeId::new),
-		category: text("category").map(CategoryId::new),
-		notes: text("notes"),
-		imported_payee: text("imported_payee")
-			.map(|payee| payee.trim().to_owned())
-			.filter(|payee| !payee.is_empty()),
-		cleared: input["cleared"].as_bool(),
-		reconciled: None,
-		schedule: None,
-		deleted: false,
-	}
-}
-
-/// The columns `addTransactions` writes after the rules ran: the account
-/// is forced back to the one being added to, and `cleared` defaults to true.
-fn expected_row(outcome: &RuleTransaction, account: &str) -> Value {
-	json!({
-		"acct": account,
-		"amount": outcome.amount.minor(),
-		"category": outcome.category.as_ref().map(CategoryId::as_str),
-		"cleared": i64::from(outcome.cleared.unwrap_or(true)),
-		"date": outcome.date.to_string().replace('-', "").parse::<i64>().unwrap(),
-		"description": outcome.payee.as_ref().map(PayeeId::as_str),
-		"imported_description": outcome.imported_payee.as_deref(),
-		"notes": outcome.notes.as_deref(),
-		"tombstone": i64::from(outcome.deleted),
-	})
 }
 
 #[test]
