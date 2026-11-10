@@ -453,3 +453,97 @@ fn a_missing_or_legacy_budget_type_is_envelope() {
 		.unwrap();
 	assert_eq!(store.load().unwrap().data.budget_type, BudgetType::Envelope);
 }
+
+fn loaded_counts(loaded: &veritas_store::Loaded) -> Vec<(&'static str, usize)> {
+	let data = &loaded.data;
+	vec![
+		("accounts", data.accounts.len()),
+		("account_groups", data.account_groups.len()),
+		("category_groups", data.category_groups.len()),
+		("categories", data.categories.len()),
+		("payees", data.payees.len()),
+		("transactions", data.transactions.len()),
+		("zero_budgets", data.budget_cells.len()),
+		("zero_budget_months", data.holds.len()),
+		("rules", data.rules.len()),
+		("schedules", data.schedules.len()),
+		("tags", data.tags.len()),
+		("notes", data.notes.len()),
+		("category_mapping", data.category_mapping.len()),
+		("payee_mapping", data.payee_mapping.len()),
+	]
+}
+
+/// Every column of every modeled table, set to each kind of value a damaged
+/// or hand-edited file can hold. The load never fails, every row is either
+/// loaded or reported, and no other table loses a row.
+#[test]
+fn no_odd_value_in_any_modeled_column_aborts_the_load_or_drops_a_row_silently() {
+	let scratch = Scratch::new("odd-values");
+	let pristine = fixture_db("all-features", &scratch);
+	let baseline = Store::open(&pristine).unwrap().load().unwrap();
+	assert_eq!(baseline.report.skipped, vec![]);
+	let baseline_counts = loaded_counts(&baseline);
+	let mut tables: Vec<&str> = baseline_counts.iter().map(|(table, _)| *table).collect();
+	tables.push("schedules_next_date");
+
+	let odd_values = ["NULL", "X'00ff'", "'not a number'", "1e300", "-1", "2.5"];
+	let mut exercised = 0;
+	for table in tables {
+		let columns: Vec<String> = {
+			let conn = Connection::open(&pristine).unwrap();
+			let mut statement = conn
+				.prepare(&format!("SELECT name FROM pragma_table_info('{table}')"))
+				.unwrap();
+			statement
+				.query_map([], |row| row.get(0))
+				.unwrap()
+				.map(Result::unwrap)
+				.collect()
+		};
+		assert!(!columns.is_empty(), "{table}");
+		for column in &columns {
+			for value in odd_values {
+				let case = format!("{table}.{column} = {value}");
+				let db_path = scratch.0.join(format!("case-{exercised}.sqlite"));
+				std::fs::copy(&pristine, &db_path).unwrap();
+				let raw = Connection::open(&db_path).unwrap();
+				// A value the schema's own constraints refuse can't be in a file.
+				if raw
+					.execute(&format!("UPDATE {table} SET \"{column}\" = {value}"), [])
+					.is_err()
+				{
+					continue;
+				}
+				let rows = count(&raw, &format!("SELECT count(*) FROM {table}"));
+				drop(raw);
+
+				let loaded = Store::open(&db_path)
+					.unwrap()
+					.load()
+					.unwrap_or_else(|error| panic!("{case}: the load failed: {error}"));
+				let skipped_here = loaded
+					.report
+					.skipped
+					.iter()
+					.filter(|row| row.table == table)
+					.count();
+				for ((name, now), (_, before)) in
+					loaded_counts(&loaded).iter().zip(&baseline_counts)
+				{
+					if *name == table {
+						assert_eq!(now + skipped_here, rows, "{case}: rows went missing");
+					} else if !(table == "schedules_next_date" && *name == "schedules") {
+						assert_eq!(now, before, "{case}: {name} lost rows");
+					}
+				}
+				exercised += 1;
+				drop(loaded);
+				let _ = std::fs::remove_file(&db_path);
+				let _ = std::fs::remove_file(db_path.with_extension("sqlite-wal"));
+				let _ = std::fs::remove_file(db_path.with_extension("sqlite-shm"));
+			}
+		}
+	}
+	assert!(exercised > 400, "only {exercised} cases ran");
+}
