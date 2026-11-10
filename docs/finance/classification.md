@@ -13,14 +13,15 @@ Conventions used in all finance specs:
 
 | Term | Meaning |
 |---|---|
-| Row | One non-tombstoned `transactions` row that is not a split parent. A split parent (`isParent = 1`) is never classified; its children are. Children sum to the parent, so nothing is lost or doubled. |
-| Transfer row | A row whose payee has `transfer_acct` set, paired by `transferred_id` to a counterpart row in the other account. |
-| Pair | The two rows of one transfer. |
+| Row | One row of Actual's `v_transactions_internal_alive` with `is_parent = 0`. That view drops tombstoned rows and children whose parent is tombstoned or missing (`docs/actual-format.md` §4, `reference/actual/packages/loot-core/src/server/aql/schema/index.ts:404-412`). A split parent is never classified; its children are. Children sum to the parent, so nothing is lost or doubled. Balances use the same rows. |
+| Category of a row | The row's `category` resolved through `category_mapping`, as `v_transactions_internal` does. A merged or deleted category's history therefore classifies under its target's kind, as Actual's budget sums do (`budget/base.ts:138-143`). No resolvable category means uncategorized. |
+| Transfer row | A row whose payee (resolved through `payee_mapping`) has `transfer_acct` set. The counterpart account is `payees.transfer_acct`, never inferred from the counterpart row. |
+| Pair | The two rows of one transfer, linked by `transferred_id`. A transfer row is **paired** if its `transferred_id` points to a live row in the `transfer_acct` account. Otherwise it is **unpaired** (edge case 4): it is still classified by the table below using `transfer_acct`, and carries flag `unpaired`. |
 | On-budget / off-budget | The account's current `accounts.offbudget` flag, applied to all of history. Actual does the same (`reference/actual/packages/loot-core/src/server/budget/base.ts:81,142`). |
 | Primary leg | For an on-budget <-> off-budget pair, the on-budget row. It carries the category and the kind. |
-| Mirror leg | The other row of an on<->off pair. It gets the same kind as the primary leg, is marked `leg = mirror`, and is skipped by every flow total. It is still counted in balances and net worth. |
+| Mirror leg | The other row of an on<->off pair. **A pair is classified once, from the on-budget row's category.** The mirror never has a category (Actual never gives the off-budget side one, `docs/actual-format.md` §4.2), so it is never evaluated against rows 6-10. It copies the primary leg's kind, is marked `leg = mirror`, and is skipped by every flow total. It still counts in balances and net worth. An off-budget row whose on-budget partner is missing has no primary to copy from: it is classified as `internal_transfer`, `leg = primary`, flags `unpaired` and `needs_review`. |
 | Kind | Exactly one of the seven values in CLS-2. Decided once, in the classification function, never re-derived by a report. |
-| Flags | Zero or more of `needs_review`, `misfiled`, `kind_conflict`. Flags never change a kind, they only surface a problem. |
+| Flags | Zero or more of `needs_review`, `misfiled`, `kind_conflict`, `unpaired`. Flags never change a kind, they only surface a problem. |
 
 ## CLS-2 Transaction kinds
 
@@ -91,11 +92,11 @@ Why the unusual rows:
 | Saving/investing | a `savings` category (same rule) | `savings_contribution` |
 | Other | a category the user picks | kind of that category (row 8 or 9) |
 
-VERIFY (P0.4): `transfer.ts:25-45` shows Actual keeps the category on mixed pairs and clears it on same-side pairs. I found no server-side check that a category is *required*. If it is only a UI nudge, existing data can contain row 10.
+Resolved in P0.4: Actual keeps the category on mixed pairs and clears it on same-side pairs (`transfer.ts:24-45`). No server check requires a category on on->off transfers. Only the Close Account modal does (`desktop-client/src/components/modals/CloseAccountModal.tsx:33-40`, `docs/actual-format.md` §4.2). Uncategorized on->off transfers exist in real files, which is why row 10 exists. PLAN R-XFER-4's "which Actual requires to carry a category" is wrong and needs correcting.
 
 ### CLS-4.2 Existing Actual data with no metadata
 
-On import, every on<->off transfer whose category has no Veritas kind lands on row 8 (`expense`), because that is what Actual's own reports do. Loan payments and savings moves therefore overstate expenses until the user answers once per category. Veritas must show a review count ("12 transfers to off-budget accounts are counted as spending") and a one-time wizard that assigns kinds to categories, never to individual rows. Net Profit stays reproducible and equal to Actual-style numbers until the user acts. Decision D-1 in the hand-off report covers whether to change this default.
+On import, every on<->off transfer whose category has no Veritas kind lands on row 8 (`expense`), because that is what Actual's own reports do. Loan payments and savings moves therefore overstate expenses until the user answers once per category. Veritas must show a review count ("12 transfers to off-budget accounts are counted as spending") and a one-time wizard that assigns kinds to categories, never to individual rows. Net Profit stays reproducible and equal to Actual-style numbers until the user acts. Decided by Ryan at Gate 0 (FIN-1 in CLS-11): keep this default.
 
 ## CLS-5 Reconciliation marker
 
@@ -116,8 +117,9 @@ For a period, summing over rows with `leg != mirror`:
 | `debt_paydown` | minus the sum of `amount` for kind `debt_principal` |
 | `savings_total` | minus the sum of `amount` for kind `savings_contribution` |
 | `net_cash_flow` | `net_profit - debt_paydown - savings_total` (R-REP-2) |
+| `unreviewed_total` | minus the sum of `amount` of on-budget rows of kind `internal_transfer` that carry flag `needs_review` from row 10, or flag `unpaired` (an uncategorized on<->off transfer, or a transfer whose partner is missing). Positive = money out. Not part of `net_cash_flow` |
 
-`income_total` is net of reversals: a negative amount in an income category reduces it. Withdrawals from savings (positive amount on kind `savings_contribution`) make `savings_total` negative and raise net cash flow. Statement and Sankey rules build on these definitions (statements.md).
+`income_total` is net of reversals: a negative amount in an income category reduces it. Withdrawals from savings (positive amount on kind `savings_contribution`) make `savings_total` negative and raise net cash flow. `net_cash_flow` is always exactly the formula above, on every screen and statement. `unreviewed_total` is reported next to it, never inside it. Statement and Sankey rules build on these definitions (statements.md).
 
 ## CLS-7 Where it lives
 
@@ -169,7 +171,11 @@ Nasty cases, each a test:
 | C-3 Starting balance never report income (intentional divergence from the budget sheet) | New on-budget account, balance 50000. Actual files it under an income category named "Starting Balances", or else the first income category (`reference/actual/packages/loot-core/src/server/accounts/payees.ts:19-29`, `app.ts:580-590`) | Row 2 wins: `starting_balance`, `income_total` unchanged. Actual's envelope sheet still counts a categorized starting balance as budget income, so To Budget rises by 50000 in the budget screen while report income does not. Reports differ from the budget sheet on purpose (PLAN edge case 16). Veritas does not change the budget math (R-BUD-1) |
 | C-4 Principal on a non-transfer row | CHK -32000, category Loan principal, no transfer | Row 14: `expense`, flag `misfiled` |
 | C-5 Uncategorized positive | CHK +4000, no category, no transfer | Row 15: `expense` (-4000 contribution to `expense_total`), flag `needs_review` |
-| C-6 On->off transfer, no category | CHK -10000 to BRK, no category | Row 10: `internal_transfer`, `needs_review`. Does not touch `net_profit`. Appears in cash flow line ST-6 |
+| C-6 On->off transfer, no category | CHK -10000 to BRK, no category | Row 10: `internal_transfer`, `needs_review`. Does not touch `net_profit` or `net_cash_flow`. `unreviewed_total` = 10000 (ST-6) |
+| C-12 Mirror leg has no category | T5m (LOAN +32000, no category) paired with T5a | Classified once from T5a (row 6). T5m copies kind `debt_principal`, `leg = mirror`, no flag. It is never sent to row 10 |
+| C-13 Unpaired transfer | CHK -10000, payee = BRK transfer payee, `transferred_id` null, category Savings | Row 7 using `transfer_acct`: `savings_contribution`, flag `unpaired`. Net worth falls 10000 with no matching asset, so equity line E6 (ST-4) = -10000 |
+| C-14 Merged category | Rows filed under deleted category "Dining Old", `category_mapping` points to "Dining" (expense) | Classified by "Dining". Same as Actual's budget sums |
+| C-15 Child of a tombstoned parent | Parent tombstoned, child live | Not a row. Excluded from balances and every report, as in Actual |
 | C-7 Unmarked category on an on->off transfer | Existing Actual file, CHK -32000 to LOAN, category "Car Loan" with no metadata | Row 8: `expense` until the user assigns kind `debt_principal` (CLS-4.2) |
 | C-8 Same-side transfer | CHK to Visa | Row 4 on both rows. No flow totals change |
 | C-9 Hidden category with activity | Category "Old Gym" hidden, 2027-01-04 CHK -3000 | Row 13: `expense`, included, labeled archived (R-REP-3) |
@@ -178,4 +184,64 @@ Nasty cases, each a test:
 
 ## CLS-9 Reports vs the budget sheet (intentional divergence)
 
-Actual's envelope sheet counts categorized starting balances as income and counts hidden categories, spent split children in on-budget accounts only, and feeds To Budget from the first income group only (`reference/actual/` budget math notes, P0.4 C-budget-math). Veritas reports follow this file, not the sheet. Where they differ, the budget screen keeps Actual's number and reports keep ours. Example: a 50000 starting balance in a new on-budget account raises To Budget by 50000 and leaves `income_total` at 0. Hidden categories count fully in both.
+Facts about Actual's envelope sheet (`reference/actual/packages/loot-core/src/server/budget/base.ts:133-149`, `docs/actual-format.md` §5):
+
+- A categorized starting balance is budget income. It feeds To Budget.
+- Hidden categories count fully in spent.
+- Spent sums live split children (not parents) in on-budget accounts only, by mapped category.
+- Only the first income group feeds To Budget.
+- Any on-budget row with a category is activity in that envelope, including the principal child of a loan payment (`transfer.ts` keeps the category on on->off children).
+
+Veritas reports follow this file, not the sheet. Where they differ, the budget screen keeps Actual's number (R-BUD-1) and reports keep ours, on purpose.
+
+| Case | Budget screen (Actual's math) | Reports (this spec) |
+|---|---|---|
+| New on-budget account, starting balance 50000, categorized to "Starting Balances" | To Budget +50000 | `income_total` 0, row 2 `starting_balance` |
+| Loan payment, principal child -32000 in "Loan principal" | "Loan principal" envelope spent 32000. It must be funded or it shows overspent | Debt paydown 32000, not an expense |
+| Hidden category with -3000 | spent 3000 | expense 3000 (labeled archived) |
+
+The loan wizard and the budget suggestions (FC-5) therefore treat the debt-principal envelope as something to fund each month.
+
+## CLS-10 Paychecks recorded gross, with splits
+
+Decided by Ryan at Gate 0 (FIN-4): paychecks are recorded as gross pay with withholding children, so the deposit is the split parent.
+
+| Child | Category kind | Row | Kind | Tax bucket (tax-buckets.md) |
+|---|---|---|---|---|
+| Gross wages (positive) | `income` | 12 | `income` | `w2_income` |
+| Income tax and payroll tax withheld (negative), e.g. federal, state, Social Security and Medicare | `expense` | 13 | `expense` | `taxes_withheld` |
+| Pre-tax retirement contribution (negative), as a transfer to an off-budget retirement account | `savings` | 7 | `savings_contribution` | `retirement_contribution` |
+| Pre-tax HSA contribution (negative), as a transfer to an off-budget HSA account | `savings` | 7 | `savings_contribution` | `hsa` |
+| Insurance premium or other deduction (negative), no account | `expense` | 13 | `expense` | none |
+
+Rules:
+
+- Withholding is an expense, so Net Profit is gross pay minus taxes and other deductions. This is how Ryan's tax-adjusted income reads on the Income Statement.
+- Retirement and HSA deductions are real money moved to an account the user owns, so they are savings contributions, not expenses. That needs an off-budget account to receive them. Without one, the child is on-budget, non-transfer, in a `savings` category: row 14 (`expense`, `misfiled`). The wizard tells the user to add the account.
+- The parent amount is the net deposit and equals the sum of the children.
+- Employer contributions are not cash on the paycheck and are not recorded unless the user records them as an off-budget revaluation (row 11).
+
+Worked example C-16 (made-up numbers, checking CHK, 401k and HSA are off-budget accounts):
+
+| Row | Amount | Kind |
+|---|---|---|
+| Parent, net deposit | +234400 | not classified |
+| Gross wages | +400000 | `income` |
+| Federal income tax withheld | -50000 | `expense` |
+| State income tax withheld | -20000 | `expense` |
+| Social Security and Medicare withheld | -30600 | `expense` |
+| 401k, transfer to 401k account | -40000 | `savings_contribution` (mirror +40000 in the 401k account) |
+| HSA, transfer to HSA account | -10000 | `savings_contribution` (mirror +10000) |
+| Health premium | -15000 | `expense` |
+
+Check: 400000 - 50000 - 20000 - 30600 - 40000 - 10000 - 15000 = 234400. `income_total` 400000. `expense_total` 50000 + 20000 + 30600 + 15000 = 115600. `net_profit` 284400. `savings_total` 50000. `net_cash_flow` 284400 - 50000 = **234400** = the net deposit.
+
+## CLS-11 Decision log for the finance specs
+
+| Id | Question | Status |
+|---|---|---|
+| FIN-1 | Unmarked on->off transfers in existing data: count as expense with a review count and a one-time per-category wizard | Resolved by Ryan: yes (CLS-4.2) |
+| FIN-2 | Off-budget purchases booked with an ordinary expense category (rows 8 and 9) are expense, with equity line E2. Alternative: a new excluded kind | Default as written, awaiting Ryan's confirmation |
+| FIN-3 | Escrow is an expense when paid to the servicer. Alternative: an off-budget escrow asset account | Default as written, awaiting Ryan's confirmation |
+| FIN-4 | Paychecks recorded gross with splits (CLS-10) | Resolved by Ryan |
+| FIN-5 | No-spend days ignore bill-linked rows and loan-payment parts (FC-8) | Default as written, awaiting Ryan's confirmation |

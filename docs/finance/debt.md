@@ -29,7 +29,7 @@ Rules:
 - **DEBT-2.2** Principal must not be negative. If a payment is smaller than the interest owed, the wizard blocks and says so. Unpaid interest added to the loan balance is recorded by the user as an `adjustment` on the loan account (a non-cash change), never as a negative principal.
 - **DEBT-2.3** Principal larger than outstanding principal is a warning, not an error (a refund or escrow credit can explain it). The loan balance would turn positive and the account would move to the asset side by ST-2. The wizard shows "This pays off the loan and leaves a credit of $X".
 - **DEBT-2.4** Net Profit sees interest, escrow and fees as expenses and principal as Debt paydown (ST-1). Escrow is its own category and never lands in principal or interest.
-- **DEBT-2.5** Escrow is booked as an expense when paid to the servicer (simple, matches how a household budgets). It is not modeled as an off-budget escrow asset in v1. See decision D-3 in the hand-off report.
+- **DEBT-2.5** Escrow is booked as an expense when paid to the servicer (simple, matches how a household budgets). It is not modeled as an off-budget escrow asset in v1. Default awaiting Ryan's confirmation (FIN-3 in classification.md CLS-11). The alternative is an off-budget escrow asset account.
 - **DEBT-2.6** Interest is booked when paid. Interest accrued but unpaid is not recorded. The loan balance the user sees moves only by principal, so it can differ from the lender's statement by accrued interest. This is a stated simplification of D7.
 
 ## DEBT-3 Pre-fill from the last payment (R-DEBT-2)
@@ -92,6 +92,7 @@ Rules:
 - **A.2** Editing the payment replaces the children and the counterpart in one SQLite transaction (R-REL-1, R-XFER-3). Deleting the parent tombstones the children and the counterpart.
 - **A.3** Register shows one payment row "Loan payment -$400.00" expandable to its parts. The principal child renders `-> To Car Loan` (R-XFER-2).
 - **A.4** Confirmed in Actual: `addTransfer` refuses only split parents (`reference/actual/packages/loot-core/src/server/transactions/transfer.ts:48-54`); a child with `transferred_id` and a standalone counterpart is tested at `transfer.test.ts:172-219`.
+- **A.6** Budget activity (Actual's math, kept as is): the principal child is on-budget with a category, so it is spending in that envelope (`reference/actual/packages/loot-core/src/server/budget/base.ts:133-149`). The "Loan principal" envelope must be funded each month or it shows overspent, while reports show Debt paydown, not an expense (classification.md CLS-9). The wizard offers to budget the payment's principal into that envelope, and the pre-fill principal (DEBT-3) is the suggestion for that envelope (forecasting.md FC-5).
 - **A.5** Deleting the *loan-side* counterpart does not delete the child. Actual unlinks it (payee and `transferred_id` set to null, `transfer.ts:103-111`), leaving an ordinary categorized child. R-XFER-3 "deleting one side deletes both" therefore holds from the checking side only. Veritas, deleting the loan-side row, must either delete the whole payment (parent, children) after confirmation or accept the unlink. Recommendation: confirm, then delete the whole payment in one SQLite transaction.
 
 ## DEBT-7 Credit cards (R-DEBT-3)
@@ -118,23 +119,34 @@ These are the finance rules for goals (R-GOAL-1, R-GOAL-4, edge case 8). Envelop
 |---|---|
 | Goal | A category in a Goals group with `veritas_goal(target_cents, target_date?, status)`. Category kind `expense` (CLS-3.3). Actual cannot express target dates. It can hold the target amount as a long-term goal (`goal_def` with `template_settings.source = "ui"`, or `zero_budgets.goal` with `long_goal = 1`), and shows progress only when its experimental goal-templates flag is on. Veritas never depends on that display. |
 | Available | The goal category's available balance for a month from Actual's envelope sheet (`leftover-<category>`). Not recomputed by Veritas. |
-| Status | Stored: `active` or `closed`. Derived at read time: `reached` when status is `active` and available >= target. "Spent" is the sum of the category's net spending (CLS-6 `expense_total`) shown on the card. |
-| Months left | Number of budget months from the current month through the month containing `target_date`, counting both, minimum 1. No target date: no suggestion. |
+| Status | Stored in `veritas_goal`: `active`, `reached` or `closed`. It only moves forward (see DEBT-8.2). `reached_month` is stored with it. "Spent" is the sum of the category's net spending (CLS-6 `expense_total`), shown on the card as "Reached → Spent" once status is `reached` or `closed` and spending exists. |
+| Carry | `available - budgeted(M)` for the goal in month `M`: money already in the envelope before this month's contribution. |
+| Months left | Number of budget months from the current month `M` through the target month, counting both, minimum 1. "Due in N months" means the target date falls in month `M + N - 1`, so the current month is month 1. The UI stores the target date, tests use any date in that month. No target date: no suggestion. |
 
 ### DEBT-8.1 Monthly suggestion (R-GOAL-1)
 
-`remaining = max(0, target - available)`. `monthly = ceil(remaining / months_left)`.
+`remaining = max(0, target - carry)`. `monthly = ceil(remaining / months_left)`.
 
-- Rounding: ceiling, so the target is reached on time. The cents that overshoot accumulate in the last month, which contributes `min(monthly, remaining after the earlier months)`. For month k, contribution = `min(monthly, remaining - (k-1) * monthly)` floored at 0.
-- Example G-1: target 150000, available 0, months left 6 (current month January, target date in June). `remaining` 150000, `monthly` **25000**. Total over six months 150000.
+Carry excludes this month's own budgeted amount, so following the suggestion does not change it: after budgeting 25000 in January, carry is still 0 and the suggestion is still 25000.
+
+- Rounding: ceiling, so the target is reached on time. The earlier months are rounded up, so the last month contributes less: `min(monthly, remaining after the earlier months)`. For month k, contribution = `min(monthly, remaining - (k-1) * monthly)` floored at 0. Goal suggestions stay in cents and are not rounded to whole dollars.
+- Example G-1: target 150000, carry 0, current month 2027-01, target date 2027-06-15 ("due in 6 months": June is month 1 + 6 - 1). Months left 6. `monthly` **25000**. Total over six months 150000. The same goal with target date 2027-07-15 has 7 months left and suggests 21429.
+- Example G-1b: January budgeted 25000, available 25000, so carry 0, still **25000**. In February, with 25000 carried and 25000 budgeted again, carry is 25000, `remaining` 125000, months left 5, monthly 25000.
 - Example G-2: target 100000, months left 3, available 0: monthly **33334**, schedule 33334, 33334, 33332. Sum 100000.
 - Example G-3: remaining 1, months left 3: monthly 1, schedule 1, 0, 0.
-- Example G-4: available >= target: remaining 0, suggestion 0, status `reached`.
+- Example G-4: carry >= target: remaining 0, suggestion 0.
 - Example G-5: target date already passed, remaining 50000: months left 1, monthly 50000.
 
 ### DEBT-8.2 Lifecycle (R-GOAL-3)
 
-`active` -> (derived `reached`) -> `closed`. Spending on the goal is a normal transaction categorized to the goal. Reopening a closed goal sets status back to `active` and unhides the category, nothing else.
+`active` -> `reached` -> `closed`. The state is stored and only moves forward.
+
+- **active to reached.** After every command that can change the goal's `available` (budget edit, move, transaction in or out of the category), Veritas checks `available >= target` for the current month and, if true, sets `reached` and `reached_month = M` in the same SQLite transaction (R-REL-1). Imported goals with no stored state are backfilled once: `reached_month` is the first month-end where Actual's `available >= target`.
+- **Spending never reverts it.** Buying the laptop for 148000 drops `available` to 2000, but status stays `reached` and the card reads "Reached → Spent" (PLAN section 10).
+- **closed.** Set by Close goal (DEBT-8.3), from `active` or `reached`.
+- **Reopen.** Sets status to `reached` if `reached_month` is set, else `active`, and unhides the category. Nothing else.
+
+Actual representation (Ryan's choice at Gate 0): Veritas writes a note line `#goal <amount>` on the category, in major units with at most two decimals and no thousands separator (for 150000 cents: `#goal 1500.00`; Actual's grammar `goal-template.pegjs:29,90,96` per `docs/actual-format.md`), and writes `zero_budgets.goal` = target in cents with `long_goal` = 1 for the current month and each later month Veritas creates. Rules: only one `#goal` line per category; Actual's template apply nulls `goal_def` for categories whose notes lack the line, so Veritas keeps the line when it edits notes; Actual shows progress only behind its experimental goal-templates flag; target dates exist only in `veritas_goal`. Closing a goal leaves the note line and the existing rows untouched.
 
 ### DEBT-8.3 Close goal and release leftover (R-GOAL-4, edge case 8)
 

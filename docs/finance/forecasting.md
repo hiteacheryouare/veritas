@@ -79,7 +79,7 @@ Applies to each non-hidden `expense`-kind category (a spending baseline) and eac
 
 **Scenario overlay (R-FC-2).** Scenario rows are added on top: one-time events (date, amount), recurring changes (start, optional end, amount, cadence), percent changes to a category's baseline (`round_half_away(baseline * pct_bp / 10000)`, `pct_bp` in basis points), income changes and goal contributions. A scenario is a pure function of read data and never writes to `transactions` or any other table except `veritas_scenario*`.
 
-### FC-3 Worked example
+### FC-3 Worked example (single account, not total net worth)
 
 Today is 2027-01-15 and checking holds 388800. One exact bill, Rent -165000 on the 1st. One exact income, Pay +300000 on the 1st. One baseline category, Groceries `L` 43000 with 20000 already spent this month. Next month (Feb):
 
@@ -122,11 +122,13 @@ Residuals (n = 10), sorted: -8000, -5000, -3000, -2000, -500, 0, 1000, 2500, 400
 
 For each non-hidden, non-archived `expense` category (income, hidden and archived categories are skipped):
 
-`suggestion = round_half_up((known bill occurrences in the month + forecast baseline) / 100) * 100`
+`suggestion = round_half_up(max(0, bills + baseline) / 100) * 100`
 
-Rounding: to the nearest whole dollar, half up, because budgeting is done in whole dollars. A negative result is 0. Applying suggestions is one undoable command that sets next month's budget amount for each category.
+`bills` = minus the sum of the signed amounts of the category's bill occurrences in the month (Rent -165000 gives 165000). `baseline` is the FC-1 forecast for the category (a positive spending magnitude). Clamp to 0 first, then round.
 
-Goal categories use the goal suggestion in DEBT-8.1 instead of a baseline.
+Rounding: to the nearest whole dollar, half up, because budgeting is done in whole dollars. Goal suggestions (DEBT-8.1) are the exception and stay in cents. The `debt_principal` envelope's suggestion is the loan's pre-fill principal (DEBT-3), rounded the same way. Applying suggestions is one undoable command that sets next month's budget amount for each category.
+
+Goal categories use the goal suggestion in DEBT-8.1 instead of a baseline. `debt_principal` categories use the line above instead of a baseline.
 
 Each suggestion carries exactly one reason line, built from these templates (dollar amounts are the rounded values):
 
@@ -147,7 +149,7 @@ Examples: F-1 gives `Groceries $430, 6-month median`. A median of 42950 gives 43
 
 - **Contribution** `c(k)`: the goal category's budgeted amount for complete month `k` after all budget moves (`zero_budgets.amount`). Spending does not reduce pace.
 - **Pace**: the median of the last up to 3 complete months. Optimistic pace: the maximum. Pessimistic pace: the minimum.
-- **Remaining** = `max(0, target - available)`, with `available` from Actual's envelope math for the current month.
+- **Remaining** = `max(0, target - available)`, with `available` from Actual's envelope math for the current month `M`. `available` includes `M`'s own budgeted amount, which is a known contribution, so only later months need the pace. This is the counterpart of DEBT-8.1, which excludes `M`'s amount because it is deciding that amount. Both agree: with pace equal to the suggestion the ETA is the target month.
 - **Months to go** = `ceil(remaining / pace)`, integer ceiling.
 - **ETA month** = current month plus months to go.
 - **Display** = "ETA {month}" with the range "optimistic to pessimistic month". If the pessimistic pace is 0 or less: "No ETA at the slowest pace". If the median is 0 or less: "No ETA: nothing is being added". `remaining = 0`: "Reached". No complete month of history: "No ETA yet".
@@ -160,6 +162,7 @@ Examples: F-1 gives `Groceries $430, 6-month median`. A median of 42950 gives 43
 | E-3 | contributions 0, 0, 0 | "No ETA: nothing is being added" |
 | E-4 | available 150000 | "Reached" |
 | E-5 | one month of history, contribution 25000 | median = min = max = 25000, one point, labeled "1 month of history" |
+| E-6 Consistency with DEBT-8.1 | target 150000, target month June 2027, current month January, budgeted 25000, available 25000, pace 25000 | remaining 125000, ceil(125000 / 25000) = 5, ETA = January + 5 = June 2027 = the target month, on track |
 
 ## FC-7 Backtest and error metrics
 
@@ -199,7 +202,7 @@ The spec for `docs/forecast-eval.md` (WS-FORECAST produces it from synthetic his
 | Evaluated range | `max(Jan 1, date of the first row in the budget)` through `min(Dec 31, today)`. Days before the first row do not count as no-spend |
 | No-spend count | Number of no-spend days in the evaluated range |
 | Longest no-spend streak | Longest run of consecutive no-spend dates. Ties: earliest start. Also report the current streak as of today for the current year |
-| Goals completed | Number of goals whose first month-end with `available >= target` falls in `Y` (a goal reached in an earlier year is not counted again). Closed goals count. The derived month uses Actual's month-end available |
+| Goals completed | Number of goals whose stored `reached_month` (DEBT-8.2) falls in `Y`. A goal reached in an earlier year is not counted again. Closed goals count. A goal spent after being reached still counts, because `reached` never reverts |
 | Net-worth change | `NW(end) - NW(start)` where `start` is the day before the period (ST-2). If the first row is inside the period, `NW(start) = 0`. Optional breakdown: ST-4 lines E1 to E5 |
 | Prior-year change | `round_half_away((cur - prev) * 10000 / |prev|)` basis points. `prev = 0`: "new this year" |
 | Biggest month vs typical | `round_half_away((max - median) * 10000 / median)` basis points, median over months with data. `median <= 0`: not shown |
@@ -227,7 +230,7 @@ No dollar amount appears. Replace amounts with shares, in tenths of a percent:
 | W-7 Largest remainder | Amounts 1, 1, 1 over total 3 | Exact 333.33 each. Floors 333, 333, 333 sum 999. The missing tenth goes to the first: **334, 333, 333** |
 | W-8 Net-worth change | `NW(start)` 720000, `NW(end)` 1118300 | Change **398300**. Redacted: 398300 * 1000 / 720000 = 553.19 tenths, so 553 (55.3%) |
 | W-9 Prior-year change | prev 400000, cur 430000 | (30000 * 10000) / 400000 = 750 bp (7.5%) |
-| W-10 Goal completion | Goal target 150000, month-end available: Feb 130000, Mar 150000, Apr 2000 (after the purchase) | Reached in March of its year. Counted once in that year. Not counted in later years |
+| W-10 Goal completion | Goal target 150000, month-end available: Feb 130000, Mar 150000, Apr 2000 (after the purchase) | `reached_month` = March, stored when March's available hit 150000, and not reverted by the April purchase. Counted once in that year. Not counted in later years |
 | W-11 Biggest month tie | Jan and Jun both 300000 | January |
 | W-12 Current year | Today is 2027-03-10 | Range 2027-01-01 to 2027-03-10. Biggest month and streaks use only that range |
 | W-13 Empty year | No rows in the year | All counts 0, "No data for this year". No division happens |
