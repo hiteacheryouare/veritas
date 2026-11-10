@@ -64,7 +64,7 @@ Every reconciling line is defined here. There are no others, and there is never 
 | E3 | Starting balances | sum of `amount` for kind `starting_balance` (all accounts) | New accounts bring opening wealth |
 | E4 | Reconciliation adjustments | sum of `amount` for kind `adjustment`, source `reconciliation` | Unexplained cash difference found at reconcile |
 | E5 | Off-budget revaluations | sum of `amount` for kind `adjustment`, source `offbudget_revaluation` | Asset value changes (house, brokerage). Non-cash |
-| E6 | Unpaired transfer legs | sum of `amount` of rows flagged `unpaired` whose kind is `internal_transfer`, `debt_principal` or `savings_contribution` (all accounts, both rows of a one-way link) | One side of a transfer is missing or the link is not reciprocal (edge case 4), so net worth moved with no matching partner. Zero on a clean file. A flagged problem, not a plug |
+| E6 | Unpaired transfer legs | sum of `amount` of rows flagged `unpaired` whose kind is `internal_transfer`, `debt_principal` or `savings_contribution` (all accounts, both rows of a one-way link) | One side of a transfer is missing, the link is not reciprocal, or the two amounts do not net to zero (edge case 4), so net worth moved with no matching partner. Zero on a clean file. A flagged problem, not a plug |
 | E7 | Transfers in transit | sum of `amount` of rows that belong to a paired transfer, dated inside the period, whose partner is dated outside the period (all accounts) | Actual does not sync transfer dates. A pair split across two periods moves net worth in the period of each leg. Zero over any range that contains both legs, and always zero when Veritas wrote both legs on the same date |
 
 **Closing equity = opening equity + E1 + E2 + E3 + E4 + E5 + E6 + E7**, to the cent.
@@ -127,7 +127,7 @@ February (chained): opening equity 1118300. E1 = 297500 (T11, T12). E2 to E5 = 0
 
 **Closing = opening + change in budget cash from operations + other lines**, to the cent.
 
-Why it closes: on-budget rows are exactly the primary legs (the mirror leg of an on<->off pair is in the off-budget account) plus on<->on pairs (net zero). Primary legs are classified into the lines above. On-budget rows that are not primary legs of income, expense, debt or savings rows are internal transfers: paired on<->on rows net to zero, and uncategorized or unpaired ones are the review line. Off-budget `adjustment` and `starting_balance` rows are not in on-budget accounts.
+Why it closes: on-budget rows are exactly the primary legs (the mirror leg of an on<->off pair is in the off-budget account) plus on<->on pairs (net zero when both legs are in the period, otherwise the in-transit line). Primary legs are classified into the lines above. On-budget rows that are not primary legs of income, expense, debt or savings rows are internal transfers: paired on<->on rows with both legs in the period net to zero, one leg outside the period is the "Transfers in transit" line, and uncategorized or unpaired ones are the review line. Off-budget `adjustment` and `starting_balance` rows are not in on-budget accounts.
 
 January example: opening on-budget balance = CHK 200000 + VISA 0 = 200000. Net Profit 234500. Debt paydown -32000. Savings -20000. Net cash flow **182500**, review 0, change in budget cash 182500. Starting balances on on-budget accounts 0. Reconciliation adjustments -1200 (T10). Closing = 200000 + 182500 - 1200 = 381300 = CHK 388800 + VISA -7500. Starting balance T7 and revaluation T9 are off-budget, so they are not in this statement.
 
@@ -144,12 +144,12 @@ February example: opening 381300, net cash flow 297500, review 0, closing 678800
 | S-5 Debt payment | 40000 split 32000/8000 | Net worth change 0 from principal; E1 reflects only -8000; LOAN balance moves 32000 toward zero |
 | S-6 Zero-history period | Period with no rows | All lines 0, closing = opening |
 | S-7 Unreviewed transfer | Month with Income 100000, Groceries 20000, and CHK -10000 -> BRK, no category | Net worth unchanged. `net_cash_flow` = 80000 on the Net Profit report and in ST-6. `unreviewed_total` 10000, review line -10000, change in budget cash 70000. On-budget balance rises 70000 |
+| S-8 Unpaired transfer | CHK -10000 transfer to SAV, `transferred_id` null, category Savings | Net worth falls 10000. E6 = -10000. Closing equity still equals the balance sheet |
 | S-9 Transfer legs on different dates, savings | CHK -20000 dated Jan 31, SAV +20000 dated Feb 1, category Savings | January: `savings_total` 20000 (the primary leg's date). Net worth falls 20000 and E7 = -20000. February: E7 = +20000, net worth rises 20000. Over Jan 1 to Feb 28, E7 = 0 |
 | S-10 Card payment legs on different dates | CHK -7500 dated Jan 31, VISA +7500 dated Feb 1 | January ST-6 "Transfers in transit" -7500, on-budget balance falls 7500. February +7500. Equity E7 follows the same signs. Net Profit unaffected |
 | S-11 Amounts do not net to zero | CHK -20000, SAV +19000, reciprocal link | Not a transfer: both rows unpaired, E6 = -20000 + 19000 = -1000. Net worth falls 1000 |
 | S-12 Overpaid loan | LOAN balance +5000 on a liability-metadata account | Listed under Assets that day. Net worth unchanged |
 | S-13 Deleted account with rows | Account tombstoned, BRK rows still live, balance 15000 | Included in assets, labeled `deleted` |
-| S-8 Unpaired transfer | CHK -10000 transfer to SAV, `transferred_id` null, category Savings | Net worth falls 10000. E6 = -10000. Closing equity still equals the balance sheet |
 
 ## ST-8 Sankey (R-REP-6)
 
