@@ -22,3 +22,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 | Veritas | Actual source |
 |---|---|
+| `crates/veritas-engine/src/arithmetic.rs` | `packages/loot-core/src/shared/arithmetic.ts`; `currencyToAmount` and `getNumberFormat` in `packages/loot-core/src/shared/util.ts` |
+| `crates/veritas-engine/src/amount_field.rs` | `amountToInteger` in `packages/loot-core/src/shared/util.ts`; `forEdit` in `packages/desktop-client/src/hooks/useFormat.ts`; the single-operator rule in `InputValue`, `packages/desktop-client/src/components/table.tsx` |
+| `crates/veritas-engine/src/envelope.rs` | `packages/loot-core/src/server/budget/envelope.ts`; `createAllBudgets`, `getBudgetRange` and the `sum-amount` query in `packages/loot-core/src/server/budget/base.ts` |
+| `crates/veritas-engine/tests/arithmetic.rs`, `crates/veritas-engine/tests/fixtures/actual-arithmetic-vectors.json` | `packages/loot-core/src/shared/arithmetic.test.ts` (test vectors), and outputs of the Actual code above |
