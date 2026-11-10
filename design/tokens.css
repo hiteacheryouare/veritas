@@ -1,0 +1,184 @@
+:root,
+[data-theme="light"] {
+	color-scheme: light;
+
+	--color-desktop-1: #b9c6d6;
+	--color-desktop-2: #dfe5ec;
+
+	--color-surface-window: #f3f3f6;
+	--color-surface-sidebar: rgba(236, 238, 243, 0.78);
+	--color-surface-grouped: #fcfcfd;
+	--color-surface-raised: #fbfbfc;
+	--color-surface-field: #fdfdfe;
+	--color-surface-paper: #fcfcfa;
+	--color-surface-scrim: rgba(28, 30, 38, 0.22);
+	--color-surface-hover: rgba(20, 22, 30, 0.04);
+	--color-surface-control: rgba(250, 250, 252, 0.85);
+
+	--color-edge-window: rgba(20, 22, 30, 0.12);
+	--color-edge-sidebar: rgba(250, 250, 252, 0.7);
+	--color-edge-grouped: rgba(20, 22, 30, 0.07);
+	--color-edge-control: rgba(20, 22, 30, 0.1);
+	--color-separator: rgba(20, 22, 30, 0.08);
+
+	--color-text-primary: #1c1c21;
+	--color-text-secondary: #66666f;
+	--color-text-tertiary: #9c9ca5;
+	--color-text-on-accent: #f7f7ff;
+	--color-text-paper: #23232a;
+
+	--color-accent: #5146d8;
+	--color-accent-soft: rgba(81, 70, 216, 0.11);
+	--color-focus-ring: #5146d8;
+
+	--color-track: rgba(20, 22, 30, 0.08);
+
+	--color-money-available: #127a49;
+	--color-money-available-fill: #26a066;
+	--color-money-low: #9a5a00;
+	--color-money-low-fill: #d98b12;
+	--color-money-overspent: #c4262e;
+	--color-money-overspent-fill: #e0474e;
+	--color-money-income: #1668bd;
+	--color-money-income-fill: #2f84dc;
+	--color-money-neutral: #9c9ca5;
+
+	--color-chart-expense: #6e6e78;
+	--color-chart-expense-soft: rgba(110, 110, 120, 0.28);
+	--color-chart-savings: #26a066;
+	--color-chart-debt-paydown: #9b3f8a;
+	--color-chart-unallocated: rgba(47, 132, 220, 0.35);
+	--color-chart-band: rgba(81, 70, 216, 0.12);
+	--color-chart-grid: rgba(20, 22, 30, 0.07);
+	--color-scenario-baseline: #3a3a42;
+	--color-scenario-1: #2f84dc;
+	--color-scenario-2: #9b3f8a;
+	--color-scenario-3: #c77a08;
+
+	--shadow-window: 0 30px 80px rgba(20, 30, 50, 0.28), 0 4px 14px rgba(20, 30, 50, 0.14);
+	--shadow-sheet: 0 24px 60px rgba(20, 30, 50, 0.28), 0 0 0 1px rgba(20, 22, 30, 0.08);
+	--shadow-popover: 0 8px 24px rgba(20, 30, 50, 0.16), 0 0 0 1px rgba(20, 22, 30, 0.08);
+	--shadow-control: 0 1px 3px rgba(20, 22, 30, 0.06);
+}
+
+[data-theme="dark"] {
+	color-scheme: dark;
+
+	--color-desktop-1: #1f2a3a;
+	--color-desktop-2: #3a4658;
+
+	--color-surface-window: #1e1e22;
+	--color-surface-sidebar: rgba(44, 45, 52, 0.72);
+	--color-surface-grouped: #27272c;
+	--color-surface-raised: #2e2e34;
+	--color-surface-field: #1a1a1e;
+	--color-surface-paper: #f4f4f1;
+	--color-surface-scrim: rgba(6, 6, 12, 0.45);
+	--color-surface-hover: rgba(240, 240, 250, 0.05);
+	--color-surface-control: rgba(60, 61, 68, 0.8);
+
+	--color-edge-window: rgba(240, 240, 250, 0.12);
+	--color-edge-sidebar: rgba(240, 240, 250, 0.08);
+	--color-edge-grouped: rgba(240, 240, 250, 0.06);
+	--color-edge-control: rgba(240, 240, 250, 0.1);
+	--color-separator: rgba(240, 240, 250, 0.08);
+
+	--color-text-primary: #ececf0;
+	--color-text-secondary: #a2a2ab;
+	--color-text-tertiary: #74747d;
+	--color-text-on-accent: #f7f7ff;
+	--color-text-paper: #23232a;
+
+	--color-accent: #8f87ff;
+	--color-accent-soft: rgba(143, 135, 255, 0.18);
+	--color-focus-ring: #8f87ff;
+
+	--color-track: rgba(240, 240, 250, 0.09);
+
+	--color-money-available: #4cc47a;
+	--color-money-available-fill: #3fb06d;
+	--color-money-low: #eda23a;
+	--color-money-low-fill: #e0952a;
+	--color-money-overspent: #ff6a64;
+	--color-money-overspent-fill: #f05650;
+	--color-money-income: #5eaaf5;
+	--color-money-income-fill: #4796e6;
+	--color-money-neutral: #74747d;
+
+	--color-chart-expense: #a5a5ae;
+	--color-chart-expense-soft: rgba(165, 165, 174, 0.3);
+	--color-chart-savings: #3fb06d;
+	--color-chart-debt-paydown: #d272bf;
+	--color-chart-unallocated: rgba(94, 170, 245, 0.4);
+	--color-chart-band: rgba(143, 135, 255, 0.16);
+	--color-chart-grid: rgba(240, 240, 250, 0.07);
+	--color-scenario-baseline: #e2e2e8;
+	--color-scenario-1: #5eaaf5;
+	--color-scenario-2: #d272bf;
+	--color-scenario-3: #eda23a;
+
+	--shadow-window: 0 30px 80px rgba(0, 0, 10, 0.55), 0 4px 14px rgba(0, 0, 10, 0.35);
+	--shadow-sheet: 0 24px 60px rgba(0, 0, 10, 0.6), 0 0 0 1px rgba(240, 240, 250, 0.1);
+	--shadow-popover: 0 8px 24px rgba(0, 0, 10, 0.5), 0 0 0 1px rgba(240, 240, 250, 0.1);
+	--shadow-control: 0 1px 3px rgba(0, 0, 10, 0.3);
+}
+
+:root {
+	--font-text: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+	--font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
+	--font-figures: ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif;
+	--font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+	--font-paper: ui-serif, "New York", Georgia, serif;
+
+	--text-caption: 11px;
+	--text-body: 13px;
+	--text-heading: 15px;
+	--text-title: 20px;
+	--text-display: 40px;
+	--text-showcase: 64px;
+
+	--line-tight: 1.15;
+	--line-body: 1.45;
+
+	--weight-regular: 400;
+	--weight-medium: 500;
+	--weight-semibold: 600;
+	--weight-bold: 700;
+
+	--space-1: 4px;
+	--space-2: 8px;
+	--space-3: 12px;
+	--space-4: 16px;
+	--space-5: 24px;
+	--space-6: 32px;
+	--space-7: 48px;
+
+	--size-row: 40px;
+	--size-row-dense: 24px;
+	--size-control: 32px;
+	--size-control-small: 26px;
+	--size-sidebar: 252px;
+	--size-bar: 6px;
+	--size-ring: 52px;
+	--size-ring-large: 96px;
+
+	--radius-window: 24px;
+	--radius-panel: 18px;
+	--radius-sheet: 20px;
+	--radius-section: 12px;
+	--radius-control: 8px;
+	--radius-field: 6px;
+	--radius-bar: 3px;
+
+	--duration-fast: 150ms;
+	--duration-sheet: 220ms;
+	--easing-standard: cubic-bezier(0.2, 0.7, 0.2, 1);
+	--easing-exit: cubic-bezier(0.4, 0, 1, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	:root {
+		--duration-fast: 0ms;
+		--duration-sheet: 0ms;
+	}
+}
