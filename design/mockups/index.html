@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Veritas mockups</title>
+<link rel="stylesheet" href="../tokens.css">
+<style>
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--color-surface-window); color: var(--color-text-primary); font-family: var(--font-text); font-size: 14px; line-height: var(--line-body); -webkit-font-smoothing: antialiased; }
+.page { max-width: 1440px; margin: 0 auto; padding: var(--space-7) var(--space-5); }
+.intro { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-5); flex-wrap: wrap; margin-bottom: var(--space-6); }
+.intro h1 { margin: 0 0 var(--space-2); font-size: 28px; font-weight: var(--weight-semibold); }
+.intro p { margin: 0; max-width: 72ch; color: var(--color-text-secondary); }
+.intro a { color: var(--color-accent); }
+.view-switch { display: flex; gap: 2px; background: var(--color-track); padding: 2px; border-radius: 8px; }
+.view-switch button { border: 0; background: transparent; font: inherit; font-size: 13px; padding: 4px 14px; border-radius: 6px; cursor: pointer; color: var(--color-text-primary); }
+.view-switch button[aria-pressed="true"] { background: var(--color-surface-raised); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }
+.area { margin-bottom: var(--space-6); }
+.area h2 { margin: 0 0 var(--space-3); font-size: var(--text-title); font-weight: var(--weight-semibold); }
+.screens { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--space-5); }
+.screen { display: flex; flex-direction: column; gap: var(--space-2); color: inherit; text-decoration: none; }
+.preview { position: relative; aspect-ratio: 1280 / 800; border-radius: 12px; overflow: hidden; background: var(--color-surface-grouped); box-shadow: 0 0 0 1px var(--color-edge-grouped), 0 10px 24px rgba(0, 0, 0, 0.1); }
+.preview iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; pointer-events: none; }
+.screen h3 { margin: 0; font-size: var(--text-heading); font-weight: var(--weight-semibold); }
+.screen:hover h3 { color: var(--color-accent); }
+.screen p { margin: 0; color: var(--color-text-secondary); }
+</style>
+</head>
+<body>
+<div class="page">
+	<div class="intro">
+		<div>
+			<h1>Veritas mockups</h1>
+			<p>Every screen from PLAN §5.3 in the Quiet native direction, with drain bars, semantic money colors and SF Pro Rounded figures. Open a screen to see light and dark side by side. Tokens are in <a href="../tokens.md">tokens.md</a>, keyboard and motion notes in <a href="../interaction.md">interaction.md</a>.</p>
+		</div>
+		<div class="view-switch" role="group" aria-label="Preview appearance">
+			<button type="button" data-view="light" aria-pressed="true">Light</button>
+			<button type="button" data-view="dark" aria-pressed="false">Dark</button>
+		</div>
+	</div>
+
+	<section class="area">
+		<h2>Budget and goals</h2>
+		<div class="screens">
+			<a class="screen" href="budget.html"><div class="preview"><iframe data-src="budget.html" title="Budget" tabindex="-1"></iframe></div><h3>Budget</h3><p>Envelope rows with drain bars, one overspent, Groceries mid-edit with +40.</p></a>
+			<a class="screen" href="budget-dense.html"><div class="preview"><iframe data-src="budget-dense.html" title="Budget, dense" tabindex="-1"></iframe></div><h3>Budget, dense</h3><p>The Dense toggle: an Actual-style compact table.</p></a>
+			<a class="screen" href="goals.html"><div class="preview"><iframe data-src="goals.html" title="Goals" tabindex="-1"></iframe></div><h3>Goals</h3><p>Cards with rings, including one that shows Reached → Spent.</p></a>
+			<a class="screen" href="goal-close.html"><div class="preview"><iframe data-src="goal-close.html" title="Close goal" tabindex="-1"></iframe></div><h3>Close goal</h3><p>Release the leftover as a budget move, or cover an overspent goal.</p></a>
+		</div>
+	</section>
+
+	<section class="area">
+		<h2>Accounts and bills</h2>
+		<div class="screens">
+			<a class="screen" href="register.html"><div class="preview"><iframe data-src="register.html" title="Register" tabindex="-1"></iframe></div><h3>Register</h3><p>Checking, with transfer rows that read → To Savings and ← From Savings.</p></a>
+			<a class="screen" href="move-money.html"><div class="preview"><iframe data-src="move-money.html" title="Move money" tabindex="-1"></iframe></div><h3>Move money</h3><p>Both balances before and after, plus the loan principal and interest prompt.</p></a>
+			<a class="screen" href="bills.html"><div class="preview"><iframe data-src="bills.html" title="Bills" tabindex="-1"></iframe></div><h3>Bills</h3><p>A plain list and the Upcoming tray, with Paid open on Electric.</p></a>
+		</div>
+	</section>
+
+	<section class="area">
+		<h2>Reports and insights</h2>
+		<div class="screens">
+			<a class="screen" href="net-profit.html"><div class="preview"><iframe data-src="net-profit.html" title="Net Profit" tabindex="-1"></iframe></div><h3>Net Profit</h3><p>Income minus expenses, then Debt paydown, Savings and Net cash flow. Every number drills down.</p></a>
+			<a class="screen" href="sankey.html"><div class="preview"><iframe data-src="sankey.html" title="Sankey" tabindex="-1"></iframe></div><h3>Sankey</h3><p>October income to groups, envelopes, savings, debt paydown and unallocated.</p></a>
+			<a class="screen" href="forecast.html"><div class="preview"><iframe data-src="forecast.html" title="Forecast" tabindex="-1"></iframe></div><h3>Forecast and what-ifs</h3><p>3, 6, 10 or 12 months with a likely range and up to three what-ifs.</p></a>
+			<a class="screen" href="wrapped.html"><div class="preview"><iframe data-src="wrapped.html" title="Wrapped" tabindex="-1"></iframe></div><h3>Wrapped card</h3><p>One card from the December story, plus the version with amounts hidden.</p></a>
+			<a class="screen" href="statement.html"><div class="preview"><iframe data-src="statement.html" title="Statement" tabindex="-1"></iframe></div><h3>Statement</h3><p>Balance Sheet for Your Household, LLC.</p></a>
+		</div>
+	</section>
+</div>
+<script>
+const frames = document.querySelectorAll('.preview iframe');
+const show = (view) => {
+	document.documentElement.dataset.theme = view;
+	frames.forEach((f) => { f.src = `${f.dataset.src}?embed&view=${view}`; });
+	document.querySelectorAll('.view-switch button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
+};
+document.querySelectorAll('.view-switch button').forEach((b) => b.addEventListener('click', () => show(b.dataset.view)));
+show(matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+</script>
+</body>
+</html>
