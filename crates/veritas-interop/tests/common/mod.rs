@@ -112,6 +112,60 @@ pub fn oracle(args: &[&std::ffi::OsStr]) -> Option<Vec<u8>> {
 	Some(output.stdout)
 }
 
+fn oracle_installed() -> bool {
+	if oracle_dir().join("node_modules").exists() {
+		return true;
+	}
+	eprintln!(
+		"skipping the Actual side: tools/actual-oracle/node_modules is missing, run `cargo xtask oracle setup`"
+	);
+	false
+}
+
+/// What `@actual-app/api` itself does with a zip: the oracle's full dump runs
+/// `importBudget` and loads the budget. `Err` carries Actual's stderr.
+pub fn actual_opens(zip_path: &Path) -> Option<Result<(), String>> {
+	if !oracle_installed() {
+		return None;
+	}
+	let output = Command::new("node")
+		.current_dir(oracle_dir())
+		.args(["src/main.ts", "dump"])
+		.arg(zip_path)
+		.output()
+		.expect("node runs");
+	Some(if output.status.success() {
+		Ok(())
+	} else {
+		Err(String::from_utf8_lossy(&output.stderr).into_owned())
+	})
+}
+
+/// Runs `oracle apply` with no ops: Actual imports the zip, then exports it.
+pub fn actual_reexport(zip_path: &Path, scratch: &Scratch) -> Option<PathBuf> {
+	if !oracle_installed() {
+		return None;
+	}
+	let ops = scratch.join("no-ops.json");
+	std::fs::write(&ops, br#"{"version": 1, "ops": []}"#).unwrap();
+	let out = scratch.join("reexported.zip");
+	let output = Command::new("node")
+		.current_dir(oracle_dir())
+		.args(["src/main.ts", "apply"])
+		.arg(zip_path)
+		.arg(&ops)
+		.arg("--out")
+		.arg(&out)
+		.output()
+		.expect("node runs");
+	assert!(
+		output.status.success(),
+		"the oracle failed: {}",
+		String::from_utf8_lossy(&output.stderr)
+	);
+	Some(out)
+}
+
 /// Fails with the first differing line instead of two 75 MB strings.
 pub fn assert_same_dump(veritas: &[u8], oracle: &[u8], label: &str) {
 	if veritas == oracle {
