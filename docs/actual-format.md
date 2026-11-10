@@ -1560,7 +1560,7 @@ What each action does (`action.ts:99-262`):
 **Ordering, stages and chaining.**
 
 - Candidate selection uses two indexers (`transaction-rules.ts:65-72, 338-343`, `lc/server/rules/rule-indexer.ts`). One is keyed on `imported_payee` by **lowercased first character**, the other on `payee`.
-  - A rule is filed under the key(s) of its first `is`, `isNot`, `oneOf` or `notOneOf` condition on that field. Otherwise it's filed under `*`.
+  - A rule is filed by its **first condition on that field**, whatever its op. If that op is `is`, `isNot`, `oneOf` or `notOneOf`, the rule goes under that value's key (each value's, for the lists). Otherwise it goes under `*`, even when a later condition on the field is `is` (`rule-indexer.ts:38-59`). An empty `oneOf` list files it under no key at all, so that indexer never offers it.
   - The candidates are `index[key(txn)] ∪ index['*']` for each indexer, and the two sets are unioned.
   - The key is computed **once, from the incoming transaction**.
   - The quirk: a rule is skipped without evaluation only when it has an is-family condition on **both** `imported_payee` and `payee` and neither key matches. One consequence: `isNot X` rules with both such conditions get pruned even when they would match. Every other rule is always a candidate.
@@ -1654,8 +1654,8 @@ Mapping to rschedule (`lc/shared/schedules.ts:201-253`):
 - `interval` is set only when it's truthy.
 - `after_n_occurrences` sets `count = endOccurrences`, and `on_date` sets `end = parseDate(endDate)`. Pinned inclusive by `lc/shared/schedules.test.ts:468-485`. [test]
 - Daily, weekly and yearly ignore `patterns`.
-- Monthly with patterns produces **up to two rrules**: one `byDayOfMonth:[days…]` and one `byDayOfWeek:[[MO,n],…]`. **Each one carries its own `count`**, so "after N occurrences" with mixed day and weekday patterns can yield up to 2N dates [unverified: rschedule dedup].
-- Monthly with no patterns and yearly use the start's day of month, or month and day. **[unverified]** With rschedule's RFC 5545 normalization, a start on the **29th, 30th or 31st skips months that lack that day**, a yearly start on Feb 29 occurs only in leap years, and a `day: 31` pattern skips short months. `day: -1` is the last day of the month. Pinned by `lc/server/schedules/occurrences.test.ts:77-87`, which gives 01-31, 02-29, 03-31, 04-30. [test]
+- Monthly with patterns produces **up to two rrules**: one `byDayOfMonth:[days…]` and one `byDayOfWeek:[[MO,n],…]`. **Each one carries its own `count`**, so "after N occurrences" with mixed day and weekday patterns can yield up to 2N dates. The union is deduplicated: "after 3" with `day 2` and `MO 1` from 2026-11-01 gives five dates, because Nov 2 is shared (oracle, §6.3 findings).
+- Monthly with no patterns and yearly use the start's day of month, or month and day. With rschedule's RFC 5545 normalization, a start on the **29th, 30th or 31st skips months that lack that day**, a yearly start on Feb 29 occurs only in leap years, and a `day: 31` pattern skips short months. `day: -1` is the last day of the month. Confirmed by the oracle (§6.3 findings). Pinned by `lc/server/schedules/occurrences.test.ts:77-87`, which gives 01-31, 02-29, 03-31, 04-30. [test]
 - Last weekday patterns like `FR -1` are pinned by `occurrences.test.ts:90-103`.
 - All date math happens in local time at noon (`lc/shared/months.ts:12-83`).
 
@@ -1702,6 +1702,16 @@ Mapping to rschedule (`lc/shared/schedules.ts:201-253`):
   - **Complete** only sets `completed = 1`.
   - **Restart** sets `completed: false` and `resetNextDate: true`.
 - Estimate bills: the amount condition `isapprox` matches ±`round(|n|·0.075)` (§6.1), and the date `isapprox` matches ±2 days around any occurrence.
+
+**Findings from the oracle (WS-RULES).** `crates/veritas-rules/tests/oracle_schedules.rs` creates generated schedules through Actual and compares `next_date` and the upcoming dates; `tests/oracle_rules.rs` runs generated rules over transactions added through `addTransactions`. Over 19,100 schedules and 5,200 transactions they confirmed or added:
+
+1. The rrule union is deduplicated (above), and the 29th–31st, Feb 29 and `day: -1` behavior above holds.
+2. **A missing nth weekday spills and skips.** rschedule's `getNthWeekdayOfMonth` (`@rschedule/core` `rules.js`, `getNextWeekdaysOfMonth`) doesn't keep the date in the month, so a fifth Friday in a month with four becomes the next month's first Friday. The monthly `ByDayOfWeek` pipe jumps to that spilled date and only then looks again, so earlier pattern dates of the next month are skipped: `[FR 5, TU 1]` from 2028-03-29 never yields Tuesday 2028-05-02, because April's spilled Friday is May 5. The pipe runs before the interval check, so a month outside the interval spills too (`interval: 2` from March skips Thursday 2026-01-01 after December spills to January 2). The result depends on where the walk starts, so a query from 2028-05-01 does return May 2. The reverse walk that finds an ended schedule's last date never sees spilled dates.
+3. **`api.getScheduleDates` checks more than the app.** It runs `validateScheduleDate` first (`lc/server/api.ts:132-159`): a strict `YYYY-MM-DD` start and end date, `interval` a positive integer when present, and `endOccurrences` a positive integer. `createSchedule` doesn't, so a recurring start of `2026-02-29` is stored, rolls over to March 1 in `parseDate`, and gets a `next_date`, but the API refuses to expand it.
+4. **`transfer` and `parent` conditions never match in memory.** The transaction object `runRules` evaluates has no `transfer` or `parent` key, so `Condition.eval` returns false for both (`condition.ts:247-249`). Only the SQL path maps them (§6.1).
+5. **`onBudget`, `offBudget` and `payee_name` read the starting transaction.** `_account` and `payee_name` are set once in `prepareTransactionForRules` (`transaction-rules.ts:1158-1208`) and aren't refreshed when a rule sets `account` or `payee`. `category_group` is refreshed when `category` changes (`:1239-1256`).
+6. **`addTransactions` overrides two fields after the rules.** It sets `account` back to the account being added to and defaults `cleared` to true when the result has none (`sync.ts:1059-1064`). A `set account` action has no effect there.
+7. **Spec wording for the indexer was loose.** The first condition on the field decides, as corrected above.
 
 ### 6.4 Custom reports
 
