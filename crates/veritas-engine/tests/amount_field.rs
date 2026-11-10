@@ -1,13 +1,14 @@
 //! R-BUD-3 and PLAN §9 edge case 12: every amount field shows its value as
-//! Actual's edit text, appends on a leading operator, and keeps the old value
-//! on input that isn't a storable amount (D37).
+//! Actual's edit text, appends when a lone operator is typed over it, commits
+//! its text as it stands, and keeps the old value on input that isn't a
+//! storable amount (D37).
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use serde_json::Value;
 use veritas_domain::Money;
 use veritas_engine::{
-	AmountEdit, NumberFormat, Rejection, edit_amount, edit_text, field_expression, js_round,
+	AmountEdit, NumberFormat, Rejection, commit_amount, edit_text, js_round, single_operator_rule,
 };
 
 use NumberFormat::{ApostropheDot, CommaDot, CommaDotIn, DotComma, SpaceComma};
@@ -16,8 +17,30 @@ fn cents(minor: i64) -> Money {
 	Money::from_minor(minor)
 }
 
-fn type_into(current: i64, typed: &str) -> AmountEdit {
-	edit_amount(cents(current), typed, CommaDot, false)
+/// Focus selects the value, each key goes through the single-operator rule,
+/// then Return commits the text.
+fn type_keys(current: i64, keys: &str, format: NumberFormat, hide_fraction: bool) -> AmountEdit {
+	let original = edit_text(cents(current), format, hide_fraction);
+	let mut text = String::new();
+	for key in keys.chars() {
+		text.push(key);
+		text = single_operator_rule(&original, &text);
+	}
+	commit_amount(cents(current), &text, format)
+}
+
+fn type_into(current: i64, keys: &str) -> AmountEdit {
+	type_keys(current, keys, CommaDot, false)
+}
+
+/// A paste replaces the selected text in one change.
+fn paste_into(current: i64, clipboard: &str) -> AmountEdit {
+	let original = edit_text(cents(current), CommaDot, false);
+	commit_amount(
+		cents(current),
+		&single_operator_rule(&original, clipboard),
+		CommaDot,
+	)
 }
 
 fn accepted(minor: i64) -> AmountEdit {
@@ -36,7 +59,6 @@ fn kept(current: i64, rejection: Rejection) -> AmountEdit {
 
 #[test]
 fn typing_a_leading_operator_appends_to_the_current_value() {
-	assert_eq!(field_expression("100.00", "+12.34"), "100.00+12.34");
 	assert_eq!(type_into(10_000, "+12.34"), accepted(11_234));
 	assert_eq!(type_into(10_000, "-12.34"), accepted(8_766));
 	assert_eq!(type_into(10_000, "*2"), accepted(20_000));
@@ -54,6 +76,23 @@ fn a_leading_minus_subtracts_from_the_current_value() {
 	assert_eq!(type_into(10_000, "-5"), accepted(9_500));
 	assert_eq!(type_into(10_000, "-2^2"), accepted(9_600));
 	assert_eq!(type_into(0, "-5"), accepted(-500));
+}
+
+/// The PR #15 regression: commit evaluates the field's text as it stands, so a
+/// negative value isn't appended to itself.
+#[test]
+fn a_negative_value_commits_as_shown_and_pastes_replace() {
+	assert_eq!(
+		commit_amount(cents(-4_500), "-45.00", CommaDot),
+		accepted(-4_500)
+	);
+	assert_eq!(type_into(-5_000, "+12.34"), accepted(-3_766));
+	assert_eq!(paste_into(10_000, "-45.00"), accepted(-4_500));
+	assert_eq!(
+		paste_into(10_000, "-"),
+		kept(10_000, Rejection::NotAnAmount),
+		"a lone operator appends and is left unfinished"
+	);
 }
 
 #[test]
@@ -81,17 +120,17 @@ fn edge_case_12_negative_results() {
 
 #[test]
 fn edge_case_12_pasted_currency_symbols() {
-	assert_eq!(type_into(0, "$1,234.56"), accepted(123_456));
-	assert_eq!(type_into(0, "\u{20AC}12,50"), accepted(1_250));
-	assert_eq!(type_into(0, "\u{A3}5 + \u{A5}100"), accepted(10_500));
-	assert_eq!(type_into(0, "-$5"), accepted(-500));
-	assert_eq!(type_into(0, "12.34 USD"), accepted(1_234));
+	assert_eq!(paste_into(0, "$1,234.56"), accepted(123_456));
+	assert_eq!(paste_into(0, "\u{20AC}12,50"), accepted(1_250));
+	assert_eq!(paste_into(0, "\u{A3}5 + \u{A5}100"), accepted(10_500));
+	assert_eq!(paste_into(700, "-$5"), accepted(-500));
+	assert_eq!(paste_into(0, "12.34 USD"), accepted(1_234));
 	assert_eq!(
-		edit_amount(cents(0), "\u{20AC}1.234,56", DotComma, false),
+		commit_amount(cents(0), "\u{20AC}1.234,56", DotComma),
 		accepted(123_456)
 	);
-	assert_eq!(type_into(700, "$-5"), kept(700, Rejection::NotAnAmount));
-	assert_eq!(type_into(700, "USD 5"), kept(700, Rejection::NotAnAmount));
+	assert_eq!(paste_into(700, "$-5"), kept(700, Rejection::NotAnAmount));
+	assert_eq!(paste_into(700, "USD 5"), kept(700, Rejection::NotAnAmount));
 }
 
 #[test]
@@ -172,7 +211,7 @@ fn rounding_to_cents_follows_math_round() {
 
 #[test]
 fn appending_works_in_every_number_format() {
-	let append = |current, format| edit_amount(cents(current), "+10", format, false);
+	let append = |current, format| type_keys(current, "+10", format, false);
 	assert_eq!(edit_text(cents(123_456), DotComma, false), "1.234,56");
 	assert_eq!(append(123_456, DotComma), accepted(124_456));
 	assert_eq!(
@@ -190,19 +229,13 @@ fn appending_works_in_every_number_format() {
 		"12,34,567.89"
 	);
 	assert_eq!(append(123_456_789, CommaDotIn), accepted(123_457_789));
-	assert_eq!(
-		edit_amount(cents(0), "12,50+1", DotComma, false),
-		accepted(1_350)
-	);
+	assert_eq!(type_keys(0, "12,50+1", DotComma, false), accepted(1_350));
 }
 
 #[test]
 fn hidden_fractions_drop_the_cents_when_appending_like_actual() {
 	assert_eq!(edit_text(cents(10_040), CommaDot, true), "100");
-	assert_eq!(
-		edit_amount(cents(10_040), "+5", CommaDot, true),
-		accepted(10_500)
-	);
+	assert_eq!(type_keys(10_040, "+5", CommaDot, true), accepted(10_500));
 }
 
 mod vectors_from_actuals_code {

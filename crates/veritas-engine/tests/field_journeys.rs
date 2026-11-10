@@ -6,7 +6,7 @@
 
 use veritas_domain::Money;
 use veritas_engine::{
-	AmountEdit, MAX_SAFE_MINOR, NumberFormat, Rejection, edit_amount, edit_text,
+	AmountEdit, MAX_SAFE_MINOR, NumberFormat, Rejection, commit_amount, edit_text,
 	single_operator_rule,
 };
 
@@ -77,7 +77,7 @@ impl Field {
 	}
 
 	fn press_return(&self) -> AmountEdit {
-		edit_amount(self.current, &self.text, self.format, false)
+		commit_amount(self.current, &self.text, self.format)
 	}
 }
 
@@ -270,7 +270,6 @@ fn dividing_by_zero_keeps_the_old_value() {
 }
 
 #[test]
-#[ignore = "bug: edit_amount re-applies the append rule to a field text that already starts with the negative edit text"]
 fn a_negative_value_shows_its_sign_and_appends_from_it() {
 	let mut field = Field::click(-5_000, CommaDot);
 	assert_eq!(field.shows(), "-50.00");
@@ -280,7 +279,6 @@ fn a_negative_value_shows_its_sign_and_appends_from_it() {
 }
 
 #[test]
-#[ignore = "bug: edit_amount re-applies the append rule to a field text that already starts with the negative edit text"]
 fn committing_an_untouched_negative_field_keeps_its_value() {
 	for format in FORMATS {
 		assert_eq!(

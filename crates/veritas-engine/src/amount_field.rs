@@ -1,7 +1,8 @@
-//! Editing an amount field. The field shows the current value as Actual's
-//! edit text, typing a lone operator appends to it (Actual's `InputValue`
-//! rule), and anything that doesn't evaluate to a storable amount keeps the
-//! old value (D37) with a reason the UI can show as a hint.
+//! Editing an amount field the way Actual's `InputValue` works: focus shows
+//! the value as edit text, each keystroke goes through the single-operator
+//! rule (a lone operator typed over the selection appends to the value), and
+//! commit evaluates the text as it stands. Anything that doesn't evaluate to
+//! a storable amount keeps the old value (D37) with a reason the UI can show.
 
 use veritas_domain::Money;
 
@@ -81,31 +82,18 @@ pub fn single_operator_rule(original_text: &str, new_text: &str) -> String {
 	}
 }
 
-/// The expression a field ends up evaluating when the user selects the value
-/// and types `typed`: a leading operator appends to the edit text.
-pub fn field_expression(edit_text: &str, typed: &str) -> String {
-	match typed.chars().next() {
-		Some(op) if OPERATORS.contains(&op) => format!("{edit_text}{typed}"),
-		_ => typed.to_owned(),
-	}
-}
-
-/// Commits typed text into a field that held `current`.
-pub fn edit_amount(
-	current: Money,
-	typed: &str,
-	format: NumberFormat,
-	hide_fraction: bool,
-) -> AmountEdit {
-	let expression = field_expression(&edit_text(current, format, hide_fraction), typed);
+/// Commits the field's text as it stands, as Actual's `InputValue` does on
+/// Return, Tab or blur. The single-operator rule has already shaped the text
+/// keystroke by keystroke, so it isn't applied again here.
+pub fn commit_amount(current: Money, text: &str, format: NumberFormat) -> AmountEdit {
 	let kept = |rejection| AmountEdit {
 		amount: current,
 		rejection: Some(rejection),
 	};
-	if expression.trim().is_empty() {
+	if text.trim().is_empty() {
 		return kept(Rejection::Empty);
 	}
-	match eval_arithmetic(&expression, format) {
+	match eval_arithmetic(text, format) {
 		None => kept(Rejection::NotAnAmount),
 		Some(value) => match amount_to_minor(value) {
 			Ok(amount) => AmountEdit {
