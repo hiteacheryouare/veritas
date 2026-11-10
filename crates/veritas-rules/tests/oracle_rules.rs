@@ -18,7 +18,7 @@ use veritas_domain::{
 	Account, AccountId, BudgetData, BudgetType, Category, CategoryGroupId, CategoryId, Payee,
 	PayeeId,
 };
-use veritas_rules::{ParsedRule, RuleBook, RuleSupport};
+use veritas_rules::{BudgetPayees, ParsedRule, RuleBook, RuleSupport};
 
 const TODAY: &str = "2026-11-09";
 const RULES: usize = 70;
@@ -177,7 +177,10 @@ fn random_condition(rng: &mut Rng, world: &World) -> Value {
 }
 
 fn random_action(rng: &mut Rng, world: &World) -> Value {
-	match rng.below(9) {
+	match rng.below(10) {
+		9 => {
+			json!({"op": "set", "field": "payee_name", "value": rng.pick(&["Amazon", "amazon", "New Shop", "NEW SHOP", "", "Coffee Shop"]), "type": "string"})
+		}
 		0 | 1 => {
 			let value = if rng.chance(15) {
 				Value::Null
@@ -324,6 +327,21 @@ fn rule_outcomes_match_the_oracle() {
 			"conditions": conditions, "actions": actions}),
 		);
 	}
+	// Pre-stage rules that score 0 and sort first, so they run before any
+	// generated rule can rewrite the imported payee they look at.
+	for (n, (text, name)) in [
+		("zelle to", "Zelle Friend"),
+		("shell oil", ""),
+		("starbucks", "amazon"),
+		("amzn digital", "New Shop"),
+	]
+	.iter()
+	.enumerate()
+	{
+		ops.push(json!({"op": "createRule", "id": uuid(0, n), "stage": "pre",
+			"conditions": [{"op": "contains", "field": "imported_payee", "value": text}],
+			"actions": [{"op": "set", "field": "payee_name", "value": name}]}));
+	}
 	let mut added = Vec::new();
 	for (a, (account, _)) in world.accounts.iter().enumerate() {
 		let transactions: Vec<Value> = (0..TRANSACTIONS / 2)
@@ -360,23 +378,51 @@ fn rule_outcomes_match_the_oracle() {
 		.flatten()
 		.filter_map(|row| Some((row["id"].as_str()?, row)))
 		.collect();
+	let actual_payees: BTreeMap<&str, &str> = dump["tables"]["payees"]["rows"]
+		.as_array()
+		.into_iter()
+		.flatten()
+		.filter_map(|row| Some((row["id"].as_str()?, row["name"].as_str()?)))
+		.collect();
+	let mut made = 0;
+	let mut payees = BudgetPayees::new(&budget, || {
+		made += 1;
+		PayeeId::new(format!("made-{made}"))
+	});
+	let known = |id: &str| world.payees.iter().any(|(payee, _)| payee == id);
 
 	let mut mismatches = Vec::new();
 	let mut rules_fired = 0;
+	let mut made_payees = 0;
 	for (input, account) in &added {
-		let outcome = book.run(&rule_transaction(input, account), &budget);
+		let outcome = book.run(&rule_transaction(input, account), &budget, &mut payees);
 		assert!(outcome.undetermined.is_empty());
 		rules_fired += outcome.applied.len();
-		let expected = expected_row(&outcome.transaction, account);
+		let mut expected = expected_row(&outcome.transaction, account);
 		let row = rows
 			.get(input["id"].as_str().unwrap())
 			.unwrap_or_else(|| panic!("{} wasn't added", input["id"]));
-		let actual: serde_json::Map<String, Value> = expected
+		let mut actual: serde_json::Map<String, Value> = expected
 			.as_object()
 			.unwrap()
 			.keys()
 			.map(|key| (key.clone(), row[key.as_str()].clone()))
 			.collect();
+		// Payees a rule made get fresh ids on each side, so compare their names.
+		if let Some(id) = actual["description"].as_str().filter(|id| !known(id)) {
+			let name = actual_payees[id];
+			actual.insert("description".into(), json!(format!("made: {name}")));
+			made_payees += 1;
+		}
+		if let Some(id) = expected["description"].as_str().filter(|id| !known(id)) {
+			let name = &payees
+				.created
+				.iter()
+				.find(|(made, _)| made.as_str() == id)
+				.unwrap()
+				.1;
+			expected["description"] = json!(format!("made: {name}"));
+		}
 		if Value::Object(actual.clone()) != expected {
 			mismatches.push(format!(
 				"{input}\n  actual:  {}\n  veritas: {expected}\n  rules applied: {:?}",
@@ -390,6 +436,40 @@ fn rule_outcomes_match_the_oracle() {
 		added.len(),
 		mismatches.len()
 	);
+	let base = common::dump(
+		&oracle,
+		&repo_root()
+			.join("fixtures/synthetic/small.zip")
+			.to_string_lossy(),
+		TODAY,
+	);
+	let before: Vec<&str> = base["tables"]["payees"]["rows"]
+		.as_array()
+		.into_iter()
+		.flatten()
+		.filter_map(|row| row["id"].as_str())
+		.collect();
+	let mut actual_made: Vec<&str> = actual_payees
+		.iter()
+		.filter(|(id, name)| !known(id) && !before.contains(id) && !name.is_empty())
+		.map(|(_, name)| *name)
+		.collect();
+	let mut veritas_made: Vec<&str> = payees
+		.created
+		.iter()
+		.map(|(_, name)| name.as_str())
+		.collect();
+	actual_made.sort_unstable();
+	veritas_made.sort_unstable();
+	assert!(
+		!veritas_made.is_empty(),
+		"no rule made a payee, so set payee_name went unproven"
+	);
+	assert_eq!(
+		veritas_made, actual_made,
+		"set payee_name made different payees"
+	);
+	eprintln!("both made payees {veritas_made:?}; {made_payees} transactions kept one");
 	assert!(
 		rules_fired > added.len() / 2,
 		"too few rules fired to prove much: {rules_fired}"
@@ -595,7 +675,11 @@ fn regex_conditions_match_the_oracle() {
 	let mut mismatches = Vec::new();
 	let mut matched = 0;
 	for input in &transactions {
-		let outcome = book.run(&rule_transaction(input, account), &budget);
+		let outcome = book.run(
+			&rule_transaction(input, account),
+			&budget,
+			&mut BudgetPayees::new(&budget, || PayeeId::new("made")),
+		);
 		assert!(
 			outcome.undetermined.is_empty(),
 			"{input}: {:?}",

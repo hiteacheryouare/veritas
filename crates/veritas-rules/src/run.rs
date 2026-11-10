@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use veritas_domain::{BudgetData, CategoryId, ConditionsOp, PayeeId, RuleId, ScheduleId};
 
-use crate::action::{Action, RuleTransaction};
+use crate::action::{Action, RuleTransaction, SetField};
 use crate::condition::{Field, FieldValue};
 use crate::rule::{IndexKey, ParsedRule, RuleSupport, rank};
 
@@ -28,6 +28,59 @@ pub struct RunOutcome {
 	/// Rules Actual would have evaluated or applied here but Veritas can't
 	/// (a regex condition, a template action). Their effect is missing.
 	pub undetermined: Vec<RuleId>,
+}
+
+/// Where `set payee_name` finds or makes its payee.
+pub trait PayeeDirectory {
+	fn find_or_create(&mut self, name: &str) -> PayeeId;
+}
+
+/// Finds payees in the budget the way `getPayeeByName` does (a live payee
+/// whose lowercased name matches, `db/index.ts:723-728`) and records the ones
+/// a rule creates. The store inserts each like `insertPayee` (`:576-586`): a
+/// `payees` row with just the name, plus its identity `payee_mapping` row.
+/// Transfer payees never match, since their stored name is empty.
+pub struct BudgetPayees<'a> {
+	budget: &'a BudgetData,
+	new_id: Box<dyn FnMut() -> PayeeId + 'a>,
+	pub created: Vec<(PayeeId, String)>,
+}
+
+impl<'a> BudgetPayees<'a> {
+	pub fn new(budget: &'a BudgetData, new_id: impl FnMut() -> PayeeId + 'a) -> Self {
+		BudgetPayees {
+			budget,
+			new_id: Box::new(new_id),
+			created: Vec::new(),
+		}
+	}
+}
+
+impl PayeeDirectory for BudgetPayees<'_> {
+	fn find_or_create(&mut self, name: &str) -> PayeeId {
+		let wanted = name.to_lowercase();
+		let existing = self
+			.budget
+			.payees
+			.values()
+			.find(|payee| {
+				!payee.tombstone
+					&& payee.transfer_account.is_none()
+					&& payee.name.to_lowercase() == wanted
+			})
+			.map(|payee| payee.id.clone())
+			.or_else(|| {
+				self.created
+					.iter()
+					.find(|(_, created)| created.to_lowercase() == wanted)
+					.map(|(id, _)| id.clone())
+			});
+		existing.unwrap_or_else(|| {
+			let id = (self.new_id)();
+			self.created.push((id.clone(), name.to_owned()));
+			id
+		})
+	}
 }
 
 /// Three-valued outcome of a rule's conditions: a condition Veritas can't
@@ -110,8 +163,13 @@ impl RuleBook {
 			.collect()
 	}
 
-	pub fn run(&self, transaction: &RuleTransaction, budget: &BudgetData) -> RunOutcome {
-		let payee_name = transaction
+	pub fn run(
+		&self,
+		transaction: &RuleTransaction,
+		budget: &BudgetData,
+		payees: &mut dyn PayeeDirectory,
+	) -> RunOutcome {
+		let mut payee_name = transaction
 			.payee
 			.as_ref()
 			.and_then(|payee| budget.payees.get(payee))
@@ -134,6 +192,7 @@ impl RuleBook {
 		};
 
 		let mut working = transaction.clone();
+		let mut new_payee = false;
 		let mut outcome = RunOutcome {
 			transaction: transaction.clone(),
 			applied: Vec::new(),
@@ -165,13 +224,30 @@ impl RuleBook {
 					match actions {
 						Some(actions) => {
 							for action in actions {
-								action.apply(&mut working);
+								match action {
+									Action::SetPayeeName(name) => {
+										payee_name = name.clone();
+										new_payee = true;
+									}
+									Action::Set(SetField::Payee(_)) => {
+										action.apply(&mut working);
+										new_payee = false;
+									}
+									other => other.apply(&mut working),
+								}
 							}
 							outcome.applied.push(rule.id.clone());
 						}
 						None => outcome.undetermined.push(rule.id.clone()),
 					}
 				}
+			}
+			if new_payee {
+				working.payee = payee_name
+					.as_deref()
+					.filter(|name| !name.is_empty())
+					.map(|name| payees.find_or_create(name));
+				new_payee = false;
 			}
 		}
 		outcome.transaction = working;
@@ -353,7 +429,58 @@ mod tests {
 	}
 
 	fn run(budget: &BudgetData, txn: &RuleTransaction) -> RunOutcome {
-		RuleBook::new(budget).run(txn, budget)
+		RuleBook::new(budget).run(
+			txn,
+			budget,
+			&mut BudgetPayees::new(budget, || PayeeId::new("made")),
+		)
+	}
+
+	#[test]
+	fn set_payee_name_finds_or_makes_the_payee_after_each_rule() {
+		// transaction-rules.ts:1210-1227: `payee` becomes the payee by that
+		// name once the rule finishes, so the next rule sees the id.
+		let mut budget = budget();
+		add_rule(
+			&mut budget,
+			"rename",
+			RuleStage::Pre,
+			ConditionsOp::And,
+			json!([{"op": "contains", "field": "imported_payee", "value": "amzn"}]),
+			json!([{"op": "set", "field": "payee_name", "value": "AMAZON"}]),
+		);
+		add_rule(
+			&mut budget,
+			"after",
+			RuleStage::Default,
+			ConditionsOp::And,
+			json!([{"op": "is", "field": "payee", "value": "amazon"}, {"op": "is", "field": "payee_name", "value": "amazon"}]),
+			json!([{"op": "set", "field": "category", "value": "groceries"}]),
+		);
+		add_rule(
+			&mut budget,
+			"new",
+			RuleStage::Default,
+			ConditionsOp::And,
+			json!([{"op": "contains", "field": "imported_payee", "value": "corner"}]),
+			json!([{"op": "set", "field": "payee_name", "value": "Corner Store"}]),
+		);
+		let book = RuleBook::new(&budget);
+		let mut payees = BudgetPayees::new(&budget, || PayeeId::new("made"));
+		let outcome = book.run(&transaction("AMZN Mktp"), &budget, &mut payees);
+		assert_eq!(outcome.transaction.payee, Some(PayeeId::new("amazon")));
+		assert_eq!(
+			outcome.transaction.category,
+			Some(CategoryId::new("groceries"))
+		);
+		let outcome = book.run(&transaction("Corner shop"), &budget, &mut payees);
+		assert_eq!(outcome.transaction.payee, Some(PayeeId::new("made")));
+		assert_eq!(
+			payees.created,
+			[(PayeeId::new("made"), "Corner Store".to_owned())]
+		);
+		book.run(&transaction("corner again"), &budget, &mut payees);
+		assert_eq!(payees.created.len(), 1);
 	}
 
 	#[test]

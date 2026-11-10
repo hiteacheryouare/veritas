@@ -19,7 +19,7 @@ use veritas_domain::{
 	Account, AccountId, BudgetData, BudgetType, Category, CategoryGroupId, CategoryId, Payee,
 	PayeeId, RuleId,
 };
-use veritas_rules::{ParsedRule, RuleBook, RuleSupport};
+use veritas_rules::{BudgetPayees, ParsedRule, RuleBook, RuleSupport};
 
 const TODAY: &str = "2026-12-15";
 
@@ -805,7 +805,11 @@ fn a_households_rules_categorize_two_months_of_statements_like_actual() {
 	for (n, purchase) in purchases.iter().enumerate() {
 		let input = as_input(purchase, n);
 		let account_id = account(purchase.account);
-		let outcome = book.run(&rule_transaction(&input, &account_id), &budget);
+		let outcome = book.run(
+			&rule_transaction(&input, &account_id),
+			&budget,
+			&mut BudgetPayees::new(&budget, || PayeeId::new("made")),
+		);
 		assert!(outcome.undetermined.is_empty(), "{}", purchase.label);
 		for id in &outcome.applied {
 			*fired.entry(rule_name(id)).or_default() += 1;
@@ -1139,7 +1143,11 @@ fn rules_veritas_cannot_run_are_read_only_untouched_and_never_half_applied() {
 	for (n, purchase) in purchases.iter().enumerate() {
 		let input = as_input(purchase, n);
 		let account_id = account(purchase.account);
-		let outcome = book.run(&rule_transaction(&input, &account_id), &budget);
+		let outcome = book.run(
+			&rule_transaction(&input, &account_id),
+			&budget,
+			&mut BudgetPayees::new(&budget, || PayeeId::new("made")),
+		);
 		let names: Vec<&str> = outcome.undetermined.iter().map(rule_name).collect();
 		for name in &names {
 			assert!(read_only.contains(name), "{}: {name}", purchase.label);
