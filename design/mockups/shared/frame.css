@@ -180,8 +180,6 @@ svg.icon.small { width: 12px; height: 12px; }
 .ring.low .value { stroke: var(--color-money-low-fill); }
 .ring.income .value { stroke: var(--color-money-income-fill); }
 
-.tag { --tag-ink: var(--tag); color: var(--tag-ink); font-weight: var(--weight-medium); white-space: nowrap; cursor: pointer; }
-[data-theme="dark"] .tag { --tag-ink: color-mix(in srgb, var(--tag) 62%, #f0f0f4); }
-.tag:hover { text-decoration: underline; text-underline-offset: 2px; }
-body[data-tags="pills"] .tag { display: inline-block; padding: 1px 7px; border-radius: 9px; background: var(--tag); color: #fbfbfd; font-size: var(--text-caption); line-height: 16px; }
-body[data-tags="pills"] .tag:hover { text-decoration: none; filter: brightness(1.08); }
+.tag { display: inline-block; padding: 1px 7px; border-radius: 9px; background: var(--tag); color: #fbfbfd; font-size: var(--text-caption); font-weight: var(--weight-medium); line-height: 16px; white-space: nowrap; cursor: pointer; }
+[data-theme="dark"] .tag { background: color-mix(in srgb, var(--tag) 88%, #f0f0f4); }
+.tag:hover { filter: brightness(1.08); }

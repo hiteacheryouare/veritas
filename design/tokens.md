@@ -47,7 +47,7 @@ The accent is graphite. Interface chrome stays neutral, so the only color on scr
 
 ### Tags
 
-A tag's color is the `color` stored in Actual's `tags` table, used as is in light mode and mixed 38% toward white in dark mode so it stays readable. Tags in notes render as colored text by default. The mockups can also show Actual-style pills (white text on the tag color) for comparison.
+Tags render as pills, as in Actual: the tag's stored `color` from Actual's `tags` table as the background and #fbfbfd text, caption size, radius 9. In dark mode the background is mixed 12% toward white so dark tag colors stay distinct from the dark surface.
 
 ### Money states
 

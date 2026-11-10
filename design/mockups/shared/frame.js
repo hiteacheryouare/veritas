@@ -95,21 +95,12 @@ const setView = (view) => {
 	document.querySelectorAll('.view-switch[aria-label="Appearance"] button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
 };
 
-const setTags = (style) => {
-	document.body.dataset.tags = style;
-	document.querySelectorAll('.view-switch[aria-label="Tag style"] button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.tags === style)));
-};
-
 const bar = document.querySelector('.page-bar');
 if (bar) {
-	const tagSwitch = document.querySelector('.tag') ? '<div class="view-switch" role="group" aria-label="Tag style"><button type="button" data-tags="text">Tags as text</button><button type="button" data-tags="pills">Tags as pills</button></div>' : '';
 	bar.insertAdjacentHTML('afterbegin', '<a href="index.html">All screens</a>');
-	bar.insertAdjacentHTML('beforeend', `<div class="bar-controls">${tagSwitch}<div class="view-switch" role="group" aria-label="Appearance"><button type="button" data-view="both">Both</button><button type="button" data-view="light">Light</button><button type="button" data-view="dark">Dark</button></div></div>`);
+	bar.insertAdjacentHTML('beforeend', `<div class="bar-controls"><div class="view-switch" role="group" aria-label="Appearance"><button type="button" data-view="both">Both</button><button type="button" data-view="light">Light</button><button type="button" data-view="dark">Dark</button></div></div>`);
 	bar.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
-	bar.querySelectorAll('[data-tags]').forEach((b) => b.addEventListener('click', () => setTags(b.dataset.tags)));
 }
-
-setTags(params.get('tags') === 'pills' ? 'pills' : 'text');
 
 if (params.has('embed')) {
 	document.body.classList.add('embed');
