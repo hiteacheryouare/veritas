@@ -7,6 +7,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, SystemTime};
 
 /// A fresh directory under Cargo's per-target temp folder, removed on drop.
 pub struct TempDir(PathBuf);
@@ -46,4 +47,14 @@ pub fn entries(dir: &Path) -> Vec<String> {
 		.collect();
 	names.sort();
 	names
+}
+
+/// Backdates a file, so it reads as left behind `by` ago.
+pub fn age_file(path: &Path, by: Duration) {
+	fs::File::options()
+		.write(true)
+		.open(path)
+		.unwrap()
+		.set_modified(SystemTime::now() - by)
+		.unwrap();
 }

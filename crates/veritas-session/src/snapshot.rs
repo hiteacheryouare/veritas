@@ -7,7 +7,9 @@ use chrono::{DateTime, NaiveDateTime, TimeDelta, Utc};
 use rusqlite::{Connection, OpenFlags};
 use veritas_domain::CoreError;
 
-use crate::fsio::{io_error, storage_error, sync_dir, sync_file, utf8};
+use crate::fsio::{
+	io_error, reserve_partial, storage_error, sweep_stale_partials, sync_dir, sync_file, utf8,
+};
 use crate::lock::WriterLock;
 use crate::retention::{RetentionPolicy, expired};
 
@@ -15,7 +17,6 @@ pub const SNAPSHOTS_DIR: &str = "snapshots";
 
 const STAMP: &str = "%Y%m%dT%H%M%S%3fZ";
 const EXTENSION: &str = ".sqlite";
-const PARTIAL: &str = ".partial";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SnapshotReason {
@@ -91,14 +92,6 @@ impl Snapshot {
 	}
 }
 
-fn partial_path(path: &Path) -> PathBuf {
-	let name = path
-		.file_name()
-		.map(|name| name.to_string_lossy().into_owned())
-		.unwrap_or_default();
-	path.with_file_name(format!(".{name}{PARTIAL}"))
-}
-
 /// Copies the committed state of `db` into `snapshots_dir` with `VACUUM INTO`.
 /// It reads through its own connection, so the session can stay open.
 pub fn take_snapshot(
@@ -111,31 +104,48 @@ pub fn take_snapshot(
 	let source =
 		Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(storage_error)?;
 
-	let mut taken_at = at;
-	let mut path = snapshots_dir.join(Snapshot::file_name(taken_at, reason));
-	while path.exists() {
-		taken_at += TimeDelta::milliseconds(1);
-		path = snapshots_dir.join(Snapshot::file_name(taken_at, reason));
-	}
-	let partial = partial_path(&path);
-	remove_if_present(&partial)?;
-
+	// VACUUM INTO accepts an empty file, so reserving it first keeps two
+	// snapshots taken at once from writing into the same one.
+	let (partial, reserved) = reserve_partial(snapshots_dir, &Snapshot::file_name(at, reason))?;
+	drop(reserved);
 	let written = source
 		.execute("VACUUM INTO ?1", [utf8(&partial)?])
 		.map_err(storage_error)
 		.and_then(|_| source.close().map_err(|(_, error)| storage_error(error)))
 		.and_then(|()| sync_file(&partial))
-		.and_then(|()| fs::rename(&partial, &path).map_err(io_error("save", &path)));
-	if let Err(error) = written {
-		let _ = fs::remove_file(&partial);
-		return Err(error);
-	}
+		.and_then(|()| publish(&partial, snapshots_dir, reason, at));
+	let _ = fs::remove_file(&partial);
+	let snapshot = written?;
 	sync_dir(snapshots_dir);
-	Ok(Snapshot {
-		path,
-		taken_at,
-		reason,
-	})
+	Ok(snapshot)
+}
+
+/// Gives a finished copy its snapshot name. A hard link never replaces an
+/// existing file, so a snapshot taken in the same millisecond moves on to
+/// the next one instead of overwriting it.
+fn publish(
+	partial: &Path,
+	snapshots_dir: &Path,
+	reason: SnapshotReason,
+	at: DateTime<Utc>,
+) -> Result<Snapshot, CoreError> {
+	let mut taken_at = at;
+	loop {
+		let path = snapshots_dir.join(Snapshot::file_name(taken_at, reason));
+		match fs::hard_link(partial, &path) {
+			Ok(()) => {
+				return Ok(Snapshot {
+					path,
+					taken_at,
+					reason,
+				});
+			}
+			Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+				taken_at += TimeDelta::milliseconds(1);
+			}
+			Err(error) => return Err(io_error("save", &path)(error)),
+		}
+	}
 }
 
 /// Every snapshot in `snapshots_dir`, newest first. Files Veritas didn't name
@@ -157,8 +167,9 @@ pub fn list_snapshots(snapshots_dir: &Path) -> Result<Vec<Snapshot>, CoreError> 
 	Ok(snapshots)
 }
 
-/// Deletes the snapshots `policy` no longer keeps, plus copies left half
-/// written by a crash. Returns what was deleted.
+/// Deletes the snapshots `policy` no longer keeps, plus copies a crash left
+/// half written. A copy still being written is never touched. Returns the
+/// snapshots deleted.
 pub fn prune_snapshots(
 	snapshots_dir: &Path,
 	policy: &RetentionPolicy,
@@ -168,16 +179,7 @@ pub fn prune_snapshots(
 	for snapshot in &gone {
 		remove_if_present(&snapshot.path)?;
 	}
-	for entry in fs::read_dir(snapshots_dir)
-		.map_err(io_error("read", snapshots_dir))?
-		.flatten()
-	{
-		let name = entry.file_name();
-		let name = name.to_string_lossy();
-		if name.starts_with('.') && name.ends_with(PARTIAL) {
-			remove_if_present(&entry.path())?;
-		}
-	}
+	sweep_stale_partials(snapshots_dir, None);
 	Ok(gone)
 }
 
@@ -207,13 +209,21 @@ pub fn restore_snapshot(
 		None
 	};
 
-	let staged = partial_path(db);
-	let copied = fs::copy(snapshot, &staged)
+	let dir = db.parent().unwrap_or(Path::new("."));
+	let name = db
+		.file_name()
+		.map(|name| name.to_string_lossy().into_owned())
+		.unwrap_or_default();
+	sweep_stale_partials(dir, Some(&name));
+	let (staged, mut file) = reserve_partial(dir, &name)?;
+	let copied = fs::File::open(snapshot)
+		.and_then(|mut source| std::io::copy(&mut source, &mut file))
+		.and_then(|_| file.sync_all())
 		.map_err(io_error("copy", snapshot))
-		.and_then(|_| sync_file(&staged))
 		.and_then(|()| remove_if_present(&sidecar(db, "-wal")))
 		.and_then(|()| remove_if_present(&sidecar(db, "-shm")))
 		.and_then(|()| fs::rename(&staged, db).map_err(io_error("replace", db)));
+	drop(file);
 	if let Err(error) = copied {
 		let _ = fs::remove_file(&staged);
 		return Err(error);

@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, TimeDelta, Utc};
 use rusqlite::Connection;
-use support::{TempDir, entries};
+use support::{TempDir, age_file, entries};
 use veritas_domain::CoreError;
 use veritas_session::{
 	Access, LOCK_FILE, RetentionPolicy, SNAPSHOTS_DIR, SnapshotReason, WriterLock, acquire,
@@ -228,10 +228,15 @@ fn pruning_applies_the_policy_and_clears_half_written_copies() {
 		)
 		.unwrap();
 	}
-	let partial = budget
+	let crashed = budget
 		.snapshots
-		.join(".20261101T000000000Z-hourly.sqlite.partial");
-	fs::write(&partial, b"half").unwrap();
+		.join(".20261101T000000000Z-hourly.sqlite.1234-0.partial");
+	fs::write(&crashed, b"half").unwrap();
+	age_file(&crashed, std::time::Duration::from_secs(2 * 60 * 60));
+	let in_progress = budget
+		.snapshots
+		.join(".20261101T000000000Z-hourly.sqlite.5678-0.partial");
+	fs::write(&in_progress, b"still copying").unwrap();
 	fs::write(budget.snapshots.join("keep-me.txt"), b"mine").unwrap();
 
 	let policy = RetentionPolicy {
@@ -244,7 +249,8 @@ fn pruning_applies_the_policy_and_clears_half_written_copies() {
 	let gone = prune_snapshots(&budget.snapshots, &policy, now).unwrap();
 
 	assert_eq!(gone.len(), 8);
-	assert!(!partial.exists());
+	assert!(!crashed.exists());
+	assert!(in_progress.exists());
 	let left: Vec<_> = list_snapshots(&budget.snapshots)
 		.unwrap()
 		.into_iter()
@@ -636,4 +642,35 @@ fn restore_refuses_a_lock_held_for_another_budget() {
 
 	assert!(matches!(result, Err(CoreError::Internal(_))), "{result:?}");
 	assert_eq!(balance(&mine.db), 3);
+}
+
+#[test]
+fn snapshots_taken_at_the_same_instant_from_two_threads_both_survive() {
+	// R-REL-3: the background open snapshot and an hourly one can overlap.
+	let (budget, _connection) = budget("snap-race");
+	let now = at("2026-11-09T20:30:00Z");
+	let taken: Vec<_> = std::thread::scope(|scope| {
+		let threads: Vec<_> = (0..4)
+			.map(|_| {
+				scope.spawn(|| {
+					take_snapshot(&budget.db, &budget.snapshots, SnapshotReason::Hourly, now)
+						.unwrap()
+				})
+			})
+			.collect();
+		threads
+			.into_iter()
+			.map(|thread| thread.join().unwrap())
+			.collect()
+	});
+
+	let mut paths: Vec<_> = taken.iter().map(|snapshot| snapshot.path.clone()).collect();
+	paths.sort();
+	paths.dedup();
+	assert_eq!(paths.len(), 4);
+	for snapshot in &taken {
+		assert_eq!(integrity(&snapshot.path), "ok");
+		assert_eq!(balance(&snapshot.path), 120_000);
+	}
+	assert_eq!(entries(&budget.snapshots).len(), 4);
 }
