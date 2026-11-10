@@ -778,6 +778,9 @@ dependencies = [
 name = "veritas-rules"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "serde_json",
+ "thiserror",
  "veritas-domain",
 ]
 
