@@ -240,3 +240,13 @@ Every decision behind Veritas, so no question gets asked twice. D1–D24 are PLA
 - **Options:** add the `regex` crate / keep those rules read-only
 - **Decision:** Add `regex` (rust-lang) to Appendix B. JS-only constructs it can't express, such as lookaround and backreferences, still flag the transaction "may need Actual".
 - **Date:** 2026-11-10
+
+### D48. Does D42 cover a contract PR the Architect files from another workstream's commit?
+- **Options:** the Architect signs it / treat it as architect-authored
+- **Decision:** Treat it as architect-authored. The Architect opening or cherry-picking a contract PR counts as authoring it, so the auto-mode classifier's self-approval block applies, and the independent reviewer clears it (D42). First used on PR #21.
+- **Date:** 2026-11-10
+
+### D49. Who gives the finance sign-off on a spec PR Fred wrote?
+- **Options:** an independent Fred instance / the code reviewer alone / Ryan
+- **Decision:** An independent Fred instance, a fresh agent that had no part in writing the spec, re-derives the examples and signs off as `fred`. Fred's earlier self-sign-offs on #6, #10 and #18 happened before this rule.
+- **Date:** 2026-11-10
