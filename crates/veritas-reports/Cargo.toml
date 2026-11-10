@@ -10,5 +10,8 @@ publish.workspace = true
 veritas-domain = { path = "../veritas-domain" }
 veritas-engine = { path = "../veritas-engine" }
 
+[dev-dependencies]
+proptest.workspace = true
+
 [lints]
 workspace = true

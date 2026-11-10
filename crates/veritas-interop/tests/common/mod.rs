@@ -83,13 +83,23 @@ pub fn oracle_dir() -> PathBuf {
 	repo_root().join("tools/actual-oracle")
 }
 
+/// CI sets VERITAS_REQUIRE_ORACLE so a missing oracle fails the run instead of
+/// letting a parity test pass without comparing anything.
+fn skip_without_oracle(what: &str) {
+	assert!(
+		std::env::var_os("VERITAS_REQUIRE_ORACLE").is_none(),
+		"VERITAS_REQUIRE_ORACLE is set but tools/actual-oracle/node_modules is missing"
+	);
+	eprintln!(
+		"skipping {what}: tools/actual-oracle/node_modules is missing, run `cargo xtask oracle setup`"
+	);
+}
+
 /// `tools/actual-oracle dump --raw-only`, or `None` (with a note on stderr)
 /// when the oracle isn't installed.
 pub fn oracle_raw_dump(zip_path: &Path) -> Option<Vec<u8>> {
 	if !oracle_dir().join("node_modules").exists() {
-		eprintln!(
-			"skipping the oracle comparison: tools/actual-oracle/node_modules is missing, run `cargo xtask oracle setup`"
-		);
+		skip_without_oracle("the oracle comparison");
 		return None;
 	}
 	let output = Command::new("node")
@@ -111,9 +121,7 @@ fn oracle_installed() -> bool {
 	if oracle_dir().join("node_modules").exists() {
 		return true;
 	}
-	eprintln!(
-		"skipping the Actual side: tools/actual-oracle/node_modules is missing, run `cargo xtask oracle setup`"
-	);
+	skip_without_oracle("the Actual side");
 	false
 }
 
