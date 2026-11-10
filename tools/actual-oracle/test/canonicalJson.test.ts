@@ -33,3 +33,10 @@ test('keys sort by code point, not by UTF-16 unit', () => {
 test('empty containers and nested objects follow the layout rules', () => {
 	assert.equal(toCanonical({ b: [], a: {}, c: { d: [1, [2, { z: 1, y: 2 }]] } }), '{\n\t"a": {},\n\t"b": [],\n\t"c": {\n\t\t"d": [\n\t\t\t1,\n\t\t\t[2,{"y":2,"z":1}]\n\t\t]\n\t}\n}\n');
 });
+
+test('strings escape only quotes, backslashes, control characters and lone surrogates', () => {
+	assert.equal(
+		toCanonical('\u0000\u0008\t\n\u000c\r\u001f"\\/\u007f é\ud800'),
+		'"\\u0000\\b\\t\\n\\f\\r\\u001f\\"\\\\/\u007f é\\ud800"\n'
+	);
+});

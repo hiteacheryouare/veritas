@@ -57,7 +57,9 @@ The raw part (`metadata`, `schema`, `tables`) comes only from the bytes in the z
 
 ### `metadata`
 
-The parsed `metadata.json` with these keys removed, because they describe one local copy rather than the budget: `cloudFileId`, `encryptKeyId`, `groupId`, `id`, `lastSyncedTimestamp`, `lastUploaded`, `userId`. Every other key, including unknown ones, is kept as-is.
+The parsed `metadata.json` with these keys removed, because they describe one local copy rather than the budget: `cloudFileId`, `encryptKeyId`, `groupId`, `id`, `lastSyncedTimestamp`, `lastUploaded`, `userId`. Every other key, including unknown ones, is kept.
+
+The file goes through `JSON.parse`, so its values are re-encoded rather than copied. Strings, booleans and `null` survive exactly. Numbers become IEEE-754 doubles and are printed with ECMAScript `Number.prototype.toString`: `1.0` prints as `1`, `1e3` as `1000`, and an integer above 2^53 loses precision. A metadata number never gets the `.0` suffix that marks a SQLite REAL. Duplicate keys keep the last value.
 
 ### `schema`
 
@@ -77,9 +79,11 @@ A row is an object with one key per column. Its values keep the SQLite storage c
 | NULL | `null` | `null` |
 | INTEGER | JSON integer, every digit kept (64-bit) | `20261030` |
 | REAL | JSON number that always has a `.` or an exponent | `16384.0`, `0.5`, `1e+21` |
-| REAL ±∞ | `{"$real": "Infinity"}` or `{"$real": "-Infinity"}` | |
-| TEXT | JSON string, decoded as UTF-8 (invalid bytes become U+FFFD) | `"Rent"` |
+| REAL ±∞ | `{"$real":"Infinity"}` or `{"$real":"-Infinity"}` | |
+| TEXT | JSON string, decoded from UTF-8 (see below) | `"Rent"` |
 | BLOB | `{"$blob": "<lowercase hex>"}` | `{"$blob":"00ff"}` |
+
+TEXT bytes are decoded as UTF-8, and each invalid sequence becomes one U+FFFD per maximal subpart. That is the WHATWG decoder's rule and the one Rust's `String::from_utf8_lossy` follows. Examples: `F0 80 80` gives three U+FFFD, `E2 82 41` gives U+FFFD then `A`, `ED A0 80` (an encoded surrogate) gives three U+FFFD.
 
 A REAL is printed with ECMAScript `Number.prototype.toString` (the shortest digits that round-trip, exponent form below 1e-6 and from 1e21 up, written `1e+21`/`1e-7`), with `.0` appended when that text has neither `.` nor `e`. `-0.0` prints as `0.0`. JSON text columns such as `rules.conditions` stay strings; they are never parsed.
 
@@ -107,9 +111,9 @@ Values come from Actual after `api.importBudget` loads the zip into the scratch 
 }
 ```
 
-- `months` has one entry per month in `api.getBudgetMonths()`, which is three months before the earliest transaction through twelve months after today. Each month is `api.getBudgetMonth(month)` with names and flags dropped and categories pulled out of their groups. The fields are whatever Actual returns for the budget type. In envelope budgets that means `budgeted`, `spent`, `balance` and `carryover` for expense categories and `received` for income ones.
+- `months` has one entry per month in `api.getBudgetMonths()`. The first month is three months before the earlier of the current month and the earliest transaction date. The earliest date counts tombstoned transactions but not split children. The last month is eleven months after the current month, because the API's list leaves out the final month of the budget bounds (`reference/actual/packages/loot-core/src/server/budget/base.ts:423`, `reference/actual/packages/loot-core/src/server/api.ts:451`). Each month is `api.getBudgetMonth(month)` with names and flags dropped and categories pulled out of their groups. The fields are whatever Actual returns for the budget type. In envelope budgets that means `budgeted`, `spent`, `balance` and `carryover` for expense categories and `received` for income ones.
 - `accounts` covers every account that isn't tombstoned, closed ones included. `balance` is `api.getAccountBalance(id)`, which counts transactions dated up to today.
-- `schedules` has `nextDate` (Actual's `next_date`), and `upcoming` is the next 12 dates from today via `api.getScheduleDates`. `upcoming` is `null` when Actual can't expand the schedule's date (for example an impossible start date).
+- `schedules` has `nextDate` (Actual's `next_date`), and `upcoming` is the next 12 dates from today via `api.getScheduleDates`. `upcoming` is `[]` for a completed schedule, and `null` when Actual can't expand the schedule's date (for example an impossible start date).
 - `computed` reflects what Actual shows right after opening the file. It does not auto-post schedules. Use the `runSchedules` op for that.
 
 ### Text layout
@@ -119,7 +123,9 @@ The output is meant to be compared byte for byte, so the layout is fixed:
 - Object keys are sorted by Unicode code point (UTF-8 byte order).
 - Objects are printed one key per line, indented with tabs, as `"key": value`.
 - An array is printed one element per line, and each element is written compactly on that line (`{"a":1,"b":[2,3]}`, no spaces, keys sorted). This puts each table row on its own line.
-- Empty objects and arrays are `{}` and `[]`. Strings are escaped like `JSON.stringify`. The file ends with one newline.
+- Empty objects and arrays are `{}` and `[]`. The file ends with one newline.
+- Numbers outside SQLite cells (in `metadata` and `computed`) are printed with ECMAScript `Number.prototype.toString`.
+- Strings, keys included, are wrapped in `"` and escape exactly these characters: `"` → `\"`, `\` → `\\`, U+0008 → `\b`, U+0009 → `\t`, U+000A → `\n`, U+000C → `\f`, U+000D → `\r`. The rest of U+0000 to U+001F become `\u00xx` with lowercase hex, and a lone surrogate (which can only come from a `\ud800`-style escape in `metadata.json`) becomes `\udxxx` with lowercase hex. Everything else is written as raw UTF-8, including `/`, U+007F, U+2028, U+2029 and all non-ASCII.
 
 `test/canonicalJson.test.ts` pins these rules with small examples the Rust side can copy.
 
@@ -131,7 +137,7 @@ The output is meant to be compared byte for byte, so the layout is fixed:
 
 Ops run in order. The first failure stops the run and names the op's index. Amounts are integer cents, dates are `YYYY-MM-DD`, months are `YYYY-MM`.
 
-**Ids.** Every op that creates something takes the new entity's `id`, so Veritas and the oracle can replay the same file and compare by id. Most of Actual's create handlers generate their own id, always as their first `uuid` call. The oracle hands the supplied id to that first call and then checks that a row with that id exists in the expected table. If the check fails, the op fails. Ids that Actual creates as side effects (transfer payees, the counterpart leg of a transfer, a schedule's rule, mapping rows) come from the seeded generator. Refer to a transfer's counterpart leg as `{"transferOf": "<id of the leg you created>"}`. Refer to an account's transfer payee as `{"transferTo": "<account id>"}` wherever a transaction takes a `payee`.
+**Ids.** Every op that creates something takes the new entity's `id`, so Veritas and the oracle can replay the same file and compare by id. Most of Actual's create handlers generate their own id, always as their first `uuid` call. The oracle first checks that no row in the target table already has the id. Actual's insert is a series of column writes, and a write to an existing row becomes an `UPDATE` (`reference/actual/packages/loot-core/src/server/sync/index.ts:142`), so a reused id would overwrite that row without any error. It then hands the id to Actual's first uuid call and checks afterwards that a row with that id exists in the expected table. If either check fails, the op fails. Ids that Actual creates as side effects (transfer payees, the counterpart leg of a transfer, a schedule's rule, mapping rows) come from the seeded generator. Refer to a transfer's counterpart leg as `{"transferOf": "<id of the leg you created>"}`. Refer to an account's transfer payee as `{"transferTo": "<account id>"}` wherever a transaction takes a `payee`.
 
 | Op | Fields | Runs |
 |---|---|---|
@@ -169,7 +175,7 @@ Ops run in order. The first failure stops the run and names the op's index. Amou
 | `createDashboardPage` | `id`, `name` | `internal.send('dashboard-create')` |
 | `addDashboardWidget` | `id`, `page`, `type`, `width`, `height`, `x?`, `y?`, `meta?` | `internal.send('dashboard-add-widget')`, which keeps the supplied id |
 | `createFilter` | `id`, `name`, `conditions`, `conditionsOp?` | `internal.send('filter-create')` |
-| `setPreference` | `id`, `value` | `api.setPreference`. Setting `budgetType` switches between envelope and tracking. |
+| `setPreference` | `id`, `value` | `api.setPreference`. Setting `budgetType` switches between envelope and tracking. Actual rebuilds the sheet for the new type without awaiting it (`reference/actual/packages/loot-core/src/server/sync/index.ts:552`), so the oracle then recreates the budgets and reopens the file. |
 
 `apply` loads the zip normally, so Actual's month checks apply: a budget month must lie inside the budget's bounds, which start three months before the earliest transaction. Add transactions before budgeting their months.
 
