@@ -2,6 +2,7 @@
 
 mod amount_field;
 mod arithmetic;
+mod budget_edits;
 mod envelope;
 
 pub use amount_field::{
@@ -9,6 +10,7 @@ pub use amount_field::{
 	single_operator_rule,
 };
 pub use arithmetic::{NumberFormat, currency_to_amount, eval_arithmetic};
+pub use budget_edits::{AverageSpan, BudgetEditor, BudgetWrites, CellWrite, Envelope, GoalColumns};
 pub use envelope::{
 	CategoryMonth, EnvelopeSheet, GroupMonth, MonthSheet, MonthSummary, SheetChange,
 };

@@ -18,6 +18,8 @@ use activity::Activity;
 use layout::{Layout, created_months};
 use month::MonthData;
 
+pub(crate) use activity::counted_category;
+pub(crate) use month::safe;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CategoryMonth {
