@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Account book</title>
+<style>
+:root,
+[data-theme="light"] {
+	--wall-1: #c3cbd3;
+	--wall-2: #e3e6ea;
+	--win-bg: #f7f8fa;
+	--win-edge: rgba(24, 28, 40, 0.14);
+	--win-shadow: 0 30px 80px rgba(24, 32, 48, 0.26), 0 4px 14px rgba(24, 32, 48, 0.12);
+	--glass: rgba(234, 236, 241, 0.8);
+	--glass-edge: rgba(250, 251, 253, 0.7);
+	--stripe: rgba(36, 52, 92, 0.035);
+	--text: #1b1e26;
+	--text-2: #5f6470;
+	--text-3: #959aa6;
+	--rule: rgba(27, 30, 38, 0.16);
+	--rule-strong: #1b1e26;
+	--accent: #2c4ea3;
+	--accent-soft: rgba(44, 78, 163, 0.1);
+	--control: rgba(250, 251, 253, 0.85);
+	--control-edge: rgba(24, 28, 40, 0.12);
+	--bar-track: rgba(27, 30, 38, 0.1);
+	--bar-fill: #2c4ea3;
+	--money-available: #1b6d45;
+	--money-low: #95580a;
+	--money-overspent: #b3262c;
+	--money-income: #1b6d45;
+	--field-bg: #fdfdfe;
+}
+
+[data-theme="dark"] {
+	--wall-1: #232a35;
+	--wall-2: #3b4351;
+	--win-bg: #1b1d23;
+	--win-edge: rgba(236, 238, 246, 0.12);
+	--win-shadow: 0 30px 80px rgba(0, 0, 10, 0.55), 0 4px 14px rgba(0, 0, 10, 0.35);
+	--glass: rgba(42, 45, 54, 0.75);
+	--glass-edge: rgba(236, 238, 246, 0.08);
+	--stripe: rgba(200, 212, 255, 0.035);
+	--text: #e8e9ee;
+	--text-2: #a1a5b1;
+	--text-3: #6f7480;
+	--rule: rgba(232, 233, 238, 0.16);
+	--rule-strong: #d9dbe2;
+	--accent: #93abff;
+	--accent-soft: rgba(147, 171, 255, 0.15);
+	--control: rgba(56, 59, 68, 0.8);
+	--control-edge: rgba(236, 238, 246, 0.1);
+	--bar-track: rgba(232, 233, 238, 0.12);
+	--bar-fill: #93abff;
+	--money-available: #5fc890;
+	--money-low: #e8a648;
+	--money-overspent: #ff7a72;
+	--money-income: #5fc890;
+	--field-bg: #15171c;
+}
+
+:root {
+	--font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+	--font-figures: ui-serif, "New York", Georgia, serif;
+	--font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+	--figures: tabular-nums lining-nums;
+	--text-caption: 11px;
+	--text-label: 12px;
+	--text-figure: 14px;
+	--text-heading: 15px;
+	--text-hero: 46px;
+	--weight-regular: 400;
+	--weight-medium: 500;
+	--weight-semibold: 600;
+	--space-1: 4px;
+	--space-2: 8px;
+	--space-3: 12px;
+	--space-4: 16px;
+	--space-5: 24px;
+	--space-6: 32px;
+	--row-height: 28px;
+	--radius-window: 24px;
+	--radius-panel: 18px;
+	--radius-control: 6px;
+	--motion-fast: 150ms;
+	--motion-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	:root { --motion-fast: 0ms; }
+}
+
+* { box-sizing: border-box; }
+
+body {
+	margin: 0;
+	background: #e6e8eb;
+	color: #1b1e26;
+	font-family: var(--font-ui);
+	-webkit-font-smoothing: antialiased;
+}
+
+.page-bar { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-3) var(--space-5); font-size: 13px; }
+.page-bar a { color: #2c4ea3; text-decoration: none; }
+.page-bar h1 { font-size: var(--text-heading); margin: 0; font-weight: var(--weight-semibold); }
+.view-switch { margin-left: auto; display: flex; gap: 2px; background: #d6d8dd; padding: 2px; border-radius: 8px; }
+.view-switch button { border: 0; background: transparent; font: inherit; padding: 4px 12px; border-radius: 6px; cursor: pointer; color: #1b1e26; }
+.view-switch button[aria-pressed="true"] { background: #fbfbfc; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+
+body[data-view="light"] .stage[data-theme="dark"],
+body[data-view="dark"] .stage[data-theme="light"] { display: none; }
+body.embed { background: transparent; }
+body.embed .page-bar { display: none; }
+body.embed .stage { padding: 0; background: none; }
+
+.stage { padding: var(--space-6); background: linear-gradient(160deg, var(--wall-1), var(--wall-2)); display: flex; justify-content: center; }
+
+.window {
+	width: 1280px;
+	height: 800px;
+	flex: none;
+	border-radius: var(--radius-window);
+	background: var(--win-bg);
+	box-shadow: var(--win-shadow), 0 0 0 1px var(--win-edge);
+	overflow: hidden;
+	display: grid;
+	grid-template-columns: 236px 1fr;
+	grid-template-rows: minmax(0, 1fr);
+	color: var(--text);
+	font-size: var(--text-label);
+}
+
+.fig { font-family: var(--font-figures); font-variant-numeric: var(--figures); font-size: var(--text-figure); }
+
+svg.icon { width: 15px; height: 15px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+
+.sidebar {
+	margin: var(--space-2);
+	border-radius: var(--radius-panel);
+	background: var(--glass);
+	backdrop-filter: blur(30px) saturate(1.4);
+	box-shadow: inset 0 0 0 1px var(--glass-edge);
+	padding: 0 var(--space-2) var(--space-3);
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	font-size: 13px;
+}
+
+.traffic { display: flex; gap: 8px; padding: 14px 8px 18px; }
+.traffic span { width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.18); }
+.traffic span:nth-child(1) { background: #ff5f57; }
+.traffic span:nth-child(2) { background: #febc2e; }
+.traffic span:nth-child(3) { background: #28c840; }
+
+.nav-item { display: flex; align-items: center; gap: var(--space-2); height: 28px; padding: 0 var(--space-2); border-radius: var(--radius-control); }
+.nav-item .icon { color: var(--text-2); }
+.nav-item.current { background: var(--accent-soft); font-weight: var(--weight-medium); }
+.nav-item.current .icon { color: var(--accent); }
+.account-group { color: var(--text-3); font-size: var(--text-caption); font-weight: var(--weight-semibold); padding: var(--space-2) var(--space-2) 1px 31px; }
+.account { display: flex; justify-content: space-between; align-items: baseline; padding: 2px var(--space-2) 2px 31px; color: var(--text-2); }
+.account .fig { font-size: 13px; color: var(--text); }
+.sidebar-spacer { flex: 1; }
+
+.main { display: flex; flex-direction: column; min-width: 0; }
+
+.toolbar { height: 52px; display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-4) 0 var(--space-4); }
+.month { display: flex; align-items: center; gap: 2px; }
+.month button { width: 26px; height: 26px; border: 0; background: transparent; color: var(--text-2); display: grid; place-items: center; border-radius: var(--radius-control); cursor: pointer; transition: background var(--motion-fast) var(--motion-ease); }
+.month button:hover { background: var(--accent-soft); color: var(--text); }
+.month h1 { margin: 0 var(--space-1); font-family: var(--font-figures); font-size: 19px; font-weight: var(--weight-regular); letter-spacing: -0.01em; }
+.toolbar-gap { flex: 1; }
+.tool-button { height: 28px; display: flex; align-items: center; gap: 6px; padding: 0 12px; border: 0; border-radius: 14px; background: var(--control); box-shadow: 0 0 0 1px var(--control-edge); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
+.tool-button .icon { color: var(--text-2); }
+.search { width: 200px; height: 28px; display: flex; align-items: center; gap: 6px; padding: 0 10px; border-radius: 14px; background: var(--control); box-shadow: 0 0 0 1px var(--control-edge); color: var(--text-3); font-size: 13px; }
+.search kbd { margin-left: auto; font-family: var(--font-ui); font-size: var(--text-caption); }
+
+.content { flex: 1; overflow: auto; padding: var(--space-2) var(--space-6) var(--space-6) var(--space-5); }
+
+.overview { display: grid; grid-template-columns: 380px 1fr; gap: var(--space-6); align-items: end; margin-bottom: var(--space-5); }
+
+.footing { display: grid; grid-template-columns: 1fr auto; row-gap: 3px; column-gap: var(--space-4); align-items: baseline; }
+.footing .label { color: var(--text-2); font-size: 13px; }
+.footing .fig { text-align: right; }
+.footing .rule { grid-column: 1 / -1; border-top: 1px solid var(--rule-strong); margin: 4px 0 2px; }
+.footing .total-label { font-size: var(--text-heading); font-weight: var(--weight-semibold); align-self: end; padding-bottom: 8px; }
+.footing .total { font-size: var(--text-hero); line-height: 1; letter-spacing: -0.02em; color: var(--money-available); padding-bottom: 6px; border-bottom: 4px double var(--rule-strong); }
+.footing .income { color: var(--money-income); }
+
+.goals { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+.goal-card { display: grid; grid-template-columns: 40px 1fr auto; gap: var(--space-3); align-items: center; padding: var(--space-3) var(--space-3); border-radius: 10px; box-shadow: inset 0 0 0 1px var(--rule); }
+.goal-card h3 { margin: 0; font-size: 13px; font-weight: var(--weight-semibold); }
+.goal-card .pace { display: flex; align-items: center; gap: 4px; color: var(--text-2); margin-top: 2px; }
+.goal-card .pace.behind { color: var(--money-low); }
+.goal-card .amounts { text-align: right; }
+.goal-card .amounts .of { display: block; color: var(--text-3); font-size: var(--text-caption); font-family: var(--font-ui); }
+.ring { width: 40px; height: 40px; transform: rotate(-90deg); }
+.ring circle { fill: none; stroke-width: 4; }
+.ring .track { stroke: var(--bar-track); }
+.ring .value { stroke: var(--accent); }
+
+.ledger { width: 100%; border-collapse: collapse; }
+.ledger th { font-weight: var(--weight-regular); color: var(--text-3); font-size: var(--text-caption); text-align: right; padding: 0 var(--space-3) 6px; border-bottom: 1px solid var(--rule); }
+.ledger th:first-child { text-align: left; padding-left: var(--space-2); }
+.ledger td { height: var(--row-height); padding: 0 var(--space-3); text-align: right; white-space: nowrap; }
+.ledger td:first-child { text-align: left; padding-left: var(--space-2); width: 100%; }
+.ledger tbody tr.line:nth-child(even) td { background: var(--stripe); }
+.ledger tr.line { transition: background var(--motion-fast) var(--motion-ease); }
+.ledger tr.group-head td { height: 34px; padding-top: 10px; font-size: 13px; font-weight: var(--weight-semibold); vertical-align: bottom; }
+.ledger tr.subtotal td { height: 30px; border-top: 1px solid var(--rule-strong); font-weight: var(--weight-semibold); }
+.ledger tr.subtotal td.fig { font-weight: var(--weight-semibold); }
+.ledger tr.subtotal td:first-child { color: var(--text-2); font-weight: var(--weight-regular); }
+.ledger .zero { color: var(--text-3); }
+
+.envelope { display: grid; grid-template-columns: 150px 200px 1fr; align-items: center; gap: var(--space-3); font-size: 13px; }
+.envelope .note { color: var(--text-2); font-size: var(--text-caption); display: inline-flex; align-items: center; gap: 3px; }
+.envelope .note .icon { width: 12px; height: 12px; }
+.envelope .note.low { color: var(--money-low); }
+.envelope .note.overspent { color: var(--money-overspent); }
+
+.bar { display: grid; grid-template-columns: 1fr; height: 3px; background: var(--bar-track);  }
+.bar span { height: 100%; background: var(--bar-fill); transition: width var(--motion-fast) var(--motion-ease); }
+.bar.low span { background: var(--money-low); }
+.bar.overspent span { background: var(--money-overspent); }
+
+.overspent-figure { color: var(--money-overspent); }
+.low-figure { color: var(--money-low); }
+.flag { display: inline-flex; align-items: center; gap: 4px; }
+.flag .icon { width: 12px; height: 12px; }
+
+.ledger tbody tr.line.editing td { background: var(--accent-soft); }
+.amount-field { position: relative; display: inline-flex; align-items: center; justify-content: space-between; gap: var(--space-3); width: 170px; height: 22px; margin-right: -8px; padding: 0 7px; background: var(--field-bg); border-radius: 4px; box-shadow: 0 0 0 1px var(--control-edge), 0 0 0 3px var(--accent); }
+.amount-field .preview { font-family: var(--font-ui); font-size: var(--text-caption); color: var(--text-2); }
+.amount-field .expression { font-family: var(--font-figures); font-variant-numeric: var(--figures); font-size: var(--text-figure); }
+.caret { display: inline-block; width: 1px; height: 15px; margin-left: 1px; background: var(--accent); vertical-align: -2px; }
+</style>
+</head>
+<body data-view="both">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+	<symbol id="i-budget" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 8l9 6 9-6"/></symbol>
+	<symbol id="i-accounts" viewBox="0 0 24 24"><path d="M3 10l9-5 9 5M5 10v7M10 10v7M14 10v7M19 10v7M3 20h18"/></symbol>
+	<symbol id="i-bills" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></symbol>
+	<symbol id="i-goals" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="0.8"/></symbol>
+	<symbol id="i-reports" viewBox="0 0 24 24"><path d="M5 20v-9M10 20V5M15 20v-7M20 20V8"/></symbol>
+	<symbol id="i-insights" viewBox="0 0 24 24"><path d="M3 17l5-5 4 3 4-6"/><path d="M16 9l5-3" stroke-dasharray="2 2.5"/></symbol>
+	<symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></symbol>
+	<symbol id="i-chev-l" viewBox="0 0 24 24"><path d="M14.5 6l-6 6 6 6"/></symbol>
+	<symbol id="i-chev-r" viewBox="0 0 24 24"><path d="M9.5 6l6 6-6 6"/></symbol>
+	<symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></symbol>
+	<symbol id="i-over" viewBox="0 0 24 24"><path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17v.3"/></symbol>
+	<symbol id="i-low" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v7M8.8 11.5L12 14.7l3.2-3.2"/></symbol>
+	<symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M8 12.5l2.7 2.7L16 9.5"/></symbol>
+	<symbol id="i-move" viewBox="0 0 24 24"><path d="M4 8h14M14.5 4.5L18 8l-3.5 3.5M20 16H6M9.5 12.5L6 16l3.5 3.5"/></symbol>
+	<symbol id="i-dense" viewBox="0 0 24 24"><path d="M4 6h16M4 10h16M4 14h16M4 18h16"/></symbol>
+</svg>
+
+<header class="page-bar">
+	<a href="index.html">All directions</a>
+	<h1>Account book</h1>
+	<div class="view-switch" role="group" aria-label="Appearance">
+		<button type="button" data-view="both" aria-pressed="true">Both</button>
+		<button type="button" data-view="light" aria-pressed="false">Light</button>
+		<button type="button" data-view="dark" aria-pressed="false">Dark</button>
+	</div>
+</header>
+
+<main>
+<section class="stage" data-theme="light">
+<div class="window">
+	<nav class="sidebar" aria-label="Sections">
+		<div class="traffic"><span></span><span></span><span></span></div>
+		<a class="nav-item current"><svg class="icon"><use href="#i-budget"/></svg>Budget</a>
+		<a class="nav-item"><svg class="icon"><use href="#i-accounts"/></svg>Accounts</a>
+		<div class="account-group">Cash</div>
+		<div class="account"><span>Checking</span><span class="fig">2,140.18</span></div>
+		<div class="account"><span>Savings</span><span class="fig">8,412.00</span></div>
+		<div class="account-group">Credit</div>
+		<div class="account"><span>Visa</span><span class="fig">(612.33)</span></div>
+		<div class="account-group">Loans</div>
+		<div class="account"><span>Car loan</span><span class="fig">(9,800.00)</span></div>
+		<a class="nav-item"><svg class="icon"><use href="#i-bills"/></svg>Bills</a>
+		<a class="nav-item"><svg class="icon"><use href="#i-goals"/></svg>Goals</a>
+		<a class="nav-item"><svg class="icon"><use href="#i-reports"/></svg>Reports</a>
+		<a class="nav-item"><svg class="icon"><use href="#i-insights"/></svg>Insights</a>
+		<div class="sidebar-spacer"></div>
+		<a class="nav-item"><svg class="icon"><use href="#i-settings"/></svg>Settings</a>
+	</nav>
+
+	<div class="main">
+		<div class="toolbar">
+			<div class="month">
+				<button type="button" aria-label="Previous month (⌘←)"><svg class="icon"><use href="#i-chev-l"/></svg></button>
+				<h1>November 2026</h1>
+				<button type="button" aria-label="Next month (⌘→)"><svg class="icon"><use href="#i-chev-r"/></svg></button>
+			</div>
+			<div class="toolbar-gap"></div>
+			<button class="tool-button" type="button" aria-pressed="false"><svg class="icon"><use href="#i-dense"/></svg>Dense</button>
+			<button class="tool-button" type="button"><svg class="icon"><use href="#i-move"/></svg>Move budget</button>
+			<div class="search"><svg class="icon"><use href="#i-search"/></svg>Go to anything<kbd>⌘K</kbd></div>
+		</div>
+
+		<div class="content">
+			<div class="overview">
+				<div class="footing">
+					<span class="label">Received in November</span><span class="fig income">3,259.40</span>
+					<span class="label">Put in envelopes</span><span class="fig">(2,947.00)</span>
+					<span class="rule"></span>
+					<span class="total-label">To Budget</span><span class="fig total">312.40</span>
+				</div>
+				<div class="goals">
+					<article class="goal-card">
+						<svg class="ring" viewBox="0 0 40 40"><circle class="track" cx="20" cy="20" r="17"/><circle class="value" cx="20" cy="20" r="17" pathLength="100" stroke-dasharray="74.7 100"/></svg>
+						<div>
+							<h3>New laptop</h3>
+							<div class="pace"><svg class="icon"><use href="#i-check"/></svg>On track for March</div>
+						</div>
+						<div class="amounts"><span class="fig">1,120</span><span class="of">of 1,500</span></div>
+					</article>
+					<article class="goal-card">
+						<svg class="ring" viewBox="0 0 40 40"><circle class="track" cx="20" cy="20" r="17"/><circle class="value" cx="20" cy="20" r="17" pathLength="100" stroke-dasharray="39 100"/></svg>
+						<div>
+							<h3>Japan trip</h3>
+							<div class="pace behind"><svg class="icon"><use href="#i-low"/></svg>Needs 410 a month</div>
+						</div>
+						<div class="amounts"><span class="fig">2,340</span><span class="of">of 6,000</span></div>
+					</article>
+				</div>
+			</div>
+
+			<table class="ledger">
+				<thead>
+					<tr><th>Envelope</th><th>Carried in</th><th>Budgeted</th><th>Spent</th><th>Available</th></tr>
+				</thead>
+				<tbody>
+					<tr class="group-head"><td colspan="5">Everyday</td></tr>
+					<tr class="line editing">
+						<td><div class="envelope"><span>Groceries</span><div class="bar"><span style="width:77%"></span></div></div></td>
+						<td class="fig zero">0.00</td>
+						<td><span class="amount-field"><span class="preview">= 452.00</span><span class="expression">412.00+40<span class="caret"></span></span></span></td>
+						<td class="fig">(318.62)</td>
+						<td class="fig">93.38</td>
+					</tr>
+					<tr class="line">
+						<td><div class="envelope"><span>Dining out</span><div class="bar overspent"><span style="width:100%"></span></div><span class="note overspent"><svg class="icon"><use href="#i-over"/></svg>Overspent by 34.75</span></div></td>
+						<td class="fig zero">0.00</td>
+						<td class="fig">180.00</td>
+						<td class="fig">(214.75)</td>
+						<td class="fig overspent-figure"><span class="flag"><svg class="icon"><use href="#i-over"/></svg>(34.75)</span></td>
+					</tr>
+					<tr class="line">
+						<td><div class="envelope"><span>Gas</span><div class="bar"><span style="width:69%"></span></div></div></td>
+						<td class="fig zero">0.00</td>
+						<td class="fig">140.00</td>
+						<td class="fig">(96.10)</td>
+						<td class="fig">43.90</td>
+					</tr>
+					<tr class="line">
+						<td><div class="envelope"><span>Household</span><div class="bar low"><span style="width:85%"></span></div><span class="note low"><svg class="icon"><use href="#i-low"/></svg>Low</span></div></td>
+						<td class="fig zero">0.00</td>
+						<td class="fig">60.00</td>
+						<td class="fig">(51.20)</td>
+						<td class="fig low-figure"><span class="flag"><svg class="icon"><use href="#i-low"/></svg>8.80</span></td>
+					</tr>
+					<tr class="subtotal"><td>Everyday total</td><td class="fig">0.00</td><td class="fig">792.00</td><td class="fig">(680.67)</td><td class="fig">111.33</td></tr>
+
+					<tr class="group-head"><td colspan="5">Housing and utilities</td></tr>
+					<tr class="line"><td><div class="envelope"><span>Rent</span><div class="bar"><span style="width:100%"></span></div></div></td><td class="fig zero">0.00</td><td class="fig">1,650.00</td><td class="fig">(1,650.00)</td><td class="fig zero">0.00</td></tr>
+					<tr class="line"><td><div class="envelope"><span>Electric</span><div class="bar"><span style="width:0%"></span></div><span class="note">Bill due Nov 15</span></div></td><td class="fig zero">0.00</td><td class="fig">90.00</td><td class="fig zero">0.00</td><td class="fig">90.00</td></tr>
+					<tr class="line"><td><div class="envelope"><span>Internet</span><div class="bar"><span style="width:100%"></span></div></div></td><td class="fig zero">0.00</td><td class="fig">70.00</td><td class="fig">(70.00)</td><td class="fig zero">0.00</td></tr>
+					<tr class="line"><td><div class="envelope"><span>Phone</span><div class="bar"><span style="width:100%"></span></div></div></td><td class="fig zero">0.00</td><td class="fig">45.00</td><td class="fig">(45.00)</td><td class="fig zero">0.00</td></tr>
+					<tr class="subtotal"><td>Housing and utilities total</td><td class="fig">0.00</td><td class="fig">1,855.00</td><td class="fig">(1,765.00)</td><td class="fig">90.00</td></tr>
+
+					<tr class="group-head"><td colspan="5">Savings</td></tr>
+					<tr class="line"><td><div class="envelope"><span>General savings</span><div class="bar"><span style="width:0%"></span></div></div></td><td class="fig">1,640.00</td><td class="fig">200.00</td><td class="fig zero">0.00</td><td class="fig">1,840.00</td></tr>
+					<tr class="line"><td><div class="envelope"><span>Car repairs</span><div class="bar"><span style="width:0%"></span></div></div></td><td class="fig">550.00</td><td class="fig">100.00</td><td class="fig zero">0.00</td><td class="fig">650.00</td></tr>
+					<tr class="subtotal"><td>Savings total</td><td class="fig">2,190.00</td><td class="fig">300.00</td><td class="fig zero">0.00</td><td class="fig">2,490.00</td></tr>
+				</tbody>
+			</table>
+		</div>
+	</div>
+</div>
+</section>
+</main>
+
+<script>
+const params = new URLSearchParams(location.search);
+const light = document.querySelector('.stage');
+const dark = light.cloneNode(true);
+dark.dataset.theme = 'dark';
+light.after(dark);
+const setView = (view) => {
+	document.body.dataset.view = view;
+	document.querySelectorAll('.view-switch button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
+};
+document.querySelectorAll('.view-switch button').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
+if (params.has('embed')) document.body.classList.add('embed');
+setView(params.get('view') || 'both');
+const fit = () => {
+	const room = document.body.classList.contains('embed') ? innerWidth : innerWidth - 64;
+	document.querySelectorAll('.window').forEach((w) => { w.style.zoom = Math.min(1, room / 1280); });
+};
+addEventListener('resize', fit);
+fit();
+</script>
+</body>
+</html>

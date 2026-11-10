@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Budget directions</title>
+<style>
+:root {
+	--bg: #eceef1;
+	--surface: #f8f9fa;
+	--text: #1b1d22;
+	--text-2: #5c616c;
+	--rule: rgba(27, 29, 34, 0.12);
+	--accent: #2c55c9;
+	--font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+	--space-2: 8px;
+	--space-3: 12px;
+	--space-4: 16px;
+	--space-5: 24px;
+	--space-6: 40px;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--bg: #1c1e23;
+		--surface: #24272d;
+		--text: #e7e8ec;
+		--text-2: #a0a5b0;
+		--rule: rgba(231, 232, 236, 0.12);
+		--accent: #8eaaff;
+	}
+}
+
+* { box-sizing: border-box; }
+
+body {
+	margin: 0;
+	background: var(--bg);
+	color: var(--text);
+	font-family: var(--font-ui);
+	font-size: 14px;
+	line-height: 1.5;
+	-webkit-font-smoothing: antialiased;
+}
+
+.page { max-width: 1520px; margin: 0 auto; padding: var(--space-6) var(--space-5); }
+
+.intro { display: flex; align-items: end; justify-content: space-between; gap: var(--space-5); flex-wrap: wrap; margin-bottom: var(--space-5); }
+.intro h1 { margin: 0 0 var(--space-2); font-size: 28px; font-weight: 600; letter-spacing: -0.01em; }
+.intro p { margin: 0; max-width: 68ch; color: var(--text-2); }
+
+.view-switch { display: flex; gap: 2px; background: var(--rule); padding: 2px; border-radius: 8px; }
+.view-switch button { border: 0; background: transparent; font: inherit; font-size: 13px; padding: 4px 14px; border-radius: 6px; cursor: pointer; color: var(--text); }
+.view-switch button[aria-pressed="true"] { background: var(--surface); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+.view-switch button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.directions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-5); }
+@media (max-width: 1100px) { .directions { grid-template-columns: 1fr; } }
+
+.direction { display: flex; flex-direction: column; gap: var(--space-3); }
+.preview { display: block; position: relative; aspect-ratio: 1280 / 800; border-radius: 14px; overflow: hidden; background: var(--surface); box-shadow: 0 0 0 1px var(--rule), 0 12px 30px rgba(0, 0, 0, 0.12); }
+.preview iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; pointer-events: none; }
+.direction h2 { margin: var(--space-2) 0 0; font-size: 20px; font-weight: 600; }
+.direction h2 a { color: inherit; text-decoration: none; }
+.direction h2 a:hover { color: var(--accent); }
+.direction p { margin: 0; max-width: 62ch; }
+.direction h3 { margin: var(--space-2) 0 0; font-size: 14px; font-weight: 600; }
+.direction ul { margin: 0; padding-left: 18px; color: var(--text-2); }
+.direction li + li { margin-top: 4px; }
+
+.compare { margin-top: var(--space-6); }
+.compare h2, .questions h2 { font-size: 20px; font-weight: 600; margin: 0 0 var(--space-3); }
+.compare-scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; min-width: 760px; }
+th, td { text-align: left; vertical-align: top; padding: 9px var(--space-4) 9px 0; border-top: 1px solid var(--rule); }
+thead th { border-top: 0; font-weight: 600; }
+tbody th { font-weight: 500; color: var(--text-2); width: 18%; }
+td { width: 27%; }
+
+.questions { margin-top: var(--space-6); max-width: 80ch; }
+.questions ol { margin: 0; padding-left: 20px; }
+.questions li + li { margin-top: var(--space-2); }
+</style>
+</head>
+<body>
+<div class="page">
+	<div class="intro">
+		<div>
+			<h1>Three directions for the Budget screen</h1>
+			<p>Same November, same envelopes, same edit in progress on Groceries. Each one fixes its own type, color, density and how far it strays from stock macOS. Pick one, or name the parts you want blended. Click a preview to open it full size with light and dark side by side.</p>
+		</div>
+		<div class="view-switch" role="group" aria-label="Preview appearance">
+			<button type="button" data-view="light" aria-pressed="true">Light</button>
+			<button type="button" data-view="dark" aria-pressed="false">Dark</button>
+		</div>
+	</div>
+
+	<div class="directions">
+		<article class="direction">
+			<a class="preview" href="a-quiet-native.html" aria-label="Open Quiet native full size"><iframe data-src="a-quiet-native.html" title="Quiet native preview" loading="lazy" tabindex="-1"></iframe></a>
+			<h2><a href="a-quiet-native.html">Quiet native</a></h2>
+			<p>Veritas looks like Apple shipped it: Liquid Glass sidebar, SF Pro at the system's own sizes, grouped lists like System Settings, and the system blue accent. Color is reserved for trouble. Bars stay graphite until an envelope runs low or goes over, and only then do amber and red appear, each with an icon and a word. The opinions live in the fill bars and the goal rings and nowhere else.</p>
+			<h3>Tradeoffs</h3>
+			<ul>
+				<li>It will keep fitting in as macOS changes, and it is the easiest to build with stock SwiftUI.</li>
+				<li>It is the least memorable of the three.</li>
+				<li>At 40px rows you see about a dozen envelopes before scrolling.</li>
+			</ul>
+		</article>
+
+		<article class="direction">
+			<a class="preview" href="b-account-book.html" aria-label="Open Account book full size"><iframe data-src="b-account-book.html" title="Account book preview" loading="lazy" tabindex="-1"></iframe></a>
+			<h2><a href="b-account-book.html">Account book</a></h2>
+			<p>The budget reads like a page from a household ledger. Figures are set in New York with tabular lining numerals, negatives sit in accountant's parentheses, every group gets a ruled subtotal, and To Budget is footed like a statement with a double rule under the total. Rows are 28px, which leaves room for a Carried in column. There is one ink-blue accent, and red is used the way a bookkeeper uses red ink.</p>
+			<h3>Tradeoffs</h3>
+			<ul>
+				<li>Densest and most exact, and it shares a voice with the Statements feature.</li>
+				<li>The 3px bars are the hardest to read at a glance.</li>
+				<li>Parentheses for negatives are a convention you either like or find fussy.</li>
+				<li>The default is already close to Dense, so the Dense toggle would have little left to remove.</li>
+			</ul>
+		</article>
+
+		<article class="direction">
+			<a class="preview" href="c-what-is-left.html" aria-label="Open What's left full size"><iframe data-src="c-what-is-left.html" title="What's left preview" loading="lazy" tabindex="-1"></iframe></a>
+			<h2><a href="c-what-is-left.html">What's left</a></h2>
+			<p>Each envelope row is its own gauge, and it fills with the money that is left: a full row is a full envelope, an empty row is spent, an overspent row is hatched and outlined. Available is the biggest number in every row and spent drops to a caption. The palette is richer: blue for income and To Budget, teal for available, amber for low, red for overspent, and indigo only for focus. Figures use SF Rounded. The edit shows what it does to To Budget before you press Return.</p>
+			<h3>Tradeoffs</h3>
+			<ul>
+				<li>The most readable at a glance and the most clearly its own app.</li>
+				<li>Spent is no longer a column, so comparing spent across envelopes is harder.</li>
+				<li>A long list of tinted rows gets busy, and it will look furthest from future macOS redesigns.</li>
+				<li>Goals get a permanent right rail, which costs width.</li>
+			</ul>
+		</article>
+	</div>
+
+	<section class="compare">
+		<h2>Side by side</h2>
+		<div class="compare-scroll">
+			<table>
+				<thead>
+					<tr><th></th><th>Quiet native</th><th>Account book</th><th>What's left</th></tr>
+				</thead>
+				<tbody>
+					<tr><th>Row height</th><td>40px rows in grouped sections</td><td>28px striped ledger rows</td><td>46px tiles with a 5px gap</td></tr>
+					<tr><th>What the bar shows</th><td>Spent out of budgeted</td><td>Spent out of budgeted, as a thin rule</td><td>What's left, filling the whole row</td></tr>
+					<tr><th>Color</th><td>Graphite, plus amber and red only on problems</td><td>One ink blue, red ink for overspent</td><td>Four money colors plus an indigo focus color</td></tr>
+					<tr><th>Figures</th><td>SF Pro, tabular</td><td>New York, tabular lining</td><td>SF Pro Rounded, tabular</td></tr>
+					<tr><th>Negatives</th><td>−34.75 with an icon</td><td>(34.75) with an icon</td><td>−34.75 on a hatched row</td></tr>
+					<tr><th>To Budget</th><td>Large green figure with one line of context</td><td>A footed sum ending in a double rule</td><td>Large blue figure over a split bar of the month's income</td></tr>
+					<tr><th>Goals</th><td>Two cards beside To Budget</td><td>Two compact cards beside the sum</td><td>A right rail with large rings</td></tr>
+					<tr><th>Arithmetic edit</th><td>"Return sets 452.00" beside the field</td><td>"= 452.00" inside the field</td><td>Callout with the new budget and the new To Budget</td></tr>
+					<tr><th>Distance from stock macOS</th><td>Small</td><td>Medium</td><td>Large</td></tr>
+				</tbody>
+			</table>
+		</div>
+	</section>
+
+	<section class="questions">
+		<h2>What would help me pick</h2>
+		<ol>
+			<li>Should a fill bar grow as you spend (Quiet native, Account book) or drain as you spend, showing what's left (What's left)?</li>
+			<li>How many envelopes do you want on screen before scrolling, and what should the Dense toggle mean in the direction you pick?</li>
+			<li>Color: only on problems, or on every money state? And negatives as −34.75 or (34.75)?</li>
+			<li>Which figures feel right for your money: SF Pro, New York serif, or SF Rounded? And should Veritas look like Apple made it, or like its own app that happens to be native?</li>
+		</ol>
+	</section>
+</div>
+
+<script>
+const frames = document.querySelectorAll('.preview iframe');
+const show = (view) => {
+	frames.forEach((f) => { f.src = `${f.dataset.src}?embed&view=${view}`; });
+	document.querySelectorAll('.view-switch button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
+};
+document.querySelectorAll('.view-switch button').forEach((b) => b.addEventListener('click', () => show(b.dataset.view)));
+show(matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+</script>
+</body>
+</html>
