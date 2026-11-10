@@ -43,6 +43,7 @@ Scope (D13): a summary export that helps hand clean numbers to tax software or a
    3. Otherwise the category's bucket (`source = category`).
    4. Otherwise not counted.
 4. The same bucket reached through two tags counts once.
+5. A bucket id that is not in TAX-2, in a category's `tax_bucket` or in a tag mapping, is ignored: a tag with such a mapping is treated as an unmapped tag (so precedence falls through to the category), and a category with such a bucket has none. Such a row is never counted and never a conflict. The audit (R-REL-2) flags every unknown bucket id so the user can fix the mapping.
 5. Tag over category, always: a pharmacy purchase in Groceries tagged `#medical` counts as medical, and the category has no bearing.
 
 ## TAX-4 Sign convention
@@ -78,8 +79,9 @@ Positive counted means "adds to this bucket". A refund in an outflow bucket is n
 | `source` | `tag` or `category` |
 | `date` | `YYYY-MM-DD` |
 | `account` | account name |
-| `payee` | payee name after payee mapping |
-| `category` | category name (archived ones shown as-is) |
+| `payee` | payee name after payee mapping. For a transfer row, the other account's name, as Actual's `v_payees` shows it |
+| `category` | the mapped category's plain name, with no prefix (hidden, archived and deleted categories are shown as-is) |
+| `category_status` | empty for an active category, otherwise `hidden`, `archived` or `deleted`, so the label is kept without changing the name |
 | `amount_cents` | Actual-signed integer |
 | `counted_cents` | per TAX-4 (empty for conflicts) |
 | `notes` | the row's notes |
