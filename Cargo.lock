@@ -1138,6 +1138,8 @@ dependencies = [
  "proptest",
  "veritas-domain",
  "veritas-engine",
+ "veritas-interop",
+ "veritas-store",
 ]
 
 [[package]]

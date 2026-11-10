@@ -12,6 +12,8 @@ veritas-engine = { path = "../veritas-engine" }
 
 [dev-dependencies]
 proptest.workspace = true
+veritas-interop = { path = "../veritas-interop" }
+veritas-store = { path = "../veritas-store" }
 
 [lints]
 workspace = true
