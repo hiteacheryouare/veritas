@@ -1136,6 +1136,7 @@ dependencies = [
 name = "veritas-reports"
 version = "0.1.0"
 dependencies = [
+ "proptest",
  "veritas-domain",
  "veritas-engine",
 ]
