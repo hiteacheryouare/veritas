@@ -19,6 +19,10 @@ pub fn month(text: &str) -> Period {
 	Period::month(YearMonth::parse(text).unwrap())
 }
 
+pub fn period(first: &str, last: &str) -> Period {
+	Period::new(date(first), date(last)).unwrap()
+}
+
 pub fn cat(id: &str) -> CategoryId {
 	CategoryId::new(id)
 }
@@ -143,6 +147,42 @@ impl Book {
 				archived_on: None,
 			},
 		);
+		self
+	}
+
+	pub fn hide_category(&mut self, id: &str) -> &mut Self {
+		self.budget.categories.get_mut(&cat(id)).unwrap().hidden = true;
+		self
+	}
+
+	pub fn hide_group(&mut self, id: &str) -> &mut Self {
+		self.budget
+			.category_groups
+			.get_mut(&CategoryGroupId::new(id))
+			.unwrap()
+			.hidden = true;
+		self
+	}
+
+	/// Archives a category, keeping whatever kind metadata it already has.
+	pub fn archive(&mut self, id: &str, on: &str) -> &mut Self {
+		self.budget
+			.category_meta
+			.entry(cat(id))
+			.or_insert(CategoryMeta {
+				kind: None,
+				tax_bucket: None,
+				archived_on: None,
+			})
+			.archived_on = Some(date(on));
+		self
+	}
+
+	/// Deletes a category the way Actual does when you pick a transfer target:
+	/// tombstone it and point its mapping at `target`.
+	pub fn delete_category_into(&mut self, id: &str, target: &str) -> &mut Self {
+		self.budget.categories.get_mut(&cat(id)).unwrap().tombstone = true;
+		self.budget.category_mapping.insert(cat(id), cat(target));
 		self
 	}
 
