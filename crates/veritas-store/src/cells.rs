@@ -45,7 +45,11 @@ pub(crate) fn flag(value: ValueRef<'_>) -> bool {
 /// Actual reads every table but transactions with `tombstone = 0`, so a NULL
 /// or any other value is a deleted row.
 pub(crate) fn tombstone(value: ValueRef<'_>) -> bool {
-	number(value) != Some(0.0)
+	!is_zero(value)
+}
+
+pub(crate) fn is_zero(value: ValueRef<'_>) -> bool {
+	number(value) == Some(0.0)
 }
 
 /// The transaction views keep a row when `IFNULL(tombstone, 0) = 0`.

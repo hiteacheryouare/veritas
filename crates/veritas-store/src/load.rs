@@ -11,8 +11,8 @@ use veritas_domain::{
 };
 
 use crate::cells::{
-	Cell, date, date_from_int, db_month, flag, integer, money, required_text, sort_order, text,
-	text_month, tombstone, transaction_tombstone,
+	Cell, date, date_from_int, db_month, flag, integer, is_zero, money, required_text, sort_order,
+	text, text_month, tombstone, transaction_tombstone,
 };
 use crate::connection::storage;
 
@@ -390,19 +390,24 @@ pub fn load(conn: &Connection) -> Result<Loaded, CoreError> {
 fn transaction(row: &Row<'_>) -> Cell<Transaction> {
 	let id = TransactionId::new(id(row, 0)?);
 	let is_parent = flag(at(row, 9)?);
-	let split = match at(row, 10)? {
+	// Actual's views keep a row only when isChild = 0, or when it is 1 and
+	// its parent is alive, so any other value never reaches a total.
+	let is_child = match at(row, 10)? {
 		ValueRef::Null => return Err("the split-child flag is NULL"),
-		is_child if flag(is_child) && is_parent => {
-			return Err("the row is marked both split parent and split child");
-		}
-		is_child if flag(is_child) => SplitRole::Child {
+		value if flag(value) => true,
+		value if is_zero(value) => false,
+		_ => return Err("the split-child flag isn't 0 or 1"),
+	};
+	let split = match (is_parent, is_child) {
+		(true, true) => return Err("the row is marked both split parent and split child"),
+		(_, true) => SplitRole::Child {
 			parent: TransactionId::new(required_text(
 				at(row, 11)?,
 				"the split child has no parent",
 			)?),
 		},
-		_ if is_parent => SplitRole::Parent,
-		_ => SplitRole::None,
+		(true, false) => SplitRole::Parent,
+		(false, false) => SplitRole::None,
 	};
 	Ok(Transaction {
 		id,

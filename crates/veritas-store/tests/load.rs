@@ -316,6 +316,8 @@ fn actuals_quirks_load_and_unrepresentable_rows_are_counted_not_fatal() {
 		 INSERT INTO zero_budgets (id, month, category, amount) VALUES ('2019-04-{category}', 201904, '{category}', 99);
 		 INSERT INTO transactions (id, acct, amount, date, description) VALUES ('null-amount', '{account}', NULL, 20261101, NULL);
 		 INSERT INTO transactions (id, acct, amount, date) VALUES ('no-date', '{account}', 100, NULL);
+		 INSERT INTO transactions (id, acct, amount, date, isChild, parent_id) VALUES ('child-flag-2', '{account}', 1, 20261101, 2, 'parent');
+		 INSERT INTO transactions (id, acct, amount, date, isChild) VALUES ('child-flag-text', '{account}', 1, 20261101, 'yes');
 		 INSERT INTO transactions (id, acct, amount, date, tombstone) VALUES ('null-tombstone', '{account}', 1, 20261101, NULL);
 		 INSERT INTO categories (id, name, cat_group, tombstone) VALUES ('null-tombstone', 'Gone', '{group}', NULL);
 		 INSERT INTO transactions (id, acct, amount, date, imported_description) VALUES ('imported', '{account}', -100, 20261101, 'ACME*STORE 123');
@@ -400,6 +402,8 @@ fn actuals_quirks_load_and_unrepresentable_rows_are_counted_not_fatal() {
 			("rules", some("no-actions")),
 			("schedules", some("no-rule")),
 			("transactions", some("bad-date")),
+			("transactions", some("child-flag-2")),
+			("transactions", some("child-flag-text")),
 			("transactions", some("fraction")),
 			("transactions", some("no-account")),
 			("transactions", some("no-date")),
