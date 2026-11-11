@@ -8,8 +8,9 @@
 //! The crash harness (PLAN §6.6): a child process edits a real budget while
 //! the parent SIGKILLs it at random moments, then reopens the budget. Every
 //! reopen must find the file sound, the lock free and the last committed
-//! action present. `cargo test` runs 25 kills; set VERITAS_CRASH_KILLS=1000
-//! for the full run.
+//! action present. A second child creates budgets until it is killed, and
+//! every budget folder it leaves must be whole. `cargo test` runs 25 kills
+//! of each; set VERITAS_CRASH_KILLS=1000 for the full run.
 
 mod support;
 
@@ -23,11 +24,14 @@ use support::TempDir;
 use veritas_domain::{
 	AccountId, BudgetCell, BudgetData, CategoryId, CoreError, Money, Row, YearMonth,
 };
-use veritas_session::{Session, SessionOptions, SnapshotReason};
+use veritas_session::{
+	Backend, NewBudget, NumberFormat, NumberStyle, Session, SessionOptions, SnapshotReason,
+};
 
 type CrashSession = Session<veritas_store::Store>;
 
 const CRASH_DIR: &str = "VERITAS_CRASH_DIR";
+const CRASH_TEMPLATE: &str = "VERITAS_CRASH_TEMPLATE";
 
 fn fixture(name: &str) -> PathBuf {
 	Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -141,15 +145,20 @@ struct Heard {
 }
 
 fn run_and_kill(dir: &Path, delay: Duration) -> Heard {
+	run_and_kill_with(dir, delay, "edit_until_killed", dir)
+}
+
+fn run_and_kill_with(dir: &Path, delay: Duration, helper: &str, template: &Path) -> Heard {
 	let mut child = Command::new(std::env::current_exe().unwrap())
 		.args([
 			"--exact",
-			"edit_until_killed",
+			helper,
 			"--ignored",
 			"--nocapture",
 			"--test-threads=1",
 		])
 		.env(CRASH_DIR, dir)
+		.env(CRASH_TEMPLATE, template)
 		.stdin(Stdio::null())
 		.stdout(Stdio::piped())
 		.stderr(Stdio::null())
@@ -251,4 +260,148 @@ fn a_killed_writer_never_damages_the_budget_or_loses_a_commit() {
 		highest = highest.max(found);
 	}
 	eprintln!("crash harness: {kills} kills, the budget reached edit {highest}");
+}
+
+/// veritas-store, except that a new budget is copied from a template folder
+/// a slice at a time, to widen the window a kill can land in.
+struct SlowTemplate(veritas_store::Store);
+
+impl veritas_domain::Store for SlowTemplate {
+	type Transaction<'a> = <veritas_store::Store as veritas_domain::Store>::Transaction<'a>;
+
+	fn begin(&mut self) -> Result<Self::Transaction<'_>, CoreError> {
+		veritas_domain::Store::begin(&mut self.0)
+	}
+}
+
+impl Backend for SlowTemplate {
+	fn open(db: &Path, access: veritas_store::Access) -> Result<Self, CoreError> {
+		<veritas_store::Store as Backend>::open(db, access).map(SlowTemplate)
+	}
+
+	fn migration_ids(&self) -> Result<Vec<i64>, CoreError> {
+		Backend::migration_ids(&self.0)
+	}
+
+	fn quick_problems(&self) -> Result<Vec<String>, CoreError> {
+		self.0.quick_problems()
+	}
+
+	fn verify(db: &Path) -> Result<veritas_store::AuditReport, CoreError> {
+		<veritas_store::Store as Backend>::verify(db)
+	}
+
+	fn adopt(&mut self) -> Result<(), CoreError> {
+		Backend::adopt(&mut self.0)
+	}
+
+	fn load(&self) -> Result<veritas_store::Loaded, CoreError> {
+		Backend::load(&self.0)
+	}
+
+	fn export_actual_zip(
+		&self,
+		metadata: &Path,
+		to: &Path,
+	) -> Result<veritas_interop::ExportOutcome, CoreError> {
+		self.0.export_actual_zip(metadata, to)
+	}
+
+	fn create(dir: &Path, _: &NewBudget) -> Result<(), CoreError> {
+		let template = PathBuf::from(std::env::var_os(CRASH_TEMPLATE).unwrap());
+		for file in ["db.sqlite", "metadata.json"] {
+			let bytes = std::fs::read(template.join(file)).unwrap();
+			let mut out = std::fs::File::create(dir.join(file)).unwrap();
+			for slice in bytes.chunks(4096) {
+				out.write_all(slice).unwrap();
+				std::thread::yield_now();
+			}
+			out.sync_all().unwrap();
+		}
+		Ok(())
+	}
+}
+
+#[test]
+#[ignore = "helper process, spawned and killed by the create crash harness"]
+fn create_until_killed() {
+	let Some(budgets) = std::env::var_os(CRASH_DIR) else {
+		return;
+	};
+	let budgets = PathBuf::from(budgets);
+	let budget = NewBudget {
+		name: "Household".to_owned(),
+		format: NumberFormat {
+			currency: None,
+			style: NumberStyle::CommaDot,
+			hide_decimals: false,
+		},
+		retirement_401k: false,
+		hsa: false,
+	};
+	say("ready 0");
+	let mut created: i64 = 0;
+	loop {
+		let dir = budgets.join(format!("budget-{created}"));
+		Session::<SlowTemplate>::create_budget(&dir, &budget, SessionOptions::default()).unwrap();
+		created += 1;
+		say(&format!("committed {created}"));
+	}
+}
+
+#[test]
+fn a_killed_create_never_leaves_a_half_made_budget() {
+	// PLAN §6.6, R-IO-0: create builds aside and renames into place, so every
+	// budget folder a crash leaves behind is whole, and only hidden build
+	// folders can be partial.
+	let kills: usize = std::env::var("VERITAS_CRASH_KILLS")
+		.ok()
+		.and_then(|kills| kills.parse().ok())
+		.unwrap_or(25);
+	let root = TempDir::new("crash-create");
+	let template = root.path().join("template");
+	veritas_interop::import_actual_zip(&fixture("small"), &template).unwrap();
+	let budgets = root.path().join("budgets");
+	std::fs::create_dir(&budgets).unwrap();
+	let mut moments = Moments(0xD1B5_4A32_D192_ED03);
+	let (mut created, mut caught_mid_build) = (0, 0);
+
+	for kill in 0..kills {
+		let batch = budgets.join(format!("run-{kill}"));
+		std::fs::create_dir(&batch).unwrap();
+		let heard = run_and_kill_with(
+			&batch,
+			moments.next_delay(),
+			"create_until_killed",
+			&template,
+		);
+		let visible: Vec<PathBuf> = std::fs::read_dir(&batch)
+			.unwrap()
+			.map(|entry| entry.unwrap().path())
+			.filter(|path| !path.file_name().unwrap().to_string_lossy().starts_with('.'))
+			.collect();
+		let count = visible.len() as i64;
+		created += count;
+		let staging = std::fs::read_dir(&batch).unwrap().count() as i64 - count;
+		caught_mid_build += i64::from(staging > 0);
+		assert!(
+			count == heard.committed || count == heard.committed + 1,
+			"kill {kill}: {count} budgets, {} reported created",
+			heard.committed
+		);
+		for dir in visible {
+			let mut session =
+				CrashSession::open(&dir, SessionOptions::default()).unwrap_or_else(|error| {
+					panic!("kill {kill}: {} won't open: {error}", dir.display())
+				});
+			assert_eq!(session.read_only(), None, "kill {kill}");
+			session.wait_for_open_check();
+			assert!(!session.audit_report().unwrap().is_corrupt(), "kill {kill}");
+		}
+		std::fs::remove_dir_all(&batch).unwrap();
+	}
+	assert!(created > 0, "no create finished before a kill");
+	eprintln!(
+		"create crash harness: {kills} kills, {created} budgets created, {caught_mid_build} kills mid-build"
+	);
 }
