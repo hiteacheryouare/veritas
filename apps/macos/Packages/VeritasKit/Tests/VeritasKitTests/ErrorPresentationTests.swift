@@ -36,7 +36,33 @@ struct ErrorPresentationTests {
 
 	@Test func aStorageFailureSaysNothingWasLostAndOffersRetry() {
 		let presentation = ErrorPresentation(FfiError.Storage(message: "disk I/O error"))
-		#expect(presentation == .alert(ErrorAlert(title: "Couldn't save that change. Nothing was lost.", offersRetry: true)))
+		#expect(presentation == .alert(ErrorAlert(title: "Couldn't save that change", message: "Nothing was lost.", offersRetry: true)))
+	}
+
+	@Test func aStorageFailureNamesWhatWasHappening() {
+		let storage = FfiError.Storage(message: "disk I/O error")
+		let titles = [Operation.open, .importing, .export].map { operation -> String? in
+			guard case .alert(let alert) = ErrorPresentation(storage, during: operation) else { return nil }
+			#expect(alert.offersRetry)
+			return alert.title
+		}
+		#expect(titles == ["Couldn't open this budget", "Couldn't import that budget", "Couldn't export this budget"])
+		guard case .alert(let importing) = ErrorPresentation(storage, during: .importing) else { return }
+		#expect(importing.message == "Your Actual export wasn't changed.")
+	}
+
+	@Test func alertTitlesNeverEndWithAPeriod() {
+		let errors: [FfiError] = [
+			.UpgradeInActualFirst(required: "26.11.0"), .NotAnActualBudget(message: "No db.sqlite."),
+			.Storage(message: "x"), .Io(message: "x"), .Internal(message: "x"), .Overflow
+		]
+		for error in errors {
+			guard case .alert(let alert) = ErrorPresentation(error).withoutField else {
+				Issue.record("\(error) should be an alert away from a field")
+				continue
+			}
+			#expect(!alert.title.hasSuffix("."), "\(alert.title)")
+		}
 	}
 
 	@Test func aFileProblemNamesThePath() {
@@ -59,14 +85,14 @@ struct ErrorPresentationTests {
 	@Test func aBugOffersItsDetailsToCopy() {
 		let presentation = ErrorPresentation(FfiError.Internal(message: "the core hit a bug: index out of bounds"))
 		#expect(presentation == .alert(ErrorAlert(
-			title: "Veritas hit a bug.",
+			title: "Veritas hit a bug",
 			message: "Your budget wasn't changed.",
 			details: "the core hit a bug: index out of bounds"
 		)))
 	}
 
 	@Test func anInlineMessageBecomesAnAlertAwayFromAField() {
-		#expect(ErrorPresentation(FfiError.Overflow).withoutField == .alert(ErrorAlert(title: "That amount is too large.")))
+		#expect(ErrorPresentation(FfiError.Overflow).withoutField == .alert(ErrorAlert(title: "That amount is too large")))
 		#expect(ErrorPresentation(FfiError.Cancelled).withoutField == .nothing)
 	}
 

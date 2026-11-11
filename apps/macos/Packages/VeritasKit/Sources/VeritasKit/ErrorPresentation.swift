@@ -16,7 +16,16 @@ public struct ErrorAlert: Hashable, Identifiable, Sendable {
 	}
 }
 
+/// What was happening when an error arrived, so a Storage failure names it.
+public enum Operation: Hashable, Sendable {
+	case change
+	case open
+	case importing
+	case export
+}
+
 /// What the app does with each error, as contracts/errors.md lays it out.
+/// Alert titles have no closing period; messages are full sentences.
 public enum ErrorPresentation: Hashable, Sendable {
 	case nothing
 	case refresh
@@ -25,7 +34,7 @@ public enum ErrorPresentation: Hashable, Sendable {
 	case integrityReport(violations: UInt64)
 	case alert(ErrorAlert)
 
-	public init(_ error: any Error) {
+	public init(_ error: any Error, during operation: Operation = .change) {
 		guard let error = error as? FfiError else {
 			self = .alert(Self.bug(details: String(describing: error)))
 			return
@@ -47,7 +56,7 @@ public enum ErrorPresentation: Hashable, Sendable {
 		case .NotAnActualBudget(let message):
 			self = .alert(ErrorAlert(title: "That file isn't an Actual budget", message: message))
 		case .Storage:
-			self = .alert(ErrorAlert(title: "Couldn't save that change. Nothing was lost.", offersRetry: true))
+			self = .alert(Self.storage(during: operation))
 		case .Io(let message):
 			self = .alert(ErrorAlert(title: "Couldn't use a file or folder", message: message))
 		case .Overflow:
@@ -62,12 +71,26 @@ public enum ErrorPresentation: Hashable, Sendable {
 	/// Away from a field there is nowhere to show an inline message, so it becomes an alert.
 	public var withoutField: ErrorPresentation {
 		if case .inline(let message) = self {
-			return .alert(ErrorAlert(title: message))
+			let title = message.hasSuffix(".") ? String(message.dropLast()) : message
+			return .alert(ErrorAlert(title: title))
 		}
 		return self
 	}
 
+	private static func storage(during operation: Operation) -> ErrorAlert {
+		switch operation {
+		case .change:
+			ErrorAlert(title: "Couldn't save that change", message: "Nothing was lost.", offersRetry: true)
+		case .open:
+			ErrorAlert(title: "Couldn't open this budget", message: "Nothing in it was changed.", offersRetry: true)
+		case .importing:
+			ErrorAlert(title: "Couldn't import that budget", message: "Your Actual export wasn't changed.", offersRetry: true)
+		case .export:
+			ErrorAlert(title: "Couldn't export this budget", message: "Nothing in it was changed.", offersRetry: true)
+		}
+	}
+
 	private static func bug(details: String) -> ErrorAlert {
-		ErrorAlert(title: "Veritas hit a bug.", message: "Your budget wasn't changed.", details: details)
+		ErrorAlert(title: "Veritas hit a bug", message: "Your budget wasn't changed.", details: details)
 	}
 }

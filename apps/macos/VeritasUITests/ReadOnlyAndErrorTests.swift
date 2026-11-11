@@ -47,11 +47,20 @@ final class ReadOnlyAndErrorTests: XCTestCase {
 	}
 
 	@MainActor
+	func testAFailedAuditDuringImportOpensTheIntegrityReport() {
+		let app = XCUIApplication.veritas(stub: "empty", ["-VeritasStubImportError", "auditFailed"])
+		XCTAssertTrue(app.buttons["importFromActual"].waitForExistence(timeout: 10))
+		app.buttons["importFromActual"].click()
+		XCTAssertTrue(app.descendants(matching: .any)["sheet.integrityReport"].waitForExistence(timeout: 5))
+		XCTAssertTrue(app.staticTexts["No budget open"].exists)
+	}
+
+	@MainActor
 	func testAStorageFailureOffersToTryAgain() {
 		let app = XCUIApplication.veritas(stub: "empty", ["-VeritasStubImportError", "storage"])
 		XCTAssertTrue(app.buttons["importFromActual"].waitForExistence(timeout: 10))
 		app.buttons["importFromActual"].click()
-		XCTAssertTrue(app.staticTexts["Couldn't save that change. Nothing was lost."].waitForExistence(timeout: 5))
+		XCTAssertTrue(app.staticTexts["Couldn't import that budget"].waitForExistence(timeout: 5))
 		XCTAssertTrue(app.buttons["Try again"].exists)
 	}
 
@@ -60,7 +69,7 @@ final class ReadOnlyAndErrorTests: XCTestCase {
 		let app = XCUIApplication.veritas(stub: "empty", ["-VeritasStubImportError", "internal"])
 		XCTAssertTrue(app.buttons["importFromActual"].waitForExistence(timeout: 10))
 		app.buttons["importFromActual"].click()
-		XCTAssertTrue(app.staticTexts["Veritas hit a bug."].waitForExistence(timeout: 5))
+		XCTAssertTrue(app.staticTexts["Veritas hit a bug"].waitForExistence(timeout: 5))
 		XCTAssertTrue(app.buttons["Copy details"].exists)
 	}
 }
