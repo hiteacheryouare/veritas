@@ -87,3 +87,25 @@ pub(crate) fn sweep_stale_partials(dir: &Path, name: Option<&str>) {
 		}
 	}
 }
+
+/// Deletes folders starting with `prefix` in `dir` that a crashed create
+/// left behind. A folder still being filled is younger than an hour and kept.
+pub(crate) fn sweep_stale_folders(dir: &Path, prefix: &str) {
+	let Ok(entries) = fs::read_dir(dir) else {
+		return;
+	};
+	for entry in entries.flatten() {
+		let ours = entry.file_name().to_string_lossy().starts_with(prefix);
+		let stale = entry
+			.metadata()
+			.and_then(|metadata| metadata.modified())
+			.is_ok_and(|modified| {
+				SystemTime::now()
+					.duration_since(modified)
+					.is_ok_and(|age| age >= STALE_AFTER)
+			});
+		if ours && stale {
+			let _ = fs::remove_dir_all(entry.path());
+		}
+	}
+}

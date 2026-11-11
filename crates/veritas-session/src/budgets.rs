@@ -32,7 +32,10 @@ pub fn list_budgets(budgets_dir: &Path) -> Result<Vec<BudgetEntry>, CoreError> {
 	let mut budgets = Vec::new();
 	for entry in entries {
 		let folder = entry.map_err(io_error("read", budgets_dir))?.path();
-		if !folder.join(DB_FILE).is_file() || !folder.join(METADATA_FILE).is_file() {
+		let hidden = folder
+			.file_name()
+			.is_some_and(|name| name.to_string_lossy().starts_with('.'));
+		if hidden || !folder.join(DB_FILE).is_file() || !folder.join(METADATA_FILE).is_file() {
 			continue;
 		}
 		let Ok(name) = budget_name(&folder) else {

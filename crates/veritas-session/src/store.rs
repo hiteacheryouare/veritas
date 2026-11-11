@@ -4,7 +4,7 @@ use veritas_domain::CoreError;
 use veritas_interop::ExportOutcome;
 use veritas_store::{Access, AuditReport, Loaded, Store};
 
-use crate::session::Backend;
+use crate::session::{Backend, NewBudget};
 
 /// veritas-store's working copy is the real backend. Its writes come from
 /// veritas-store's own `veritas_domain::Store` impl.
@@ -41,5 +41,15 @@ impl Backend for Store {
 
 	fn export_actual_zip(&self, metadata: &Path, to: &Path) -> Result<ExportOutcome, CoreError> {
 		veritas_interop::export_actual_zip(self, metadata, to)
+	}
+
+	/// Stands in for veritas-store's `create_budget` (the pinned template,
+	/// metadata.json, starter categories and setup's accounts) until it lands,
+	/// so the shell can code against `create_budget` now.
+	fn create(_dir: &Path, _budget: &NewBudget) -> Result<(), CoreError> {
+		Err(CoreError::Invalid(
+			"Starting a new budget isn't available in this build yet. Import an Actual export instead."
+				.to_owned(),
+		))
 	}
 }

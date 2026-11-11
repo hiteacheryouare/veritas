@@ -10,7 +10,8 @@ use veritas_store::{Access as StoreAccess, AuditReport, LoadReport, Loaded};
 use crate::background::{OpenCheck, Pending};
 use crate::backup::write_backup;
 use crate::bus::{ChangeListener, ChangeSet, Command, CommandBus, Listeners, Permit, Subscription};
-use crate::fsio::{io_error, reserve_partial};
+use crate::cancel::CancelToken;
+use crate::fsio::{io_error, reserve_partial, sweep_stale_folders, sync_dir};
 use crate::lock::{Access, WriterLock, acquire};
 use crate::overview::{Overview, account_groups};
 use crate::retention::RetentionPolicy;
@@ -47,6 +48,21 @@ pub trait Backend: Store + Sized {
 	fn load(&self) -> Result<Loaded, CoreError>;
 	/// Writes an Actual zip of the budget to `to`, after the invariant audit.
 	fn export_actual_zip(&self, metadata: &Path, to: &Path) -> Result<ExportOutcome, CoreError>;
+	/// Builds a complete new budget (db.sqlite and metadata.json) in `dir`,
+	/// which exists and is empty. The session builds in a hidden folder and
+	/// renames it into place, so this needn't be atomic itself.
+	fn create(dir: &Path, budget: &NewBudget) -> Result<(), CoreError>;
+}
+
+/// What setup asks for a new budget (R-IO-0).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NewBudget {
+	pub name: String,
+	pub format: NumberFormat,
+	/// Off-budget accounts for a 401(k) and an HSA, so gross-paycheck
+	/// contributions classify as savings (D56, CLS-10).
+	pub retirement_401k: bool,
+	pub hsa: bool,
 }
 
 /// Actual's number format preferences: `numberFormat`, `hideFraction` and
@@ -176,24 +192,31 @@ impl<B: Backend> Session<B> {
 	/// from Veritas's pinned template, and opens it. No Actual export is
 	/// needed (D52, D53).
 	pub fn create_budget(
-		name: &str,
 		budget_dir: &Path,
-		format: &NumberFormat,
+		budget: &NewBudget,
 		options: SessionOptions,
 	) -> Result<Self, CoreError> {
-		let name = name.trim();
-		if name.is_empty() {
+		Session::create_budget_until(budget_dir, budget, options, &CancelToken::default())
+	}
+
+	pub fn create_budget_until(
+		budget_dir: &Path,
+		budget: &NewBudget,
+		options: SessionOptions,
+		cancel: &CancelToken,
+	) -> Result<Self, CoreError> {
+		if budget.name.trim().is_empty() {
 			return Err(CoreError::Invalid(
 				"Enter a name for the budget.".to_owned(),
 			));
 		}
-		if budget_dir.exists() {
-			return Err(CoreError::Io(format!(
-				"{} already exists. Choose a new folder for the budget",
-				budget_dir.display()
-			)));
-		}
-		create_from_template(budget_dir, name, format)?;
+		let trimmed = NewBudget {
+			name: budget.name.trim().to_owned(),
+			..budget.clone()
+		};
+		build_aside(budget_dir, "creating", cancel, |staging| {
+			B::create(staging, &trimmed)
+		})?;
 		Session::open(budget_dir, options)
 	}
 
@@ -204,12 +227,28 @@ impl<B: Backend> Session<B> {
 		budget_dir: &Path,
 		options: SessionOptions,
 	) -> Result<Self, CoreError> {
-		match import_actual_zip(zip, budget_dir)? {
-			ImportOutcome::Imported(_) => Session::open(budget_dir, options),
-			ImportOutcome::Refused(report) => Err(CoreError::AuditFailed {
-				violations: report.violations.len(),
-			}),
-		}
+		Session::import_actual_zip_until(zip, budget_dir, options, &CancelToken::default())
+	}
+
+	/// `import_actual_zip`, built in a hidden folder and renamed into place,
+	/// so a crash or a cancel never leaves half a budget at `budget_dir`.
+	pub fn import_actual_zip_until(
+		zip: &Path,
+		budget_dir: &Path,
+		options: SessionOptions,
+		cancel: &CancelToken,
+	) -> Result<Self, CoreError> {
+		build_aside(budget_dir, "importing", cancel, |staging| {
+			// The importer creates its own folder, so it gets a fresh name.
+			std::fs::remove_dir(staging).map_err(io_error("prepare", staging))?;
+			match import_actual_zip(zip, staging)? {
+				ImportOutcome::Imported(_) => Ok(()),
+				ImportOutcome::Refused(report) => Err(CoreError::AuditFailed {
+					violations: report.violations.len(),
+				}),
+			}
+		})?;
+		Session::open(budget_dir, options)
 	}
 
 	pub fn dir(&self) -> &Path {
@@ -370,17 +409,48 @@ impl<B: Backend> Session<B> {
 	/// written: SQLite damage refuses the export, and other findings come
 	/// back with it.
 	pub fn export_actual_zip(&mut self, to: &Path) -> Result<AuditReport, CoreError> {
+		self.export_actual_zip_until(to, &CancelToken::default())
+	}
+
+	/// `export_actual_zip`, written beside `to` and renamed over it only if
+	/// the export wasn't cancelled meanwhile.
+	pub fn export_actual_zip_until(
+		&mut self,
+		to: &Path,
+		cancel: &CancelToken,
+	) -> Result<AuditReport, CoreError> {
 		self.poll();
 		if self.ensure_writer().is_ok() {
 			self.snapshot(SnapshotReason::Export)?;
 		}
 		let metadata = self.dir.join(METADATA_FILE);
-		match self.bus()?.store().export_actual_zip(&metadata, to)? {
-			ExportOutcome::Exported(report) => Ok(report),
-			ExportOutcome::Refused(report) => Err(CoreError::AuditFailed {
-				violations: report.violations.len(),
-			}),
+		let parent = to.parent().unwrap_or(Path::new("."));
+		let name = to
+			.file_name()
+			.map(|name| name.to_string_lossy().into_owned())
+			.ok_or_else(|| CoreError::Invalid("Choose a file to export to.".to_owned()))?;
+		let (aside, reserved) = reserve_partial(parent, &name)?;
+		drop(reserved);
+		let exported = self
+			.bus()
+			.and_then(|bus| bus.store().export_actual_zip(&metadata, &aside))
+			.and_then(|outcome| match outcome {
+				ExportOutcome::Exported(report) => Ok(report),
+				ExportOutcome::Refused(report) => Err(CoreError::AuditFailed {
+					violations: report.violations.len(),
+				}),
+			})
+			.and_then(|report| cancel.check().map(|()| report))
+			.and_then(|report| {
+				std::fs::rename(&aside, to)
+					.map(|()| report)
+					.map_err(io_error("save the export as", to))
+			});
+		if exported.is_err() {
+			let _ = std::fs::remove_file(&aside);
 		}
+		sync_dir(parent);
+		exported
 	}
 
 	/// Where backups go. Swift holds the folder's security-scoped access and
@@ -716,12 +786,55 @@ fn backup_file_name(budget_name: Option<&str>, at: DateTime<Utc>) -> String {
 	format!("{}-{name}.zip", at.format("%Y-%m-%d"))
 }
 
-/// Stands in for veritas-store's `create_budget` (the pinned template plus
-/// metadata.json) until it lands, so the shell can code against
-/// `create_budget` now.
-fn create_from_template(_dir: &Path, _name: &str, _format: &NumberFormat) -> Result<(), CoreError> {
-	Err(CoreError::Invalid(
-		"Starting a new budget isn't available in this build yet. Import an Actual export instead."
-			.to_owned(),
-	))
+/// Builds a budget folder in a hidden sibling of `budget_dir`, then renames
+/// it into place unless cancelled. On any failure the sibling is removed.
+fn build_aside(
+	budget_dir: &Path,
+	doing: &str,
+	cancel: &CancelToken,
+	build: impl FnOnce(&Path) -> Result<(), CoreError>,
+) -> Result<(), CoreError> {
+	if budget_dir.exists() {
+		return Err(CoreError::Io(format!(
+			"{} already exists. Choose a new folder for the budget",
+			budget_dir.display()
+		)));
+	}
+	let parent = budget_dir.parent().unwrap_or(Path::new("."));
+	let folder_name = budget_dir
+		.file_name()
+		.map(|name| name.to_string_lossy().into_owned())
+		.ok_or_else(|| CoreError::Invalid("Choose a folder for the budget.".to_owned()))?;
+	let prefix = format!(".{folder_name}.{doing}-");
+	sweep_stale_folders(parent, &prefix);
+	let staging = reserve_folder(parent, &prefix)?;
+	let built = build(&staging)
+		.and_then(|()| cancel.check())
+		.and_then(|()| {
+			std::fs::rename(&staging, budget_dir).map_err(io_error("create", budget_dir))
+		});
+	if let Err(error) = built {
+		let _ = std::fs::remove_dir_all(&staging);
+		return Err(error);
+	}
+	sync_dir(parent);
+	Ok(())
+}
+
+/// A fresh hidden folder `<prefix><pid>-<n>` in `parent`, unique to this
+/// process and call.
+fn reserve_folder(parent: &Path, prefix: &str) -> Result<PathBuf, CoreError> {
+	static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+	loop {
+		let staging = parent.join(format!(
+			"{prefix}{}-{}",
+			std::process::id(),
+			NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+		));
+		match std::fs::create_dir(&staging) {
+			Ok(()) => return Ok(staging),
+			Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+			Err(error) => return Err(io_error("create a folder in", parent)(error)),
+		}
+	}
 }

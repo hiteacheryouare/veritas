@@ -128,6 +128,26 @@ impl Backend for ReadPath {
 	) -> Result<veritas_interop::ExportOutcome, CoreError> {
 		veritas_interop::export_actual_zip(&self.store, metadata, to)
 	}
+
+	/// Stands in for the store's template: the small fixture, renamed.
+	fn create(dir: &Path, budget: &veritas_session::NewBudget) -> Result<(), CoreError> {
+		build_from_fixture(dir, &budget.name);
+		Ok(())
+	}
+}
+
+fn build_from_fixture(dir: &Path, name: &str) {
+	let unpacked = dir.join("unpacked");
+	veritas_interop::import_actual_zip(&fixture("small"), &unpacked).unwrap();
+	for file in ["db.sqlite", "metadata.json"] {
+		std::fs::rename(unpacked.join(file), dir.join(file)).unwrap();
+	}
+	std::fs::remove_dir_all(&unpacked).unwrap();
+	let metadata = dir.join("metadata.json");
+	let mut json: serde_json::Value =
+		serde_json::from_str(&std::fs::read_to_string(&metadata).unwrap()).unwrap();
+	json["budgetName"] = serde_json::Value::String(name.to_owned());
+	std::fs::write(&metadata, json.to_string()).unwrap();
 }
 
 /// How the background check of one database should behave: wait for the
@@ -835,29 +855,127 @@ fn the_overview_names_the_budget_and_groups_every_live_account() {
 	assert!(listed >= live, "{listed} listed, {live} live");
 }
 
+fn new_budget(name: &str) -> veritas_session::NewBudget {
+	veritas_session::NewBudget {
+		name: name.to_owned(),
+		format: veritas_session::NumberFormat {
+			currency: Some("USD".to_owned()),
+			style: veritas_session::NumberStyle::CommaDot,
+			hide_decimals: false,
+		},
+		retirement_401k: true,
+		hsa: false,
+	}
+}
+
 #[test]
-fn creating_a_budget_checks_its_name_and_folder_before_the_store_is_asked() {
-	// D52, D53. The store's create_budget hasn't landed, so a valid request
-	// ends at the stand-in and leaves no folder behind.
+fn a_new_budget_is_built_aside_and_renamed_into_place_before_it_opens() {
+	// R-IO-0, PLAN §6.6: no half-made budget is ever visible at its folder.
 	let root = TempDir::new("session-create");
-	let format = veritas_session::NumberFormat {
-		currency: Some("USD".to_owned()),
-		style: veritas_session::NumberStyle::CommaDot,
-		hide_decimals: false,
-	};
-	let clock = TestClock::new();
-	let options = || clock.options();
+	let dir = root.path().join("Household");
+
+	let session = TestSession::create_budget(
+		&dir,
+		&new_budget("  Household  "),
+		TestClock::new().options(),
+	)
+	.unwrap();
+
+	assert_eq!(session.read_only(), None);
+	assert_eq!(session.budget_name().unwrap().as_deref(), Some("Household"));
+	assert_eq!(entries(root.path()), ["Household"]);
 	assert!(matches!(
-		TestSession::create_budget("   ", &root.path().join("new"), &format, options()),
-		Err(CoreError::Invalid(_))
-	));
-	assert!(matches!(
-		TestSession::create_budget("Household", root.path(), &format, options()),
+		TestSession::create_budget(&dir, &new_budget("Again"), TestClock::new().options()),
 		Err(CoreError::Io(_))
 	));
 	assert!(matches!(
-		TestSession::create_budget("Household", &root.path().join("new"), &format, options()),
+		TestSession::create_budget(
+			&root.path().join("Blank"),
+			&new_budget("  "),
+			TestClock::new().options()
+		),
 		Err(CoreError::Invalid(_))
 	));
-	assert!(!root.path().join("new").exists());
+	assert_eq!(entries(root.path()), ["Household"]);
+}
+
+#[test]
+fn until_the_store_can_create_a_budget_the_request_fails_and_leaves_nothing() {
+	let root = TempDir::new("session-create-stub");
+	let result = Session::<veritas_store::Store>::create_budget(
+		&root.path().join("Household"),
+		&new_budget("Household"),
+		TestClock::new().options(),
+	);
+	assert!(
+		matches!(result, Err(CoreError::Invalid(_))),
+		"{:?}",
+		result.err()
+	);
+	assert!(entries(root.path()).is_empty());
+}
+
+#[test]
+fn the_budget_list_skips_a_budget_still_being_built() {
+	let root = TempDir::new("session-list-staging");
+	build_from_fixture(
+		&std::fs::create_dir(root.path().join(".Household.creating-1-0"))
+			.map(|()| root.path().join(".Household.creating-1-0"))
+			.unwrap(),
+		"Household",
+	);
+	assert!(
+		veritas_session::list_budgets(root.path())
+			.unwrap()
+			.is_empty()
+	);
+}
+
+#[test]
+fn a_cancelled_import_create_or_export_leaves_nothing_behind() {
+	// The shell cancels long work when the user closes the sheet.
+	let root = TempDir::new("session-cancel");
+	let cancel = veritas_session::CancelToken::default();
+	cancel.cancel();
+	let clock = TestClock::new();
+
+	let imported = TestSession::import_actual_zip_until(
+		&fixture("small"),
+		&root.path().join("Imported"),
+		clock.options(),
+		&cancel,
+	);
+	assert!(
+		matches!(imported, Err(CoreError::Cancelled)),
+		"{:?}",
+		imported.err()
+	);
+	let created = TestSession::create_budget_until(
+		&root.path().join("Created"),
+		&new_budget("Created"),
+		clock.options(),
+		&cancel,
+	);
+	assert!(
+		matches!(created, Err(CoreError::Cancelled)),
+		"{:?}",
+		created.err()
+	);
+	assert!(
+		entries(root.path()).is_empty(),
+		"{:?}",
+		entries(root.path())
+	);
+
+	let dir = root.path().join("budget");
+	veritas_interop::import_actual_zip(&fixture("small"), &dir).unwrap();
+	let mut session = TestSession::open(&dir, clock.options()).unwrap();
+	let to = root.path().join("out.zip");
+	let exported = session.export_actual_zip_until(&to, &cancel);
+	assert!(
+		matches!(exported, Err(CoreError::Cancelled)),
+		"{:?}",
+		exported.err()
+	);
+	assert_eq!(entries(root.path()), ["budget"]);
 }
