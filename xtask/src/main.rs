@@ -46,9 +46,14 @@ fn root() -> PathBuf {
 }
 
 fn run(dir: &Path, program: &str, args: &[&str]) -> Result {
+	run_with_env(dir, program, args, &[])
+}
+
+fn run_with_env(dir: &Path, program: &str, args: &[&str], env: &[(&str, &str)]) -> Result {
 	eprintln!("» {program} {}", args.join(" "));
 	let status = Command::new(program)
 		.args(args)
+		.envs(env.iter().copied())
 		.current_dir(dir)
 		.status()
 		.map_err(|e| format!("could not start {program}: {e}"))?;
@@ -169,16 +174,20 @@ fn fixtures() -> Result {
 }
 
 const VERITAS_KIT: &str = "apps/macos/Packages/VeritasKit";
+const MACOS_DEPLOYMENT_TARGET: &str = "27.0";
 const XCODE_PROJECT: &str = "apps/macos/Veritas.xcodeproj";
 const FFI_MODULE_MAP: &str =
 	"module VeritasCoreFFI {\n\theader \"VeritasCoreFFI.h\"\n\texport *\n}\n";
 
 fn bindings() -> Result {
 	let root = root();
-	run(
+	// The bundled SQLite is C, and cc targets the SDK's own macOS version
+	// unless told otherwise, which is newer than the app's minimum.
+	run_with_env(
 		&root,
 		"cargo",
 		&["build", "--quiet", "--release", "--package", "veritas-ffi"],
+		&[("MACOSX_DEPLOYMENT_TARGET", MACOS_DEPLOYMENT_TARGET)],
 	)?;
 	let release = root.join("target/release");
 	let generated = root.join("target/uniffi/swift");
@@ -258,13 +267,36 @@ fn write(path: &Path, contents: &str) -> Result {
 	std::fs::write(path, contents).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// Stale when missing, or when any Rust source or the lockfile changed after
+/// the xcframework was written.
+fn bindings_are_stale(root: &Path) -> bool {
+	let built = root
+		.join(VERITAS_KIT)
+		.join("VeritasCoreFFI.xcframework/Info.plist");
+	let Ok(built) = std::fs::metadata(built).and_then(|meta| meta.modified()) else {
+		return true;
+	};
+	[root.join("crates"), root.join("Cargo.lock")]
+		.iter()
+		.filter_map(|path| newest_change(path))
+		.any(|changed| changed > built)
+}
+
+fn newest_change(path: &Path) -> Option<std::time::SystemTime> {
+	let meta = std::fs::metadata(path).ok()?;
+	if !meta.is_dir() {
+		return meta.modified().ok();
+	}
+	std::fs::read_dir(path)
+		.ok()?
+		.filter_map(|entry| entry.ok())
+		.filter_map(|entry| newest_change(&entry.path()))
+		.max()
+}
+
 fn xcodebuild(action: &str) -> Result {
 	let root = root();
-	if !root
-		.join(VERITAS_KIT)
-		.join("VeritasCoreFFI.xcframework")
-		.exists()
-	{
+	if bindings_are_stale(&root) {
 		bindings()?;
 	}
 	let derived_data = root.join("target/xcode");
