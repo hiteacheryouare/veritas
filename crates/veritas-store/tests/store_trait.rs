@@ -254,11 +254,12 @@ fn variant(change: &Change) -> &'static str {
 		Change::CategoryMeta(_) => "CategoryMeta",
 		Change::AccountMeta(_) => "AccountMeta",
 		Change::TransactionMeta(_) => "TransactionMeta",
+		Change::TaxTag(_) => "TaxTag",
 		Change::Goal(_) => "Goal",
 	}
 }
 
-const EVERY_VARIANT: [&str; 18] = [
+const EVERY_VARIANT: [&str; 19] = [
 	"Account",
 	"AccountGroup",
 	"CategoryGroup",
@@ -276,6 +277,7 @@ const EVERY_VARIANT: [&str; 18] = [
 	"CategoryMeta",
 	"AccountMeta",
 	"TransactionMeta",
+	"TaxTag",
 	"Goal",
 ];
 
@@ -430,6 +432,10 @@ fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
 				needs_actual: None,
 			},
 		}),
+		Row::TaxTag(veritas_domain::TaxTag {
+			tag: "giving".to_owned(),
+			bucket: "charitable".to_owned(),
+		}),
 		Row::Goal(Goal {
 			id: GoalId::new("v-goal"),
 			category: category.id.clone(),
@@ -529,6 +535,10 @@ fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
 					adjustment: true,
 					needs_actual: Some("formula action".to_owned()),
 				},
+				..row
+			}),
+			Row::TaxTag(row) => Row::TaxTag(veritas_domain::TaxTag {
+				bucket: "medical".to_owned(),
 				..row
 			}),
 			Row::Goal(row) => Row::Goal(Goal {

@@ -57,6 +57,7 @@ pub enum EntityKind {
 	CategoryMeta,
 	AccountMeta,
 	TransactionMeta,
+	TaxTag,
 	Goal,
 }
 
@@ -102,6 +103,7 @@ impl From<&CoreEntity> for EntityRef {
 			CoreEntity::CategoryMeta(id) => row(EntityKind::CategoryMeta, id),
 			CoreEntity::AccountMeta(id) => row(EntityKind::AccountMeta, id),
 			CoreEntity::TransactionMeta(id) => row(EntityKind::TransactionMeta, id),
+			CoreEntity::TaxTag(tag) => row(EntityKind::TaxTag, tag),
 			CoreEntity::Goal(id) => row(EntityKind::Goal, id),
 		}
 	}

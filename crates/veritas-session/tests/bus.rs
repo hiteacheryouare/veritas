@@ -17,7 +17,7 @@ use veritas_domain::{
 	CategoryKind, CategoryMapping, CategoryMeta, CategoryMetaRow, Change, CivilDate, ConditionsOp,
 	CoreError, EntityRef, Goal, GoalId, GoalStatus, Hold, Money, Note, Payee, PayeeId,
 	PayeeMapping, ReadOnlyReason, Row, Rule, RuleId, RuleStage, Schedule, ScheduleId, SplitRole,
-	Store, StoreTransaction, Tag, TagId, Transaction, TransactionId, TransactionMeta,
+	Store, StoreTransaction, Tag, TagId, TaxTag, Transaction, TransactionId, TransactionMeta,
 	TransactionMetaRow, YearMonth,
 };
 use veritas_session::{Access, ChangeListener, ChangeSet, CommandBus, Permit, acquire};
@@ -543,6 +543,7 @@ struct NewRows {
 	category_meta: CategoryMetaRow,
 	account_meta: AccountMetaRow,
 	transaction_meta: TransactionMetaRow,
+	tax_tag: TaxTag,
 	goal: Goal,
 }
 
@@ -648,6 +649,10 @@ impl NewRows {
 					needs_actual: None,
 				},
 			},
+			tax_tag: TaxTag {
+				tag: "charity".to_owned(),
+				bucket: "charitable".to_owned(),
+			},
 			goal: goal("trip"),
 		}
 	}
@@ -672,6 +677,7 @@ impl NewRows {
 		rows.category_meta.meta.tax_bucket = Some("schedule-c".to_owned());
 		rows.account_meta.meta.lender = Some("Ally".to_owned());
 		rows.transaction_meta.meta.adjustment = true;
+		rows.tax_tag.bucket = "medical".to_owned();
 		rows.goal.target = Money::from_minor(450_000);
 		rows
 	}
@@ -695,6 +701,7 @@ impl NewRows {
 			Row::CategoryMeta(self.category_meta.clone()),
 			Row::AccountMeta(self.account_meta.clone()),
 			Row::TransactionMeta(self.transaction_meta.clone()),
+			Row::TaxTag(self.tax_tag.clone()),
 			Row::Goal(self.goal.clone()),
 		]
 	}
@@ -713,10 +720,10 @@ fn every_kind_of_row_undoes_and_redoes_exactly() {
 	let edited = NewRows::edited();
 
 	let changed = bus.perform(&rows(created.rows())).unwrap();
-	assert_eq!(changed.entities.len(), 18);
+	assert_eq!(changed.entities.len(), 19);
 	let after_create = bus.data().clone();
 	let changed = bus.perform(&rows(edited.rows())).unwrap();
-	assert_eq!(changed.entities.len(), 18);
+	assert_eq!(changed.entities.len(), 19);
 	let after_edit = bus.data().clone();
 
 	bus.undo().unwrap();

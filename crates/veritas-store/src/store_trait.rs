@@ -71,6 +71,11 @@ impl StoreTransaction for Writer<'_> {
 				delta.before.as_ref().map(|row| &row.meta),
 				delta.after.as_ref().map(|row| &row.meta),
 			),
+			Change::TaxTag(delta) => self.put_tax_tag(
+				&delta.key,
+				delta.before.as_ref().map(|row| row.bucket.as_str()),
+				delta.after.as_ref().map(|row| row.bucket.as_str()),
+			),
 			Change::Goal(delta) => self.put_goal(delta.before.as_ref(), delta.after.as_ref()),
 		}
 	}
