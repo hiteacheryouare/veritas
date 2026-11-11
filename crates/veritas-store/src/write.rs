@@ -702,19 +702,25 @@ impl<'conn> Writer<'conn> {
 				&budget_cell_columns(after),
 			),
 			(Some(_), None) => Err(invalid("that budget row already exists")),
-			(None, _) => self.insert(
-				table,
-				&[("id", owned(&format!("{month}-{}", after.category)))],
-				&[
-					vec![
-						("month", Value::Integer(month)),
-						("category", owned(after.category.as_str())),
-					],
-					budget_cell_columns(after),
-				]
-				.concat(),
-				Nulls::Skip,
-			),
+			(None, _) => {
+				// Actual's setBudget writes only the amount, so a goal-less
+				// row keeps long_goal NULL, which reads as false.
+				let mut columns = budget_cell_columns(after);
+				columns.retain(|(name, value)| !(*name == "long_goal" && *value == flag(false)));
+				self.insert(
+					table,
+					&[("id", owned(&format!("{month}-{}", after.category)))],
+					&[
+						vec![
+							("month", Value::Integer(month)),
+							("category", owned(after.category.as_str())),
+						],
+						columns,
+					]
+					.concat(),
+					Nulls::Skip,
+				)
+			}
 		}
 	}
 

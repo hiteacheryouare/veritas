@@ -554,3 +554,45 @@ fn a_schedule_date_edit_lands_in_the_next_date_row_the_loader_reads() {
 	writer.commit().unwrap();
 	assert_eq!(loaded(&db).schedules[&before.id], after);
 }
+
+#[test]
+fn a_new_budget_row_leaves_goal_columns_null_like_actuals_set_budget() {
+	let scratch = Scratch::new("write-cell-defaults");
+	let db = fixture_db("small", &scratch);
+	let category = loaded(&db)
+		.categories
+		.values()
+		.find(|c| !c.is_income)
+		.unwrap()
+		.id
+		.clone();
+	let cell = BudgetCell {
+		month: YearMonth::parse("2019-06").unwrap(),
+		category: category.clone(),
+		budgeted: Money::from_minor(1_000),
+		carryover: false,
+		goal: None,
+		long_goal: false,
+	};
+	let mut store = Store::open(&db, Access::ReadWrite).unwrap();
+	let mut writer = store.writer().unwrap();
+	writer.put_budget_cell(None, Some(&cell)).unwrap();
+	writer.commit().unwrap();
+	let stored = row(
+		&Connection::open(&db).unwrap(),
+		"zero_budgets",
+		&format!("201906-{category}"),
+	);
+	let value = |name: &str| {
+		stored
+			.iter()
+			.find(|(column, _)| column == name)
+			.unwrap()
+			.1
+			.clone()
+	};
+	assert_eq!(value("goal"), Value::Null);
+	assert_eq!(value("long_goal"), Value::Null);
+	assert_eq!(value("carryover"), Value::Integer(0));
+	assert_eq!(loaded(&db).budget_cells[&(cell.month, category)], cell);
+}
