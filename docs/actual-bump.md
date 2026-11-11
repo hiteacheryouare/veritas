@@ -28,6 +28,7 @@ Also diff `server/budget/`, `server/transactions/`, `server/rules/`, `server/sch
 2. **Reference.** Delete the checkout, then recreate it: `rm -rf reference/actual && cargo xtask reference`.
 3. **Oracle.** In `tools/actual-oracle/`, run `npm install --save-exact @actual-app/api@NEWVER`. Commit the lockfile. If Actual raised its Node engine floor, update `.nvmrc`.
 4. **Notices.** Bump the pinned version in THIRD_PARTY_NOTICES.md.
+5. **Template.** Run `cargo xtask template` to regenerate the new-budget template from the new oracle, then commit it. Its manifest test fails until you do.
 
 ## 3. Update Veritas
 

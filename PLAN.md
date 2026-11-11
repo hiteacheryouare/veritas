@@ -46,7 +46,7 @@ The run is **done** when Phase 3's shadow run passes and Ryan has been asked for
 - forecast and suggestion methodology (R-FC-*)
 - Wrapped metric definitions
 
-**Fred's specs** are written in Phase 0 (P0.8) and land in `docs/finance/`: `classification.md`, `statements.md`, `tax-buckets.md`, `debt.md` and `forecasting.md`. Every implementation in those areas cites the spec section it implements.
+**Fred's specs** are written in Phase 0 (P0.8) and land in `docs/finance/`: `classification.md`, `statements.md`, `tax-buckets.md`, `debt.md`, `forecasting.md` and `starter-categories.md`. Every implementation in those areas cites the spec section it implements.
 
 **Labels:** `finance` (Fred), `contract` (Architect), `file-format` (reviewer must verify against the oracle). Every GitHub PR, issue and comment starts with Ryan's AI-agent note (Appendix C).
 
@@ -56,7 +56,7 @@ The run is **done** when Phase 3's shadow run passes and Ryan has been asked for
 
 Veritas is a native, fast and boringly reliable personal finance app. It does envelope budgeting the way Actual Budget does and acts as a **strict superset of Actual's data**:
 
-- You can bring an Actual budget in, use Veritas for weeks, and take it back to Actual with no Actual data lost.
+- You can start a budget in Veritas, or bring an Actual budget in, use Veritas for weeks, and take it to Actual with no Actual data lost.
 - It fixes Ryan's long-standing gripes:
   1. Savings goals are first-class envelopes. Closing one doesn't wreck your reports.
   2. Transfers say plainly where money went from and to.
@@ -129,6 +129,7 @@ Priority: **P0** = required for the first daily-driver release (v1, end of Phase
 
 | ID | Requirement | P |
 |---|---|---|
+| R-IO-0 | **Veritas stands on its own.** Create a new budget without Actual: a name, currency and number format, accounts with starting balances, and the Veritas starter categories (docs/finance/starter-categories.md). The file is an Actual-format budget from the first write, built from the pinned template (Appendix A), so exporting it imports into Actual cleanly. | P0 |
 | R-IO-1 | Import an Actual export `.zip`: `db.sqlite` + `metadata.json`, either at the zip root or both in exactly one shared subfolder (same rule as Actual's `importBuffer`). | P0 |
 | R-IO-2 | Export an Actual `.zip` that Actual (Electron, pinned version) imports with no warnings or errors. | P0 |
 | R-IO-3 | **Lossless round trip of Actual data.** Actual → Veritas → Actual with no edits produces a canonical dump (§6.4) identical to the original for every Actual table except `kvcache`/`kvcache_key`. Metadata ids may differ. | P0 |
@@ -365,7 +366,7 @@ Rust has a matching `canonical_dump` in `veritas-interop`. That gives three test
 
 1. **Round trip:** `dump(export(import(zip))) == dump(zip)` for every fixture.
 2. **Differential behavior:** a random op sequence, generated with proptest, is applied by Veritas *and* by the oracle. Then the budget values, balances and schedule dates must be equal. This is how R-BUD-1 and R-RULE-1 get proven, not just argued.
-3. **Actual acceptance:** the oracle imports every Veritas export with `importBudget`, and `checkDatabaseValidity` passes.
+3. **Actual acceptance:** the oracle imports every Veritas export with `importBudget`, and `checkDatabaseValidity` passes. That includes budgets created in Veritas (R-IO-0), whose balances and budgets are compared with what the oracle reads back.
 
 Fixtures:
 
@@ -390,6 +391,7 @@ Fixtures:
 - **Crash tests:** a harness kills the process (SIGKILL) at random points during scripted edits, reopens, and asserts integrity, the audit and "last committed action present".
 - **Fuzzing:** a `cargo fuzz` target on the zip importer and the arithmetic parser (hostile input never panics).
 - Import works on a copy, audits it, and refuses to adopt the budget if the audit finds corruption. The user gets a report instead.
+- Creating a budget (R-IO-0) builds it in a temporary folder and renames it into place, so a crash never leaves a half-made budget. The crash harness covers create too.
 
 ## 6.7 UI technology
 
@@ -407,7 +409,7 @@ Fixtures:
 ## 6.8 Build and tooling (project-scoped, nothing global beyond Xcode + rustup + Node)
 
 - Cargo workspace with `rust-toolchain.toml` pinning the toolchain.
-- **`cargo xtask`** for every task runner need: `xtask bindings`, `xtask oracle <cmd>`, `xtask fixtures`, `xtask bench`, `xtask ci`. No `just`, `make` or Homebrew tools to install.
+- **`cargo xtask`** for every task runner need: `xtask bindings`, `xtask oracle <cmd>`, `xtask fixtures`, `xtask template`, `xtask bench`, `xtask ci`. No `just`, `make` or Homebrew tools to install.
 - `.nvmrc` + `tools/actual-oracle/package-lock.json` for the oracle. Run it with `npm ci` inside that folder only.
 - GitHub Actions (macOS runner): fmt, clippy, Rust tests, oracle differential tests, `swift test` for the packages, `xcodebuild` for the app, benchmarks with a regression threshold (fail at >15% over the budget in R-PERF).
 
@@ -508,7 +510,8 @@ Each workstream runs on its own branch (`ws/<id>`), in its own git worktree, and
   7. Zip import (copy → audit → adopt) and export (`VACUUM INTO` → zip → atomic rename).
   8. Manifest guard.
   9. Rust `canonical_dump`.
-- **Done when:** round-trip tests pass on every fixture (R-IO-1 to R-IO-8), the oracle imports every export cleanly, and the importer fuzz target has run 1 h with no crash.
+  10. New budget (R-IO-0), including `cargo xtask template`, which WS-STORE owns: copy the pinned template db (Appendix A), write `metadata.json`, apply the starter categories (docs/finance/starter-categories.md), and add accounts with starting balances. It's built in a temp folder and renamed into place.
+- **Done when:** round-trip tests pass on every fixture (R-IO-1 to R-IO-8), a new budget's export imports into Actual through the oracle with no errors and the same balances and budgets, the oracle imports every export cleanly, and the importer fuzz target has run 1 h with no crash.
 
 ### WS-ENGINE: budget math
 - **Owns:** `veritas-engine`.
@@ -536,7 +539,7 @@ Each workstream runs on its own branch (`ws/<id>`), in its own git worktree, and
 ### WS-SESSION: session, FFI, reliability
 - **Owns:** `veritas-session`, `veritas-ffi`, crash harness.
 - **Steps:**
-  1. Open/close, single-writer lock.
+  1. Create (R-IO-0), open and close, single-writer lock.
   2. Command bus with one transaction per command.
   3. Undo/redo inverses.
   4. Change-event stream.
@@ -590,7 +593,7 @@ Shared rule: views go in `VeritasMacUI`, view models in `VeritasKit`, and no bus
 
 | Workstream | Builds | Key requirements |
 |---|---|---|
-| **WS-MAC-SHELL** | App shell, sidebar, toolbar, menus, ⌘K palette, open/import/export, settings (backups, interop, AI, appearance), snapshot restore UI, read-only mode banners, error presentation | R-IO-*, R-REL-3/4/6, §5.2 |
+| **WS-MAC-SHELL** | App shell, sidebar, toolbar, menus, ⌘K palette, new budget/open/import/export, settings (backups, interop, AI, appearance), snapshot restore UI, read-only mode banners, error presentation | R-IO-*, R-REL-3/4/6, §5.2 |
 | **WS-MAC-BUDGET** | Budget screen, envelope rows, arithmetic field component (**reused by every amount field app-wide**: build it first and publish it to the others), move budget, cover overspending, dense mode, goal cards + create/close/archive flows | R-BUD-*, R-GOAL-* |
 | **WS-MAC-ACCOUNTS** | Account list, `NSTableView` register, quick entry ⌘N with payee memory, Move money sheet, transfer rendering, on→off "what is this?" prompt, loan setup + payment wizard, reconcile flow, payee manager, account close (Actual's flow: an optional closing transfer moves the balance to the chosen account; see docs/actual-format.md) | R-ACC-*, R-XFER-*, R-DEBT-* |
 | **WS-MAC-BILLS** | Bills list/editor, upcoming tray, Paid/skip, sentence-style rule editor, read-only unsupported rules | R-BILL-*, R-RULE-* |
@@ -602,7 +605,7 @@ Shared rule: views go in `VeritasMacUI`, view models in `VeritasKit`, and no bus
 ## Phase 3: Hardening & cutover (v1)
 
 - **WS-QA** (owned by the coverage cowboys; Fred reviews the finance journeys):
-  - End-to-end journeys: a month of manual entry, closing a goal, paying a loan, a bill cycle, a round trip.
+  - End-to-end journeys: a new budget from scratch, a month of manual entry, closing a goal, paying a loan, a bill cycle, a round trip.
   - Fuzz the remaining parsers.
   - Run the perf suite on `perf-100k`.
   - Accessibility pass.
@@ -649,13 +652,15 @@ Shared rule: views go in `VeritasMacUI`, view models in `VeritasKit`, and no bus
 
 **Scale & UX**
 19. 100k+ transactions, 15+ years of months, 500 categories: still within the perf budgets.
-20. First launch with no budget: empty state with **Import from Actual** as the primary action.
+20. First launch with no budget: two equal choices, **New budget** and **Import from Actual**. New budget offers to create off-budget 401(k) and HSA accounts (D56). The new-budget screens get Ryan's design sign-off (§5.3) before they merge.
 
 ---
 
 # 10. Acceptance criteria
 
 **Interop & safety**
+- [ ] First launch shows New budget and Import from Actual as equal choices, and a UI test walks both to an open budget.
+- [ ] A budget created in Veritas (accounts with starting balances, starter categories, a month of budgeting and transactions) exports to a zip that Actual imports with no errors, and Actual shows the same balances and budgets.
 - [ ] Ryan exports from Actual, imports into Veritas, and immediately exports. The oracle reports a canonical dump identical to the original.
 - [ ] After a scripted session in Veritas (budget edits, transfers, a split loan payment, a new bill, a closed goal, an edited custom report), the export imports into Actual with no errors, and Actual shows the same balances, budgets, schedules and report config.
 - [ ] A file with an injected unknown table and an unknown column survives import → edit → export unchanged in those parts.
@@ -740,7 +745,7 @@ New questions found during the build go to Ryan as they come up (§0.1). Agents 
 
 Verified against tag v26.11.0 (sha 1766241e3f4b) in P0.4. This is a summary. [docs/actual-format.md](docs/actual-format.md) has the details, the file:line citations and the Architect's decisions.
 
-- **New budgets** copy `default-db.sqlite`, which already holds seed rows with fixed ids (3 category groups, 7 categories including "Starting Balances", 7 identity `category_mapping` rows), and run every migration on first load, which adds 12 dashboard widgets on one `Main` page. → Veritas creates budgets from a pinned template db that the oracle generates.
+- **New budgets** copy `default-db.sqlite`, which already holds seed rows with fixed ids (3 category groups, 7 categories including "Starting Balances", 7 identity `category_mapping` rows), and run every migration on first load, which adds 12 dashboard widgets on one `Main` page. → Veritas creates budgets from a pinned template db that the oracle generates (`cargo xtask template`), committed in `crates/veritas-store/template/` because the oracle is dev-only. A test fails when the template's `__migrations__` don't match the manifest. The starter categories reuse the 3 seed groups and 7 seed categories by id (renamed and moved with plain updates, nothing deleted; "Starting Balances" is kept exactly) and add the rest as new rows (docs/finance/starter-categories.md).
 - **Migrations:** exactly **60** (57 up to `ADDITIVE_ONLY_CUTOFF = 1780606215001`, 3 after). `checkDatabaseValidity` fails a file with `out-of-sync-migrations` when it has applied ids but no migrations exist, has an unknown id ≤ the cutoff, has any unknown id while missing a known one, has a post-cutoff id while missing a pre-cutoff one, or its pre-cutoff ids aren't an exact ordered prefix. Otherwise missing ids are applied on load. → **Veritas never writes `__migrations__`.**
 - **Export** (`exportBuffer`): a zip of exactly `db.sqlite` + `metadata.json` at the root. The db is a SQLite **backup copy** with `kvcache`/`kvcache_key` emptied, not the raw file. `metadata.json` is copied from disk with `resetClock: true`. No export at all when `budgetName` is missing.
 - **metadata.json** (`MetadataPrefs`): `budgetName, id, lastUploaded, cloudFileId, groupId, encryptKeyId, lastSyncedTimestamp, resetClock, lastScheduleRun, userId`. Import requires none of them, only valid JSON.
