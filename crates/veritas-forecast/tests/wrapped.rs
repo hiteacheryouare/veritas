@@ -119,22 +119,25 @@ fn w_5_ties_go_to_the_earlier_name() {
 }
 
 #[test]
-fn w_6_top_five_plus_everything_else_and_hidden_labels() {
+fn w_14_everything_else_leaves_out_refunds_and_uncategorized() {
 	let mut book = Book::household();
-	book.hide("Books");
+	book.category("Pets", "Everyday")
+		.category("Refunds", "Everyday")
+		.hide("Books");
 	nets(
 		&mut book,
 		&[
 			("Groceries", 43000),
-			("Dining", 20000),
-			("Fuel", 10000),
+			("Dining", 30000),
+			("Fuel", 17000),
 			("Fun", 10000),
-			("Books", 7000),
-			("Gifts", 6000),
-			("Electric", 4000),
+			("Books", 6000),
+			("Gifts", 5000),
+			("Pets", 4000),
+			("Refunds", -2000),
 		],
 	);
-	book.row("CHK", "2027-04-01", -3000);
+	book.row("CHK", "2027-04-01", -9000);
 	let result = wrap(&book, 2027, "2027-12-31");
 	let names: Vec<&str> = result
 		.top_categories
@@ -143,16 +146,55 @@ fn w_6_top_five_plus_everything_else_and_hidden_labels() {
 		.collect();
 	assert_eq!(names, ["Groceries", "Dining", "Fuel", "Fun", "Books"]);
 	assert!(result.top_categories[4].labels.hidden);
-	assert_eq!(result.other_categories, cents(13000));
+	assert_eq!(result.other_categories, cents(9000));
 	let redacted = result.redacted();
 	let shares: Vec<i64> = redacted
 		.categories
 		.iter()
 		.map(|(_, share)| *share)
 		.collect();
-	assert_eq!(shares, [418, 194, 97, 97, 68, 126]);
-	assert_eq!(shares.iter().sum::<i64>(), 1000);
+	assert_eq!(shares, [374, 261, 148, 87, 52, 78]);
 	assert_eq!(redacted.categories.last().unwrap().0, None);
+}
+
+#[test]
+fn w_9b_prior_year_net_from_a_negative_base_year_to_date() {
+	let mut book = Book::household();
+	book.opening("CHK", "2025-12-31", 100000);
+	book.spend("Groceries", "2026-02-10", -20000);
+	book.spend("Paycheck", "2026-06-10", 900000);
+	book.spend("Paycheck", "2027-02-10", 10000);
+	let result = wrap(&book, 2027, "2027-03-10");
+	assert_eq!(result.prior_year.net, Change::BasisPoints(15000));
+	assert_eq!(result.prior_year.from, None);
+}
+
+#[test]
+fn fc_8_a_prior_year_that_starts_late_is_labeled() {
+	let mut book = Book::household();
+	book.spend("Groceries", "2026-09-01", -20000);
+	book.spend("Groceries", "2027-09-01", -30000);
+	let result = wrap(&book, 2027, "2027-12-31");
+	assert_eq!(result.prior_year.from, Some(date("2026-09-01")));
+	assert_eq!(result.prior_year.total_out, Change::BasisPoints(5000));
+}
+
+#[test]
+fn w_15_out_vs_in_needs_positive_income() {
+	let mut book = Book::household();
+	book.spend("Paycheck", "2027-02-01", 100000);
+	book.spend("Groceries", "2027-02-01", -50000);
+	assert_eq!(
+		wrap(&book, 2027, "2027-12-31").redacted().out_vs_in,
+		Some(500)
+	);
+	let mut negative = Book::household();
+	negative.spend("Paycheck", "2027-02-01", -3000);
+	negative.spend("Groceries", "2027-02-01", -50000);
+	assert_eq!(
+		wrap(&negative, 2027, "2027-12-31").redacted().out_vs_in,
+		None
+	);
 }
 
 #[test]

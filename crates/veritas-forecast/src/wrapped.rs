@@ -65,6 +65,9 @@ pub struct PriorYear {
 	pub total_in: Change,
 	pub total_out: Change,
 	pub net: Change,
+	/// Set when the budget's first row falls inside the prior range, so the
+	/// prior figures cover only the days from it ("prior year from {date}").
+	pub from: Option<CivilDate>,
 }
 
 /// FC-8's aggregates for one calendar year, or the current year to date (R-WRAP-1).
@@ -79,7 +82,8 @@ pub struct Wrapped {
 	pub debt_paydown: Money,
 	pub savings: Money,
 	pub top_categories: Vec<CategoryRank>,
-	/// The other categories with a positive net, uncategorized included.
+	/// The other categories with a positive net. Uncategorized rows are not a
+	/// category, so they are in neither the ranking nor this (FC-8).
 	pub other_categories: Money,
 	pub top_groups: Vec<GroupRank>,
 	pub top_payees: Vec<PayeeRank>,
@@ -154,7 +158,10 @@ fn shares<Id: Clone>(mut set: Vec<(Option<Id>, Money)>, other: Money) -> Vec<(Op
 }
 
 /// Positive nets, largest first, ties by name (code point order) then id.
-fn rank<T>(mut items: Vec<T>, key: impl Fn(&T) -> (Money, &str, String)) -> (Vec<T>, Money) {
+fn rank<T>(
+	mut items: Vec<T>,
+	key: impl Fn(&T) -> (Money, &str, String),
+) -> Result<(Vec<T>, Money), CoreError> {
 	items.retain(|item| key(item).0 > Money::ZERO);
 	items.sort_by(|a, b| {
 		let (a, b) = (key(a), key(b));
@@ -163,10 +170,8 @@ fn rank<T>(mut items: Vec<T>, key: impl Fn(&T) -> (Money, &str, String)) -> (Vec
 			.then_with(|| a.2.cmp(&b.2))
 	});
 	let rest = items.split_off(TOP.min(items.len()));
-	let other = rest.iter().fold(0i64, |total, item| {
-		total.saturating_add(key(item).0.minor())
-	});
-	(items, Money::from_minor(other))
+	let other = Money::checked_sum(rest.iter().map(|item| key(item).0))?;
+	Ok((items, other))
 }
 
 fn change(current: Money, previous: Money) -> Change {
@@ -260,18 +265,9 @@ pub fn wrapped(
 			})
 		})
 		.collect();
-	let (top_categories, mut other_categories) = rank(categories, |rank| {
+	let (top_categories, other_categories) = rank(categories, |rank| {
 		(rank.total, rank.name.as_str(), rank.category.to_string())
-	});
-	if let Some(uncategorized) = report
-		.expenses
-		.categories
-		.iter()
-		.find(|line| line.category.is_none())
-		.filter(|line| line.total > Money::ZERO)
-	{
-		other_categories = other_categories.checked_add(uncategorized.total)?;
-	}
+	})?;
 
 	let mut groups: BTreeMap<CategoryGroupId, i64> = BTreeMap::new();
 	for line in &report.expenses.categories {
@@ -302,7 +298,7 @@ pub fn wrapped(
 		.collect();
 	let (top_groups, _) = rank(groups, |rank| {
 		(rank.total, rank.name.as_str(), rank.group.to_string())
-	});
+	})?;
 
 	let expense_rows = rows
 		.iter()
@@ -343,7 +339,7 @@ pub fn wrapped(
 		.collect();
 	let (top_payees, other_payees) = rank(payees, |rank| {
 		(rank.total, rank.name.as_str(), rank.payee.to_string())
-	});
+	})?;
 
 	let biggest_month = months.iter().fold(
 		None,
@@ -375,6 +371,11 @@ pub fn wrapped(
 		same_day_in(year - 1, last)?,
 	)?;
 	let (previous, _) = totals(budget, classification, prior)?;
+	let from = classification
+		.rows()
+		.first()
+		.map(|row| row.date)
+		.filter(|first| prior.first() < *first && *first <= prior.last());
 	let net = current.total_in.checked_sub(current.total_out)?;
 	let previous_net = previous.total_in.checked_sub(previous.total_out)?;
 
@@ -409,6 +410,7 @@ pub fn wrapped(
 			total_in: change(current.total_in, previous.total_in),
 			total_out: change(current.total_out, previous.total_out),
 			net: change(net, previous_net),
+			from,
 		},
 	})
 }
