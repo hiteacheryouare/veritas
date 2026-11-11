@@ -55,6 +55,10 @@ thread_local! {
 	static PANIC_ON_WRITE: Cell<Option<usize>> = const { Cell::new(None) };
 	/// Makes adopt answer as veritas-store does for tables from a newer Veritas.
 	static NEWER_VERITAS_TABLES: Cell<bool> = const { Cell::new(false) };
+	/// Makes a read-only open fail the way it does on a journal a killed
+	/// writer left, until recover_after_crash runs. Counts the recoveries.
+	static CRASHED_JOURNAL: Cell<bool> = const { Cell::new(false) };
+	static RECOVERIES: Cell<usize> = const { Cell::new(0) };
 }
 
 impl StoreTransaction for Counted<'_> {
@@ -79,6 +83,11 @@ impl StoreTransaction for Counted<'_> {
 
 impl Backend for ReadPath {
 	fn open(db: &Path, access: veritas_store::Access) -> Result<Self, CoreError> {
+		if CRASHED_JOURNAL.get() && matches!(access, veritas_store::Access::ReadOnly(_)) {
+			return Err(CoreError::Storage(
+				"attempt to write a readonly database".to_owned(),
+			));
+		}
 		veritas_store::Store::open(db, access).map(|store| ReadPath { store, writes: 0 })
 	}
 
@@ -129,10 +138,18 @@ impl Backend for ReadPath {
 		veritas_interop::export_actual_zip(&self.store, metadata, to)
 	}
 
-	/// Stands in for the store's template: the small fixture, renamed.
-	fn create(dir: &Path, budget: &veritas_domain::NewBudget) -> Result<(), CoreError> {
-		build_from_fixture(dir, &budget.name);
-		Ok(())
+	fn create(
+		dir: &Path,
+		budget: &veritas_domain::NewBudget,
+		today: veritas_domain::CivilDate,
+	) -> Result<(), CoreError> {
+		<veritas_store::Store as Backend>::create(dir, budget, today)
+	}
+
+	fn recover_after_crash(db: &Path) -> Result<(), CoreError> {
+		CRASHED_JOURNAL.set(false);
+		RECOVERIES.set(RECOVERIES.get() + 1);
+		<veritas_store::Store as Backend>::recover_after_crash(db)
 	}
 }
 
@@ -901,19 +918,76 @@ fn a_new_budget_is_built_aside_and_renamed_into_place_before_it_opens() {
 }
 
 #[test]
-fn until_the_store_can_create_a_budget_the_request_fails_and_leaves_nothing() {
-	let root = TempDir::new("session-create-stub");
-	let result = Session::<veritas_store::Store>::create_budget(
+fn a_new_budget_starts_with_its_accounts_in_the_right_groups() {
+	// R-IO-0, D8, D56, docs/finance/statements.md ST-9.2: each kind lands in
+	// its sidebar group, and what a liability owes is stored negative.
+	use veritas_domain::{Money, NewAccount, NewAccountKind};
+	use veritas_session::AccountGroupKind;
+	let root = TempDir::new("session-create-real");
+	let account = |name: &str, kind, typed: i64| NewAccount {
+		name: name.to_owned(),
+		kind,
+		starting_balance: Money::from_minor(typed),
+	};
+	let budget = veritas_domain::NewBudget {
+		accounts: vec![
+			account("Checking", NewAccountKind::Checking, 250_000),
+			account("Visa", NewAccountKind::CreditCard, 45_000),
+			account("Brokerage", NewAccountKind::Investment, 900_000),
+			account("Mortgage", NewAccountKind::Mortgage, 25_000_000),
+		],
+		hsa: true,
+		..new_budget("Household")
+	};
+	let mut session = Session::<veritas_store::Store>::create_budget(
 		&root.path().join("Household"),
-		&new_budget("Household"),
+		&budget,
 		TestClock::new().options(),
-	);
+	)
+	.unwrap();
+	session.wait_for_open_check();
+
+	assert_eq!(session.read_only(), None);
 	assert!(
-		matches!(result, Err(CoreError::Invalid(_))),
+		session.audit_report().unwrap().is_clean(),
 		"{:?}",
-		result.err()
+		session.audit_report()
 	);
-	assert!(entries(root.path()).is_empty());
+	let overview = session.overview().unwrap();
+	assert_eq!(overview.budget_name.as_deref(), Some("Household"));
+	let group = |kind: AccountGroupKind| -> Vec<(String, i64)> {
+		overview
+			.groups
+			.iter()
+			.find(|group| group.kind == kind)
+			.unwrap()
+			.accounts
+			.iter()
+			.map(|account| (account.name.clone(), account.balance.minor()))
+			.collect()
+	};
+	assert_eq!(
+		group(AccountGroupKind::Cash),
+		[("Checking".to_owned(), 250_000)]
+	);
+	assert_eq!(
+		group(AccountGroupKind::Credit),
+		[("Visa".to_owned(), -45_000)]
+	);
+	assert_eq!(
+		group(AccountGroupKind::Loans),
+		[("Mortgage".to_owned(), -25_000_000)]
+	);
+	let investments = group(AccountGroupKind::Investments);
+	assert!(investments.contains(&("Brokerage".to_owned(), 900_000)));
+	assert_eq!(
+		investments.len(),
+		3,
+		"the 401(k) and HSA too: {investments:?}"
+	);
+	let metadata = std::fs::read_to_string(root.path().join("Household/metadata.json")).unwrap();
+	assert!(!metadata.contains(".creating"), "{metadata}");
+	assert_eq!(entries(root.path()), ["Household"]);
 }
 
 #[test]
@@ -1013,4 +1087,28 @@ fn setup_accounts_need_a_name_and_a_balance_that_fits() {
 		clock.options(),
 	)
 	.unwrap();
+}
+
+#[test]
+fn a_crashed_writers_journal_is_recovered_before_the_budget_opens() {
+	// A writer killed mid-write can leave a journal only a read-write
+	// connection may replay. The window holding the lock recovers it first;
+	// a window without the lock never tries.
+	let (_root, dir) = imported("session-recover");
+	let holder = acquire(&dir).unwrap();
+	CRASHED_JOURNAL.set(true);
+	let refused = TestSession::open(&dir, TestClock::new().options());
+	assert!(
+		matches!(refused, Err(CoreError::Storage(_))),
+		"{:?}",
+		refused.err()
+	);
+	assert_eq!(RECOVERIES.get(), 0);
+	drop(holder);
+
+	let session = TestSession::open(&dir, TestClock::new().options()).unwrap();
+
+	CRASHED_JOURNAL.set(false);
+	assert_eq!(RECOVERIES.get(), 1);
+	assert_eq!(session.read_only(), None);
 }

@@ -53,7 +53,10 @@ pub trait Backend: Store + Sized {
 	/// Builds a complete new budget (db.sqlite and metadata.json) in `dir`,
 	/// which exists and is empty. The session builds in a hidden folder and
 	/// renames it into place, so this needn't be atomic itself.
-	fn create(dir: &Path, budget: &NewBudget) -> Result<(), CoreError>;
+	fn create(dir: &Path, budget: &NewBudget, today: CivilDate) -> Result<(), CoreError>;
+	/// Replays what a killed writer left in the journal, without switching the
+	/// file's journal mode. Only called while holding the writer lock.
+	fn recover_after_crash(db: &Path) -> Result<(), CoreError>;
 }
 
 /// How the last backup went. Backup failures are reported here and never
@@ -189,8 +192,10 @@ impl<B: Backend> Session<B> {
 			}
 			account.opening_balance()?;
 		}
-		build_aside(budget_dir, "creating", cancel, |staging| {
-			B::create(staging, &trimmed)
+		let today = CivilDate::from((options.clock)().date_naive());
+		build_aside(budget_dir, "creating", cancel, |inner| {
+			std::fs::create_dir(inner).map_err(io_error("create", inner))?;
+			B::create(inner, &trimmed, today)
 		})?;
 		Session::open(budget_dir, options)
 	}
@@ -213,16 +218,17 @@ impl<B: Backend> Session<B> {
 		options: SessionOptions,
 		cancel: &CancelToken,
 	) -> Result<Self, CoreError> {
-		build_aside(budget_dir, "importing", cancel, |staging| {
-			// The importer creates its own folder, so it gets a fresh name.
-			std::fs::remove_dir(staging).map_err(io_error("prepare", staging))?;
-			match import_actual_zip(zip, staging)? {
+		build_aside(
+			budget_dir,
+			"importing",
+			cancel,
+			|inner| match import_actual_zip(zip, inner)? {
 				ImportOutcome::Imported(_) => Ok(()),
 				ImportOutcome::Refused(report) => Err(CoreError::AuditFailed {
 					violations: report.violations.len(),
 				}),
-			}
-		})?;
+			},
+		)?;
 		Session::open(budget_dir, options)
 	}
 
@@ -715,7 +721,7 @@ fn open_backend<B: Backend>(
 		// connection may recover. The writer lock means no other writer is
 		// alive, so this one recovers it, then looks again.
 		Err(CoreError::Storage(message)) if writable && message.contains("readonly database") => {
-			drop(B::open(db, StoreAccess::ReadWrite)?);
+			B::recover_after_crash(db)?;
 			inspect::<B>(db)?
 		}
 		inspected => inspected?,
@@ -777,8 +783,10 @@ fn backup_file_name(budget_name: Option<&str>, at: DateTime<Utc>) -> String {
 	format!("{}-{name}.zip", at.format("%Y-%m-%d"))
 }
 
-/// Builds a budget folder in a hidden sibling of `budget_dir`, then renames
-/// it into place unless cancelled. On any failure the sibling is removed.
+/// Builds a budget in a folder named like `budget_dir` (budgets take their id
+/// from their folder's name) inside a hidden sibling, then renames it into
+/// place unless cancelled. `build` gets that folder's path, not yet created.
+/// On any failure the hidden sibling is removed.
 fn build_aside(
 	budget_dir: &Path,
 	doing: &str,
@@ -799,15 +807,12 @@ fn build_aside(
 	let prefix = format!(".{folder_name}.{doing}-");
 	sweep_stale_folders(parent, &prefix);
 	let staging = reserve_folder(parent, &prefix)?;
-	let built = build(&staging)
+	let inner = staging.join(&folder_name);
+	let built = build(&inner)
 		.and_then(|()| cancel.check())
-		.and_then(|()| {
-			std::fs::rename(&staging, budget_dir).map_err(io_error("create", budget_dir))
-		});
-	if let Err(error) = built {
-		let _ = std::fs::remove_dir_all(&staging);
-		return Err(error);
-	}
+		.and_then(|()| std::fs::rename(&inner, budget_dir).map_err(io_error("create", budget_dir)));
+	let _ = std::fs::remove_dir_all(&staging);
+	built?;
 	sync_dir(parent);
 	Ok(())
 }

@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use veritas_domain::CoreError;
+use veritas_domain::{CivilDate, CoreError};
 use veritas_interop::ExportOutcome;
 use veritas_store::{Access, AuditReport, Loaded, Store};
 
@@ -45,13 +45,11 @@ impl Backend for Store {
 		veritas_interop::export_actual_zip(self, metadata, to)
 	}
 
-	/// Stands in for veritas-store's `create_budget` (the pinned template,
-	/// metadata.json, starter categories and setup's accounts) until it lands,
-	/// so the shell can code against `create_budget` now.
-	fn create(_dir: &Path, _budget: &NewBudget) -> Result<(), CoreError> {
-		Err(CoreError::Invalid(
-			"Starting a new budget isn't available in this build yet. Import an Actual export instead."
-				.to_owned(),
-		))
+	fn create(dir: &Path, budget: &NewBudget, today: CivilDate) -> Result<(), CoreError> {
+		veritas_interop::create_budget(dir, budget, today).map(|_| ())
+	}
+
+	fn recover_after_crash(db: &Path) -> Result<(), CoreError> {
+		veritas_store::recover_after_crash(db)
 	}
 }
