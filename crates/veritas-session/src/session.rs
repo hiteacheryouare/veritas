@@ -708,15 +708,9 @@ fn open_bus<B: Backend>(
 	}
 }
 
-/// Reads everything that decides access through a read-only open, so a
-/// budget that turns out read-only is never written. Only a writable one is
-/// reopened for writing and adopted. The data loaded read-only is kept: the
-/// writer lock means nothing else wrote in between, and adopt only adds
-/// empty veritas_* tables.
-fn open_backend<B: Backend>(
-	db: &Path,
-	writable: bool,
-) -> Result<(B, Loaded, Option<ReadOnlyReason>), CoreError> {
+/// The read-only part of opening: the migration check, quick check, load
+/// and budget type, with the reason the budget must stay read-only, if any.
+fn inspect<B: Backend>(db: &Path) -> Result<(B, Loaded, Option<ReadOnlyReason>), CoreError> {
 	let reader = B::open(db, StoreAccess::ReadOnly(ReadOnlyReason::OpenElsewhere))?;
 	let mut reason = match Manifest::supported()?.check(&reader.migration_ids()?)? {
 		veritas_interop::Access::ReadWrite => None,
@@ -729,6 +723,28 @@ fn open_backend<B: Backend>(
 	if reason.is_none() && loaded.data.budget_type == BudgetType::Tracking {
 		reason = Some(ReadOnlyReason::TrackingBudget);
 	}
+	Ok((reader, loaded, reason))
+}
+
+/// Reads everything that decides access through a read-only open, so a
+/// budget that turns out read-only is never written. Only a writable one is
+/// reopened for writing and adopted. The data loaded read-only is kept: the
+/// writer lock means nothing else wrote in between, and adopt only adds
+/// empty veritas_* tables.
+fn open_backend<B: Backend>(
+	db: &Path,
+	writable: bool,
+) -> Result<(B, Loaded, Option<ReadOnlyReason>), CoreError> {
+	let (reader, loaded, reason) = match inspect::<B>(db) {
+		// A process killed mid-write can leave a WAL that only a read-write
+		// connection may recover. The writer lock means no other writer is
+		// alive, so this one recovers it, then looks again.
+		Err(CoreError::Storage(message)) if writable && message.contains("readonly database") => {
+			drop(B::open(db, StoreAccess::ReadWrite)?);
+			inspect::<B>(db)?
+		}
+		inspected => inspected?,
+	};
 	if reason.is_some() || !writable {
 		let reason = reason.unwrap_or(ReadOnlyReason::OpenElsewhere);
 		return Ok((reader, loaded, Some(reason)));
