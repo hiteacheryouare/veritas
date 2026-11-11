@@ -1289,6 +1289,7 @@ dependencies = [
  "thiserror",
  "uniffi",
  "veritas-domain",
+ "veritas-engine",
  "veritas-session",
  "veritas-store",
 ]

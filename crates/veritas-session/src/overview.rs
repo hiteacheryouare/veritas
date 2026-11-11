@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use veritas_domain::{AccountId, AccountKind, BudgetData, CivilDate, CoreError, Money};
 use veritas_reports::{account_balances, classify};
 
-use crate::session::NumberFormat;
+use veritas_domain::NumberFormat;
 
 /// docs/finance/statements.md ST-9.2, in the order the sidebar lists them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]

@@ -3,7 +3,9 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use chrono::{DateTime, TimeDelta, Utc};
-use veritas_domain::{BudgetData, BudgetType, CivilDate, CoreError, ReadOnlyReason, Store};
+use veritas_domain::{
+	BudgetData, BudgetType, CivilDate, CoreError, NewBudget, ReadOnlyReason, Store,
+};
 use veritas_interop::{ExportOutcome, ImportOutcome, Manifest, import_actual_zip};
 use veritas_store::{Access as StoreAccess, AuditReport, LoadReport, Loaded};
 
@@ -52,40 +54,6 @@ pub trait Backend: Store + Sized {
 	/// which exists and is empty. The session builds in a hidden folder and
 	/// renames it into place, so this needn't be atomic itself.
 	fn create(dir: &Path, budget: &NewBudget) -> Result<(), CoreError>;
-}
-
-/// What setup asks for a new budget (R-IO-0).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct NewBudget {
-	pub name: String,
-	pub format: NumberFormat,
-	/// Off-budget accounts for a 401(k) and an HSA, so gross-paycheck
-	/// contributions classify as savings (D56, CLS-10).
-	pub retirement_401k: bool,
-	pub hsa: bool,
-}
-
-/// Actual's number format preferences: `numberFormat`, `hideFraction` and
-/// `defaultCurrencyCode` (loot-core/src/types/prefs.ts:26-31).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct NumberFormat {
-	/// An ISO 4217 code, or `None` for no currency symbol, Actual's default.
-	pub currency: Option<String>,
-	pub style: NumberStyle,
-	pub hide_decimals: bool,
-}
-
-/// Actual's `numberFormat` values (loot-core/src/shared/util.ts:265-268).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NumberStyle {
-	/// `1,000.33`, Actual's default.
-	CommaDot,
-	/// `1.000,33`
-	DotComma,
-	/// `1 000,33`
-	SpaceComma,
-	/// `1'000.33`
-	ApostropheDot,
 }
 
 /// How the last backup went. Backup failures are reported here and never
@@ -210,10 +178,17 @@ impl<B: Backend> Session<B> {
 				"Enter a name for the budget.".to_owned(),
 			));
 		}
-		let trimmed = NewBudget {
+		let mut trimmed = NewBudget {
 			name: budget.name.trim().to_owned(),
 			..budget.clone()
 		};
+		for account in &mut trimmed.accounts {
+			account.name = account.name.trim().to_owned();
+			if account.name.is_empty() {
+				return Err(CoreError::Invalid("Give each account a name.".to_owned()));
+			}
+			account.opening_balance()?;
+		}
 		build_aside(budget_dir, "creating", cancel, |staging| {
 			B::create(staging, &trimmed)
 		})?;
