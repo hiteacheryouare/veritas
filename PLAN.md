@@ -510,7 +510,7 @@ Each workstream runs on its own branch (`ws/<id>`), in its own git worktree, and
   7. Zip import (copy → audit → adopt) and export (`VACUUM INTO` → zip → atomic rename).
   8. Manifest guard.
   9. Rust `canonical_dump`.
-  10. New budget (R-IO-0): copy the pinned template db (Appendix A), write `metadata.json`, apply the starter categories (docs/finance/starter-categories.md), and add accounts with starting balances. It's built in a temp folder and renamed into place.
+  10. New budget (R-IO-0), including `cargo xtask template`, which WS-STORE owns: copy the pinned template db (Appendix A), write `metadata.json`, apply the starter categories (docs/finance/starter-categories.md), and add accounts with starting balances. It's built in a temp folder and renamed into place.
 - **Done when:** round-trip tests pass on every fixture (R-IO-1 to R-IO-8), a new budget's export imports into Actual through the oracle with no errors and the same balances and budgets, the oracle imports every export cleanly, and the importer fuzz target has run 1 h with no crash.
 
 ### WS-ENGINE: budget math

@@ -1,6 +1,6 @@
 # Starter categories (D52, D54)
 
-Status: proposed, needs Ryan's approval before it ships. Owner: Fred. Builds on classification.md (CLS-n), tax-buckets.md (TAX-n) and debt.md (DEBT-n).
+Status: approved by Ryan on 2026-11-11 (D54). Owner: Fred. Builds on classification.md (CLS-n), tax-buckets.md (TAX-n) and debt.md (DEBT-n).
 
 A new Veritas budget (no Actual involved, D52) is an Actual-format file created from the pinned template (`docs/actual-format.md` §3.1, decision 1). Veritas then applies this set once, at creation, as ordinary category and group writes. After that the user owns every category and may rename, move, hide or delete any of them. Nothing in this file is re-applied to an existing budget.
 
@@ -31,47 +31,47 @@ A new Veritas budget (no Actual involved, D52) is an Actual-format file created 
 
 | # | Group | Category | Kind (CLS-3) | Tax bucket (TAX-2) | Seed row reused (SC-4) |
 |---|---|---|---|---|---|
-| 1 | Housing | Rent | expense | none | Bills |
-| 2 | Housing | Mortgage Escrow | expense | none | |
-| 3 | Housing | Home Insurance | expense | none | |
-| 4 | Housing | Home Maintenance | expense | none | |
-| 5 | Utilities | Electricity and Gas | expense | none | Bills (Flexible) |
-| 6 | Utilities | Water and Trash | expense | none | |
-| 7 | Utilities | Internet and Phone | expense | none | |
-| 8 | Food | Groceries | expense | none | Food |
-| 9 | Food | Dining Out | expense | none | |
-| 10 | Transportation | Fuel and Transit | expense | none | |
-| 11 | Transportation | Car Insurance | expense | none | |
-| 12 | Transportation | Car Maintenance | expense | none | |
-| 13 | Health | Health Insurance | expense | none | |
+| 1 | Housing | Rent | expense | — | Bills |
+| 2 | Housing | Mortgage Escrow | expense | — | |
+| 3 | Housing | Home Insurance | expense | — | |
+| 4 | Housing | Home Maintenance | expense | — | |
+| 5 | Utilities | Electricity and Gas | expense | — | Bills (Flexible) |
+| 6 | Utilities | Water and Trash | expense | — | |
+| 7 | Utilities | Internet and Phone | expense | — | |
+| 8 | Food | Groceries | expense | — | Food |
+| 9 | Food | Dining Out | expense | — | |
+| 10 | Transportation | Fuel and Transit | expense | — | |
+| 11 | Transportation | Car Insurance | expense | — | |
+| 12 | Transportation | Car Maintenance | expense | — | |
+| 13 | Health | Health Insurance | expense | — | |
 | 14 | Health | Medical | expense | medical | |
-| 15 | Personal and Family | Clothing and Personal Care | expense | none | |
-| 16 | Personal and Family | Childcare | expense | none | |
+| 15 | Personal and Family | Clothing and Personal Care | expense | — | |
+| 16 | Personal and Family | Childcare | expense | — | |
 | 17 | Personal and Family | Education | expense | education | |
-| 18 | Personal and Family | Entertainment | expense | none | |
-| 19 | Personal and Family | Gifts | expense | none | |
+| 18 | Personal and Family | Entertainment | expense | — | |
+| 19 | Personal and Family | Gifts | expense | — | |
 | 20 | Personal and Family | Charity | expense | charitable | |
-| 21 | Personal and Family | Miscellaneous | expense | none | General |
+| 21 | Personal and Family | Miscellaneous | expense | — | General |
 | 22 | Paycheck Deductions | Federal Income Tax | expense | taxes_withheld | |
 | 23 | Paycheck Deductions | State Income Tax | expense | taxes_withheld | |
 | 24 | Paycheck Deductions | Social Security and Medicare | expense | taxes_withheld | |
 | 25 | Paycheck Deductions | Retirement Contribution | savings | retirement_contribution | |
 | 26 | Paycheck Deductions | HSA Contribution | savings | hsa | |
-| 27 | Savings and Debt | Savings | savings | none | Savings |
-| 28 | Savings and Debt | Investments | savings | none | |
-| 29 | Savings and Debt | Loan Principal | debt_principal | none | |
-| 30 | Savings and Debt | Interest and Fees | expense | none | |
+| 27 | Savings and Debt | Savings | savings | — | Savings |
+| 28 | Savings and Debt | Investments | savings | — | |
+| 29 | Savings and Debt | Loan Principal | debt_principal | — | |
+| 30 | Savings and Debt | Interest and Fees | expense | — | |
 | 31 | Income | Wages | income | w2_income | Income |
 | 32 | Income | Interest | income | interest_income | |
 | 33 | Income | Business Income | income | business_income | |
-| 34 | Income | Other Income | income | none | |
-| 35 | Income | Starting Balances | income | none | Starting Balances (required) |
+| 34 | Income | Other Income | income | — | |
+| 35 | Income | Starting Balances | income | — | Starting Balances (required) |
 
 Group order: Housing, Utilities, Food, Transportation, Health, Personal and Family, Paycheck Deductions, Savings and Debt, Income.
 
 Notes on the tax column:
 
-- Buckets are set only where the category's name already says what it is: wages, interest, business income, medical, education, charity, withholding, retirement, HSA. A category with `none` can still be tagged per transaction (TAX-3).
+- Buckets are set only where the category's name already says what it is: wages, interest, business income, medical, education, charity, withholding, retirement, HSA. A category with no bucket (—, stored as NULL) can still be tagged per transaction (TAX-3). `none` is only TAX-2's tag override, never a category default.
 - Health Insurance has no bucket on purpose. A premium paid through the paycheck is not the same thing as one paid out of pocket, and Veritas does not decide which is reportable.
 - Tax-bucket names, never dollar limits or rates, appear here. This file contains no tax numbers.
 
@@ -105,7 +105,7 @@ Nothing. Reasons: hiding would make a day-one user think a category is missing, 
 - Nine groups follow how a household thinks about monthly money: where I live, what keeps the lights on, food, getting around, health, everyone and everything else, what the paycheck takes before I see it, what I put away or owe, and what comes in.
 - 30 spending categories is the practical range. Fewer hides where money goes, more makes data entry (D14, everything is entered by hand) a chore. Subscriptions and Pharmacy are not separate: they fold into Entertainment and Medical, and the user splits them out when a real need shows up.
 - The debt trio matches DEBT-2: principal is `debt_principal`, interest and fees are an expense, escrow is its own expense (FIN-3).
-- Paycheck Deductions exists because FIN-4 records paychecks gross. Federal, state, and Social Security and Medicare are `taxes_withheld`. Retirement and HSA are `savings` so they are not counted as spending (CLS-10 row 7). Those two need off-budget accounts to receive the transfer, or they classify as misfiled `expense` (CLS-10, row 14). The first-run wizard should say so.
+- Paycheck Deductions exists because FIN-4 records paychecks gross. Federal, state, and Social Security and Medicare are `taxes_withheld`. Retirement and HSA are `savings` so they are not counted as spending (CLS-10 row 7). Those two need off-budget accounts to receive the transfer, or they classify as misfiled `expense` (CLS-10, row 14). New-budget setup offers to create them (D56).
 - Tax buckets exist so the TAX export is useful on day one (R-REP-8) without Veritas asserting anything about deductibility.
 - Savings, Investments and Loan Principal are envelopes you fund each month (CLS-9), so they appear in the budget like any other.
 
@@ -122,10 +122,10 @@ Nothing. Reasons: hiding would make a day-one user think a category is missing, 
 | SC-E7 Card payment | CHK pays the card bill 50000 | Transfer. No category from the set is touched. The purchases were spending when swiped. |
 | SC-E8 Zero-history category | Education has no rows | Budget and reports show 0. Education bucket total 0 in the tax export. |
 | SC-E9 Interest on savings | Bank pays +1234 into Interest | `income` 1234, bucket `interest_income` 1234. |
-| SC-E10 Savings with no off-budget account | Savings and Debt "Savings" with an on-budget transfer, no off-budget account | Row 14 (`expense`, `misfiled`). The user should move the savings to an off-budget account, which is a savings contribution. |
+| SC-E10 Savings with no off-budget account | Savings and Debt "Savings" with an on-budget transfer, no off-budget account | Row 4 (`internal_transfer`, `needs_review`, because a category is present). The user should move the savings to an off-budget account, which makes it a savings contribution. |
 
-## SC-8 Questions for Ryan
+## SC-8 Ryan's answers
 
-1. Should the first-run wizard create off-budget accounts for 401k and HSA, or only tell the user to add them (SC-6)?
-2. Should "Emergency Fund" be a starter category? It is left out to keep the set lean. A user can add it as a `savings` category.
-3. Should Paycheck Deductions categories default to budgeted 0 each month? In envelope budgeting the gross wages feed To Budget, so withholding categories will read as overspent unless the user budgets for them or the app treats these two kinds specially. This is a product decision, not a finance fact.
+1. The new-budget setup offers to create off-budget 401(k) and HSA accounts for the ones the user checks (D56).
+2. No Emergency Fund category; the set ships as proposed (D54). A user can add one as a `savings` category.
+3. Withholding categories are normal envelopes. Suggestions (R-FC-3) propose the usual withholding, and Veritas never budgets them on its own (D57).

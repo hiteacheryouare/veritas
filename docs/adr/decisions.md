@@ -274,7 +274,7 @@ Every decision behind Veritas, so no question gets asked twice. D1–D24 are PLA
 ### D54. Which categories does a new budget start with?
 - **Options:** Actual's seed set / a Veritas starter set / empty
 - **Decision:** A Veritas starter set that Fred designed to fit the classification layer (kinds, savings, debt and tax buckets already set), in docs/finance/starter-categories.md: 35 categories in 9 groups. It reuses Actual's seed rows by id and keeps "Starting Balances" exactly. Ryan approved it as proposed on 2026-11-11.
-- **Date:** 2026-11-10
+- **Date:** 2026-11-11
 
 ### D55. Mac shell UI defaults
 - **Options:** keep the shell's defaults / overlay palette / review screenshots first
