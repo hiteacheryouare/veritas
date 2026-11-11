@@ -223,3 +223,41 @@ fn cls_3_1_a_kind_conflict_baselines_by_actuals_flag() {
 	let fun = baseline(&book, "2027-01-15", "Fun");
 	assert_eq!((fun.side, fun.level), (Side::Spending, cents(1000)));
 }
+
+#[test]
+fn f_10_an_annual_spike_is_not_clamped() {
+	let mut values = vec![2000, 40000];
+	values.extend([2000; 11]);
+	let book = book_with("Gifts", "2026-11", &values);
+	let gifts = baseline(&book, "2027-12-05", "Gifts");
+	let index = gifts.seasonal_index.unwrap();
+	assert_eq!((index[11], index[0]), (43710, 6935));
+	assert_eq!(gifts.forecast(ym("2027-12")).unwrap(), cents(12606));
+
+	let year: Vec<i64> = [40000].into_iter().chain([2000; 11]).collect();
+	let mut values = vec![2000];
+	values.extend(&year);
+	values.extend(&year);
+	let book = book_with("Gifts", "2025-11", &values);
+	let gifts = baseline(&book, "2027-12-05", "Gifts");
+	assert_eq!(
+		gifts.forecast(ym("2027-12")).unwrap(),
+		cents(40002),
+		"25+ months, raw as is"
+	);
+}
+
+#[test]
+fn f_12_signed_values_round_half_away_from_zero() {
+	let book = book_with("Fun", "2026-11", &[-3, -2]);
+	assert_eq!(baseline(&book, "2027-01-15", "Fun").level, cents(-3));
+}
+
+#[test]
+fn f_9_a_negative_forecast_is_projected_as_zero() {
+	let book = book_with("Fun", "2026-07", &[-3000; 6]);
+	let fun = baseline(&book, "2027-01-15", "Fun");
+	assert_eq!(fun.level, cents(-3000));
+	assert_eq!(fun.forecast_plus(ym("2027-02")).unwrap(), cents(0));
+	assert_eq!(fun.remainder(ym("2027-01")).unwrap(), cents(0));
+}

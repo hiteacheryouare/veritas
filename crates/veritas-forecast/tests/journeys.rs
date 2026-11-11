@@ -538,6 +538,7 @@ fn lumpy_groceries(book: &mut Book) {
 #[test]
 fn band_comes_from_hand_checked_rolling_origin_residuals() {
 	// Residuals for Jul..Dec: -3000, 3000, 0, 0, -6000, 0. P10 = -6000, P90 = 3000.
+	// FC-4.2 step 3 at h = 3: scale 22795, so -13677 and 6839.
 	let mut book = Book::household();
 	book.opening("CHK", "2026-03-31", 500000);
 	lumpy_groceries(&mut book);
@@ -552,8 +553,8 @@ fn band_comes_from_hand_checked_rolling_origin_residuals() {
 	assert_eq!(
 		three.band,
 		Some((
-			cents(three.net_worth.minor() - 10392),
-			cents(three.net_worth.minor() + 5196)
+			cents(three.net_worth.minor() - 13677),
+			cents(three.net_worth.minor() + 6839)
 		))
 	);
 	assert_eq!(projection.band.label(), "80% band from 6 past months");

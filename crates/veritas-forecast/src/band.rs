@@ -27,12 +27,17 @@ pub struct Band {
 }
 
 impl Band {
-	/// Offsets for an `h`-month horizon, scaled by `sqrt(h)`. `None` with no history.
+	/// Offsets for an `h`-month horizon, scaled by `h` to `BAND_GROWTH` (3/4):
+	/// `isqrt(isqrt(h^3 * 10^16))`. `None` with no history.
 	pub fn offsets(&self, horizon: u32) -> Result<Option<(Money, Money)>, CoreError> {
 		if self.method == BandMethod::NoHistory {
 			return Ok(None);
 		}
-		let scale = isqrt(i128::from(horizon) * 100_000_000);
+		let cube = i128::from(horizon)
+			.checked_pow(3)
+			.and_then(|cube| cube.checked_mul(10_i128.pow(16)))
+			.ok_or(CoreError::Overflow)?;
+		let scale = isqrt(isqrt(cube));
 		let scaled =
 			|offset: Money| to_money(round_half_away(i128::from(offset.minor()) * scale, 10_000));
 		Ok(Some((scaled(self.low)?, scaled(self.high)?)))
@@ -114,7 +119,10 @@ pub(crate) fn forecast_flow(baselines: &[Baseline], month: YearMonth) -> Result<
 	let mut total = 0i64;
 	for baseline in baselines {
 		total = total
-			.checked_add(signed(baseline.side, baseline.forecast(month)?.minor())?)
+			.checked_add(signed(
+				baseline.side,
+				baseline.forecast_plus(month)?.minor(),
+			)?)
 			.ok_or(CoreError::Overflow)?;
 	}
 	Ok(total)
@@ -167,8 +175,9 @@ mod tests {
 		assert_eq!(band.method, BandMethod::Residuals);
 		assert_eq!((band.low.minor(), band.high.minor()), (-8000, 4000));
 		assert_eq!(offsets(&band, 1), (-8000, 4000));
-		assert_eq!(offsets(&band, 4), (-16000, 8000));
-		assert_eq!(offsets(&band, 3), (-13856, 6928));
+		assert_eq!(offsets(&band, 3), (-18236, 9118));
+		assert_eq!(offsets(&band, 4), (-22627, 11314));
+		assert_eq!(offsets(&band, 12), (-51579, 25790));
 		assert_eq!(band.label(), "80% band from 10 past months");
 	}
 

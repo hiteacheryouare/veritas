@@ -49,7 +49,8 @@ pub struct Suggestions {
 	/// Known income flows plus income baselines for the month.
 	pub expected_income: Money,
 	pub exceeds_income_by: Option<Money>,
-	/// "Suggestions exceed expected income by $X", in whole dollars.
+	/// "Suggestions exceed expected income by $X", in whole dollars and never
+	/// below $1 (FC-5).
 	pub notice: Option<String>,
 }
 
@@ -190,7 +191,7 @@ impl Forecaster<'_> {
 		for baseline in &all_baselines {
 			if baseline.side == Side::Income {
 				expected_income = expected_income
-					.checked_add(baseline.forecast(month)?.minor())
+					.checked_add(baseline.forecast_plus(month)?.minor())
 					.ok_or(CoreError::Overflow)?;
 			}
 		}
@@ -200,7 +201,7 @@ impl Forecaster<'_> {
 		let notice = match exceeds_income_by {
 			Some(by) => Some(format!(
 				"Suggestions exceed expected income by {}",
-				dollars(round_dollars(by)?)
+				dollars(round_dollars(by)?.max(Money::from_minor(100)))
 			)),
 			None => None,
 		};
@@ -235,7 +236,7 @@ impl Forecaster<'_> {
 			));
 		}
 		let forecast = match baseline {
-			Some(baseline) if has_history => baseline.forecast(month)?,
+			Some(baseline) if has_history => baseline.forecast_plus(month)?,
 			_ => Money::ZERO,
 		};
 		let amount = round_dollars(bill_total.checked_add(forecast)?.max(Money::ZERO))?;

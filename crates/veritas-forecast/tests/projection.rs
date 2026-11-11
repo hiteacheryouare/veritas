@@ -675,3 +675,58 @@ fn fc_2_fl_3_a_payment_below_interest_and_escrow_never_capitalizes() {
 	assert_eq!(february.balances[&acct("CHK")], cents(840000));
 	assert_eq!(february.balances[&acct("LOAN")], cents(-30_000_000));
 }
+
+fn percent(changes: &[i64]) -> Scenario {
+	Scenario {
+		name: "Percent".to_owned(),
+		events: changes
+			.iter()
+			.map(|bp| ScenarioEvent::CategoryPercent {
+				category: cat("Groceries"),
+				percent_bp: *bp,
+				start_month: ym("2027-02"),
+				end_month: None,
+			})
+			.collect(),
+	}
+}
+
+fn groceries_book(level: i64) -> Book {
+	let mut book = Book::household();
+	for month in [
+		"2026-07", "2026-08", "2026-09", "2026-10", "2026-11", "2026-12",
+	] {
+		book.spend("Groceries", &format!("{month}-15"), -level);
+	}
+	book
+}
+
+#[test]
+fn fc_3_s_1_to_s_4_percent_changes() {
+	let february = |level: i64, changes: &[i64]| {
+		project(&groceries_book(level), &[], &percent(changes)).months[1].uncertain_net_flow
+	};
+	assert_eq!(
+		february(43005, &[-1000]),
+		cents(-38704),
+		"S-1 rounds half away"
+	);
+	assert_eq!(february(43000, &[-15000]), cents(0), "S-2 clamped at 0");
+	assert_eq!(
+		february(43000, &[1000, 500]),
+		cents(-49450),
+		"S-3 deltas add"
+	);
+	assert_eq!(february(-3000, &[1000]), cents(0), "S-4 negative forecast");
+}
+
+#[test]
+fn fc_4_2_residuals_use_forecast_plus() {
+	let mut book = Book::household();
+	for step in 0..9 {
+		let month = ym("2026-04").offset(step).unwrap();
+		book.spend("Fun", &format!("{month}-15"), 3000);
+	}
+	let band = project(&book, &[], &Scenario::baseline()).band;
+	assert_eq!((band.low, band.high), (cents(3000), cents(3000)));
+}

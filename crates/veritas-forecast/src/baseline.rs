@@ -5,8 +5,8 @@ use crate::math::{median, round_half_away, round_half_up, to_money};
 
 pub const WINDOW: i32 = 6;
 pub const SEASON_MIN: i32 = 13;
-pub const INDEX_MIN: i64 = 5_000;
-pub const INDEX_MAX: i64 = 20_000;
+pub const INDEX_MIN: i64 = 2_500;
+pub const INDEX_MAX: i64 = 120_000;
 pub const INDEX_ACTIVE_MIN: usize = 6;
 const TYPICAL: i64 = 10_000;
 
@@ -107,7 +107,8 @@ impl Baseline {
 			.map_or(TYPICAL, |index| index_for(index, month))
 	}
 
-	/// FC-1 step 5: the forecast for a whole target month, a positive magnitude.
+	/// FC-1 step 5: the forecast for a whole target month, a magnitude that
+	/// is negative for a category that typically nets a refund.
 	pub fn forecast(&self, month: YearMonth) -> Result<Money, CoreError> {
 		match self.deseasonalized_level {
 			Some(level) => to_money(round_half_away(
@@ -118,9 +119,15 @@ impl Baseline {
 		}
 	}
 
-	/// The current month's uncertain rest: `max(0, forecast - month_to_date)`.
+	/// `forecast+ = max(0, forecast)`, what every use after FC-1 reads: the
+	/// projection never books a refund stream the history only suggests.
+	pub fn forecast_plus(&self, month: YearMonth) -> Result<Money, CoreError> {
+		Ok(self.forecast(month)?.max(Money::ZERO))
+	}
+
+	/// The current month's uncertain rest: `max(0, forecast+ - month_to_date)`.
 	pub fn remainder(&self, month: YearMonth) -> Result<Money, CoreError> {
-		let rest = self.forecast(month)?.checked_sub(self.month_to_date)?;
+		let rest = self.forecast_plus(month)?.checked_sub(self.month_to_date)?;
 		Ok(rest.max(Money::ZERO))
 	}
 

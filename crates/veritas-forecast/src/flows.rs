@@ -122,7 +122,7 @@ pub struct LoanPayment {
 }
 
 impl LoanPayment {
-	/// FC-2's split of each payment: the payment covers interest
+	/// FC-2's split of each payment, in DEBT-2.1a's order: the payment covers interest
 	/// (`round_half_up(outstanding * rate_bps / 120000)`), then escrow, then
 	/// principal, which is capped at what is still owed so the last payment is
 	/// smaller. A shortfall never capitalizes (DEBT-2.2, DEBT-2.6): interest

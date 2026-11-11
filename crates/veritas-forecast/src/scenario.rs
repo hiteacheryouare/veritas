@@ -221,13 +221,15 @@ impl Scenario {
 		Ok(flows)
 	}
 
-	/// A baseline forecast after this scenario's percent changes, never below 0.
+	/// FC-3: each active change adds `round_half_away(forecast+ * pct / 10000)`
+	/// to the same unadjusted `forecast+`, so changes add and never compound.
 	pub(crate) fn adjust_baseline(
 		&self,
 		category: &CategoryId,
 		month: YearMonth,
 		forecast: Money,
 	) -> Result<Money, CoreError> {
+		let forecast = forecast.max(Money::ZERO);
 		let mut adjusted = forecast;
 		for event in &self.events {
 			if let ScenarioEvent::CategoryPercent {

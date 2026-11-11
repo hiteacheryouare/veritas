@@ -194,7 +194,7 @@ impl<'a> Forecaster<'a> {
 				let forecast = scenario.adjust_baseline(
 					&baseline.category,
 					month,
-					baseline.forecast(month)?,
+					baseline.forecast_plus(month)?,
 				)?;
 				let amount = if step == 0 {
 					forecast

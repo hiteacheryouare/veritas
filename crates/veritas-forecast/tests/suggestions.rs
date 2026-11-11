@@ -486,3 +486,42 @@ fn fc_6_e_9_and_e_10_history_starts_at_the_first_cell() {
 		"E-10"
 	);
 }
+
+#[test]
+fn fc_5_sg_1_bills_plus_baseline_parts_add_up() {
+	let mut book = Book::household();
+	six("Electric", &mut book, 2040);
+	let bill = known("2027-02-02", "Electric", -5049, FlowKind::Expense);
+	let electric = item(&suggest(&book, "2027-01-15", &[bill]), "Electric").clone();
+	assert_eq!(
+		electric.reason,
+		"Electric $71: $50 scheduled + $21 6-month median"
+	);
+}
+
+#[test]
+fn fc_5_sg_6_the_notice_never_reads_zero_dollars() {
+	let mut book = Book::household();
+	book.category("New laptop", "Goals");
+	book.goal("laptop", "New laptop", 150000, Some("2027-07-15"));
+	let rent = known("2027-01-01", "Rent", -100000, FlowKind::Expense);
+	let pay = known("2027-01-01", "Paycheck", 121400, FlowKind::Income);
+	let suggestions = suggest(&book, "2026-12-10", &[rent, pay.clone()]);
+	assert_eq!(suggestions.exceeds_income_by, Some(cents(29)));
+	assert_eq!(
+		suggestions.notice.as_deref(),
+		Some("Suggestions exceed expected income by $1")
+	);
+	let even = known("2027-01-01", "Paycheck", 121429, FlowKind::Income);
+	let rent = known("2027-01-01", "Rent", -100000, FlowKind::Expense);
+	assert_eq!(suggest(&book, "2026-12-10", &[rent, even]).notice, None);
+}
+
+#[test]
+fn fc_5_sg_7_a_negative_forecast_suggests_zero() {
+	let mut book = Book::household();
+	six("Fun", &mut book, -3000);
+	let fun = item(&suggest(&book, "2027-01-15", &[]), "Fun").clone();
+	assert_eq!(fun.amount, Some(cents(0)));
+	assert_eq!(fun.reason, "Fun $0, 6-month median");
+}
