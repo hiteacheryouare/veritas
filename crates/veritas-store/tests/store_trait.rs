@@ -557,7 +557,6 @@ fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
 				reached_month: Some(month),
 				..row
 			}),
-			other => other,
 		})
 		.collect();
 	run(&mut data, edited);
