@@ -32,9 +32,17 @@ impl JsPattern {
 	/// patterns `regex` rejects, since JS may still accept them.
 	pub fn new(source: &str) -> Result<JsPattern, String> {
 		if source.chars().any(|c| c.len_utf16() > 1) {
-			return Err("a pattern with characters outside the BMP".into());
+			return Err(
+				"a regex with an emoji or another character JavaScript reads as two".into(),
+			);
+		}
+		if source.chars().count() > MAX_SOURCE_CHARS {
+			return Err(format!("a regex longer than {MAX_SOURCE_CHARS} characters"));
 		}
 		let translated = translate(source)?;
+		if translated.len() > MAX_TRANSLATED_BYTES {
+			return Err("a regex too large for Veritas to check".into());
+		}
 		let regex = Regex::new(&translated)
 			.map_err(|error| format!("a pattern Veritas can't read the JS way: {error}"))?;
 		Ok(JsPattern {
@@ -53,9 +61,20 @@ impl JsPattern {
 	}
 }
 
+/// One character as `regex` reads it literally, inside or outside a class:
+/// `regex::escape` covers every character with a meaning there, `-`, `&`,
+/// `~` and `#` included.
 fn literal(c: char) -> String {
-	format!("\\x{{{:X}}}", u32::from(c))
+	if c.is_control() {
+		return format!("\\x{{{:X}}}", u32::from(c));
+	}
+	regex::escape(c.encode_utf8(&mut [0; 4]))
 }
+
+/// Longer patterns are refused rather than compiled: real rules are short,
+/// and a pathological one shouldn't stall loading the rules.
+const MAX_SOURCE_CHARS: usize = 1_000;
+const MAX_TRANSLATED_BYTES: usize = 50_000;
 
 fn hex(chars: &[char], at: usize, len: usize) -> Option<char> {
 	let digits: String = chars.get(at..at + len)?.iter().collect();
@@ -370,5 +389,11 @@ mod tests {
 			assert!(JsPattern::new(pattern).is_err(), "{pattern}");
 		}
 		assert_eq!(JsPattern::new("a").unwrap().test("😀a"), None);
+		assert!(JsPattern::new(&"a".repeat(1_001)).is_err());
+		assert!(
+			JsPattern::new(&"\\s".repeat(900)).is_err(),
+			"each \\s expands, so the translation is capped too"
+		);
+		assert!(JsPattern::new(&"ab".repeat(400)).is_ok());
 	}
 }
