@@ -98,15 +98,20 @@ fn skip_without_oracle(what: &str) {
 /// `tools/actual-oracle dump --raw-only`, or `None` (with a note on stderr)
 /// when the oracle isn't installed.
 pub fn oracle_raw_dump(zip_path: &Path) -> Option<Vec<u8>> {
+	oracle(&["dump".as_ref(), zip_path.as_os_str(), "--raw-only".as_ref()])
+}
+
+/// Runs `tools/actual-oracle` with these arguments and returns its stdout, or
+/// `None` (with a note on stderr) when the oracle isn't installed.
+pub fn oracle(args: &[&std::ffi::OsStr]) -> Option<Vec<u8>> {
 	if !oracle_dir().join("node_modules").exists() {
 		skip_without_oracle("the oracle comparison");
 		return None;
 	}
 	let output = Command::new("node")
 		.current_dir(oracle_dir())
-		.args(["src/main.ts", "dump"])
-		.arg(zip_path)
-		.arg("--raw-only")
+		.arg("src/main.ts")
+		.args(args)
 		.output()
 		.expect("node runs");
 	assert!(
@@ -195,4 +200,31 @@ pub fn assert_same_dump(veritas: &[u8], oracle: &[u8], label: &str) {
 		show(&ours),
 		show(&theirs)
 	);
+}
+
+pub fn imported(
+	result: Result<veritas_interop::ImportOutcome, veritas_domain::CoreError>,
+) -> veritas_interop::ImportedBudget {
+	match result {
+		Ok(veritas_interop::ImportOutcome::Imported(budget)) => budget,
+		other => panic!("expected an import, got {other:?}"),
+	}
+}
+
+/// Imports a fixture-shaped zip, adopts it and exports it again, the way the
+/// app would with no edits in between.
+pub fn round_trip(zip_path: &Path, scratch: &Scratch) -> PathBuf {
+	let budget = imported(veritas_interop::import_actual_zip(
+		zip_path,
+		&scratch.join("budget"),
+	));
+	let mut store =
+		veritas_store::Store::open(&budget.db_path, veritas_store::Access::ReadWrite).unwrap();
+	store.adopt().unwrap();
+	let out = scratch.join("exported.zip");
+	match veritas_interop::export_actual_zip(&store, &budget.metadata_path, &out).unwrap() {
+		veritas_interop::ExportOutcome::Exported(audit) => assert!(audit.is_clean(), "{audit:?}"),
+		refused => panic!("export refused: {refused:?}"),
+	}
+	out
 }
