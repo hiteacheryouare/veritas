@@ -30,16 +30,19 @@ pub struct RunOutcome {
 	pub undetermined: Vec<RuleId>,
 }
 
-/// Where `set payee_name` finds or makes its payee.
+/// Where `set payee_name` finds or makes its payee. `None` when more than
+/// one live payee has the name: Actual's `getPayeeByName` has no `ORDER BY`,
+/// so which one it takes depends on SQLite's row order, and the rule is
+/// reported as undetermined rather than guessed.
 pub trait PayeeDirectory {
-	fn find_or_create(&mut self, name: &str) -> PayeeId;
+	fn find_or_create(&mut self, name: &str) -> Option<PayeeId>;
 }
 
 /// Finds payees in the budget the way `getPayeeByName` does (a live payee
 /// whose lowercased name matches, `db/index.ts:723-728`) and records the ones
 /// a rule creates. The store inserts each like `insertPayee` (`:576-586`): a
 /// `payees` row with just the name, plus its identity `payee_mapping` row.
-/// Transfer payees never match, since their stored name is empty.
+/// Names are compared as stored: a transfer payee's stored name is empty.
 pub struct BudgetPayees<'a> {
 	budget: &'a BudgetData,
 	new_id: Box<dyn FnMut() -> PayeeId + 'a>,
@@ -57,29 +60,29 @@ impl<'a> BudgetPayees<'a> {
 }
 
 impl PayeeDirectory for BudgetPayees<'_> {
-	fn find_or_create(&mut self, name: &str) -> PayeeId {
+	fn find_or_create(&mut self, name: &str) -> Option<PayeeId> {
 		let wanted = name.to_lowercase();
-		let existing = self
+		let mut matches = self
 			.budget
 			.payees
 			.values()
-			.find(|payee| {
-				!payee.tombstone
-					&& payee.transfer_account.is_none()
-					&& payee.name.to_lowercase() == wanted
-			})
+			.filter(|payee| !payee.tombstone && payee.name.to_lowercase() == wanted)
 			.map(|payee| payee.id.clone())
-			.or_else(|| {
+			.chain(
 				self.created
 					.iter()
-					.find(|(_, created)| created.to_lowercase() == wanted)
-					.map(|(id, _)| id.clone())
-			});
-		existing.unwrap_or_else(|| {
-			let id = (self.new_id)();
-			self.created.push((id.clone(), name.to_owned()));
-			id
-		})
+					.filter(|(_, created)| created.to_lowercase() == wanted)
+					.map(|(id, _)| id.clone()),
+			);
+		match (matches.next(), matches.next()) {
+			(Some(id), None) => Some(id),
+			(Some(_), Some(_)) => None,
+			(None, _) => {
+				let id = (self.new_id)();
+				self.created.push((id.clone(), name.to_owned()));
+				Some(id)
+			}
+		}
 	}
 }
 
@@ -192,7 +195,6 @@ impl RuleBook {
 		};
 
 		let mut working = transaction.clone();
-		let mut new_payee = false;
 		let mut outcome = RunOutcome {
 			transaction: transaction.clone(),
 			applied: Vec::new(),
@@ -221,33 +223,41 @@ impl RuleBook {
 						.iter()
 						.map(|item| item.parsed.as_ref().ok())
 						.collect();
-					match actions {
-						Some(actions) => {
-							for action in actions {
-								match action {
-									Action::SetPayeeName(name) => {
-										payee_name = name.clone();
-										new_payee = true;
-									}
-									Action::Set(SetField::Payee(_)) => {
-										action.apply(&mut working);
-										new_payee = false;
-									}
-									other => other.apply(&mut working),
+					let result = actions.and_then(|actions| {
+						let mut next = working.clone();
+						let mut next_name = payee_name.clone();
+						let mut new_payee = false;
+						for action in actions {
+							match action {
+								Action::SetPayeeName(name) => {
+									next_name = name.clone();
+									new_payee = true;
 								}
+								Action::Set(SetField::Payee(_)) => {
+									action.apply(&mut next);
+									new_payee = false;
+								}
+								other => other.apply(&mut next),
 							}
+						}
+						if new_payee {
+							next.payee = match next_name.as_deref().filter(|name| !name.is_empty())
+							{
+								Some(name) => Some(payees.find_or_create(name)?),
+								None => None,
+							};
+						}
+						Some((next, next_name))
+					});
+					match result {
+						Some((next, name)) => {
+							working = next;
+							payee_name = name;
 							outcome.applied.push(rule.id.clone());
 						}
 						None => outcome.undetermined.push(rule.id.clone()),
 					}
 				}
-			}
-			if new_payee {
-				working.payee = payee_name
-					.as_deref()
-					.filter(|name| !name.is_empty())
-					.map(|name| payees.find_or_create(name));
-				new_payee = false;
 			}
 		}
 		outcome.transaction = working;
@@ -481,6 +491,31 @@ mod tests {
 		);
 		book.run(&transaction("corner again"), &budget, &mut payees);
 		assert_eq!(payees.created.len(), 1);
+	}
+
+	#[test]
+	fn a_name_two_payees_share_is_undetermined() {
+		// getPayeeByName has no ORDER BY, so Actual's pick depends on row order.
+		let mut budget = budget();
+		let mut twin = budget.payees[&PayeeId::new("amazon")].clone();
+		twin.id = PayeeId::new("amazon-2");
+		twin.name = "AMAZON".into();
+		budget.payees.insert(twin.id.clone(), twin);
+		add_rule(
+			&mut budget,
+			"rename",
+			RuleStage::Pre,
+			ConditionsOp::And,
+			json!([{"op": "contains", "field": "imported_payee", "value": "amzn"}]),
+			json!([{"op": "set", "field": "payee_name", "value": "amazon"}, {"op": "set", "field": "notes", "value": "renamed"}]),
+		);
+		let outcome = run(&budget, &transaction("AMZN Mktp"));
+		assert_eq!(outcome.undetermined, [RuleId::new("rename")]);
+		assert_eq!(outcome.transaction.payee, None);
+		assert_eq!(
+			outcome.transaction.notes, None,
+			"nothing from the rule is applied"
+		);
 	}
 
 	#[test]

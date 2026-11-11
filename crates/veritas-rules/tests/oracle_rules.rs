@@ -16,7 +16,7 @@ use common::{
 use serde_json::{Value, json};
 use veritas_domain::{
 	Account, AccountId, BudgetData, BudgetType, Category, CategoryGroupId, CategoryId, Payee,
-	PayeeId,
+	PayeeId, RuleId,
 };
 use veritas_rules::{BudgetPayees, ParsedRule, RuleBook, RuleSupport};
 
@@ -702,4 +702,80 @@ fn regex_conditions_match_the_oracle() {
 		mismatches.len()
 	);
 	assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+}
+
+/// Two live payees can share a name: `createPayee` doesn't stop it. Actual's
+/// `getPayeeByName` then takes whichever SQLite returns first, so Veritas
+/// reports a `set payee_name` to that name as undetermined instead of
+/// guessing, and still runs a rename to a name that is unique.
+#[test]
+fn a_payee_name_shared_by_two_payees_is_left_to_actual() {
+	let Some(oracle) = oracle_dir() else {
+		eprintln!(
+			"skipping the duplicate payee oracle test: tools/actual-oracle/node_modules is missing, run `cargo xtask oracle setup`"
+		);
+		return;
+	};
+	let mut world = world();
+	world.payees.push((uuid(4, 9), "AMAZON"));
+	let mut ops = setup_ops(&world);
+	let rename = |n: usize, text: &str, name: &str| {
+		json!({"op": "createRule", "id": uuid(8, n), "stage": "pre",
+			"conditions": [{"op": "contains", "field": "imported_payee", "value": text}],
+			"actions": [{"op": "set", "field": "payee_name", "value": name}]})
+	};
+	ops.push(rename(0, "amzn", "amazon"));
+	// The fixture has its own "Landlord", so the unique name is the coffee shop.
+	ops.push(rename(1, "zelle", "coffee shop"));
+	let account = world.accounts[0].0.clone();
+	let transactions = vec![
+		json!({"id": uuid(9, 0), "date": "2026-11-01", "amount": -100, "cleared": true, "imported_payee": "AMZN Mktp"}),
+		json!({"id": uuid(9, 1), "date": "2026-11-01", "amount": -200, "cleared": true, "imported_payee": "Zelle to Bob"}),
+	];
+	ops.push(json!({"op": "addTransactions", "account": account, "transactions": transactions, "runTransfers": false}));
+	let scratch = scratch_dir("duplicate-payees");
+	let dump = apply_and_dump(
+		&oracle,
+		&scratch,
+		"duplicates",
+		&repo_root().join("fixtures/synthetic/small.zip"),
+		ops,
+		TODAY,
+	);
+	let _ = std::fs::remove_dir_all(&scratch);
+	let budget = budget_from(&world, &dump);
+	let book = RuleBook::new(&budget);
+	let row = |n: usize| {
+		dump["tables"]["transactions"]["rows"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.find(|row| row["id"] == uuid(9, n))
+			.unwrap()["description"]
+			.clone()
+	};
+	let run = |n: usize| {
+		book.run(
+			&rule_transaction(&transactions[n], &account),
+			&budget,
+			&mut BudgetPayees::new(&budget, || PayeeId::new("made")),
+		)
+	};
+
+	let amazon = run(0);
+	assert_eq!(amazon.undetermined, [RuleId::new(uuid(8, 0))]);
+	assert_eq!(
+		amazon.transaction.payee, None,
+		"the ambiguous rename isn't half applied"
+	);
+	assert!(
+		[json!(uuid(4, 0)), json!(uuid(4, 9))].contains(&row(0)),
+		"Actual picked one of the two: {}",
+		row(0)
+	);
+
+	let coffee = run(1);
+	assert!(coffee.undetermined.is_empty());
+	assert_eq!(coffee.transaction.payee, Some(PayeeId::new(uuid(4, 2))));
+	assert_eq!(row(1), json!(uuid(4, 2)));
 }
