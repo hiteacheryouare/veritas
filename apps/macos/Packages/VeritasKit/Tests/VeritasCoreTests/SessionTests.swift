@@ -26,17 +26,17 @@ private final class Scratch {
 	}
 }
 
-private func importSmall(into scratch: Scratch) throws -> Session {
+private func importSmall(into scratch: Scratch) async throws -> Session {
 	let zip = repoRoot.appending(path: "fixtures/synthetic/small.zip").path
-	return try Session.importActualZip(zip: zip, intoDirectory: scratch.budget)
+	return try await Session.importActualZip(zip: zip, intoDirectory: scratch.budget)
 }
 
 /// The full integrity check runs in the background after opening.
-private func settled(_ session: Session) throws -> SessionState {
+private func settled(_ session: Session) async throws -> SessionState {
 	for _ in 0..<400 {
 		let state = try session.state()
 		if !state.checking { return state }
-		Thread.sleep(forTimeInterval: 0.025)
+		try await Task.sleep(for: .milliseconds(25))
 	}
 	Issue.record("the background check never finished")
 	return try session.state()
@@ -53,11 +53,11 @@ private final class Recorder: ChangeListener, @unchecked Sendable {
 	var changes: [Change] { lock.withLock { heard } }
 }
 
-@Test func importingABudgetOpensItWritableAndSnapshotsIt() throws {
+@Test func importingABudgetOpensItWritableAndSnapshotsIt() async throws {
 	let scratch = try Scratch()
-	let session = try importSmall(into: scratch)
+	let session = try await importSmall(into: scratch)
 
-	let state = try settled(session)
+	let state = try await settled(session)
 
 	#expect(state.readOnly == nil)
 	#expect(!state.canUndo)
@@ -67,10 +67,10 @@ private final class Recorder: ChangeListener, @unchecked Sendable {
 	#expect(try session.snapshots().map(\.reason) == [.open])
 }
 
-@Test func aSecondWindowShowsTheOpenElsewhereBanner() throws {
+@Test func aSecondWindowShowsTheOpenElsewhereBanner() async throws {
 	let scratch = try Scratch()
-	let first = try importSmall(into: scratch)
-	let second = try Session.open(directory: scratch.budget)
+	let first = try await importSmall(into: scratch)
+	let second = try await Session.open(directory: scratch.budget)
 
 	#expect(try second.state().readOnly == .openElsewhere)
 	#expect {
@@ -82,20 +82,20 @@ private final class Recorder: ChangeListener, @unchecked Sendable {
 	_ = first
 }
 
-@Test func closingABudgetFreesItForTheNextWindow() throws {
+@Test func closingABudgetFreesItForTheNextWindow() async throws {
 	let scratch = try Scratch()
-	let first = try importSmall(into: scratch)
-	_ = try settled(first)
+	let first = try await importSmall(into: scratch)
+	_ = try await settled(first)
 
 	try first.close()
 
-	#expect(try Session.open(directory: scratch.budget).state().readOnly == nil)
+	#expect(try await Session.open(directory: scratch.budget).state().readOnly == nil)
 	#expect(throws: FfiError.self) { try first.state() }
 }
 
-@Test func anUnknownAccountComesBackAsNotFound() throws {
+@Test func anUnknownAccountComesBackAsNotFound() async throws {
 	let scratch = try Scratch()
-	let session = try importSmall(into: scratch)
+	let session = try await importSmall(into: scratch)
 	#expect {
 		try session.perform(command: .renameAccount(accountId: "no-such-account", name: "Everyday"))
 	} throws: { error in
@@ -104,10 +104,10 @@ private final class Recorder: ChangeListener, @unchecked Sendable {
 	}
 }
 
-@Test func restoringASnapshotTellsListenersToRefetchEverything() throws {
+@Test func restoringASnapshotTellsListenersToRefetchEverything() async throws {
 	let scratch = try Scratch()
-	let session = try importSmall(into: scratch)
-	_ = try settled(session)
+	let session = try await importSmall(into: scratch)
+	_ = try await settled(session)
 	let recorder = Recorder()
 	_ = try session.subscribe(listener: recorder)
 	let opened = try #require(try session.snapshots().first)
@@ -119,16 +119,16 @@ private final class Recorder: ChangeListener, @unchecked Sendable {
 	#expect(try session.snapshots().map(\.reason).contains(.restore))
 }
 
-@Test func theShellGetsAnOverviewAnExportABackupAndTheBudgetList() throws {
+@Test func theShellGetsAnOverviewAnExportABackupAndTheBudgetList() async throws {
 	let scratch = try Scratch()
-	let session = try importSmall(into: scratch)
+	let session = try await importSmall(into: scratch)
 
 	let overview = try session.overview()
 	#expect(overview.budgetName != nil)
 	#expect(overview.groups.map(\.group) == [.cash, .credit, .investments, .loans])
 
 	let zip = scratch.url.appending(path: "export.zip").path
-	_ = try session.exportActualZip(to: zip)
+	_ = try await session.exportActualZip(to: zip)
 	#expect(FileManager.default.fileExists(atPath: zip))
 
 	let folder = scratch.url.appending(path: "Backups")
@@ -139,4 +139,18 @@ private final class Recorder: ChangeListener, @unchecked Sendable {
 
 	let listed = try listBudgets(budgetsDir: scratch.url.path)
 	#expect(listed.map(\.name) == [overview.budgetName])
+}
+
+@Test func creatingABudgetSaysWhenTheBuildCantYet() async throws {
+	let scratch = try Scratch()
+	let format = NumberFormat(currency: "USD", style: .commaDot, hideDecimals: false)
+	let options = NewBudgetOptions(retirement401k: true, hsa: false)
+	await #expect {
+		try await Session.createBudget(
+			name: "Household", directory: scratch.budget, format: format, options: options)
+	} throws: { error in
+		guard case FfiError.Invalid = error else { return false }
+		return true
+	}
+	#expect(!FileManager.default.fileExists(atPath: scratch.budget))
 }

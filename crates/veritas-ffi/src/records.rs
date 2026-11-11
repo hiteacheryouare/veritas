@@ -205,6 +205,15 @@ pub struct Overview {
 	pub groups: Vec<AccountGroupSummary>,
 }
 
+/// What new-budget setup asks besides the name and number format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct NewBudgetOptions {
+	/// Create off-budget 401(k) and HSA accounts, so gross-paycheck
+	/// contributions classify as savings (D56).
+	pub retirement_401k: bool,
+	pub hsa: bool,
+}
+
 /// Actual's number format preferences.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct NumberFormat {

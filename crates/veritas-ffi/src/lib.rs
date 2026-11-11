@@ -1,5 +1,6 @@
 //! The only surface the apps see: commands, queries and the change-event stream, exported through UniFFI.
 
+mod blocking;
 mod commands;
 mod records;
 mod session;
@@ -11,8 +12,8 @@ use veritas_domain::{CoreError, YearMonth};
 pub use commands::Command;
 pub use records::{
 	AccountGroup, AccountGroupSummary, AccountSummary, AuditCheck, AuditFinding, BackupInfo,
-	BudgetListing, Change, EntityKind, EntityRef, NumberFormat, NumberStyle, Overview, Retention,
-	SessionState, SnapshotInfo, SnapshotKind,
+	BudgetListing, Change, EntityKind, EntityRef, NewBudgetOptions, NumberFormat, NumberStyle,
+	Overview, Retention, SessionState, SnapshotInfo, SnapshotKind,
 };
 pub use session::{ChangeListener, Session};
 

@@ -2,9 +2,14 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use veritas_domain::CoreError;
-use veritas_session::{Backend, ChangeSet, Session as CoreSession, SessionOptions, SharedSession};
+use veritas_session::{
+	Backend, CancelToken, ChangeSet, NewBudget, Session as CoreSession, SessionOptions,
+	SharedSession,
+};
 
+use crate::blocking::run;
 use crate::commands::Command;
+use crate::records::NewBudgetOptions;
 use crate::records::{
 	AuditFinding, BackupInfo, Change, NumberFormat, Overview, Retention, SessionState, SnapshotInfo,
 };
@@ -55,32 +60,53 @@ impl<B: Backend> Core<B> {
 		}
 	}
 
-	pub(crate) fn open(directory: &str) -> Result<Self, FfiError> {
-		guard(|| CoreSession::open(Path::new(directory), SessionOptions::default())).map(Core::new)
+	/// A cancel that lands after the budget opened closes it again.
+	pub(crate) fn open(directory: &str, cancel: &CancelToken) -> Result<Self, FfiError> {
+		guard(|| {
+			let session = CoreSession::open(Path::new(directory), SessionOptions::default())?;
+			if cancel.is_cancelled() {
+				return Err(CoreError::Cancelled);
+			}
+			Ok(session)
+		})
+		.map(Core::new)
 	}
 
 	pub(crate) fn create_budget(
 		name: &str,
 		directory: &str,
 		format: &NumberFormat,
+		options: &NewBudgetOptions,
+		cancel: &CancelToken,
 	) -> Result<Self, FfiError> {
+		let budget = NewBudget {
+			name: name.to_owned(),
+			format: format.into(),
+			retirement_401k: options.retirement_401k,
+			hsa: options.hsa,
+		};
 		guard(|| {
-			CoreSession::create_budget(
-				name,
+			CoreSession::create_budget_until(
 				Path::new(directory),
-				&format.into(),
+				&budget,
 				SessionOptions::default(),
+				cancel,
 			)
 		})
 		.map(Core::new)
 	}
 
-	pub(crate) fn import_actual_zip(zip: &str, into_directory: &str) -> Result<Self, FfiError> {
+	pub(crate) fn import_actual_zip(
+		zip: &str,
+		into_directory: &str,
+		cancel: &CancelToken,
+	) -> Result<Self, FfiError> {
 		guard(|| {
-			CoreSession::import_actual_zip(
+			CoreSession::import_actual_zip_until(
 				Path::new(zip),
 				Path::new(into_directory),
 				SessionOptions::default(),
+				cancel,
 			)
 		})
 		.map(Core::new)
@@ -143,10 +169,14 @@ impl<B: Backend> Core<B> {
 		self.call(|session| session.overview().map(|overview| Overview::from(&overview)))
 	}
 
-	pub(crate) fn export_actual_zip(&self, to: &str) -> Result<Vec<AuditFinding>, FfiError> {
+	pub(crate) fn export_actual_zip(
+		&self,
+		to: &str,
+		cancel: &CancelToken,
+	) -> Result<Vec<AuditFinding>, FfiError> {
 		self.call(|session| {
 			session
-				.export_actual_zip(Path::new(to))
+				.export_actual_zip_until(Path::new(to), cancel)
 				.map(|report| report.violations.iter().map(AuditFinding::from).collect())
 		})
 	}
@@ -254,37 +284,55 @@ impl<B: Backend> Core<B> {
 /// on the same budget opens read-only, and `state().read_only` says why.
 #[derive(uniffi::Object)]
 pub struct Session {
-	core: Core<veritas_store::Store>,
+	core: Arc<Core<veritas_store::Store>>,
+}
+
+impl Session {
+	fn wrap(core: Core<veritas_store::Store>) -> Arc<Session> {
+		Arc::new(Session {
+			core: Arc::new(core),
+		})
+	}
 }
 
 #[uniffi::export]
 impl Session {
-	/// Opens a budget folder Veritas imported earlier. It is usable as soon as
-	/// this returns, while the full integrity check finishes in the background.
+	/// Opens a budget folder. It is usable as soon as this returns, while the
+	/// full integrity check finishes in the background. The work runs off the
+	/// caller's thread; cancelling the task closes the budget again.
 	#[uniffi::constructor]
-	pub fn open(directory: String) -> Result<Arc<Session>, FfiError> {
-		Core::open(&directory).map(|core| Arc::new(Session { core }))
+	pub async fn open(directory: String) -> Result<Arc<Session>, FfiError> {
+		run(move |cancel| Core::open(&directory, cancel))
+			.await
+			.map(Session::wrap)
 	}
 
-	/// Starts a brand-new budget in `directory`, which must not exist yet,
-	/// and opens it. No Actual export is needed.
+	/// Starts a brand-new budget in `directory`, which must not exist yet, and
+	/// opens it (R-IO-0). It is built aside and renamed into place, so
+	/// cancelling the task before then leaves nothing behind.
 	#[uniffi::constructor]
-	pub fn create_budget(
+	pub async fn create_budget(
 		name: String,
 		directory: String,
 		format: NumberFormat,
+		options: NewBudgetOptions,
 	) -> Result<Arc<Session>, FfiError> {
-		Core::create_budget(&name, &directory, &format).map(|core| Arc::new(Session { core }))
+		run(move |cancel| Core::create_budget(&name, &directory, &format, &options, cancel))
+			.await
+			.map(Session::wrap)
 	}
 
 	/// Copies an Actual export into `into_directory`, which must not exist
-	/// yet, then opens it. The zip itself is only read.
+	/// yet, then opens it. The zip itself is only read, and cancelling the
+	/// task before the copy is in place leaves nothing behind.
 	#[uniffi::constructor]
-	pub fn import_actual_zip(
+	pub async fn import_actual_zip(
 		zip: String,
 		into_directory: String,
 	) -> Result<Arc<Session>, FfiError> {
-		Core::import_actual_zip(&zip, &into_directory).map(|core| Arc::new(Session { core }))
+		run(move |cancel| Core::import_actual_zip(&zip, &into_directory, cancel))
+			.await
+			.map(Session::wrap)
 	}
 
 	pub fn state(&self) -> Result<SessionState, FfiError> {
@@ -305,8 +353,9 @@ impl Session {
 	/// Writes an Actual zip to `to` (R-IO-2), snapshotting a writable budget
 	/// first. SQLite damage refuses it with `AuditFailed`. Other audit
 	/// findings come back with the export.
-	pub fn export_actual_zip(&self, to: String) -> Result<Vec<AuditFinding>, FfiError> {
-		self.core.export_actual_zip(&to)
+	pub async fn export_actual_zip(&self, to: String) -> Result<Vec<AuditFinding>, FfiError> {
+		let core = self.core.clone();
+		run(move |cancel| core.export_actual_zip(&to, cancel)).await
 	}
 
 	/// The folder `back_up_now` writes to. Swift starts security-scoped
@@ -423,8 +472,12 @@ mod tests {
 
 	fn imported(label: &str) -> (Scratch, Arc<Core<veritas_store::Store>>) {
 		let scratch = Scratch::new(label);
-		let core = Core::<veritas_store::Store>::import_actual_zip(&small_zip(), &scratch.budget())
-			.unwrap();
+		let core = Core::<veritas_store::Store>::import_actual_zip(
+			&small_zip(),
+			&scratch.budget(),
+			&CancelToken::default(),
+		)
+		.unwrap();
 		(scratch, Arc::new(core))
 	}
 
@@ -560,7 +613,8 @@ mod tests {
 		assert_eq!(state.snapshot_problem, None);
 		assert!(state.directory.ends_with("budget"));
 
-		let second = Core::<veritas_store::Store>::open(&scratch.budget()).unwrap();
+		let second =
+			Core::<veritas_store::Store>::open(&scratch.budget(), &CancelToken::default()).unwrap();
 		assert_eq!(
 			second.state().unwrap().read_only,
 			Some(ReadOnlyKind::OpenElsewhere)
@@ -621,7 +675,8 @@ mod tests {
 		let (scratch, core) = imported("close");
 		core.close().unwrap();
 		assert!(matches!(core.state(), Err(FfiError::Invalid { .. })));
-		let reopened = Core::<veritas_store::Store>::open(&scratch.budget()).unwrap();
+		let reopened =
+			Core::<veritas_store::Store>::open(&scratch.budget(), &CancelToken::default()).unwrap();
 		assert_eq!(reopened.state().unwrap().read_only, None);
 	}
 
@@ -653,7 +708,8 @@ mod tests {
 		);
 
 		let zip = scratch.0.join("export.zip");
-		core.export_actual_zip(&zip.display().to_string()).unwrap();
+		core.export_actual_zip(&zip.display().to_string(), &CancelToken::default())
+			.unwrap();
 		assert!(zip.is_file());
 
 		assert!(matches!(core.back_up_now(), Err(FfiError::Invalid { .. })));
