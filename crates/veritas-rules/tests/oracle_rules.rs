@@ -16,9 +16,9 @@ use common::{
 use serde_json::{Value, json};
 use veritas_domain::{
 	Account, AccountId, BudgetData, BudgetType, Category, CategoryGroupId, CategoryId, Payee,
-	PayeeId,
+	PayeeId, RuleId,
 };
-use veritas_rules::{ParsedRule, RuleBook, RuleSupport};
+use veritas_rules::{BudgetPayees, ParsedRule, RuleBook, RuleSupport};
 
 const TODAY: &str = "2026-11-09";
 const RULES: usize = 70;
@@ -177,7 +177,10 @@ fn random_condition(rng: &mut Rng, world: &World) -> Value {
 }
 
 fn random_action(rng: &mut Rng, world: &World) -> Value {
-	match rng.below(9) {
+	match rng.below(10) {
+		9 => {
+			json!({"op": "set", "field": "payee_name", "value": rng.pick(&["Amazon", "amazon", "New Shop", "NEW SHOP", "", "Coffee Shop"]), "type": "string"})
+		}
 		0 | 1 => {
 			let value = if rng.chance(15) {
 				Value::Null
@@ -324,6 +327,21 @@ fn rule_outcomes_match_the_oracle() {
 			"conditions": conditions, "actions": actions}),
 		);
 	}
+	// Pre-stage rules that score 0 and sort first, so they run before any
+	// generated rule can rewrite the imported payee they look at.
+	for (n, (text, name)) in [
+		("zelle to", "Zelle Friend"),
+		("shell oil", ""),
+		("starbucks", "amazon"),
+		("amzn digital", "New Shop"),
+	]
+	.iter()
+	.enumerate()
+	{
+		ops.push(json!({"op": "createRule", "id": uuid(0, n), "stage": "pre",
+			"conditions": [{"op": "contains", "field": "imported_payee", "value": text}],
+			"actions": [{"op": "set", "field": "payee_name", "value": name}]}));
+	}
 	let mut added = Vec::new();
 	for (a, (account, _)) in world.accounts.iter().enumerate() {
 		let transactions: Vec<Value> = (0..TRANSACTIONS / 2)
@@ -360,23 +378,51 @@ fn rule_outcomes_match_the_oracle() {
 		.flatten()
 		.filter_map(|row| Some((row["id"].as_str()?, row)))
 		.collect();
+	let actual_payees: BTreeMap<&str, &str> = dump["tables"]["payees"]["rows"]
+		.as_array()
+		.into_iter()
+		.flatten()
+		.filter_map(|row| Some((row["id"].as_str()?, row["name"].as_str()?)))
+		.collect();
+	let mut made = 0;
+	let mut payees = BudgetPayees::new(&budget, || {
+		made += 1;
+		PayeeId::new(format!("made-{made}"))
+	});
+	let known = |id: &str| world.payees.iter().any(|(payee, _)| payee == id);
 
 	let mut mismatches = Vec::new();
 	let mut rules_fired = 0;
+	let mut made_payees = 0;
 	for (input, account) in &added {
-		let outcome = book.run(&rule_transaction(input, account), &budget);
+		let outcome = book.run(&rule_transaction(input, account), &budget, &mut payees);
 		assert!(outcome.undetermined.is_empty());
 		rules_fired += outcome.applied.len();
-		let expected = expected_row(&outcome.transaction, account);
+		let mut expected = expected_row(&outcome.partial, account);
 		let row = rows
 			.get(input["id"].as_str().unwrap())
 			.unwrap_or_else(|| panic!("{} wasn't added", input["id"]));
-		let actual: serde_json::Map<String, Value> = expected
+		let mut actual: serde_json::Map<String, Value> = expected
 			.as_object()
 			.unwrap()
 			.keys()
 			.map(|key| (key.clone(), row[key.as_str()].clone()))
 			.collect();
+		// Payees a rule made get fresh ids on each side, so compare their names.
+		if let Some(id) = actual["description"].as_str().filter(|id| !known(id)) {
+			let name = actual_payees[id];
+			actual.insert("description".into(), json!(format!("made: {name}")));
+			made_payees += 1;
+		}
+		if let Some(id) = expected["description"].as_str().filter(|id| !known(id)) {
+			let name = &payees
+				.created
+				.iter()
+				.find(|(made, _)| made.as_str() == id)
+				.unwrap()
+				.1;
+			expected["description"] = json!(format!("made: {name}"));
+		}
 		if Value::Object(actual.clone()) != expected {
 			mismatches.push(format!(
 				"{input}\n  actual:  {}\n  veritas: {expected}\n  rules applied: {:?}",
@@ -390,6 +436,40 @@ fn rule_outcomes_match_the_oracle() {
 		added.len(),
 		mismatches.len()
 	);
+	let base = common::dump(
+		&oracle,
+		&repo_root()
+			.join("fixtures/synthetic/small.zip")
+			.to_string_lossy(),
+		TODAY,
+	);
+	let before: Vec<&str> = base["tables"]["payees"]["rows"]
+		.as_array()
+		.into_iter()
+		.flatten()
+		.filter_map(|row| row["id"].as_str())
+		.collect();
+	let mut actual_made: Vec<&str> = actual_payees
+		.iter()
+		.filter(|(id, name)| !known(id) && !before.contains(id) && !name.is_empty())
+		.map(|(_, name)| *name)
+		.collect();
+	let mut veritas_made: Vec<&str> = payees
+		.created
+		.iter()
+		.map(|(_, name)| name.as_str())
+		.collect();
+	actual_made.sort_unstable();
+	veritas_made.sort_unstable();
+	assert!(
+		!veritas_made.is_empty(),
+		"no rule made a payee, so set payee_name went unproven"
+	);
+	assert_eq!(
+		veritas_made, actual_made,
+		"set payee_name made different payees"
+	);
+	eprintln!("both made payees {veritas_made:?}; {made_payees} transactions kept one");
 	assert!(
 		rules_fired > added.len() / 2,
 		"too few rules fired to prove much: {rules_fired}"
@@ -460,4 +540,242 @@ fn unsupported_rules_in_the_fixture_are_read_only_and_untouched() {
 			.iter()
 			.any(|(actions, _)| actions.contains("formula"))
 	);
+}
+
+const PATTERNS: [&str; 40] = [
+	"^amzn",
+	"amzn|amazon",
+	"^(starbucks|peet'?s) #?\\d+",
+	"\\d{3,}",
+	"^\\D+$",
+	"\\bshell\\b",
+	"oil$",
+	"^zelle (to|from) \\w+$",
+	"[aeiou]{2}",
+	"^[a-z ]+$",
+	"\\.com$",
+	"s\\.",
+	"\\s{2,}",
+	"^$",
+	"école",
+	"\\u00e9",
+	"\\x41",
+	"[^a-z0-9 ]",
+	"(?:mk|dig)",
+	"a{2}",
+	"\\W",
+	"^.{5}$",
+	"#\\d",
+	"llc\\b",
+	"[A-Z]",
+	"\\S+\\s\\S+",
+	"x{",
+	"a]",
+	"(oil|gas)?$",
+	"(?<n>\\d)",
+	"^[\\w.]+$",
+	"[-.]",
+	"\\Bll",
+	"^a.*b$",
+	"mktp\\s+us",
+	"[\\d-]",
+	"b+?",
+	"^.+@.+$",
+	"(?=a)",
+	"fo**",
+];
+
+const TEXTS: [&str; 24] = [
+	"AMZN Mktp US",
+	"Amazon.com",
+	"Starbucks #123",
+	"Peets 42",
+	"Shell Oil",
+	"SHELL",
+	"Zelle to Bob",
+	"zelle from Ann",
+	"École du ski",
+	"12345",
+	"Coffee  Shop",
+	"A1",
+	"Gas",
+	"LANDLORD LLC",
+	"llcx",
+	"x{",
+	"a]b",
+	"aa",
+	"ab",
+	"me@example.com",
+	"1-2",
+	"Mr. Smith",
+	"amzn digital",
+	"",
+];
+
+/// D47: `matches` conditions go through the `regex` crate, read the JS way.
+/// Each rule appends its own marker, so the notes show exactly which
+/// patterns Actual matched for each text.
+#[test]
+fn regex_conditions_match_the_oracle() {
+	let Some(oracle) = oracle_dir() else {
+		eprintln!(
+			"skipping the regex oracle test: tools/actual-oracle/node_modules is missing, run `cargo xtask oracle setup`"
+		);
+		return;
+	};
+	let world = world();
+	let mut ops = setup_ops(&world);
+	let mut refused = Vec::new();
+	for (n, pattern) in PATTERNS.iter().enumerate() {
+		let condition =
+			json!({"op": "matches", "field": "imported_payee", "value": pattern, "type": "string"});
+		let probe = rule_from_row(
+			&json!({"id": "probe", "conditions": json!([condition]).to_string(), "actions": "[]"}),
+		);
+		if ParsedRule::parse(&probe).support() != RuleSupport::Full {
+			refused.push(*pattern);
+			continue;
+		}
+		ops.push(
+			json!({"op": "createRule", "id": uuid(8, n), "conditions": [condition],
+			"actions": [{"op": "append-notes", "value": format!(" [{n}]")}]}),
+		);
+	}
+	assert_eq!(
+		refused,
+		["(?=a)", "fo**"],
+		"only lookaround and patterns regex can't read are refused"
+	);
+	let account = &world.accounts[0].0;
+	let transactions: Vec<Value> = TEXTS
+		.iter()
+		.enumerate()
+		.map(|(n, text)| json!({"id": uuid(9, n), "date": "2026-11-01", "amount": -100, "cleared": true, "imported_payee": text}))
+		.collect();
+	ops.push(json!({"op": "addTransactions", "account": account, "transactions": transactions, "runTransfers": false}));
+
+	let scratch = scratch_dir("regex");
+	let dump = apply_and_dump(
+		&oracle,
+		&scratch,
+		"regex",
+		&repo_root().join("fixtures/synthetic/small.zip"),
+		ops,
+		TODAY,
+	);
+	let _ = std::fs::remove_dir_all(&scratch);
+	let budget = budget_from(&world, &dump);
+	let book = RuleBook::new(&budget);
+	let rows: BTreeMap<&str, &Value> = dump["tables"]["transactions"]["rows"]
+		.as_array()
+		.into_iter()
+		.flatten()
+		.filter_map(|row| Some((row["id"].as_str()?, row)))
+		.collect();
+	let mut mismatches = Vec::new();
+	let mut matched = 0;
+	for input in &transactions {
+		let outcome = book.run(
+			&rule_transaction(input, account),
+			&budget,
+			&mut BudgetPayees::new(&budget, || PayeeId::new("made")),
+		);
+		assert!(
+			outcome.undetermined.is_empty(),
+			"{input}: {:?}",
+			outcome.undetermined
+		);
+		matched += outcome.applied.len();
+		let actual = &rows[input["id"].as_str().unwrap()]["notes"];
+		let veritas = json!(outcome.partial.notes);
+		if *actual != veritas {
+			mismatches.push(format!(
+				"{:?}: actual {actual}, veritas {veritas}",
+				input["imported_payee"]
+			));
+		}
+	}
+	eprintln!(
+		"{} patterns × {} texts, {matched} matches, {} differ",
+		PATTERNS.len() - refused.len(),
+		TEXTS.len(),
+		mismatches.len()
+	);
+	assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+}
+
+/// Two live payees can share a name: `createPayee` doesn't stop it. Actual's
+/// `getPayeeByName` then takes whichever SQLite returns first, so Veritas
+/// reports a `set payee_name` to that name as undetermined instead of
+/// guessing, and still runs a rename to a name that is unique.
+#[test]
+fn a_payee_name_shared_by_two_payees_is_left_to_actual() {
+	let Some(oracle) = oracle_dir() else {
+		eprintln!(
+			"skipping the duplicate payee oracle test: tools/actual-oracle/node_modules is missing, run `cargo xtask oracle setup`"
+		);
+		return;
+	};
+	let mut world = world();
+	world.payees.push((uuid(4, 9), "AMAZON"));
+	let mut ops = setup_ops(&world);
+	let rename = |n: usize, text: &str, name: &str| {
+		json!({"op": "createRule", "id": uuid(8, n), "stage": "pre",
+			"conditions": [{"op": "contains", "field": "imported_payee", "value": text}],
+			"actions": [{"op": "set", "field": "payee_name", "value": name}]})
+	};
+	ops.push(rename(0, "amzn", "amazon"));
+	// The fixture has its own "Landlord", so the unique name is the coffee shop.
+	ops.push(rename(1, "zelle", "coffee shop"));
+	let account = world.accounts[0].0.clone();
+	let transactions = vec![
+		json!({"id": uuid(9, 0), "date": "2026-11-01", "amount": -100, "cleared": true, "imported_payee": "AMZN Mktp"}),
+		json!({"id": uuid(9, 1), "date": "2026-11-01", "amount": -200, "cleared": true, "imported_payee": "Zelle to Bob"}),
+	];
+	ops.push(json!({"op": "addTransactions", "account": account, "transactions": transactions, "runTransfers": false}));
+	let scratch = scratch_dir("duplicate-payees");
+	let dump = apply_and_dump(
+		&oracle,
+		&scratch,
+		"duplicates",
+		&repo_root().join("fixtures/synthetic/small.zip"),
+		ops,
+		TODAY,
+	);
+	let _ = std::fs::remove_dir_all(&scratch);
+	let budget = budget_from(&world, &dump);
+	let book = RuleBook::new(&budget);
+	let row = |n: usize| {
+		dump["tables"]["transactions"]["rows"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.find(|row| row["id"] == uuid(9, n))
+			.unwrap()["description"]
+			.clone()
+	};
+	let run = |n: usize| {
+		book.run(
+			&rule_transaction(&transactions[n], &account),
+			&budget,
+			&mut BudgetPayees::new(&budget, || PayeeId::new("made")),
+		)
+	};
+
+	let amazon = run(0);
+	assert_eq!(amazon.undetermined, [RuleId::new(uuid(8, 0))]);
+	assert_eq!(
+		amazon.partial.payee, None,
+		"the ambiguous rename isn't half applied"
+	);
+	assert!(
+		[json!(uuid(4, 0)), json!(uuid(4, 9))].contains(&row(0)),
+		"Actual picked one of the two: {}",
+		row(0)
+	);
+
+	let coffee = run(1);
+	assert!(coffee.undetermined.is_empty());
+	assert_eq!(coffee.partial.payee, Some(PayeeId::new(uuid(4, 2))));
+	assert_eq!(row(1), json!(uuid(4, 2)));
 }
