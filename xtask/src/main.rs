@@ -9,7 +9,9 @@ commands:
 	oracle <args...>   run the Actual oracle CLI (dump, apply, generate)
 	fixtures           regenerate fixtures/synthetic with the oracle
 	bindings           build the core and generate its Swift bindings into VeritasKit
-	ci                 run every check CI runs";
+	app                build the macOS app into target/xcode
+	app-test           run the macOS app's UI tests
+	ci                 run every check CI runs, plus the app build";
 
 const FIXTURE_SPECS: [&str; 3] = ["small", "all-features", "perf-100k"];
 
@@ -22,6 +24,8 @@ fn main() -> ExitCode {
 		Some("oracle") => oracle(&args[1..]),
 		Some("fixtures") => fixtures(),
 		Some("bindings") => bindings(),
+		Some("app") => xcodebuild("build"),
+		Some("app-test") => xcodebuild("test"),
 		Some("ci") => ci(),
 		_ => Err(USAGE.to_owned()),
 	};
@@ -42,9 +46,14 @@ fn root() -> PathBuf {
 }
 
 fn run(dir: &Path, program: &str, args: &[&str]) -> Result {
+	run_with_env(dir, program, args, &[])
+}
+
+fn run_with_env(dir: &Path, program: &str, args: &[&str], env: &[(&str, &str)]) -> Result {
 	eprintln!("» {program} {}", args.join(" "));
 	let status = Command::new(program)
 		.args(args)
+		.envs(env.iter().copied())
 		.current_dir(dir)
 		.status()
 		.map_err(|e| format!("could not start {program}: {e}"))?;
@@ -165,13 +174,20 @@ fn fixtures() -> Result {
 }
 
 const VERITAS_KIT: &str = "apps/macos/Packages/VeritasKit";
+const MACOS_DEPLOYMENT_TARGET: &str = "27.0";
+const XCODE_PROJECT: &str = "apps/macos/Veritas.xcodeproj";
+const FFI_MODULE_MAP: &str =
+	"module VeritasCoreFFI {\n\theader \"VeritasCoreFFI.h\"\n\texport *\n}\n";
 
 fn bindings() -> Result {
 	let root = root();
-	run(
+	// The bundled SQLite is C, and cc targets the SDK's own macOS version
+	// unless told otherwise, which is newer than the app's minimum.
+	run_with_env(
 		&root,
 		"cargo",
 		&["build", "--quiet", "--release", "--package", "veritas-ffi"],
+		&[("MACOSX_DEPLOYMENT_TARGET", MACOS_DEPLOYMENT_TARGET)],
 	)?;
 	let release = root.join("target/release");
 	let generated = root.join("target/uniffi/swift");
@@ -199,30 +215,113 @@ fn bindings() -> Result {
 	)?;
 
 	let kit = root.join(VERITAS_KIT);
-	// The static library sits alone in its own folder: given a .dylib next to it,
-	// the linker would pick the dylib and the app would need it at runtime.
-	let link_dir = root.join("target/swift");
-	for (from, to) in [
-		(
-			generated.join("VeritasCore.swift"),
-			kit.join("Sources/VeritasCore/VeritasCore.swift"),
-		),
-		(
-			generated.join("VeritasCoreFFI.h"),
-			kit.join("Sources/VeritasCoreFFI/VeritasCoreFFI.h"),
-		),
-		(
-			release.join("libveritas_ffi.a"),
-			link_dir.join("libveritas_ffi.a"),
-		),
-	] {
-		if let Some(parent) = to.parent() {
-			std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
-		}
-		std::fs::copy(&from, &to)
-			.map_err(|e| format!("{} → {}: {e}", from.display(), to.display()))?;
+	copy(
+		&generated.join("VeritasCore.swift"),
+		&kit.join("Sources/VeritasCore/VeritasCore.swift"),
+	)?;
+
+	// SwiftPM and Xcode both link a binary target's static library without search
+	// paths or unsafe flags, so the core travels as an xcframework.
+	let headers = root.join("target/swift/include");
+	copy(
+		&generated.join("VeritasCoreFFI.h"),
+		&headers.join("VeritasCoreFFI.h"),
+	)?;
+	write(&headers.join("module.modulemap"), FFI_MODULE_MAP)?;
+	let xcframework = kit.join("VeritasCoreFFI.xcframework");
+	if xcframework.exists() {
+		std::fs::remove_dir_all(&xcframework)
+			.map_err(|e| format!("{}: {e}", xcframework.display()))?;
 	}
+	run(
+		&root,
+		"xcodebuild",
+		&[
+			"-quiet",
+			"-create-xcframework",
+			"-library",
+			&release.join("libveritas_ffi.a").to_string_lossy(),
+			"-headers",
+			&headers.to_string_lossy(),
+			"-output",
+			&xcframework.to_string_lossy(),
+		],
+	)?;
 	eprintln!("Swift bindings are in {VERITAS_KIT}");
+	Ok(())
+}
+
+fn copy(from: &Path, to: &Path) -> Result {
+	if let Some(parent) = to.parent() {
+		std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+	}
+	std::fs::copy(from, to)
+		.map(|_| ())
+		.map_err(|e| format!("{} → {}: {e}", from.display(), to.display()))
+}
+
+fn write(path: &Path, contents: &str) -> Result {
+	if let Some(parent) = path.parent() {
+		std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+	}
+	std::fs::write(path, contents).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Stale when missing, or when any Rust source or the lockfile changed after
+/// the xcframework was written.
+fn bindings_are_stale(root: &Path) -> bool {
+	let built = root
+		.join(VERITAS_KIT)
+		.join("VeritasCoreFFI.xcframework/Info.plist");
+	let Ok(built) = std::fs::metadata(built).and_then(|meta| meta.modified()) else {
+		return true;
+	};
+	[root.join("crates"), root.join("Cargo.lock")]
+		.iter()
+		.filter_map(|path| newest_change(path))
+		.any(|changed| changed > built)
+}
+
+fn newest_change(path: &Path) -> Option<std::time::SystemTime> {
+	let meta = std::fs::metadata(path).ok()?;
+	if !meta.is_dir() {
+		return meta.modified().ok();
+	}
+	std::fs::read_dir(path)
+		.ok()?
+		.filter_map(|entry| entry.ok())
+		.filter_map(|entry| newest_change(&entry.path()))
+		.max()
+}
+
+fn xcodebuild(action: &str) -> Result {
+	let root = root();
+	if bindings_are_stale(&root) {
+		bindings()?;
+	}
+	let derived_data = root.join("target/xcode");
+	run(
+		&root,
+		"xcodebuild",
+		&[
+			"-quiet",
+			"-project",
+			XCODE_PROJECT,
+			"-scheme",
+			"Veritas",
+			"-destination",
+			"platform=macOS",
+			"-derivedDataPath",
+			&derived_data.to_string_lossy(),
+			action,
+		],
+	)?;
+	if action == "build" {
+		eprintln!(
+			"Veritas.app is in {}",
+			derived_data.join("Build/Products/Debug").display()
+		);
+	}
 	Ok(())
 }
 
@@ -245,6 +344,7 @@ fn ci() -> Result {
 	run(&root, "node", &["--test", ".github/scripts/*.test.ts"])?;
 	bindings()?;
 	run(&root.join(VERITAS_KIT), "swift", &["test", "--quiet"])?;
+	xcodebuild("build")?;
 	if oracle_dir().join("node_modules").exists() {
 		run(&oracle_dir(), "npm", &["test", "--silent"])?;
 	} else {
