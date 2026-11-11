@@ -617,3 +617,41 @@ fn tax_tags_are_added_changed_and_removed() {
 	assert_eq!(tags.len(), 1);
 	assert_eq!(tags["rx"], "hsa");
 }
+
+#[test]
+fn a_journal_left_by_a_dead_writer_is_replayed_by_recover_after_crash() {
+	let scratch = Scratch::new("hot-journal");
+	let db = fixture_db("small", &scratch);
+	let live = Connection::open(&db).unwrap();
+	live.execute_batch(
+		"PRAGMA journal_mode = DELETE; PRAGMA cache_size = 2; PRAGMA cache_spill = ON;
+		 CREATE TABLE ballast (a); BEGIN;
+		 INSERT INTO ballast SELECT zeroblob(3000) FROM (WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 600) SELECT i FROM n);
+		 UPDATE transactions SET amount = 0;",
+	)
+	.unwrap();
+	// Copying mid-transaction is what a killed writer leaves on disk.
+	let crashed = scratch.0.join("crashed");
+	std::fs::create_dir(&crashed).unwrap();
+	for name in ["db.sqlite", "db.sqlite-journal"] {
+		std::fs::copy(scratch.0.join(name), crashed.join(name)).unwrap();
+	}
+	drop(live);
+	let copy = crashed.join("db.sqlite");
+
+	let read_only = Access::ReadOnly(veritas_domain::ReadOnlyReason::OpenElsewhere);
+	let refused = Store::open(&copy, read_only).and_then(|store| store.load());
+	assert!(
+		matches!(&refused, Err(CoreError::Storage(message)) if message.contains("recover_after_crash")),
+		"{refused:?}"
+	);
+	veritas_store::recover_after_crash(&copy).unwrap();
+	assert!(!crashed.join("db.sqlite-journal").exists());
+	let store = Store::open(&copy, read_only).unwrap();
+	assert_eq!(store.pragma_text("journal_mode").unwrap(), "delete");
+	let data = store.load().unwrap().data;
+	assert!(
+		data.transactions.values().any(|t| t.amount != Money::ZERO),
+		"the dead writer's change rolled back"
+	);
+}

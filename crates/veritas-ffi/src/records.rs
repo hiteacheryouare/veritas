@@ -1,9 +1,13 @@
 use chrono::{DateTime, Utc};
+use veritas_domain::{
+	Currency as CoreCurrency, Money, NewAccount as CoreNewAccount,
+	NewAccountKind as CoreNewAccountKind, NumberFormat as CoreNumberFormat,
+	NumberStyle as CoreNumberStyle,
+};
 use veritas_domain::{EntityRef as CoreEntity, ReadOnlyReason, YearMonth};
 use veritas_session::{
-	AccountGroupKind, BackupResult, BudgetEntry, ChangeSet, NumberFormat as CoreNumberFormat,
-	NumberStyle as CoreNumberStyle, Overview as CoreOverview, OverviewGroup, RetentionPolicy,
-	Snapshot, SnapshotReason,
+	AccountGroupKind, BackupResult, BudgetEntry, ChangeSet, Overview as CoreOverview,
+	OverviewGroup, RetentionPolicy, Snapshot, SnapshotReason,
 };
 use veritas_store::{Check, Violation};
 
@@ -208,12 +212,87 @@ pub struct Overview {
 }
 
 /// What new-budget setup asks besides the name and number format.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct NewBudgetOptions {
 	/// Create off-budget 401(k) and HSA accounts, so gross-paycheck
 	/// contributions classify as savings (D56).
 	pub retirement_401k: bool,
 	pub hsa: bool,
+	/// The accounts setup creates, each with its balance today.
+	pub accounts: Vec<NewAccount>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct NewAccount {
+	pub name: String,
+	pub kind: NewAccountKind,
+	/// Cents as typed. For a credit card, line of credit, loan or mortgage,
+	/// what is owed, as a positive amount; the core stores it negative.
+	pub starting_balance: i64,
+}
+
+/// What setup offers. The core decides each one's budget flag and side
+/// (D8, docs/finance/statements.md ST-9.2): checking, savings, cash, credit
+/// cards and lines of credit are on budget; the rest are off budget.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum NewAccountKind {
+	Checking,
+	Savings,
+	Cash,
+	CreditCard,
+	LineOfCredit,
+	Investment,
+	Retirement,
+	Property,
+	Loan,
+	Mortgage,
+}
+
+impl From<&NewAccount> for CoreNewAccount {
+	fn from(account: &NewAccount) -> Self {
+		CoreNewAccount {
+			name: account.name.clone(),
+			kind: match account.kind {
+				NewAccountKind::Checking => CoreNewAccountKind::Checking,
+				NewAccountKind::Savings => CoreNewAccountKind::Savings,
+				NewAccountKind::Cash => CoreNewAccountKind::Cash,
+				NewAccountKind::CreditCard => CoreNewAccountKind::CreditCard,
+				NewAccountKind::LineOfCredit => CoreNewAccountKind::LineOfCredit,
+				NewAccountKind::Investment => CoreNewAccountKind::Investment,
+				NewAccountKind::Retirement => CoreNewAccountKind::Retirement,
+				NewAccountKind::Property => CoreNewAccountKind::Property,
+				NewAccountKind::Loan => CoreNewAccountKind::Loan,
+				NewAccountKind::Mortgage => CoreNewAccountKind::Mortgage,
+			},
+			starting_balance: Money::from_minor(account.starting_balance),
+		}
+	}
+}
+
+/// One of Actual's currencies, for setup's currency picker.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct Currency {
+	/// ISO 4217, or empty for "None".
+	pub code: String,
+	pub name: String,
+	pub symbol: String,
+	pub decimal_places: u8,
+	/// The number format Actual suggests with this currency.
+	pub number_format: NumberStyle,
+	pub symbol_first: bool,
+}
+
+impl From<&CoreCurrency> for Currency {
+	fn from(currency: &CoreCurrency) -> Self {
+		Currency {
+			code: currency.code.to_owned(),
+			name: currency.name.to_owned(),
+			symbol: currency.symbol.to_owned(),
+			decimal_places: currency.decimal_places,
+			number_format: currency.number_format.into(),
+			symbol_first: currency.symbol_first,
+		}
+	}
 }
 
 /// Actual's number format preferences.
@@ -235,18 +314,39 @@ pub enum NumberStyle {
 	SpaceComma,
 	/// `1'000.33`
 	ApostropheDot,
+	/// `1,00,000.33`
+	CommaDotIn,
+}
+
+impl From<NumberStyle> for CoreNumberStyle {
+	fn from(style: NumberStyle) -> Self {
+		match style {
+			NumberStyle::CommaDot => CoreNumberStyle::CommaDot,
+			NumberStyle::DotComma => CoreNumberStyle::DotComma,
+			NumberStyle::SpaceComma => CoreNumberStyle::SpaceComma,
+			NumberStyle::ApostropheDot => CoreNumberStyle::ApostropheDot,
+			NumberStyle::CommaDotIn => CoreNumberStyle::CommaDotIn,
+		}
+	}
+}
+
+impl From<CoreNumberStyle> for NumberStyle {
+	fn from(style: CoreNumberStyle) -> Self {
+		match style {
+			CoreNumberStyle::CommaDot => NumberStyle::CommaDot,
+			CoreNumberStyle::DotComma => NumberStyle::DotComma,
+			CoreNumberStyle::SpaceComma => NumberStyle::SpaceComma,
+			CoreNumberStyle::ApostropheDot => NumberStyle::ApostropheDot,
+			CoreNumberStyle::CommaDotIn => NumberStyle::CommaDotIn,
+		}
+	}
 }
 
 impl From<&NumberFormat> for CoreNumberFormat {
 	fn from(format: &NumberFormat) -> Self {
 		CoreNumberFormat {
 			currency: format.currency.clone(),
-			style: match format.style {
-				NumberStyle::CommaDot => CoreNumberStyle::CommaDot,
-				NumberStyle::DotComma => CoreNumberStyle::DotComma,
-				NumberStyle::SpaceComma => CoreNumberStyle::SpaceComma,
-				NumberStyle::ApostropheDot => CoreNumberStyle::ApostropheDot,
-			},
+			style: format.style.into(),
 			hide_decimals: format.hide_decimals,
 		}
 	}
@@ -256,12 +356,7 @@ impl From<&CoreNumberFormat> for NumberFormat {
 	fn from(format: &CoreNumberFormat) -> Self {
 		NumberFormat {
 			currency: format.currency.clone(),
-			style: match format.style {
-				CoreNumberStyle::CommaDot => NumberStyle::CommaDot,
-				CoreNumberStyle::DotComma => NumberStyle::DotComma,
-				CoreNumberStyle::SpaceComma => NumberStyle::SpaceComma,
-				CoreNumberStyle::ApostropheDot => NumberStyle::ApostropheDot,
-			},
+			style: format.style.into(),
 			hide_decimals: format.hide_decimals,
 		}
 	}

@@ -21,10 +21,7 @@ pub use cancel::CancelToken;
 pub use lock::{Access, LOCK_FILE, WriterLock, acquire};
 pub use overview::{AccountGroupKind, Overview, OverviewAccount, OverviewGroup, account_groups};
 pub use retention::{RetentionPolicy, expired};
-pub use session::{
-	Backend, BackupResult, Clock, DB_FILE, METADATA_FILE, NewBudget, NumberFormat, NumberStyle,
-	Session, SessionOptions,
-};
+pub use session::{Backend, BackupResult, Clock, DB_FILE, METADATA_FILE, Session, SessionOptions};
 pub use shared::SharedSession;
 pub use snapshot::{
 	SNAPSHOTS_DIR, Snapshot, SnapshotReason, list_snapshots, prune_snapshots, restore_snapshot,

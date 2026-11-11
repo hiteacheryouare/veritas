@@ -4,7 +4,9 @@ use veritas_domain::CoreError;
 use veritas_interop::ExportOutcome;
 use veritas_store::{Access, AuditReport, Loaded, Store};
 
-use crate::session::{Backend, NewBudget};
+use veritas_domain::NewBudget;
+
+use crate::session::Backend;
 
 /// veritas-store's working copy is the real backend. Its writes come from
 /// veritas-store's own `veritas_domain::Store` impl.

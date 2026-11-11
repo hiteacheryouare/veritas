@@ -144,7 +144,9 @@ private final class Recorder: ChangeListener, @unchecked Sendable {
 @Test func creatingABudgetSaysWhenTheBuildCantYet() async throws {
 	let scratch = try Scratch()
 	let format = NumberFormat(currency: "USD", style: .commaDot, hideDecimals: false)
-	let options = NewBudgetOptions(retirement401k: true, hsa: false)
+	let options = NewBudgetOptions(
+		retirement401k: true, hsa: false,
+		accounts: [NewAccount(name: "Visa", kind: .creditCard, startingBalance: 45_000)])
 	await #expect {
 		try await Session.createBudget(
 			name: "Household", directory: scratch.budget, format: format, options: options)
@@ -153,4 +155,13 @@ private final class Recorder: ChangeListener, @unchecked Sendable {
 		return true
 	}
 	#expect(!FileManager.default.fileExists(atPath: scratch.budget))
+}
+
+@Test func setupListsActualsCurrenciesAndAmountFieldsDoArithmetic() throws {
+	let all = try currencies()
+	#expect(all.count == 55)
+	#expect(all.first { $0.code == "USD" }?.symbol == "$")
+	#expect(try evaluateAmount(text: "12.50+3", style: .commaDot) == 1_550)
+	#expect(try evaluateAmount(text: "1.234,5", style: .dotComma) == 123_450)
+	#expect(throws: FfiError.self) { try evaluateAmount(text: "abc", style: .commaDot) }
 }

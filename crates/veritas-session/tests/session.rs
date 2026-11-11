@@ -130,7 +130,7 @@ impl Backend for ReadPath {
 	}
 
 	/// Stands in for the store's template: the small fixture, renamed.
-	fn create(dir: &Path, budget: &veritas_session::NewBudget) -> Result<(), CoreError> {
+	fn create(dir: &Path, budget: &veritas_domain::NewBudget) -> Result<(), CoreError> {
 		build_from_fixture(dir, &budget.name);
 		Ok(())
 	}
@@ -855,16 +855,17 @@ fn the_overview_names_the_budget_and_groups_every_live_account() {
 	assert!(listed >= live, "{listed} listed, {live} live");
 }
 
-fn new_budget(name: &str) -> veritas_session::NewBudget {
-	veritas_session::NewBudget {
+fn new_budget(name: &str) -> veritas_domain::NewBudget {
+	veritas_domain::NewBudget {
 		name: name.to_owned(),
-		format: veritas_session::NumberFormat {
+		format: veritas_domain::NumberFormat {
 			currency: Some("USD".to_owned()),
-			style: veritas_session::NumberStyle::CommaDot,
+			style: veritas_domain::NumberStyle::CommaDot,
 			hide_decimals: false,
 		},
 		retirement_401k: true,
 		hsa: false,
+		accounts: Vec::new(),
 	}
 }
 
@@ -978,4 +979,38 @@ fn a_cancelled_import_create_or_export_leaves_nothing_behind() {
 		exported.err()
 	);
 	assert_eq!(entries(root.path()), ["budget"]);
+}
+
+#[test]
+fn setup_accounts_need_a_name_and_a_balance_that_fits() {
+	// R-IO-0: checked before the store is asked, so nothing is built.
+	let root = TempDir::new("session-create-accounts");
+	let clock = TestClock::new();
+	let with = |name: &str, typed: i64| veritas_domain::NewBudget {
+		accounts: vec![veritas_domain::NewAccount {
+			name: name.to_owned(),
+			kind: veritas_domain::NewAccountKind::CreditCard,
+			starting_balance: veritas_domain::Money::from_minor(typed),
+		}],
+		..new_budget("Household")
+	};
+	assert!(matches!(
+		TestSession::create_budget(&root.path().join("a"), &with("  ", 45_000), clock.options()),
+		Err(CoreError::Invalid(_))
+	));
+	assert!(matches!(
+		TestSession::create_budget(
+			&root.path().join("b"),
+			&with("Visa", i64::MIN),
+			clock.options()
+		),
+		Err(CoreError::Overflow)
+	));
+	assert!(entries(root.path()).is_empty());
+	TestSession::create_budget(
+		&root.path().join("c"),
+		&with(" Visa ", 45_000),
+		clock.options(),
+	)
+	.unwrap();
 }

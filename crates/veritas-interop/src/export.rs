@@ -1,6 +1,8 @@
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use veritas_domain::CoreError;
 use veritas_store::{AuditReport, Store};
@@ -51,11 +53,24 @@ fn export_metadata(metadata_path: &Path) -> Result<Vec<u8>, CoreError> {
 	Ok(out)
 }
 
+static NEXT_PARTIAL: AtomicU64 = AtomicU64::new(0);
+
+/// A temp name beside `to` that no other export, in this process or another,
+/// is using: the zip is written there and renamed over `to`.
 fn partial_path(to: &Path) -> Result<PathBuf, CoreError> {
 	let name = to
 		.file_name()
 		.ok_or_else(|| CoreError::Io(format!("{} has no file name", to.display())))?;
-	Ok(to.with_file_name(format!(".{}.partial", name.to_string_lossy())))
+	let nanos = SystemTime::now()
+		.duration_since(UNIX_EPOCH)
+		.map(|elapsed| elapsed.as_nanos())
+		.unwrap_or_default();
+	Ok(to.with_file_name(format!(
+		".{}.{}-{nanos}-{}.partial",
+		name.to_string_lossy(),
+		std::process::id(),
+		NEXT_PARTIAL.fetch_add(1, Ordering::Relaxed)
+	)))
 }
 
 fn write_zip(path: &Path, db_path: &Path, metadata: &[u8]) -> Result<(), CoreError> {
@@ -97,7 +112,6 @@ pub fn export_actual_zip(
 	store.export_copy(&db_path)?;
 
 	let partial = partial_path(to)?;
-	let _ = std::fs::remove_file(&partial);
 	let written = write_zip(&partial, &db_path, &metadata)
 		.and_then(|()| std::fs::rename(&partial, to).map_err(|error| io_error(to, &error)));
 	if written.is_err() {

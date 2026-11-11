@@ -22,11 +22,10 @@ use std::time::Duration;
 
 use support::TempDir;
 use veritas_domain::{
-	AccountId, BudgetCell, BudgetData, CategoryId, CoreError, Money, Row, YearMonth,
+	AccountId, BudgetCell, BudgetData, CategoryId, CoreError, Money, NewBudget, NumberFormat,
+	NumberStyle, Row, YearMonth,
 };
-use veritas_session::{
-	Backend, NewBudget, NumberFormat, NumberStyle, Session, SessionOptions, SnapshotReason,
-};
+use veritas_session::{Backend, Session, SessionOptions, SnapshotReason};
 
 type CrashSession = Session<veritas_store::Store>;
 
@@ -338,6 +337,7 @@ fn create_until_killed() {
 		},
 		retirement_401k: false,
 		hsa: false,
+		accounts: Vec::new(),
 	};
 	say("ready 0");
 	let mut created: i64 = 0;

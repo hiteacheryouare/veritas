@@ -1,10 +1,9 @@
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use veritas_domain::CoreError;
+use veritas_domain::{CoreError, NewBudget};
 use veritas_session::{
-	Backend, CancelToken, ChangeSet, NewBudget, Session as CoreSession, SessionOptions,
-	SharedSession,
+	Backend, CancelToken, ChangeSet, Session as CoreSession, SessionOptions, SharedSession,
 };
 
 use crate::blocking::run;
@@ -84,6 +83,7 @@ impl<B: Backend> Core<B> {
 			format: format.into(),
 			retirement_401k: options.retirement_401k,
 			hsa: options.hsa,
+			accounts: options.accounts.iter().map(Into::into).collect(),
 		};
 		guard(|| {
 			CoreSession::create_budget_until(
