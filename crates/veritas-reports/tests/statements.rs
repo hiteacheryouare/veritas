@@ -11,7 +11,7 @@ use veritas_domain::{AccountId, AccountKind, AccountMeta, Money, YearMonth};
 use veritas_reports::Period;
 use veritas_reports::{
 	BalanceSheet, OwnersEquity, Side, account_balances, balance_sheet, cash_flow,
-	net_profit_by_month, net_worth, net_worth_by_month, owners_equity,
+	cash_flow_by_month, net_profit_by_month, net_worth, net_worth_by_month, owners_equity,
 };
 
 fn sheet(book: &Book, on: &str) -> BalanceSheet {
@@ -552,4 +552,86 @@ fn r_rep_5_net_worth_and_income_vs_expense_by_month() {
 		.map(|month| (month.income.total.minor(), month.expenses.total.minor()))
 		.collect();
 	assert_eq!(income_vs_expense, [(300_000, 65_500), (300_000, 2_500)]);
+}
+
+#[test]
+fn st3_accounts_in_a_deleted_or_missing_group_are_ungrouped() {
+	let mut book = master();
+	book.account_group("Cash", 1.0).account_group("Old", 2.0);
+	book.budget
+		.account_groups
+		.get_mut(&veritas_domain::AccountGroupId::new("Old"))
+		.unwrap()
+		.tombstone = true;
+	for (account, group) in [("CHK", "Cash"), ("SAV", "Old"), ("BRK", "Gone")] {
+		book.budget
+			.accounts
+			.get_mut(&AccountId::new(account))
+			.unwrap()
+			.group = Some(veritas_domain::AccountGroupId::new(group));
+	}
+	let sheet = sheet(&book, "2027-01-31");
+	let groups: Vec<_> = sheet
+		.assets
+		.iter()
+		.map(|section| {
+			(
+				section.group.as_ref().map(ToString::to_string),
+				section.total.minor(),
+			)
+		})
+		.collect();
+	assert_eq!(
+		groups,
+		[
+			(Some("Cash".to_owned()), 388_800),
+			(None, 520_000 + 1_015_000 + 50_000 + 100_000),
+		]
+	);
+	let balances = account_balances(&book.budget, &book.classify(), date("2027-01-31")).unwrap();
+	assert!(
+		balances
+			.iter()
+			.filter(|line| ["SAV", "BRK"].contains(&line.account.as_str()))
+			.all(|line| line.group.is_none())
+	);
+}
+
+#[test]
+fn r_rep_5_cash_flow_by_month_chains_one_statement_per_month() {
+	let book = master();
+	let classification = book.classify();
+	let series = cash_flow_by_month(
+		&book.budget,
+		&classification,
+		YearMonth::new(2026, 12).unwrap(),
+		YearMonth::new(2027, 3).unwrap(),
+	)
+	.unwrap();
+	let summary: Vec<_> = series
+		.iter()
+		.map(|flow| {
+			(
+				flow.opening.minor(),
+				flow.net_cash_flow.total.minor(),
+				flow.closing.minor(),
+			)
+		})
+		.collect();
+	assert_eq!(
+		summary,
+		[
+			(0, 0, 200_000),
+			(200_000, 182_500, 381_300),
+			(381_300, 297_500, 678_800),
+			(678_800, 0, 678_800),
+		]
+	);
+	for flow in &series {
+		assert_eq!(
+			flow,
+			&cash_flow(&book.budget, &classification, flow.period).unwrap()
+		);
+		assert_eq!(flow.unexplained().unwrap(), Money::ZERO);
+	}
 }
