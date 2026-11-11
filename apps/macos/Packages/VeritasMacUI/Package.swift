@@ -18,6 +18,7 @@ let package = Package(
 				.product(name: "VeritasCore", package: "VeritasKit"),
 				.product(name: "VeritasDesign", package: "VeritasKit")
 			]
-		)
+		),
+		.testTarget(name: "VeritasMacUITests", dependencies: ["VeritasMacUI"])
 	]
 )

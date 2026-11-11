@@ -174,6 +174,8 @@ fn fixtures() -> Result {
 }
 
 const VERITAS_KIT: &str = "apps/macos/Packages/VeritasKit";
+// Its tests also render the new-budget screens into target/screenshots.
+const VERITAS_MAC_UI: &str = "apps/macos/Packages/VeritasMacUI";
 const MACOS_DEPLOYMENT_TARGET: &str = "27.0";
 const XCODE_PROJECT: &str = "apps/macos/Veritas.xcodeproj";
 const FFI_MODULE_MAP: &str =
@@ -344,6 +346,7 @@ fn ci() -> Result {
 	run(&root, "node", &["--test", ".github/scripts/*.test.ts"])?;
 	bindings()?;
 	run(&root.join(VERITAS_KIT), "swift", &["test", "--quiet"])?;
+	run(&root.join(VERITAS_MAC_UI), "swift", &["test", "--quiet"])?;
 	xcodebuild("build")?;
 	if oracle_dir().join("node_modules").exists() {
 		run(&oracle_dir(), "npm", &["test", "--silent"])?;

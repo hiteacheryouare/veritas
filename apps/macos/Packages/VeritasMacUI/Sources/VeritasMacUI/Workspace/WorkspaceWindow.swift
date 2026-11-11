@@ -17,7 +17,7 @@ struct WorkspaceWindow: View {
 			if model.phase == .open {
 				WorkspaceView(model: model)
 			} else {
-				EmptyStateView(isWorking: model.phase == .working, importActualZip: chooseActualZip)
+				EmptyStateView(isWorking: model.phase == .working, newBudget: model.startNewBudget, importActualZip: chooseActualZip)
 			}
 		}
 		.frame(minWidth: 900, minHeight: 560)
@@ -27,6 +27,12 @@ struct WorkspaceWindow: View {
 		.fileImporter(isPresented: $model.isImportPanelShown, allowedContentTypes: [.zip]) { result in
 			guard case .success(let zip) = result else { return }
 			Task { await importActualZip(zip) }
+		}
+		.fileDialogMessage("Choose the .zip from Export data in Actual's settings.")
+		.sheet(item: $model.newBudgetSetup) { setup in
+			NewBudgetSheet(setup: setup) { budget in
+				Task { await model.finishNewBudget(budget) }
+			}
 		}
 		.sheet(item: $model.sheet) { sheet in
 			PlaceholderSheet(sheet: sheet)
