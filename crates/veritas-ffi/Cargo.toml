@@ -20,5 +20,8 @@ chrono.workspace = true
 thiserror.workspace = true
 uniffi.workspace = true
 
+[dev-dependencies]
+serde_json.workspace = true
+
 [lints]
 workspace = true

@@ -141,20 +141,26 @@ private final class Recorder: ChangeListener, @unchecked Sendable {
 	#expect(listed.map(\.name) == [overview.budgetName])
 }
 
-@Test func creatingABudgetSaysWhenTheBuildCantYet() async throws {
+@Test func creatingABudgetStartsItWithItsAccounts() async throws {
 	let scratch = try Scratch()
 	let format = NumberFormat(currency: "USD", style: .commaDot, hideDecimals: false)
 	let options = NewBudgetOptions(
 		retirement401k: true, hsa: false,
-		accounts: [NewAccount(name: "Visa", kind: .creditCard, startingBalance: 45_000)])
-	await #expect {
-		try await Session.createBudget(
-			name: "Household", directory: scratch.budget, format: format, options: options)
-	} throws: { error in
-		guard case FfiError.Invalid = error else { return false }
-		return true
-	}
-	#expect(!FileManager.default.fileExists(atPath: scratch.budget))
+		accounts: [
+			NewAccount(name: "Checking", kind: .checking, startingBalance: 250_000),
+			NewAccount(name: "Visa", kind: .creditCard, startingBalance: 45_000),
+		])
+
+	let session = try await Session.createBudget(
+		name: "Household", directory: scratch.budget, format: format, options: options)
+
+	#expect(try session.state().readOnly == nil)
+	let overview = try session.overview()
+	#expect(overview.budgetName == "Household")
+	let credit = try #require(overview.groups.first { $0.group == .credit })
+	#expect(credit.accounts.map(\.balance) == [-45_000])
+	let investments = try #require(overview.groups.first { $0.group == .investments })
+	#expect(investments.accounts.map(\.name) == ["401(k)"])
 }
 
 @Test func setupListsActualsCurrenciesAndAmountFieldsDoArithmetic() throws {
