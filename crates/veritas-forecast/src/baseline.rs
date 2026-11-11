@@ -125,7 +125,7 @@ impl Baseline {
 		Ok(self.forecast(month)?.max(Money::ZERO))
 	}
 
-	/// The current month's uncertain rest: `max(0, forecast+ - month_to_date)`.
+	/// The current month's baseline still to come: `max(0, forecast+ - month_to_date)`.
 	pub fn remainder(&self, month: YearMonth) -> Result<Money, CoreError> {
 		let rest = self.forecast_plus(month)?.checked_sub(self.month_to_date)?;
 		Ok(rest.max(Money::ZERO))

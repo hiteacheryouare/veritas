@@ -11,12 +11,12 @@ pub(crate) const MIN_MONTHS_BEFORE: usize = 3;
 pub enum BandMethod {
 	/// P10 and P90 of the rolling-origin residuals (FC-4.2).
 	Residuals,
-	/// Range of the monthly uncertain net flow around its median (FC-4.3).
+	/// Range of the monthly baselined net flow around its median (FC-4.3).
 	Range,
 	NoHistory,
 }
 
-/// FC-4's 80% band on the uncertain net flow, as one-month offsets.
+/// FC-4's 80% band on the baselined net flow, as one-month offsets.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Band {
 	pub method: BandMethod,
@@ -93,7 +93,7 @@ fn signed(side: Side, value: i64) -> Result<i64, CoreError> {
 	}
 }
 
-/// The actual uncertain net flow `F_t` of a month: baselined income minus spending.
+/// The actual baselined net flow `F_t` of a month: baselined income minus spending.
 pub(crate) fn actual_flow(series: &[&Series], month: YearMonth) -> Result<i64, CoreError> {
 	series.iter().try_fold(0i64, |total, series| {
 		total

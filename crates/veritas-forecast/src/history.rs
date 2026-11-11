@@ -4,7 +4,7 @@ use veritas_domain::{
 	AccountId, BudgetData, CategoryId, CategoryKind, CivilDate, CoreError, TransactionId,
 	TransactionKind, YearMonth,
 };
-use veritas_reports::{Classification, ClassifiedRow, Period, account_balances};
+use veritas_reports::{Classification, ClassifiedRow, Decision, Period, account_balances};
 
 /// Whether a baseline forecasts money spent or money earned. Both are
 /// positive magnitudes: a spending baseline of 43000 is $430 out.
@@ -114,6 +114,9 @@ impl History {
 			.collect();
 
 		for row in classification.rows() {
+			if asset_purchase(row) {
+				continue;
+			}
 			let Some(category) = row.category.as_ref().filter(|_| row.is_primary()) else {
 				continue;
 			};
@@ -175,6 +178,16 @@ pub(crate) fn baselined(budget: &BudgetData, id: &CategoryId) -> bool {
 		.is_some_and(|category| !category.tombstone)
 		&& !hidden(budget, id)
 		&& !archived(budget, id)
+}
+
+/// FC-3 asset purchases: an on-budget to off-budget transfer in an expense
+/// or income category (CLS-4 rows 8 and 9). It moves money into an asset the
+/// user still owns, so no baseline counts it (ST-4 E2).
+pub(crate) fn asset_purchase(row: &ClassifiedRow) -> bool {
+	matches!(
+		row.decision,
+		Decision::CapitalizedExpense | Decision::CapitalizedIncome
+	)
 }
 
 /// A row posted from a bill (`transactions.schedule`). A split child counts

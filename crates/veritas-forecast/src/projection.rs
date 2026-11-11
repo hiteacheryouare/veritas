@@ -3,12 +3,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use veritas_domain::{
 	AccountId, BudgetData, CategoryId, CivilDate, CoreError, Money, TransactionKind, YearMonth,
 };
-use veritas_reports::{Classification, Decision, Period, classify, net_worth};
+use veritas_reports::{Classification, Period, classify, net_worth};
 
 use crate::band::{Band, band};
 use crate::baseline::{Baseline, WINDOW, complete_months};
 use crate::flows::{FlowKind, KnownFlow};
-use crate::history::{History, Series, Side, balances, bill_linked};
+use crate::history::{History, Series, Side, asset_purchase, balances, bill_linked};
 use crate::math::{median, round_half_away, to_money};
 use crate::scenario::{IncomeDelta, MAX_COMPARED, Scenario};
 
@@ -21,8 +21,8 @@ pub struct MonthForecast {
 	pub month: YearMonth,
 	/// Net income from known flows (income minus expenses).
 	pub known_net_income: Money,
-	/// `F_t`: baselined income minus baselined spending, the uncertain part.
-	pub uncertain_net_flow: Money,
+	/// `F_t`: baselined income minus baselined spending (FC-4.1).
+	pub baselined_net_flow: Money,
 	pub scenario_net_income: Money,
 	pub net_income: Money,
 	/// At the end of the month.
@@ -61,12 +61,23 @@ pub struct Projection {
 	/// hidden, archived or deleted categories) over the window. It is shown,
 	/// never projected.
 	pub not_forecast: Money,
-	/// On-to-off transfers counted as spending in the baseline windows
-	/// (CLS-4 row 8). The projection lowers net worth by them.
-	pub capitalized_transfers: usize,
+	/// FC-3: asset purchases (CLS-4 rows 8 and 9) in the baseline window,
+	/// which no baseline counts, and their net amount as money out.
+	pub asset_purchases: usize,
+	pub asset_purchase_total: Money,
 }
 
 impl Projection {
+	/// "N asset purchase(s) excluded: $X", omitted when there are none.
+	pub fn asset_purchase_note(&self) -> Option<String> {
+		let dollars = round_half_away(i128::from(self.asset_purchase_total.minor()), 100);
+		match self.asset_purchases {
+			0 => None,
+			1 => Some(format!("1 asset purchase excluded: ${dollars}")),
+			n => Some(format!("{n} asset purchases excluded: ${dollars}")),
+		}
+	}
+
 	/// "Not forecast: $X a month in uncategorized or hidden spending", in
 	/// whole dollars rounded half up, omitted when that rounds to $0.
 	pub fn not_forecast_note(&self) -> Option<String> {
@@ -178,6 +189,7 @@ impl<'a> Forecaster<'a> {
 		let net_worth_today = worth;
 		let last = Period::month(current.offset(LAST_HORIZON)?).last();
 		let scenario_flows = scenario.flows(today, last)?;
+		let (asset_purchases, asset_purchase_total) = self.asset_purchases(current)?;
 
 		let mut months = Vec::new();
 		for step in 0..=LAST_HORIZON {
@@ -210,7 +222,7 @@ impl<'a> Forecaster<'a> {
 				}
 			}
 
-			let mut uncertain = 0i64;
+			let mut baselined = 0i64;
 			let mut baseline_income: BTreeMap<&CategoryId, i64> = BTreeMap::new();
 			for baseline in &baselines {
 				let forecast = scenario.adjust_baseline(
@@ -233,7 +245,7 @@ impl<'a> Forecaster<'a> {
 					}
 					Side::Spending => amount.checked_neg().ok_or(CoreError::Overflow)?,
 				};
-				uncertain = add(uncertain, signed)?;
+				baselined = add(baselined, signed)?;
 				if let Some(account) = &baseline.account {
 					post(&mut running, account, signed)?;
 				}
@@ -270,12 +282,12 @@ impl<'a> Forecaster<'a> {
 				scenario_net = add(scenario_net, delta)?;
 			}
 
-			let net_income = add(add(known_net, uncertain)?, scenario_net)?;
+			let net_income = add(add(known_net, baselined)?, scenario_net)?;
 			worth = add(worth, net_income)?;
 			months.push(MonthForecast {
 				month,
 				known_net_income: Money::from_minor(known_net),
-				uncertain_net_flow: Money::from_minor(uncertain),
+				baselined_net_flow: Money::from_minor(baselined),
 				scenario_net_income: Money::from_minor(scenario_net),
 				net_income: Money::from_minor(net_income),
 				net_worth: Money::from_minor(worth),
@@ -315,7 +327,8 @@ impl<'a> Forecaster<'a> {
 				.cloned()
 				.collect(),
 			possible_double_counts: double_counts(self, &baselines, known),
-			capitalized_transfers: self.capitalized_transfers(&baselines, current)?,
+			asset_purchases,
+			asset_purchase_total,
 			not_forecast: self.not_forecast(&baselines, current)?,
 			baselines,
 			band,
@@ -381,35 +394,22 @@ impl<'a> Forecaster<'a> {
 		Ok(Money::from_minor(median(&totals).unwrap_or(0)))
 	}
 
-	fn capitalized_transfers(
-		&self,
-		baselines: &[Baseline],
-		current: YearMonth,
-	) -> Result<usize, CoreError> {
-		let spending: BTreeSet<&CategoryId> = baselines
-			.iter()
-			.filter(|baseline| baseline.side == Side::Spending)
-			.map(|baseline| &baseline.category)
-			.collect();
+	/// FC-3's asset purchases in the baseline window: how many, and their
+	/// net amount as money out.
+	fn asset_purchases(&self, current: YearMonth) -> Result<(usize, Money), CoreError> {
 		let window = complete_months(current, WINDOW)?;
 		let (Some(first), Some(last)) = (window.first(), window.last()) else {
-			return Ok(0);
+			return Ok((0, Money::ZERO));
 		};
 		let period = Period::new(Period::month(*first).first(), Period::month(*last).last())?;
-		Ok(self
+		let rows: Vec<_> = self
 			.classification
 			.within(period)
 			.iter()
-			.filter(|row| {
-				row.decision == Decision::CapitalizedExpense
-					&& row.is_primary()
-					&& row
-						.category
-						.as_ref()
-						.is_some_and(|id| spending.contains(id))
-					&& !bill_linked(self.budget, row)
-			})
-			.count())
+			.filter(|row| row.is_primary() && asset_purchase(row) && !bill_linked(self.budget, row))
+			.collect();
+		let total = Money::checked_sum(rows.iter().map(|row| row.amount))?.checked_neg()?;
+		Ok((rows.len(), total))
 	}
 }
 

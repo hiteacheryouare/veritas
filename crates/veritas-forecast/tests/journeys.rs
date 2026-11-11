@@ -184,20 +184,20 @@ fn household_baselines_follow_the_card_and_skip_known_and_moved_money() {
 	assert_eq!(level("Loan principal"), None);
 	assert_eq!(level("Emergency fund"), None);
 	assert!(projection.possible_double_counts.is_empty());
-	assert_eq!(projection.capitalized_transfers, 0);
+	assert_eq!(projection.asset_purchases, 0);
 }
 
 #[test]
 fn household_projection_moves_each_account_by_its_own_flows() {
 	let projection = project(&household(), &household_flows(), &Scenario::baseline());
 
-	assert_eq!(projection.months[0].uncertain_net_flow, cents(-15000));
+	assert_eq!(projection.months[0].baselined_net_flow, cents(-15000));
 	assert_eq!(projection.months[0].known_net_income, cents(0));
 	assert_eq!(balances(&projection, 0), [551000, 5000, 1_350_000, -756000]);
 
 	let february = &projection.months[1];
 	assert_eq!(february.known_net_income, cents(300000 - 165000 - 6174));
-	assert_eq!(february.uncertain_net_flow, cents(-37000));
+	assert_eq!(february.baselined_net_flow, cents(-37000));
 	assert_eq!(balances(&projection, 1), [564000, 0, 1_400_000, -722174]);
 
 	assert_eq!(
@@ -221,7 +221,7 @@ fn household_projection_moves_each_account_by_its_own_flows() {
 	assert_eq!(
 		projection.horizons[0].band,
 		Some((cents(1_426_309), cents(1_426_309))),
-		"every month's uncertain flow was the same, so the range is empty"
+		"every month's baselined flow was the same, so the range is empty"
 	);
 	assert_eq!(
 		projection.band.label(),
@@ -481,12 +481,12 @@ fn a_category_cut_of_more_than_all_of_it_floors_at_zero() {
 	let base = project(&book, &household_flows(), &Scenario::baseline());
 	let cut = project(&book, &household_flows(), &scenario);
 	assert_eq!(
-		cut.months[1].uncertain_net_flow.minor() - base.months[1].uncertain_net_flow.minor(),
+		cut.months[1].baselined_net_flow.minor() - base.months[1].baselined_net_flow.minor(),
 		12000
 	);
 	let march = |projection: &Projection| {
 		let month = &projection.months[2];
-		(month.uncertain_net_flow.minor(), month.net_worth.minor())
+		(month.baselined_net_flow.minor(), month.net_worth.minor())
 	};
 	assert_eq!(march(&cut).0, march(&base).0, "the cut ended in February");
 	assert_eq!(march(&cut).1 - march(&base).1, 12000);
@@ -614,7 +614,7 @@ fn seasonal_months_are_projected_with_their_own_index() {
 		.months
 		.iter()
 		.take(3)
-		.map(|month| (month.month.to_string(), month.uncertain_net_flow.minor()))
+		.map(|month| (month.month.to_string(), month.baselined_net_flow.minor()))
 		.collect();
 	assert_eq!(
 		flows,

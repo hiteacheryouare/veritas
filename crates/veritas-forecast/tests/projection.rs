@@ -63,7 +63,7 @@ fn fc_3_worked_example_single_account() {
 	let projection = project(&book, &fc_3_flows(), &Scenario::baseline());
 	assert_eq!(projection.net_worth_today, cents(388800));
 	let january = &projection.months[0];
-	assert_eq!(january.uncertain_net_flow, cents(-23000));
+	assert_eq!(january.baselined_net_flow, cents(-23000));
 	assert_eq!(
 		january.known_net_income,
 		cents(0),
@@ -72,7 +72,7 @@ fn fc_3_worked_example_single_account() {
 	assert_eq!(january.net_worth, cents(365800));
 	let february = &projection.months[1];
 	assert_eq!(february.known_net_income, cents(135000));
-	assert_eq!(february.uncertain_net_flow, cents(-43000));
+	assert_eq!(february.baselined_net_flow, cents(-43000));
 	assert_eq!(february.net_income, cents(92000));
 	assert_eq!(february.net_worth, cents(457800));
 	assert_eq!(february.balances[&acct("CHK")], cents(457800));
@@ -274,12 +274,28 @@ fn fc_2_lists_categories_that_may_be_double_counted() {
 }
 
 #[test]
-fn capitalized_transfers_in_the_window_are_counted_for_the_note() {
-	let mut book = fc_3_book();
-	book.transfer("CHK", "SAV", "2026-11-20", -10000)
-		.in_category("Gifts");
-	let projection = project(&book, &fc_3_flows(), &Scenario::baseline());
-	assert_eq!(projection.capitalized_transfers, 1);
+fn fc_3_ap_1_an_asset_purchase_is_not_spending() {
+	let mut book = Book::household();
+	book.account("CAR", true);
+	book.opening("CHK", "2026-10-31", 1_000_000);
+	book.spend("Fuel", "2026-11-10", -20000);
+	book.spend("Fuel", "2026-12-10", -20000);
+	book.transfer("CHK", "CAR", "2026-12-20", -50000)
+		.in_category("Fuel");
+	let projection = project(&book, &[], &Scenario::baseline());
+	let fuel = projection
+		.baselines
+		.iter()
+		.find(|baseline| baseline.category == cat("Fuel"))
+		.unwrap();
+	assert_eq!(fuel.level, cents(20000));
+	assert_eq!(projection.months[1].net_income, cents(-20000));
+	assert_eq!(projection.asset_purchases, 1);
+	assert_eq!(
+		projection.asset_purchase_note().as_deref(),
+		Some("1 asset purchase excluded: $500")
+	);
+	assert_eq!(projection.not_forecast_note(), None);
 }
 
 #[test]
@@ -354,13 +370,13 @@ fn r_fc_2_category_percent_change_scales_the_baseline() {
 		}],
 	};
 	let projection = project(&book, &fc_3_flows(), &scenario);
-	let uncertain: Vec<i64> = projection
+	let baselined: Vec<i64> = projection
 		.months
 		.iter()
 		.take(5)
-		.map(|month| month.uncertain_net_flow.minor())
+		.map(|month| month.baselined_net_flow.minor())
 		.collect();
-	assert_eq!(uncertain, [-23000, -38700, -38700, -43000, -43000]);
+	assert_eq!(baselined, [-23000, -38700, -38700, -43000, -43000]);
 }
 
 #[test]
@@ -702,22 +718,22 @@ fn groceries_book(level: i64) -> Book {
 }
 
 #[test]
-fn fc_3_s_1_to_s_4_percent_changes() {
+fn fc_3_sc_1_to_sc_4_percent_changes() {
 	let february = |level: i64, changes: &[i64]| {
-		project(&groceries_book(level), &[], &percent(changes)).months[1].uncertain_net_flow
+		project(&groceries_book(level), &[], &percent(changes)).months[1].baselined_net_flow
 	};
 	assert_eq!(
 		february(43005, &[-1000]),
 		cents(-38704),
-		"S-1 rounds half away"
+		"SC-1 rounds half away"
 	);
-	assert_eq!(february(43000, &[-15000]), cents(0), "S-2 clamped at 0");
+	assert_eq!(february(43000, &[-15000]), cents(0), "SC-2 clamped at 0");
 	assert_eq!(
 		february(43000, &[1000, 500]),
 		cents(-49450),
-		"S-3 deltas add"
+		"SC-3 deltas add"
 	);
-	assert_eq!(february(-3000, &[1000]), cents(0), "S-4 negative forecast");
+	assert_eq!(february(-3000, &[1000]), cents(0), "SC-4 negative forecast");
 }
 
 #[test]
@@ -772,7 +788,7 @@ fn fc_3_spending_no_baseline_covers_is_noted_not_projected() {
 		projection.not_forecast_note().as_deref(),
 		Some("Not forecast: $31 a month in uncategorized or hidden spending")
 	);
-	assert_eq!(projection.months[1].uncertain_net_flow, cents(-43000));
+	assert_eq!(projection.months[1].baselined_net_flow, cents(-43000));
 	let clean = project(&groceries_book(43000), &[], &Scenario::baseline());
 	assert_eq!(clean.not_forecast_note(), None);
 }
