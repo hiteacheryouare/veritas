@@ -97,20 +97,20 @@ struct CoreBudgetLibraryTests {
 			],
 			hasRetirementPlan: true, hasHealthSavingsAccount: false
 		)
-		// Until veritas-store's create_budget lands, the core answers Invalid.
-		await withKnownIssue("veritas-store can't create budgets yet", isIntermittent: true) {
-			let session = try await library.createBudget(budget, into: library.newBudgetDirectory())
-			let overview = try await session.overview()
-			#expect(overview.name == "Household")
-			let groups = Dictionary(uniqueKeysWithValues: overview.accountGroups.map { group in (group.name, group.accounts.map(\.name)) })
-			#expect(groups["Cash"] == ["Checking"])
-			#expect(groups["Credit"] == ["Visa"])
-			#expect(groups["Loans"] == ["Car loan"])
-			#expect(groups["Investments & Other assets"]?.count == 1, "the 401(k)")
-			#expect(overview.accounts.first { $0.name == "Visa" }?.balance == -61_233)
-			await session.close()
-			#expect(try await library.listBudgets().first?.name == "Household")
-		}
+		let session = try await library.createBudget(budget, into: library.newBudgetDirectory())
+		let overview = try await session.overview()
+		#expect(overview.name == "Household")
+		let groups = Dictionary(uniqueKeysWithValues: overview.accountGroups.map { group in (group.name, group.accounts.map(\.name)) })
+		#expect(groups["Cash"] == ["Checking"])
+		#expect(groups["Credit"] == ["Visa"])
+		#expect(groups["Loans"] == ["Car loan"])
+		#expect(groups["Investments & Other assets"]?.count == 1, "the 401(k)")
+		let balances = Dictionary(uniqueKeysWithValues: overview.accounts.map { ($0.name, $0.balance) })
+		#expect(balances["Checking"] == 214_018)
+		#expect(balances["Visa"] == -61_233)
+		#expect(balances["Car loan"] == -980_000)
+		await session.close()
+		#expect(try await library.listBudgets().first?.name == "Household")
 	}
 
 	@Test func currenciesComeFromActualsTable() async throws {

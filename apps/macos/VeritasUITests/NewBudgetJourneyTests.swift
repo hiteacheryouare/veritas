@@ -75,3 +75,73 @@ final class NewBudgetJourneyTests: XCTestCase {
 		XCTAssertTrue(app.buttons["newBudget"].exists)
 	}
 }
+
+/// The same journey against the real core (R-IO-0): the budget is created from
+/// the pinned template in a scratch folder, and the sidebar shows what the
+/// core placed where.
+final class RealCoreNewBudgetTests: XCTestCase {
+	override func setUp() {
+		continueAfterFailure = false
+	}
+
+	@MainActor
+	func testANewBudgetIsCreatedByTheCoreWithItsAccounts() {
+		let app = XCUIApplication()
+		app.launchArguments = ["-ApplePersistenceIgnoreState", "YES", "-VeritasRealCore", "YES"]
+		app.launch()
+		XCTAssertTrue(app.buttons["newBudget"].waitForExistence(timeout: 10))
+		app.buttons["newBudget"].click()
+
+		let name = app.textFields["newBudget.name"]
+		XCTAssertTrue(name.waitForExistence(timeout: 5))
+		name.typeText("UI test budget")
+		let currency = app.popUpButtons["newBudget.currency"]
+		XCTAssertTrue(waitUntil { currency.isEnabled })
+		currency.click()
+		app.menuItems["US Dollar (USD)"].click()
+		XCTAssertEqual(app.popUpButtons["newBudget.numberFormat"].value as? String, "1,000.33")
+		attachScreenshot(of: app, named: "real-core-1-basics")
+		app.buttons["newBudget.continue"].click()
+
+		let accountName = app.textFields["newBudget.account.name"].firstMatch
+		XCTAssertTrue(accountName.waitForExistence(timeout: 5))
+		accountName.click()
+		accountName.typeText("Checking")
+		let balance = app.textFields["newBudget.account.balance"].firstMatch
+		balance.click()
+		balance.typeText("2,000+140.18")
+		app.buttons["newBudget.addAccount"].click()
+		let cardName = app.textFields.matching(identifier: "newBudget.account.name").element(boundBy: 1)
+		cardName.click()
+		cardName.typeText("Visa")
+		let cardType = app.popUpButtons.matching(identifier: "newBudget.account.type").element(boundBy: 1)
+		cardType.click()
+		app.menuItems["Credit card"].click()
+		let cardBalance = app.textFields.matching(identifier: "newBudget.account.balance").element(boundBy: 1)
+		cardBalance.click()
+		cardBalance.typeText("612.33")
+		attachScreenshot(of: app, named: "real-core-2-accounts")
+		app.buttons["newBudget.continue"].click()
+
+		let retirement = app.checkBoxes["newBudget.retirementPlan"]
+		XCTAssertTrue(retirement.waitForExistence(timeout: 5))
+		retirement.click()
+		app.buttons["newBudget.continue"].click()
+
+		XCTAssertTrue(app.screen("budget").waitForExistence(timeout: 15))
+		XCTAssertTrue(app.staticTexts["Cash"].exists)
+		XCTAssertTrue(app.staticTexts["Credit"].exists)
+		XCTAssertTrue(app.staticTexts["Investments & Other assets"].exists, "the 401(k)")
+		let checking = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'sidebar.account.' AND label CONTAINS 'Checking'")).firstMatch
+		XCTAssertTrue(checking.exists)
+		XCTAssertTrue(checking.label.contains("2,140.18"), checking.label)
+		let visa = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'sidebar.account.' AND label CONTAINS 'Visa'")).firstMatch
+		XCTAssertTrue(visa.label.contains("612.33"), visa.label)
+		attachScreenshot(of: app, named: "real-core-3-opened")
+	}
+
+	private func waitUntil(_ condition: @escaping () -> Bool) -> Bool {
+		let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: nil)
+		return XCTWaiter().wait(for: [expectation], timeout: 10) == .completed
+	}
+}

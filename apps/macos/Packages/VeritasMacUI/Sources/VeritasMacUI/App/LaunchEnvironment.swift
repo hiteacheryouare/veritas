@@ -9,13 +9,16 @@ enum LaunchEnvironment {
 		if let stub = StubLaunch.current {
 			return stub.library
 		}
+		if RealCoreLaunch.isOn {
+			return CoreBudgetLibrary(budgetsDirectory: RealCoreLaunch.budgetsDirectory)
+		}
 		#endif
 		return CoreBudgetLibrary()
 	}
 
 	static func localSettings() -> any LocalBudgetSettings {
 		#if DEBUG
-		if StubLaunch.current != nil {
+		if StubLaunch.current != nil || RealCoreLaunch.isOn {
 			return InMemoryBudgetSettings()
 		}
 		#endif
