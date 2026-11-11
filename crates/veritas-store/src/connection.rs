@@ -17,6 +17,18 @@ pub(crate) fn storage(error: rusqlite::Error) -> CoreError {
 		Some(ErrorCode::NotADatabase) => {
 			CoreError::NotAnActualBudget("db.sqlite isn't a SQLite database".to_owned())
 		}
+		// SQLITE_READONLY_RECOVERY, _CANTINIT and _ROLLBACK: a writer stopped
+		// mid-change, and only a writable connection may replay its journal.
+		Some(ErrorCode::ReadOnly)
+			if matches!(
+				error.sqlite_error().map(|e| e.extended_code),
+				Some(264 | 776 | 1288)
+			) =>
+		{
+			CoreError::Storage(format!(
+				"{error}: a writer stopped mid-change, so call recover_after_crash while holding the writer lock"
+			))
+		}
 		_ => CoreError::Storage(error.to_string()),
 	}
 }
@@ -178,7 +190,8 @@ impl Store {
 }
 
 /// Opens a database without any write, journal-mode change or WAL file, for
-/// inspecting an import before Veritas adopts it.
+/// inspecting an import before Veritas adopts it. If a writer died mid-change,
+/// reads fail until [`recover_after_crash`] replays what it left.
 pub fn open_read_only(db_path: &Path) -> Result<Connection, CoreError> {
 	let conn = Connection::open_with_flags(
 		db_path,
@@ -187,6 +200,25 @@ pub fn open_read_only(db_path: &Path) -> Result<Connection, CoreError> {
 	.map_err(storage)?;
 	conn.busy_timeout(BUSY_TIMEOUT).map_err(storage)?;
 	Ok(conn)
+}
+
+/// Lets SQLite roll back the journal, or recover the WAL, that a writer left
+/// when it stopped mid-change. That takes a writable connection, so a
+/// read-only look can't do it, but nothing else is written: the journal mode
+/// and every row stay as they were. Call it only while holding the budget's
+/// writer lock, so no live writer's work is mistaken for a dead one's.
+pub fn recover_after_crash(db_path: &Path) -> Result<(), CoreError> {
+	let conn = Connection::open_with_flags(
+		db_path,
+		OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+	)
+	.map_err(storage)?;
+	conn.busy_timeout(BUSY_TIMEOUT).map_err(storage)?;
+	conn.query_row("SELECT count(*) FROM sqlite_master", [], |row| {
+		row.get::<_, i64>(0)
+	})
+	.map_err(storage)?;
+	conn.close().map_err(|(_, error)| storage(error))
 }
 
 /// The problems `PRAGMA integrity_check` reports. Empty means the file is sound.
