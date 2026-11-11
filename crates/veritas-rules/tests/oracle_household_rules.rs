@@ -814,7 +814,7 @@ fn a_households_rules_categorize_two_months_of_statements_like_actual() {
 		for id in &outcome.applied {
 			*fired.entry(rule_name(id)).or_default() += 1;
 		}
-		let expected = expected_row(&outcome.transaction, &account_id);
+		let expected = expected_row(&outcome.partial, &account_id);
 		let row = rows
 			.get(uuid(9, n).as_str())
 			.unwrap_or_else(|| panic!("{} wasn't added", purchase.label));
@@ -1164,7 +1164,7 @@ fn rules_veritas_cannot_run_are_read_only_untouched_and_never_half_applied() {
 		if names.is_empty() {
 			let row = rows[uuid(9, n).as_str()];
 			if let Some((actual, veritas)) =
-				compare(&expected_row(&outcome.transaction, &account_id), row)
+				compare(&expected_row(&outcome.partial, &account_id), row)
 			{
 				panic!(
 					"{}\n  actual:  {actual}\n  veritas: {veritas}",
@@ -1172,7 +1172,7 @@ fn rules_veritas_cannot_run_are_read_only_untouched_and_never_half_applied() {
 				);
 			}
 		}
-		undetermined.insert(purchase.label, (names, outcome.transaction));
+		undetermined.insert(purchase.label, (names, outcome.partial));
 	}
 
 	for (label, rule) in [

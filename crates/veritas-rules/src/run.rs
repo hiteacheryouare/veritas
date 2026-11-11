@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use veritas_domain::{BudgetData, CategoryId, ConditionsOp, PayeeId, RuleId, ScheduleId};
 
 use crate::action::{Action, RuleTransaction, SetField};
-use crate::condition::{Field, FieldValue, Gap};
+use crate::condition::{EvalError, Field, FieldValue, Gap};
 use crate::rule::{IndexKey, ParsedRule, RuleSupport, rank};
 
 /// The budget's live rules, parsed once, with merged ids mapped to their
@@ -22,7 +22,15 @@ pub struct RuleBook {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RunOutcome {
-	pub transaction: RuleTransaction,
+	/// The transaction with every rule applied, ready to write. `None` when
+	/// any rule is undetermined: Veritas then doesn't know what Actual would
+	/// write, so nothing from this run may be written. Leave the transaction
+	/// for Actual and show the "may need Actual" note instead.
+	pub transaction: Option<RuleTransaction>,
+	/// What the rules Veritas could run make of the transaction. It is for
+	/// showing, never for writing: with an undetermined rule it is only part
+	/// of Actual's result.
+	pub partial: RuleTransaction,
 	/// Rules whose actions were applied, in the order they ran.
 	pub applied: Vec<RuleId>,
 	/// Rules Actual would have evaluated or applied here but Veritas can't
@@ -99,11 +107,20 @@ enum Verdict {
 	Unknown(String),
 }
 
+/// A gap's text is already a noun phrase ("a template action"), which the
+/// "may need Actual" note lists as is.
 fn gap_reason(gap: &Gap) -> String {
 	match gap {
-		Gap::Unsupported(what) | Gap::RejectedByActual(what) => {
-			format!("it uses {what}, which Veritas doesn't run")
+		Gap::Unsupported(what) | Gap::RejectedByActual(what) => what.clone(),
+	}
+}
+
+fn eval_reason(error: &EvalError) -> String {
+	match error {
+		EvalError::Recurrence(_) => {
+			"a repeating date Veritas can't expand the way Actual does".into()
 		}
+		other => other.to_string(),
 	}
 }
 
@@ -208,7 +225,8 @@ impl RuleBook {
 
 		let mut working = transaction.clone();
 		let mut outcome = RunOutcome {
-			transaction: transaction.clone(),
+			transaction: None,
+			partial: transaction.clone(),
 			applied: Vec::new(),
 			undetermined: Vec::new(),
 			reasons: BTreeMap::new(),
@@ -261,7 +279,7 @@ impl RuleBook {
 							{
 								Some(name) => Some(payees.find_or_create(name).ok_or_else(|| {
 									format!(
-										"more than one payee is named {name}, and Actual's pick depends on how its database orders them"
+										"a payee name, {name}, that more than one payee shares, so Actual's pick depends on how its database orders them"
 									)
 								})?),
 								None => None,
@@ -283,7 +301,8 @@ impl RuleBook {
 				}
 			}
 		}
-		outcome.transaction = working;
+		outcome.transaction = outcome.undetermined.is_empty().then(|| working.clone());
+		outcome.partial = working;
 		outcome
 	}
 }
@@ -353,7 +372,7 @@ fn evaluate(
 					field_value(condition.field, transaction, payee_name, budget),
 					account_off_budget,
 				)
-				.map_err(|error| error.to_string()),
+				.map_err(|error| eval_reason(&error)),
 			Err(gap) => Err(gap_reason(gap)),
 		};
 		match result {
@@ -503,13 +522,10 @@ mod tests {
 		let book = RuleBook::new(&budget);
 		let mut payees = BudgetPayees::new(&budget, || PayeeId::new("made"));
 		let outcome = book.run(&transaction("AMZN Mktp"), &budget, &mut payees);
-		assert_eq!(outcome.transaction.payee, Some(PayeeId::new("amazon")));
-		assert_eq!(
-			outcome.transaction.category,
-			Some(CategoryId::new("groceries"))
-		);
+		assert_eq!(outcome.partial.payee, Some(PayeeId::new("amazon")));
+		assert_eq!(outcome.partial.category, Some(CategoryId::new("groceries")));
 		let outcome = book.run(&transaction("Corner shop"), &budget, &mut payees);
-		assert_eq!(outcome.transaction.payee, Some(PayeeId::new("made")));
+		assert_eq!(outcome.partial.payee, Some(PayeeId::new("made")));
 		assert_eq!(
 			payees.created,
 			[(PayeeId::new("made"), "Corner Store".to_owned())]
@@ -536,14 +552,18 @@ mod tests {
 		);
 		let outcome = run(&budget, &transaction("AMZN Mktp"));
 		assert_eq!(outcome.undetermined, [RuleId::new("rename")]);
-		assert_eq!(outcome.transaction.payee, None);
 		assert_eq!(
-			outcome.transaction.notes, None,
+			outcome.transaction, None,
+			"nothing from an undetermined run may be written"
+		);
+		assert_eq!(outcome.partial.payee, None);
+		assert_eq!(
+			outcome.partial.notes, None,
 			"nothing from the rule is applied"
 		);
 		assert!(
 			outcome.reasons[&RuleId::new("rename")]
-				.starts_with("more than one payee is named amazon")
+				.starts_with("a payee name, amazon, that more than one payee shares")
 		);
 	}
 
@@ -578,7 +598,7 @@ mod tests {
 		let templated = run(&budget, &transaction("x"));
 		assert_eq!(
 			templated.reasons[&RuleId::new("template")],
-			"it uses template actions, which Veritas doesn't run"
+			"a template action"
 		);
 	}
 
@@ -628,12 +648,14 @@ mod tests {
 				.collect::<Vec<_>>(),
 			["rename", "broad", "narrow", "tag"]
 		);
-		assert_eq!(outcome.transaction.payee, Some(PayeeId::new("amazon")));
+		assert_eq!(outcome.partial.payee, Some(PayeeId::new("amazon")));
+		assert_eq!(outcome.partial.category, Some(CategoryId::new("groceries")));
+		assert_eq!(outcome.partial.notes.as_deref(), Some(" #food"));
 		assert_eq!(
-			outcome.transaction.category,
-			Some(CategoryId::new("groceries"))
+			outcome.transaction.as_ref(),
+			Some(&outcome.partial),
+			"a fully run outcome is ready to write"
 		);
-		assert_eq!(outcome.transaction.notes.as_deref(), Some(" #food"));
 	}
 
 	#[test]
@@ -732,7 +754,7 @@ mod tests {
 		let mut undetermined: Vec<&str> = outcome.undetermined.iter().map(RuleId::as_str).collect();
 		undetermined.sort();
 		assert_eq!(undetermined, ["template", "unknown"]);
-		assert_eq!(outcome.transaction.cleared, Some(true));
+		assert_eq!(outcome.partial.cleared, Some(true));
 	}
 
 	#[test]
@@ -789,7 +811,7 @@ mod tests {
 		let mut applied: Vec<&str> = outcome.applied.iter().map(RuleId::as_str).collect();
 		applied.sort();
 		assert_eq!(applied, ["everyone", "rent-rule"]);
-		assert_eq!(outcome.transaction.notes.as_deref(), Some("rent-rule"));
+		assert_eq!(outcome.partial.notes.as_deref(), Some("rent-rule"));
 	}
 
 	#[test]
@@ -812,10 +834,7 @@ mod tests {
 		let mut txn = transaction("");
 		txn.payee = Some(PayeeId::new("amazon"));
 		let outcome = run(&budget, &txn);
-		assert_eq!(
-			outcome.transaction.category,
-			Some(CategoryId::new("groceries"))
-		);
+		assert_eq!(outcome.partial.category, Some(CategoryId::new("groceries")));
 	}
 
 	#[test]
@@ -850,11 +869,8 @@ mod tests {
 		let mut txn = transaction("");
 		txn.payee = Some(PayeeId::new("amazon"));
 		let outcome = run(&budget, &txn);
-		assert_eq!(outcome.transaction.account, AccountId::new("brokerage"));
-		assert_eq!(
-			outcome.transaction.notes.as_deref(),
-			Some("still on budget")
-		);
-		assert_eq!(outcome.transaction.cleared, Some(false));
+		assert_eq!(outcome.partial.account, AccountId::new("brokerage"));
+		assert_eq!(outcome.partial.notes.as_deref(), Some("still on budget"));
+		assert_eq!(outcome.partial.cleared, Some(false));
 	}
 }

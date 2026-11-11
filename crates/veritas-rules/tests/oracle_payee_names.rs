@@ -215,7 +215,7 @@ fn renames_agree_with_actual_unless_the_name_is_ambiguous() {
 			wrong.push(format!("{text}: undetermined {:?}", outcome.reasons));
 			continue;
 		}
-		let veritas_payee = outcome.transaction.payee.as_ref().map(|id| {
+		let veritas_payee = outcome.partial.payee.as_ref().map(|id| {
 			let created = payees.created.iter().find(|(made, _)| made == id);
 			match (budget.payees.get(id), created) {
 				(Some(payee), _) => payee.name.clone(),
@@ -231,10 +231,10 @@ fn renames_agree_with_actual_unless_the_name_is_ambiguous() {
 				"{text}: Actual's payee {actual_payee:?}, Veritas {veritas_payee:?}"
 			));
 		}
-		if json!(outcome.transaction.notes) != row["notes"] {
+		if json!(outcome.partial.notes) != row["notes"] {
 			wrong.push(format!(
 				"{text}: Actual's notes {}, Veritas {:?}",
-				row["notes"], outcome.transaction.notes
+				row["notes"], outcome.partial.notes
 			));
 		}
 	}

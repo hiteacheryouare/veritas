@@ -61,7 +61,7 @@ fn text_or_null(value: Option<&Value>, what: &str) -> Result<Option<String>, Gap
 	match value {
 		Some(Value::String(text)) => Ok(Some(text.clone())),
 		Some(Value::Null) => Ok(None),
-		_ => unsupported(format!("setting {what} to something that isn't text")),
+		_ => unsupported(format!("a new {what} that isn't text")),
 	}
 }
 
@@ -87,19 +87,19 @@ impl Action {
 			return rejected("field cannot be empty: account");
 		}
 		if op == "set-split-amount" || js::truthy(option("splitIndex")) {
-			return unsupported("split actions");
+			return unsupported("a split action");
 		}
 
 		match op {
 			"set" => {
 				if js::truthy(option("formula")) {
-					return unsupported("formula actions");
+					return unsupported("a formula action");
 				}
 				if js::truthy(option("template")) {
-					return unsupported("template actions");
+					return unsupported("a template action");
 				}
 				let Some(field) = field else {
-					return unsupported("setting saved");
+					return unsupported("a change to the saved field");
 				};
 				if field == Field::PayeeName {
 					return Ok(Action::SetPayeeName(text_or_null(value, "payee name")?));
@@ -108,11 +108,11 @@ impl Action {
 			}
 			"link-schedule" => match value {
 				Some(Value::String(id)) => Ok(Action::LinkSchedule(ScheduleId::new(id.clone()))),
-				_ => unsupported("linking a schedule id that isn't text"),
+				_ => unsupported("a schedule link that isn't text"),
 			},
 			"prepend-notes" | "append-notes" => {
 				let Some(Value::String(text)) = value else {
-					return unsupported("notes text that isn't text");
+					return unsupported("notes that aren't text");
 				};
 				Ok(if op == "prepend-notes" {
 					Action::PrependNotes(text.clone())
@@ -190,21 +190,21 @@ fn parse_set(field: Field, value: Option<&Value>) -> Result<SetField, Gap> {
 		}
 		Field::Account => match value {
 			Some(Value::String(id)) => SetField::Account(AccountId::new(id.clone())),
-			_ => return unsupported("setting account to something that isn't text"),
+			_ => return unsupported("a new account that isn't text"),
 		},
 		Field::Notes => SetField::Notes(text_or_null(value, "notes")?),
 		Field::ImportedPayee => SetField::ImportedPayee(text_or_null(value, "imported payee")?),
 		Field::Amount => match value.and_then(js::integer) {
 			Some(amount) => SetField::Amount(Money::from_minor(amount)),
-			None => return unsupported("setting amount to something that isn't whole cents"),
+			None => return unsupported("a new amount that isn't whole cents"),
 		},
 		Field::Date => match value.and_then(Value::as_str).and_then(js::strict_date) {
 			Some(date) => SetField::Date(date.into()),
-			None => return unsupported("setting date to something that isn't YYYY-MM-DD"),
+			None => return unsupported("a new date that isn't YYYY-MM-DD"),
 		},
 		Field::Cleared | Field::Reconciled => {
 			let Some(Value::Bool(flag)) = value else {
-				return unsupported("setting a flag to something that isn't true or false");
+				return unsupported("a flag set to something other than true or false");
 			};
 			if field == Field::Cleared {
 				SetField::Cleared(*flag)
@@ -213,7 +213,7 @@ fn parse_set(field: Field, value: Option<&Value>) -> Result<SetField, Gap> {
 			}
 		}
 		Field::PayeeName | Field::CategoryGroup | Field::Transfer | Field::Parent => {
-			return unsupported("setting a field Veritas doesn't keep on transactions");
+			return unsupported("a change to a field Veritas doesn't keep on transactions");
 		}
 	})
 }

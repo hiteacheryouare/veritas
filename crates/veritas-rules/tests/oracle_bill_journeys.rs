@@ -511,7 +511,7 @@ fn month_end_payments_link_to_the_bill_exactly_when_actual_links_them() {
 			&mut BudgetPayees::new(&budget, || PayeeId::new("made")),
 		);
 		assert!(outcome.undetermined.is_empty(), "{label}");
-		let veritas = expected_row(&outcome.transaction, CHECKING);
+		let veritas = expected_row(&outcome.partial, CHECKING);
 		let row = rows[uuid(9, n).as_str()];
 		for key in veritas.as_object().unwrap().keys() {
 			assert_eq!(row[key.as_str()], veritas[key.as_str()], "{label}: {key}");

@@ -398,7 +398,7 @@ fn rule_outcomes_match_the_oracle() {
 		let outcome = book.run(&rule_transaction(input, account), &budget, &mut payees);
 		assert!(outcome.undetermined.is_empty());
 		rules_fired += outcome.applied.len();
-		let mut expected = expected_row(&outcome.transaction, account);
+		let mut expected = expected_row(&outcome.partial, account);
 		let row = rows
 			.get(input["id"].as_str().unwrap())
 			.unwrap_or_else(|| panic!("{} wasn't added", input["id"]));
@@ -687,7 +687,7 @@ fn regex_conditions_match_the_oracle() {
 		);
 		matched += outcome.applied.len();
 		let actual = &rows[input["id"].as_str().unwrap()]["notes"];
-		let veritas = json!(outcome.transaction.notes);
+		let veritas = json!(outcome.partial.notes);
 		if *actual != veritas {
 			mismatches.push(format!(
 				"{:?}: actual {actual}, veritas {veritas}",
@@ -765,7 +765,7 @@ fn a_payee_name_shared_by_two_payees_is_left_to_actual() {
 	let amazon = run(0);
 	assert_eq!(amazon.undetermined, [RuleId::new(uuid(8, 0))]);
 	assert_eq!(
-		amazon.transaction.payee, None,
+		amazon.partial.payee, None,
 		"the ambiguous rename isn't half applied"
 	);
 	assert!(
@@ -776,6 +776,6 @@ fn a_payee_name_shared_by_two_payees_is_left_to_actual() {
 
 	let coffee = run(1);
 	assert!(coffee.undetermined.is_empty());
-	assert_eq!(coffee.transaction.payee, Some(PayeeId::new(uuid(4, 2))));
+	assert_eq!(coffee.partial.payee, Some(PayeeId::new(uuid(4, 2))));
 	assert_eq!(row(1), json!(uuid(4, 2)));
 }
