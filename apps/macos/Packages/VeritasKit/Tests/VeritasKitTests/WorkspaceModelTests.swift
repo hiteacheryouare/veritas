@@ -134,19 +134,77 @@ struct WorkspaceModelTests {
 		try await Task.sleep(for: .milliseconds(50))
 		#expect(library.session.overviews == 2)
 	}
+
+	@Test func undoAndRedoFollowTheCoresState() async {
+		let library = FakeLibrary()
+		library.session.undoable = 1
+		let model = WorkspaceModel(library: library, format: MoneyFormat())
+		await model.importActualZip(URL(filePath: "/tmp/a.zip"))
+		#expect(model.canUndo && !model.canRedo)
+		await model.undo()
+		#expect(!model.canUndo && model.canRedo)
+		await model.redo()
+		#expect(model.canUndo && !model.canRedo)
+	}
+
+	@Test func aChangeFromTheCoreRefreshesTheWindow() async throws {
+		let library = FakeLibrary()
+		let model = WorkspaceModel(library: library, format: MoneyFormat())
+		await model.importActualZip(URL(filePath: "/tmp/a.zip"))
+		library.session.readOnly = .openElsewhere
+		let changed = try #require(library.session.changed)
+		changed()
+		var turns = 0
+		while model.readOnly == nil, turns < 100 {
+			await Task.yield()
+			turns += 1
+		}
+		#expect(model.readOnly == .openElsewhere)
+	}
+
+	@Test func maintenanceCollectsTheOpenCheckWhileItRuns() async throws {
+		let library = FakeLibrary()
+		library.session.checking = true
+		let model = WorkspaceModel(library: library, format: MoneyFormat(), maintenanceInterval: .seconds(60), checkingInterval: .milliseconds(5))
+		await model.importActualZip(URL(filePath: "/tmp/a.zip"))
+		var turns = 0
+		while model.readOnly == nil, turns < 200 {
+			try await Task.sleep(for: .milliseconds(5))
+			turns += 1
+		}
+		#expect(model.readOnly == .auditFailed)
+		#expect(library.session.maintained == 1)
+		await model.closeBudget()
+	}
+
+	@Test func exportStaysOffUntilTheCoreCanExport() async {
+		let library = FakeLibrary(canExport: false)
+		let model = WorkspaceModel(library: library, format: MoneyFormat())
+		await model.importActualZip(URL(filePath: "/tmp/a.zip"))
+		#expect(!model.canExport)
+		await model.exportActualZip(to: URL(filePath: "/tmp/out.zip"))
+		#expect(library.session.exports == 0)
+	}
 }
 
 private final class FakeSession: BudgetSession, @unchecked Sendable {
-	let readOnly: ReadOnlyKind?
 	let exportError: FfiError?
+	let canExport: Bool
+	var readOnly: ReadOnlyKind?
 	var overviewErrors: [FfiError] = []
 	var overviews = 0
+	var undoable = 0
+	var redoable = 0
+	var checking = false
 	var exports = 0
+	var maintained = 0
 	var closed = false
+	var changed: (@Sendable () -> Void)?
 
-	init(readOnly: ReadOnlyKind?, exportError: FfiError?) {
+	init(readOnly: ReadOnlyKind?, exportError: FfiError?, canExport: Bool) {
 		self.readOnly = readOnly
 		self.exportError = exportError
+		self.canExport = canExport
 	}
 
 	func overview() async throws -> BudgetOverview {
@@ -156,13 +214,38 @@ private final class FakeSession: BudgetSession, @unchecked Sendable {
 			name: "Household",
 			directory: URL(filePath: "/tmp/budget"),
 			readOnly: readOnly,
+			canUndo: undoable > 0,
+			canRedo: redoable > 0,
+			isChecking: checking,
 			accountGroups: [AccountGroup(name: "Cash", accounts: [AccountSummary(id: "chk", name: "Checking", balance: 214_018)])]
 		)
+	}
+
+	func undo() async throws {
+		undoable -= 1
+		redoable += 1
+	}
+
+	func redo() async throws {
+		redoable -= 1
+		undoable += 1
+	}
+
+	func maintain() async throws {
+		maintained += 1
+		if checking {
+			checking = false
+			readOnly = .auditFailed
+		}
 	}
 
 	func exportActualZip(to destination: URL) async throws {
 		exports += 1
 		if let exportError { throw exportError }
+	}
+
+	func observeChanges(_ changed: @escaping @Sendable () -> Void) async throws {
+		self.changed = changed
 	}
 
 	func close() async {
@@ -174,9 +257,10 @@ private final class FakeLibrary: BudgetLibrary, @unchecked Sendable {
 	let session: FakeSession
 	var importErrors: [FfiError]
 	var importDirectories: [URL] = []
+	var created: [NewBudget] = []
 
-	init(readOnly: ReadOnlyKind? = nil, importError: FfiError? = nil, exportError: FfiError? = nil) {
-		session = FakeSession(readOnly: readOnly, exportError: exportError)
+	init(readOnly: ReadOnlyKind? = nil, importError: FfiError? = nil, exportError: FfiError? = nil, canExport: Bool = true) {
+		session = FakeSession(readOnly: readOnly, exportError: exportError, canExport: canExport)
 		importErrors = importError.map { [$0] } ?? []
 	}
 
@@ -192,5 +276,18 @@ private final class FakeLibrary: BudgetLibrary, @unchecked Sendable {
 		importDirectories.append(directory)
 		if !importErrors.isEmpty { throw importErrors.removeFirst() }
 		return session
+	}
+
+	func createBudget(_ budget: NewBudget, into directory: URL) async throws -> any BudgetSession {
+		created.append(budget)
+		return session
+	}
+
+	func currencies() async throws -> [CurrencyOption] {
+		FakeAmounts.currencies
+	}
+
+	func evaluateAmount(_ text: String) async throws -> Int64 {
+		try FakeAmounts.evaluate(text)
 	}
 }

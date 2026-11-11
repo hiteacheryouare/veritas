@@ -64,28 +64,66 @@ struct StubLibrary: BudgetLibrary {
 		if let importError { throw importError }
 		return StubSession(readOnly: readOnly)
 	}
+
+	func createBudget(_ budget: NewBudget, into directory: URL) async throws -> any BudgetSession {
+		StubSession(readOnly: readOnly, name: budget.name, accounts: budget.accounts.enumerated().map { index, account in
+			AccountSummary(id: "new-\(index)", name: account.name, balance: account.balance)
+		})
+	}
+
+	func currencies() async throws -> [CurrencyOption] {
+		[
+			CurrencyOption(code: "USD", name: "US Dollar", symbol: "$", numberFormat: .commaDot),
+			CurrencyOption(code: "EUR", name: "Euro", symbol: "€", numberFormat: .dotComma),
+			CurrencyOption(code: "CHF", name: "Swiss Franc", symbol: "Fr.", numberFormat: .apostropheDot)
+		]
+	}
+
+	/// Plain decimals only. The real reader is the core's.
+	func evaluateAmount(_ text: String) async throws -> Int64 {
+		let plain = text.replacing(",", with: "").trimmingCharacters(in: .whitespaces)
+		guard let value = Decimal(string: plain.isEmpty ? "0" : plain) else {
+			throw FfiError.Invalid(message: "Can't read \(text) as an amount. Fix it or clear it.")
+		}
+		return NSDecimalNumber(decimal: value * 100).int64Value
+	}
 }
 
 final class StubSession: BudgetSession {
 	let readOnly: ReadOnlyKind?
+	let name: String
+	let accountGroups: [AccountGroup]
 
 	init(readOnly: ReadOnlyKind?) {
 		self.readOnly = readOnly
+		name = "Stub"
+		accountGroups = [
+			AccountGroup(name: "Cash", accounts: [AccountSummary(id: "checking", name: "Checking", balance: 0)]),
+			AccountGroup(name: "Credit", accounts: [AccountSummary(id: "card", name: "Card", balance: 0)])
+		]
 	}
+
+	init(readOnly: ReadOnlyKind?, name: String, accounts: [AccountSummary]) {
+		self.readOnly = readOnly
+		self.name = name
+		accountGroups = accounts.isEmpty ? [] : [AccountGroup(name: "Accounts", accounts: accounts)]
+	}
+
+	let canExport = true
 
 	func overview() async throws -> BudgetOverview {
-		BudgetOverview(
-			name: "Stub",
-			directory: StubLaunch.budgetDirectory,
-			readOnly: readOnly,
-			accountGroups: [
-				AccountGroup(name: "Cash", accounts: [AccountSummary(id: "checking", name: "Checking", balance: 0)]),
-				AccountGroup(name: "Credit", accounts: [AccountSummary(id: "card", name: "Card", balance: 0)])
-			]
-		)
+		BudgetOverview(name: name, directory: StubLaunch.budgetDirectory, readOnly: readOnly, accountGroups: accountGroups)
 	}
 
+	func undo() async throws {}
+
+	func redo() async throws {}
+
+	func maintain() async throws {}
+
 	func exportActualZip(to destination: URL) async throws {}
+
+	func observeChanges(_ changed: @escaping @Sendable () -> Void) async throws {}
 
 	func close() async {}
 }

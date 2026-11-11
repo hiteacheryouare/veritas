@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import VeritasKit
 
@@ -26,12 +27,20 @@ struct VeritasCommands: Commands {
 				guard let model else { return }
 				Task { await ExportPanel.run(for: model) }
 			}
-			.disabled(!isOpen)
+			.disabled(!isOpen || model?.canExport != true)
 			Button("Close Budget") {
 				guard let model else { return }
 				Task { await model.closeBudget() }
 			}
 			.disabled(!isOpen)
+		}
+		CommandGroup(replacing: .undoRedo) {
+			Button("Undo") { undo(redo: false) }
+				.keyboardShortcut("z")
+				.disabled(model?.canUndo != true)
+			Button("Redo") { undo(redo: true) }
+				.keyboardShortcut("z", modifiers: [.command, .shift])
+				.disabled(model?.canRedo != true)
 		}
 		CommandGroup(after: .pasteboard) {
 			Divider()
@@ -56,5 +65,17 @@ struct VeritasCommands: Commands {
 				.keyboardShortcut("k")
 				.disabled(!isOpen)
 		}
+	}
+
+	/// While a text field is editing, ⌘Z belongs to its own text undo.
+	private func undo(redo: Bool) {
+		if let editor = NSApp.keyWindow?.firstResponder as? NSTextView, let undoManager = editor.undoManager,
+			redo ? undoManager.canRedo : undoManager.canUndo
+		{
+			redo ? undoManager.redo() : undoManager.undo()
+			return
+		}
+		guard let model else { return }
+		Task { redo ? await model.redo() : await model.undo() }
 	}
 }

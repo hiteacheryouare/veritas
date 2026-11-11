@@ -20,6 +20,7 @@ public struct ErrorAlert: Hashable, Identifiable, Sendable {
 public enum Operation: Hashable, Sendable {
 	case change
 	case open
+	case creating
 	case importing
 	case export
 }
@@ -83,6 +84,8 @@ public enum ErrorPresentation: Hashable, Sendable {
 			ErrorAlert(title: "Couldn't save that change", message: "Nothing was lost.", offersRetry: true)
 		case .open:
 			ErrorAlert(title: "Couldn't open this budget", message: "Nothing in it was changed.", offersRetry: true)
+		case .creating:
+			ErrorAlert(title: "Couldn't create the budget", message: "Nothing was saved.", offersRetry: true)
 		case .importing:
 			ErrorAlert(title: "Couldn't import that budget", message: "Your Actual export wasn't changed.", offersRetry: true)
 		case .export:
