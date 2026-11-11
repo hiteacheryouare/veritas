@@ -174,8 +174,10 @@ fn fc_2_loan_payments_split_interest_and_principal() {
 		payment: cents(40000),
 		rate_bps: Some(980),
 		last_interest: cents(0),
+		escrow: cents(0),
 		outstanding: cents(980000),
 		interest_category: Some(cat("Loan interest")),
+		escrow_category: None,
 		principal_category: Some(cat("Loan principal")),
 	};
 	let flows = loan
@@ -215,8 +217,10 @@ fn fc_2_final_loan_payment_is_capped_at_what_is_owed() {
 		payment: cents(40000),
 		rate_bps: None,
 		last_interest: cents(100),
+		escrow: cents(0),
 		outstanding: cents(20000),
 		interest_category: None,
+		escrow_category: None,
 		principal_category: None,
 	};
 	let flows = loan
@@ -518,49 +522,6 @@ fn r_fc_2_what_ifs_count_from_today_and_reject_the_past() {
 }
 
 #[test]
-fn fc_2_interest_above_the_payment_capitalizes_on_the_loan() {
-	let loan = LoanPayment {
-		from: acct("CHK"),
-		loan: acct("LOAN"),
-		name: "Student loan".to_owned(),
-		payment: cents(10000),
-		rate_bps: Some(1000),
-		last_interest: cents(0),
-		outstanding: cents(1_500_000),
-		interest_category: Some(cat("Loan interest")),
-		principal_category: Some(cat("Loan principal")),
-	};
-	let flows = loan.flows(&[date("2027-02-10")]).unwrap();
-	let parts: Vec<_> = flows
-		.iter()
-		.map(|flow| {
-			(
-				flow.account.as_str(),
-				flow.amount.minor(),
-				flow.kind.clone(),
-			)
-		})
-		.collect();
-	assert_eq!(
-		parts,
-		[
-			("CHK", -10000, FlowKind::Expense),
-			("LOAN", -2500, FlowKind::Expense)
-		]
-	);
-	assert_eq!(flows[1].name, "Student loan: capitalized interest");
-
-	let mut book = Book::household();
-	book.opening("CHK", "2026-12-31", 100000);
-	book.opening("LOAN", "2026-12-31", -1_500_000);
-	let projection = project(&book, &flows, &Scenario::baseline());
-	let february = &projection.months[1];
-	assert_eq!(february.net_income, cents(-12500));
-	assert_eq!(february.balances[&acct("CHK")], cents(90000));
-	assert_eq!(february.balances[&acct("LOAN")], cents(-1_502_500));
-}
-
-#[test]
 fn fc_2_a_negative_loan_payment_is_rejected_not_wrapped() {
 	let loan = LoanPayment {
 		from: acct("CHK"),
@@ -569,8 +530,10 @@ fn fc_2_a_negative_loan_payment_is_rejected_not_wrapped() {
 		payment: cents(i64::MIN),
 		rate_bps: Some(980),
 		last_interest: cents(0),
+		escrow: cents(0),
 		outstanding: cents(980000),
 		interest_category: None,
+		escrow_category: None,
 		principal_category: None,
 	};
 	assert!(matches!(
@@ -614,4 +577,101 @@ fn fc_2_warns_when_an_income_baseline_sits_next_to_an_income_flow() {
 	flow.schedule = Some(ScheduleId::new("new pay"));
 	let projection = project(&book, &[flow], &Scenario::baseline());
 	assert_eq!(projection.possible_double_counts, [cat("Paycheck")]);
+}
+
+fn mortgage(outstanding: i64, rate: Option<i64>, last_interest: i64, payment: i64) -> LoanPayment {
+	LoanPayment {
+		from: acct("CHK"),
+		loan: acct("LOAN"),
+		name: "Mortgage".to_owned(),
+		payment: cents(payment),
+		rate_bps: rate,
+		last_interest: cents(last_interest),
+		escrow: cents(50000),
+		outstanding: cents(outstanding),
+		interest_category: Some(cat("Loan interest")),
+		escrow_category: Some(cat("Electric")),
+		principal_category: Some(cat("Loan principal")),
+	}
+}
+
+fn parts(flows: &[KnownFlow]) -> Vec<(&str, i64, Option<&str>)> {
+	flows
+		.iter()
+		.map(|flow| {
+			(
+				flow.account.as_str(),
+				flow.amount.minor(),
+				flow.category.as_ref().map(|category| category.as_str()),
+			)
+		})
+		.collect()
+}
+
+#[test]
+fn fc_2_fl_1_escrow_is_an_expense_not_principal() {
+	let flows = mortgage(30_000_000, Some(600), 0, 220000)
+		.flows(&[date("2027-02-01"), date("2027-03-01")])
+		.unwrap();
+	assert_eq!(
+		parts(&flows),
+		[
+			("CHK", -150000, Some("Loan interest")),
+			("CHK", -50000, Some("Electric")),
+			("CHK", -20000, Some("Loan principal")),
+			("CHK", -149900, Some("Loan interest")),
+			("CHK", -50000, Some("Electric")),
+			("CHK", -20100, Some("Loan principal")),
+		]
+	);
+	let mut book = Book::household();
+	book.opening("CHK", "2026-12-31", 1_000_000);
+	book.opening("LOAN", "2026-12-31", -30_000_000);
+	let projection = project(&book, &flows, &Scenario::baseline());
+	assert_eq!(projection.months[1].net_income, cents(-200000));
+	assert_eq!(projection.months[2].net_income, cents(-199900));
+	assert_eq!(
+		projection.months[2].balances[&acct("CHK")],
+		cents(1_000_000 - 440000)
+	);
+	assert_eq!(
+		projection.months[2].balances[&acct("LOAN")],
+		cents(-29_959_900)
+	);
+}
+
+#[test]
+fn fc_2_fl_2_final_payment_with_escrow_stops_the_loan() {
+	let flows = mortgage(20000, None, 100, 220000)
+		.flows(&[date("2027-02-01"), date("2027-03-01")])
+		.unwrap();
+	assert_eq!(
+		parts(&flows),
+		[
+			("CHK", -100, Some("Loan interest")),
+			("CHK", -50000, Some("Electric")),
+			("CHK", -20000, Some("Loan principal")),
+		]
+	);
+}
+
+#[test]
+fn fc_2_fl_3_a_payment_below_interest_and_escrow_never_capitalizes() {
+	let flows = mortgage(30_000_000, Some(600), 0, 160000)
+		.flows(&[date("2027-02-01")])
+		.unwrap();
+	assert_eq!(
+		parts(&flows),
+		[
+			("CHK", -150000, Some("Loan interest")),
+			("CHK", -10000, Some("Electric")),
+		]
+	);
+	let mut book = Book::household();
+	book.opening("CHK", "2026-12-31", 1_000_000);
+	book.opening("LOAN", "2026-12-31", -30_000_000);
+	let february = &project(&book, &flows, &Scenario::baseline()).months[1];
+	assert_eq!(february.net_income, cents(-160000));
+	assert_eq!(february.balances[&acct("CHK")], cents(840000));
+	assert_eq!(february.balances[&acct("LOAN")], cents(-30_000_000));
 }

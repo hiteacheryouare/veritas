@@ -108,8 +108,10 @@ fn car_loan(outstanding: i64) -> LoanPayment {
 		payment: cents(40000),
 		rate_bps: Some(980),
 		last_interest: cents(8000),
+		escrow: cents(0),
 		outstanding: cents(outstanding),
 		interest_category: Some(cat("Loan interest")),
+		escrow_category: None,
 		principal_category: Some(cat("Loan principal")),
 	}
 }
@@ -315,8 +317,10 @@ fn a_loan_paid_off_inside_the_horizon_stops_at_zero() {
 		payment: cents(9000),
 		rate_bps: Some(1200),
 		last_interest: cents(0),
+		escrow: cents(0),
 		outstanding: cents(20000),
 		interest_category: Some(cat("Loan interest")),
+		escrow_category: None,
 		principal_category: Some(cat("Loan principal")),
 	};
 	let dates: Vec<_> = (0..12)
@@ -853,7 +857,7 @@ fn hand_typed_paychecks_are_not_counted_on_top_of_their_schedule() {
 }
 
 #[test]
-fn interest_the_payment_does_not_cover_compounds_month_after_month() {
+fn interest_the_payment_does_not_cover_never_capitalizes() {
 	let mut book = Book::household();
 	book.opening("CHK", "2026-12-31", 200000)
 		.opening("LOAN", "2026-12-31", -1_500_000);
@@ -864,8 +868,10 @@ fn interest_the_payment_does_not_cover_compounds_month_after_month() {
 		payment: cents(10000),
 		rate_bps: Some(1000),
 		last_interest: cents(0),
+		escrow: cents(0),
 		outstanding: cents(1_500_000),
 		interest_category: Some(cat("Loan interest")),
+		escrow_category: None,
 		principal_category: Some(cat("Loan principal")),
 	};
 	let dates = [date("2027-02-10"), date("2027-03-10"), date("2027-04-10")];
@@ -883,19 +889,19 @@ fn interest_the_payment_does_not_cover_compounds_month_after_month() {
 	assert_eq!(
 		path,
 		[
-			(190000, -1_502_500, -12500),
-			(180000, -1_505_021, -12521),
-			(170000, -1_507_563, -12542),
-		]
+			(190000, -1_500_000, -10000),
+			(180000, -1_500_000, -10000),
+			(170000, -1_500_000, -10000),
+		],
+		"FC-2: a shortfall never capitalizes (DEBT-2.2, DEBT-2.6)"
 	);
 	assert_eq!(
 		projection.months[3].net_worth,
-		cents(200000 - 1_500_000 - 37563)
+		cents(200000 - 1_500_000 - 30000)
 	);
 }
 
 #[test]
-#[ignore = "R-FC-3 bug: capitalized interest posts on the off-budget loan, yet the suggestion counts it as a scheduled bill, so the interest envelope is over-budgeted by the uncovered interest every month"]
 fn a_loan_below_its_interest_budgets_only_the_cash_that_leaves_checking() {
 	let book = Book::household();
 	let loan = LoanPayment {
@@ -905,8 +911,10 @@ fn a_loan_below_its_interest_budgets_only_the_cash_that_leaves_checking() {
 		payment: cents(10000),
 		rate_bps: Some(1000),
 		last_interest: cents(0),
+		escrow: cents(0),
 		outstanding: cents(1_500_000),
 		interest_category: Some(cat("Loan interest")),
+		escrow_category: None,
 		principal_category: Some(cat("Loan principal")),
 	};
 	let flows = loan.flows(&[date("2027-02-10")]).unwrap();

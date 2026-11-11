@@ -112,23 +112,28 @@ pub struct LoanPayment {
 	pub rate_bps: Option<i64>,
 	/// The last payment's interest, used when there's no rate.
 	pub last_interest: Money,
+	/// The last payment's escrow (DEBT-3), repeated every payment.
+	pub escrow: Money,
 	/// `-balance` of the loan account before the first payment.
 	pub outstanding: Money,
 	pub interest_category: Option<CategoryId>,
+	pub escrow_category: Option<CategoryId>,
 	pub principal_category: Option<CategoryId>,
 }
 
 impl LoanPayment {
-	/// An interest expense and a principal transfer per date. Interest is
-	/// `round_half_up(outstanding * rate_bps / 120000)`; principal is the rest,
-	/// capped at what is still owed, so the last payment is smaller. Interest
-	/// the payment doesn't cover capitalizes: it is an expense on the loan
-	/// account, which then owes more.
+	/// FC-2's split of each payment: the payment covers interest
+	/// (`round_half_up(outstanding * rate_bps / 120000)`), then escrow, then
+	/// principal, which is capped at what is still owed so the last payment is
+	/// smaller. A shortfall never capitalizes (DEBT-2.2, DEBT-2.6): interest
+	/// and escrow are booked up to what the payment covers, and the loan
+	/// balance moves only by principal.
 	pub fn flows(&self, dates: &[CivilDate]) -> Result<Vec<KnownFlow>, CoreError> {
 		let payment = self.payment.minor();
-		if payment < 0 {
+		let escrow = self.escrow.minor();
+		if payment < 0 || escrow < 0 {
 			return Err(CoreError::Invalid(format!(
-				"{}: a loan payment can't be negative",
+				"{}: a loan payment and its escrow can't be negative",
 				self.name
 			)));
 		}
@@ -148,11 +153,10 @@ impl LoanPayment {
 			}
 			.max(0);
 			let paid_interest = interest.min(payment);
-			let capitalized = interest - paid_interest;
-			let principal = (payment - paid_interest).min(outstanding);
+			let paid_escrow = escrow.min(payment - paid_interest);
+			let principal = (payment - paid_interest - paid_escrow).min(outstanding);
 			outstanding = outstanding
 				.checked_sub(principal)
-				.and_then(|owed| owed.checked_add(capitalized))
 				.ok_or(CoreError::Overflow)?;
 			let flow = |account: &AccountId,
 			            amount: i64,
@@ -168,23 +172,19 @@ impl LoanPayment {
 				name,
 				certainty: Certainty::Exact,
 			};
-			if paid_interest > 0 {
-				flows.push(flow(
-					&self.from,
-					paid_interest,
-					FlowKind::Expense,
-					&self.interest_category,
-					self.name.clone(),
-				));
-			}
-			if capitalized > 0 {
-				flows.push(flow(
-					&self.loan,
-					capitalized,
-					FlowKind::Expense,
-					&self.interest_category,
-					format!("{}: capitalized interest", self.name),
-				));
+			for (amount, category) in [
+				(paid_interest, &self.interest_category),
+				(paid_escrow, &self.escrow_category),
+			] {
+				if amount > 0 {
+					flows.push(flow(
+						&self.from,
+						amount,
+						FlowKind::Expense,
+						category,
+						self.name.clone(),
+					));
+				}
 			}
 			if principal > 0 {
 				flows.push(flow(
