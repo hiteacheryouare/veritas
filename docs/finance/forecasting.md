@@ -13,7 +13,7 @@ Forecasts are estimates. Every screen that shows one must show the method name, 
 | `SEASON_MIN` | 13 complete months | Seasonality turns on at this history length |
 | `BAND_LOW`, `BAND_HIGH` | P10, P90 | An 80% band |
 | `BAND_MIN_RESIDUALS` | 6 | Fewer residuals use the fallback (FC-4.3) |
-| `INDEX_MIN`, `INDEX_MAX` | 2500, 120000 basis points | Seasonal index clamp (0.25 to 12.00). a month holding the whole 12-month sum gives 12.00, so for a window with no negative month the cap never cuts a real spike. A window with a negative month can give a larger raw index (Dec 10000, five months of 1000 and one month of -8000: `sum12` 7000, raw Dec = 10000*120000/7000 = 171429), and then the cap applies |
+| `INDEX_MIN`, `INDEX_MAX` | 2500, 120000 basis points | Seasonal index clamp (0.25 to 12.00). A month holding the whole 12-month sum gives 12.00, so for a window with no negative month the cap never cuts a real spike. A window with a negative month can give a larger raw index (Dec 10000, five months of 1000 and one month of -8000: `sum12` 7000, raw Dec = 10000*120000/7000 = 171429), and then the cap applies |
 | `INDEX_ACTIVE_MIN` | 6 of the last 12 months with activity | Below this, no seasonal index for the category. Applies to each 12-month window separately (FC-1 step 1) |
 | `BAND_GROWTH` | 3/4 | The band at horizon `h` grows like `h` to this power (FC-4.2 step 3). 1/2 would assume independent monthly errors, 1 would assume the same error repeats every month |
 
@@ -23,7 +23,7 @@ Forecasts are estimates. Every screen that shows one must show the method name, 
 
 The first backtest (`docs/forecast-eval.md` on `ws/forecast` at b83086f) raised three problems. This is what was decided and why.
 
-1. **Seasonality fitting noise (stationary series, `h = 1`).** `SEASON_MIN` (13), the halving of the index for 13 to 24 months and the two-window average from 25 months are unchanged. The loss to "last month repeated" could not be reproduced: a rerun of the FC-1 rules on the same recipe (Groceries and Dining, 36 months, a different random generator, 100 seeds) gave +15% skill at `h = 1` with seasonality on and +19% with it off. Seasonality costs a stationary series about 4 points of skill. Turning it on only from 25 months would buy back under 1 point and cost a real seasonal category (Electric) about 9 points of skill at `h = 1`, so it is not worth it. A single 36-month series gives 32 overlapping origins, and one such run is too small to judge skill (FC-7 now asks for repeated runs).
+1. **Seasonality fitting noise (stationary series, `h = 1`).** `SEASON_MIN` (13), the halving of the index for 13 to 24 months and the two-window average from 25 months are unchanged. The loss to "last month repeated" could not be reproduced: a rerun of the FC-1 rules on the same recipe (Groceries and Dining, 36 months, a different random generator, 100 seeds) gave +15% skill at `h = 1` with seasonality on and +19% with it off. Seasonality costs a stationary series about 4 points of skill. Turning it on only from 25 months would buy back under 1 point and cost a real seasonal category (Electric) about 9 points of skill at `h = 1`, so it is not worth it. A single 36-month series gives 32 overlapping origins for target (a) at `h = 1` and 29 for target (b), and one such run is too small to judge skill (FC-7 now asks for repeated runs).
 2. **The index clamp hid annual spikes.** `INDEX_MAX` moved from 20000 to 120000 and `INDEX_MIN` from 5000 to 2500. A December that is about 8 times a typical month cannot be forecast with an index capped at 2.00. On the same recipe, Gifts at `h = 1` went from +41% to +55% skill and its bias fell from 32 to 21 dollars a month. Stationary and smoothly seasonal series did not move. The 13 to 24 month halving stays: one December seen once is as likely to be a wedding as a season, so a first-year spike is half believed (F-10). Making a known annual spike a yearly bill turns it into a known flow, which is better than any index.
 3. **The band at long horizons.** The `sqrt(h)` band assumed independent monthly errors, but a level error or an annual spike repeats. Coverage of target (b) at 12 months fell to 11% (seasonal) and 33% (household) in the backtest against the 80% label, and to 58% on a stationary series in the rerun. `BAND_GROWTH` of 3/4 replaces 1/2 in FC-4.2. On the same recipe the stationary mix then covers 82% to 86% at every horizon from 3 months, and the household mix 72% to 77%. A smooth exponent is a compromise, not a theorem. Series dominated by annual lumps (Gifts and Electric together) are still under-covered (69% at 3 months, falling to 40% at 12). The detail view says so (FC-4.2).
 
@@ -58,7 +58,7 @@ Applies to each non-hidden `expense`-kind category (a spending baseline) and eac
 
 **Forecast used downstream.** The FC-1 forecast can be negative (a category whose typical month is a net refund). Every use of it after this section, meaning the projection (FC-3), the band's backtest residuals (FC-4.2), suggestions (FC-5) and scenario percent changes, uses `forecast+ = max(0, forecast)`. `L`, its label and the window values keep their sign. The projection never books a refund stream the history only suggests.
 
-**Current month remainder.** For the current partial month the uncertain forecast is `max(0, forecast+ - month_to_date x)`.
+**Current month remainder.** For the current partial month the baseline forecast still to come is `max(0, forecast+ - month_to_date x)`.
 
 ### FC-1 Worked examples
 
@@ -73,7 +73,7 @@ Applies to each non-hidden `expense`-kind category (a spending baseline) and eac
 | F-7 Seasonality | 13+ complete months, 12-month series: Dec(prev year) 8000, other 11 months 5000 each, `sum12` 63000. Forecast month Dec | raw Dec = 8000*120000/63000 = 15238.1, so 15238. raw other = 5000*120000/63000 = 9523.8, so 9524. Shrink (13-24 months): Dec `10000 + (15238-10000)/2` = **12619**. Other `10000 + (9524-10000)/2` = **9762**. Window Jun-Nov all 5000: `a(k)` = 5000*10000/9762 = 5122 each, `L'` = 5122. Forecast Dec = 5122*12619/10000 = 6463.45, so **6463**. Without seasonality it would be 5000 |
 | F-8 Sparse category | Only 4 of the last 12 months have activity | No seasonal index (below `INDEX_ACTIVE_MIN`), forecast = `L` |
 | F-9 Negative months | A category whose window values include -8000 (refund exceeded spending) | The negative is used as is in the median, never clamped. A forecast that comes out negative is shown as `L` but projected as 0 (`forecast+`) |
-| F-10 Annual spike is not clamped | 13 complete months. Latest 12: Dec(prev year) 40000, other 11 months 2000 each, `sum12` 62000. Forecast month Dec | raw Dec = 40000*120000/62000 = 77419.4, so 77419. raw other = 2000*120000/62000 = 3871.0, so 3871. Shrink (13-24 months): Dec `10000 + (77419-10000)/2`, where 67419/2 = 33709.5 rounds half away to 33710, so **43710**. Other `10000 + (3871-10000)/2`, where -6129/2 = -3064.5 rounds half away to -3065, so **6935**. Neither is clamped (2500 to 120000). Window Jun-Nov all 2000: `a(k)` = 2000*10000/6935 = 2883.9, so 2884, `L'` = 2884. Forecast Dec = 2884*43710/10000 = 12605.96, so **12606**. The old clamp (0.50 to 2.00) would have given 2884*20000/10000 = 5768. With 25+ months and the same spike in both years, raw is used as is: `a(k)` = 2000*10000/3871 = 5167, forecast = 5167*77419/10000 = 40001.6, so **40002** |
+| F-10 Annual spike is not clamped | 13 complete months. Latest 12: Dec(prev year) 40000, other 11 months 2000 each, `sum12` 62000. Forecast month Dec | raw Dec = 40000*120000/62000 = 77419.4, so 77419. raw other = 2000*120000/62000 = 3871.0, so 3871. Shrink (13-24 months): Dec `10000 + (77419-10000)/2`, where 67419/2 = 33709.5 rounds half away to 33710, so **43710**. Other `10000 + (3871-10000)/2`, where -6129/2 = -3064.5 rounds half away to -3065, so **6935**. Neither is clamped (2500 to 120000). Window Jun-Nov all 2000: `a(k)` = 2000*10000/6935 = 2883.9, so 2884, `L'` = 2884. Forecast Dec = 2884*43710/10000 = 12605.96, so **12606**. The old clamp (0.50 to 2.00) would have given 2884*20000/10000 = 5768. With 25+ months and the same spike in both years, raw is used as is: `a(k)` = 2000*10000/3871 = 5167, forecast = 5167*77419/10000 = 40002.40, so **40002** |
 | F-11 Previous window too sparse | 25 complete months. Latest 12 as in F-7 (Dec 8000, 11 months of 5000). Previous 12: eleven months of 0 and one month of 9000 (1 active month, below `INDEX_ACTIVE_MIN`) | The previous window fails step 1, so the shrink rule applies to the latest window alone: Dec index **12619**, other **9762**, the same as F-7. The category does not lose its index |
 | F-12 Signed rounding | Even median of -3 and -2. `a(k)` for `x` = -8000 at index 9762. `a(k)` for `x` = -1 at index 20000 | (-3 + -2)/2 = -2.5, half away from zero is **-3**. -8000*10000/9762 = -8195.04, so **-8195**. -1*10000/20000 = -0.5, so **-1**. Half up would have given -2 and 0 |
 
@@ -82,9 +82,9 @@ Applies to each non-hidden `expense`-kind category (a spending baseline) and eac
 - **Source.** Active, non-completed schedules (R-BILL-*), expanded by the recurrence engine (WS-RULES) into dated occurrences for the horizon. Skipped occurrences and end conditions are honored. "Paid" occurrences already posted are not repeated.
 - **Unpaid and due today.** An occurrence dated today or earlier that is not yet posted is still money that has to go out (or come in). It is projected in the current month's remainder, as due now. Nothing that is unposted drops out of the projection because its date has passed. The caller removes only posted occurrences. A what-if event dated today counts in the current month. A what-if dated before today is rejected as invalid.
 - **Amount per occurrence.** Schedule amount operator `is`: exact. `isapprox`: median of the last up to `WINDOW` transactions linked to the schedule (`transactions.schedule`), else the stated amount. `isbetween`: midpoint `round_half_away((num1 + num2) / 2)`.
-- **Known vs uncertain.** Exact bills, exact income and loan payments (DEBT) are known: no uncertainty. `isapprox` and `isbetween` amounts and all FC-1 baselines are uncertain.
+- **Known, estimated and baselined.** Exact bills, exact income and loan payments (DEBT) are **known**: no uncertainty. `isapprox` and `isbetween` amounts are **estimated**: a point amount with real uncertainty. All FC-1 category baselines are **baselined**. The band (FC-4.1) covers baselined flows only. Estimated amounts are counted at their expected amount and add no range.
 - **Double counting.** A category with an active bill gets its baseline from non-bill rows only (FC-1), plus the bill's occurrences. A row the user types by hand instead of using Paid is not linked and will be counted twice. An income schedule feeds the category on its flow, or when the flow has none, the most common category of the rows linked to it. If neither exists, the income baselines whose median is at least half the schedule's amount are listed as possible double counts, because the schedule's income cannot be kept out of them. The forecast screen lists categories where this looks likely: any category whose unlinked monthly median is at least half of an active bill's amount.
-- **Loan payments.** A payment is made of interest, escrow, fees and principal (DEBT-1, DEBT-2). `payment` is the total that leaves the paying account. The balance falls by principal each month. With `rate_bps` set: `interest = round_half_up(outstanding * rate_bps / 120000)`. With no rate: repeat the last payment's interest. `escrow` is the last payment's escrow (DEBT-3), repeated. `fees` are 0 in a forecast. Then `principal = payment - interest - escrow - fees` (DEBT-2.1), floored at 0 and capped at `outstanding` (DEBT-3, final payment: the total shrinks by what the cap removed). The payment covers interest first, then escrow, then principal (DEBT-2.1). If `payment` is below interest plus escrow, principal is 0 and only what the payment covers is booked, interest first. The part not covered is not recorded and the loan balance moves only by principal (DEBT-2.6). A forecast assumes no non-cash changes (FC-3), so capitalized interest is never projected. The screen warns that the payment is below interest and escrow (DEBT-2.2). Interest and escrow are expenses in the projection, each in the category of the last payment (DEBT-2.4, DEBT-2.5). Principal is not an expense: net worth is unchanged by principal (ST-4). Once `outstanding` reaches 0 the loan has no more flows, escrow included.
+- **Loan payments.** A payment is made of interest, escrow, fees and principal (DEBT-1, DEBT-2). `payment` is the total that leaves the paying account. The balance falls by principal each month. With `rate_bps` set: `interest = round_half_up(outstanding * rate_bps / 120000)`. With no rate: repeat the last payment's interest. `escrow` is the last payment's escrow (DEBT-3), repeated. `fees` are 0 in a forecast. Then `principal = payment - interest - escrow - fees` (DEBT-2.1), floored at 0 and capped at `outstanding` (DEBT-3, final payment: the total shrinks by what the cap removed). The payment covers interest first, then escrow, then principal (DEBT-2.1a). If `payment` is below interest plus escrow, principal is 0 and only what the payment covers is booked, interest first. The part not covered is not recorded and the loan balance moves only by principal (DEBT-2.6). A forecast assumes no non-cash changes (FC-3), so capitalized interest is never projected. The screen warns that the payment is below interest and escrow (DEBT-2.2). Interest and escrow are expenses in the projection, each in the category of the last payment (DEBT-2.4, DEBT-2.5). Principal is not an expense: net worth is unchanged by principal (ST-4). The order of allocation is DEBT-2.1a. Once `outstanding` reaches 0 the loan has no more flows, escrow included.
 - **Card payments and transfers.** On-budget card payments are internal transfers and have no effect on net worth. They affect per-account balances only when a schedule exists for them (DEBT-7).
 
 ### FC-2 Worked examples
@@ -96,6 +96,8 @@ Applies to each non-hidden `expense`-kind category (a spending baseline) and eac
 | FL-3 Payment below interest and escrow | `payment` 160000, interest 150000, `escrow` 50000 | 160000 - 150000 - 50000 = -40000, so principal **0**. The payment covers interest 150000 and 10000 of escrow. Expense booked **160000**. Checking falls **160000**. The loan balance does not change. Net worth falls **160000**. The uncovered 40000 is not recorded. Warning shown |
 
 ## FC-3 Projection (R-FC-1)
+
+Open product question, not specified yet: how on-to-off transfers in an expense category (CLS-4 row 8) enter a baseline. Pending Ryan.
 
 **Horizon.** 3, 6, 10 and 12 months mean the end of the 3rd, 6th, 10th and 12th complete month after the current month, plus the remainder of the current month.
 
@@ -117,7 +119,7 @@ Applies to each non-hidden `expense`-kind category (a spending baseline) and eac
 Today is 2027-01-15 and checking holds 388800. One exact bill, Rent -165000 on the 1st. One exact income, Pay +300000 on the 1st. One baseline category, Groceries `L` 43000 with 20000 already spent this month. Next month (Feb):
 
 - Known: +300000 - 165000 = +135000.
-- Uncertain: -43000.
+- Baselined: -43000.
 - Net income for Feb = +92000.
 - Current-month remainder: Groceries `max(0, 43000 - 20000)` = 23000.
 - End of January net worth = 388800 - 23000 = 365800. End of February = 365800 + 92000 = 457800.
@@ -126,17 +128,17 @@ Today is 2027-01-15 and checking holds 388800. One exact bill, Rent -165000 on t
 
 | Case | Inputs | Expected |
 |---|---|---|
-| S-1 Percent change rounds half away | Groceries `forecast+` 43005, change -1000 bp | delta = 43005 * -1000 / 10000 = -4300.5, so **-4301**. Scenario forecast **38704** |
-| S-2 Clamped at 0 | Groceries `forecast+` 43000, change -15000 bp (-150%) | delta = **-64500**. 43000 - 64500 = -21500, clamped to **0**. Spending is never negative because of a percent change |
-| S-3 Deltas add, they do not compound | Groceries `forecast+` 43000, active changes +1000 bp and +500 bp | 4300 + 2150 = 6450. Scenario forecast **49450** (not 49665) |
-| S-4 Negative forecast | A category whose FC-1 forecast is -3000, change +1000 bp | `forecast+` is 0, delta 0, scenario forecast **0** |
-| S-5 Goal contribution | Scenario adds 25000 a month to a goal from February | Net worth, balances and band offsets are identical to the baseline projection. Only the goal's ETA changes (E-7) |
+| SC-1 Percent change rounds half away | Groceries `forecast+` 43005, change -1000 bp | delta = 43005 * -1000 / 10000 = -4300.5, so **-4301**. Scenario forecast **38704** |
+| SC-2 Clamped at 0 | Groceries `forecast+` 43000, change -15000 bp (-150%) | delta = **-64500**. 43000 - 64500 = -21500, clamped to **0**. Spending is never negative because of a percent change |
+| SC-3 Deltas add, they do not compound | Groceries `forecast+` 43000, active changes +1000 bp and +500 bp | 4300 + 2150 = 6450. Scenario forecast **49450** (not 49665) |
+| SC-4 Negative forecast | A category whose FC-1 forecast is -3000, change +1000 bp | `forecast+` is 0, delta 0, scenario forecast **0** |
+| SC-5 Goal contribution | Scenario adds 25000 a month to a goal from February | Net worth, balances and band offsets are identical to the baseline projection. Only the goal's ETA changes (E-7) |
 
 ## FC-4 Confidence band
 
 ### FC-4.1 What is in the band
 
-The band covers the category baselines only, for now: `F_t` = baselined income minus baselined spending for month `t` (each baseline as `forecast+`, FC-1). Known flows have none. Bill amounts that are `isapprox` or `isbetween` are uncertain by FC-2, but the band does not widen for them: they are counted at their expected amount and the detail view says so. Scenarios do not change the band (FC-3).
+The band covers the category baselines only, for now: `F_t` = baselined income minus baselined spending for month `t` (each baseline as `forecast+`, FC-1). Known flows have none. Bill amounts that are `isapprox` or `isbetween` are estimated (FC-2), but the band does not widen for them: they are counted at their expected amount and the detail view says so. Scenarios do not change the band (FC-3).
 
 ### FC-4.2 Method
 
@@ -168,7 +170,7 @@ For each non-hidden, non-archived `expense` category (income, hidden and archive
 
 `suggestion = round_half_up(max(0, bills + baseline) / 100) * 100`
 
-`bills` = minus the sum of the signed amounts of the category's bill occurrences in the month (Rent -165000 gives 165000). `baseline` is the FC-1 forecast for the category (a positive spending magnitude). Clamp to 0 first, then round.
+`bills` = minus the sum of the signed amounts of the category's bill occurrences in the month (Rent -165000 gives 165000). `baseline` is `forecast+` (FC-1) for the category, a non-negative spending magnitude. Clamp to 0 first, then round.
 
 Rounding: to the nearest whole dollar, half up, because budgeting is done in whole dollars. Goal suggestions (DEBT-8.1) are the exception and stay in cents. The `debt_principal` envelope's suggestion is the loan's pre-fill principal (DEBT-3), rounded the same way. Applying suggestions is one undoable command that sets next month's budget amount for each category.
 
@@ -219,7 +221,7 @@ Examples: F-1 gives `Groceries $430, 6-month median`. A median of 42950 gives 43
 - **ETA month** = current month plus months to go.
 - **With a scenario (R-FC-2).** A goal contribution in the scenario is added to the pace for each month it is active. Month `M + j` adds `pace + extra(j)`, and the ETA is the first month where the running total reaches `remaining`. After the last month with an extra, the steady pace finishes the count with the same ceiling. The same rule is applied to the median, optimistic and pessimistic paces. The scenario changes this ETA and nothing else (FC-3).
 - **Cap.** An ETA more than 1200 months out is "No ETA", the same as a pace of 0. It is never an error and never skips months.
-- **Display** = "ETA {month}" with the range "optimistic to pessimistic month". If the pessimistic pace is 0 or less: "No ETA at the slowest pace". If the median is 0 or less: "No ETA: nothing is being added". `remaining = 0`: "Reached". No complete month of history: "No ETA yet". The checks run in that order: Reached first, then no history, then the pace messages.
+- **Display** = "ETA {month}" with the range "optimistic to pessimistic month". `remaining = 0`: "Reached". No complete month of history: "No ETA yet". If the median is 0 or less: "No ETA: nothing is being added", which replaces the whole line. Otherwise, if the pessimistic pace is 0 or less, the line reads "ETA {month}, no ETA at the slowest pace": the slowest pace replaces only the range, and the median ETA stays. The checks run in that order: Reached, no history, median, then pessimistic pace. Contributions 0, 0, 0 therefore read "No ETA: nothing is being added" (E-3).
 - **On track** when the ETA month is not after the target month.
 
 | Case | Inputs | Expected |
@@ -231,7 +233,7 @@ Examples: F-1 gives `Groceries $430, 6-month median`. A median of 42950 gives 43
 | E-5 | one month of history, contribution 25000 | median = min = max = 25000, one point, labeled "1 month of history" |
 | E-6 Consistency with DEBT-8.1 | target 150000, target month June 2027, current month January, budgeted 25000, available 25000, pace 25000 | remaining 125000, ceil(125000 / 25000) = 5, ETA = January + 5 = June 2027 = the target month, on track |
 | E-7 Scenario contribution | target 150000, available 0, current month 2027-01, one prior month at 10000 (pace 10000). Scenario adds 40000 in February and March | running totals: Feb 50000, Mar 100000, then 10000 a month: Apr 110000, May 120000, Jun 130000, Jul 140000, Aug 150000. ETA **August 2027**. Without the scenario: ceil(150000 / 10000) = 15, April 2028. Open-ended +15000 from February instead: 25000 a month, ceil(150000 / 25000) = 6, **July 2027** |
-| E-8 A gap inside the history | cells: Oct 2026 25000, Dec 2026 20000, none for Nov. Current month 2027-01 | history starts in October, so November counts as 0: contributions 25000, 0, 20000. Median **20000**, optimistic 25000, pessimistic **0**: "No ETA at the slowest pace" |
+| E-8 A gap inside the history | cells: Oct 2026 25000, Dec 2026 20000, none for Nov. Current month 2027-01 | history starts in October, so November counts as 0: contributions 25000, 0, 20000. Median **20000**, optimistic 25000, pessimistic **0**. With remaining 38000 the median gives ceil(38000 / 20000) = 2, so the line reads "ETA March 2027, no ETA at the slowest pace" |
 | E-9 A goal that starts late | The goal category exists since October, but its first budget cell is December 2026 at 25000. Current month 2027-01 | History is December only: 1 month, pace **25000**. October and November are not counted as 0 (that would make the median 0 and read "nothing is being added") |
 | E-10 First cell is this month | The goal's only budget cell is the current month | No complete month of history: "No ETA yet" (unless `remaining = 0`, then "Reached") |
 
@@ -239,14 +241,14 @@ Examples: F-1 gives `Groceries $430, 6-month median`. A median of 42950 gives 43
 
 The spec for `docs/forecast-eval.md` (WS-FORECAST produces it from synthetic history).
 
-**Method.** Rolling origin. Each origin `o` is a "today" on the 1st of month `o`. For each origin with at least 6 complete months before it (3 for the uncertain-spending series), forecast months `o+1 .. o+h` for `h` in {1, 3, 6, 10, 12}, using only data before `o`. Month `o` has no days elapsed, so it is skipped and scoring starts at `o+1`. Compare with what happened.
+**Method.** Rolling origin. Each origin `o` is a "today" on the 1st of month `o`. For each origin with enough complete months before it (3 for target (a), 6 for target (b)), forecast months `o+1 .. o+h` for `h` in {1, 3, 6, 10, 12}, using only data before `o`. Month `o` has no days elapsed, so it is skipped and scoring starts at `o+1`. Compare with what happened.
 
 - **Naive** is the last complete month before `o`, repeated: once for target (a), `h` times for target (b).
 - **Bills are perfect foresight.** Bill-linked rows in the scored months are taken as they actually posted, as known flows. This flatters target (b) and is stated next to its numbers. Target (a) has no bills in it.
 - **Band for target (a)** is the one-month band (`h = 1`), because (a) is one month and carries one month of error. **Band for target (b)** is the `h`-scaled band of FC-4.2 step 3.
 - **Error sign.** `e = actual - forecast`, so a negative bias on net flow means more spending than forecast.
 
-**Targets.** (a) total uncertain net flow per month. (b) cumulative net-worth change over `h` months excluding non-cash changes (ST-4 lines E3, E4, E5, E6 and E7), because the model does not predict them.
+**Targets.** (a) total baselined net flow per month (baselined income minus baselined spending). (b) cumulative net-worth change over `h` months excluding non-cash changes (ST-4 lines E3, E4, E5, E6 and E7), because the model does not predict them.
 
 **Metrics, per horizon (each reports `n`, the number of origins):**
 
@@ -260,7 +262,7 @@ The spec for `docs/forecast-eval.md` (WS-FORECAST produces it from synthetic his
 
 **Why MAE and WAPE, not MAPE.** Household categories are lumpy and often 0, so percent-of-actual metrics divide by zero or explode. MAPE also weights under-forecasts and over-forecasts unequally. MAE is in cents, a person can read it, and it adds up across categories. WAPE gives a scale-free percentage that stays defined whenever the total is non-zero.
 
-**Repeated runs.** One 36-month series gives about 30 overlapping origins, and a single run is too small to judge skill: in a rerun of the first backtest's recipe the skill of single seeds at `h = 1` ranged from -45% to +44% around a median of +15%. Every mix is run with at least 20 seeds. The report gives the median of each metric across seeds, the lowest and highest, and the share of seeds with skill below 0. Each mix is also run once with seasonality off (`SEASON_MIN` set past the history), so the report shows what seasonality adds or costs.
+**Repeated runs.** One 36-month series gives 32 overlapping origins at `h = 1` for target (a), falling to 21 at `h = 12`, and 29 falling to 18 for target (b), and a single run is too small to judge skill: in a rerun of the first backtest's recipe the skill of single seeds at `h = 1` ranged from -45% to +44% around a median of +15%. Every mix is run with at least 20 seeds. The report gives the median of each metric across seeds, the lowest and highest, and the share of seeds with skill below 0. Each mix is also run with seasonality off (`SEASON_MIN` set past the history) on the same 20 or more seeds, so the report shows what seasonality adds or costs on matching data.
 
 **Initial acceptance targets on synthetic data with at least 24 months of history and known noise (the first backtest and its rerun are recorded in FC-0.1):**
 
