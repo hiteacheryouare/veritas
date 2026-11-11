@@ -460,6 +460,19 @@ fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
 	run(&mut data, created.clone());
 
 	// Every row again with a field changed, so each one takes the update path.
+	// The mappings are repointed, as a merge would.
+	let other_category = data
+		.categories
+		.keys()
+		.find(|id| **id != category.id)
+		.unwrap()
+		.clone();
+	let other_payee = data
+		.payees
+		.keys()
+		.find(|id| **id != payee.id)
+		.unwrap()
+		.clone();
 	let edited: Vec<Row> = created
 		.into_iter()
 		.map(|row| match row {
@@ -481,6 +494,14 @@ fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
 			}),
 			Row::Category(row) => Row::Category(Category {
 				name: "Car fund".to_owned(),
+				..row
+			}),
+			Row::CategoryMapping(row) => Row::CategoryMapping(CategoryMapping {
+				to: other_category.clone(),
+				..row
+			}),
+			Row::PayeeMapping(row) => Row::PayeeMapping(PayeeMapping {
+				to: other_payee.clone(),
 				..row
 			}),
 			Row::Rule(row) => Row::Rule(Rule {
@@ -536,7 +557,6 @@ fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
 				reached_month: Some(month),
 				..row
 			}),
-			other => other,
 		})
 		.collect();
 	run(&mut data, edited);
