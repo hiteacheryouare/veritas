@@ -659,3 +659,54 @@ fn a_child_of_a_parent_with_a_null_tombstone_is_left_out_like_actuals_alive_view
 			.any(|row| row.id.as_deref() == Some("null-parent/child"))
 	);
 }
+
+#[test]
+fn a_budget_adopted_by_an_earlier_v1_build_opens_and_is_upgraded_in_place() {
+	let scratch = Scratch::new("old-v1");
+	let db_path = fixture_db("small", &scratch);
+	// veritas_transaction_meta as the first v1 builds created it, before
+	// needs_actual existed.
+	Connection::open(&db_path)
+		.unwrap()
+		.execute_batch(
+			"CREATE TABLE veritas_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+			 INSERT INTO veritas_meta VALUES ('schema_version', '1');
+			 CREATE TABLE veritas_transaction_meta (
+			   transaction_id TEXT PRIMARY KEY,
+			   adjustment INTEGER NOT NULL DEFAULT 0 CHECK (adjustment IN (0, 1)));
+			 INSERT INTO veritas_transaction_meta VALUES ('t-old', 1);",
+		)
+		.unwrap();
+	let read_only = Store::open(&db_path, Access::ReadOnly(ReadOnlyReason::OpenElsewhere)).unwrap();
+	let meta = &read_only.load().unwrap().data.transaction_meta[&TransactionId::new("t-old")];
+	assert!(meta.adjustment);
+	assert_eq!(meta.needs_actual, None);
+	drop(read_only);
+
+	let mut store = Store::open(&db_path, Access::ReadWrite).unwrap();
+	store.adopt().unwrap();
+	store.adopt().unwrap();
+	let columns = count(
+		&Connection::open(&db_path).unwrap(),
+		"SELECT count(*) FROM pragma_table_info('veritas_transaction_meta') WHERE name = 'needs_actual'",
+	);
+	assert_eq!(columns, 1);
+	let mut writer = store.writer().unwrap();
+	writer
+		.put_transaction_meta(
+			&TransactionId::new("t-old"),
+			Some(meta),
+			Some(&veritas_domain::TransactionMeta {
+				adjustment: true,
+				needs_actual: Some("template".to_owned()),
+			}),
+		)
+		.unwrap();
+	writer.commit().unwrap();
+	assert_eq!(
+		store.load().unwrap().data.transaction_meta[&TransactionId::new("t-old")]
+			.needs_actual
+			.as_deref(),
+		Some("template")
+	);
+}
