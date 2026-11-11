@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use veritas_domain::CoreError;
+use veritas_interop::ExportOutcome;
 use veritas_store::{Access, AuditReport, Loaded, Store};
 
 use crate::session::Backend;
@@ -36,5 +37,9 @@ impl Backend for Store {
 
 	fn load(&self) -> Result<Loaded, CoreError> {
 		Store::load(self)
+	}
+
+	fn export_actual_zip(&self, metadata: &Path, to: &Path) -> Result<ExportOutcome, CoreError> {
+		veritas_interop::export_actual_zip(self, metadata, to)
 	}
 }

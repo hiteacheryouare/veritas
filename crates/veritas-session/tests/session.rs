@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, TimeDelta, Utc};
 use rusqlite::Connection;
-use support::TempDir;
+use support::{TempDir, entries};
 use veritas_domain::{
 	AccountId, BudgetData, Change, CoreError, ReadOnlyReason, Row, Store, StoreTransaction,
 };
@@ -119,6 +119,14 @@ impl Backend for ReadPath {
 
 	fn load(&self) -> Result<Loaded, CoreError> {
 		self.store.load()
+	}
+
+	fn export_actual_zip(
+		&self,
+		metadata: &Path,
+		to: &Path,
+	) -> Result<veritas_interop::ExportOutcome, CoreError> {
+		veritas_interop::export_actual_zip(&self.store, metadata, to)
 	}
 }
 
@@ -694,4 +702,78 @@ fn closing_a_shared_session_frees_the_budget_at_once() {
 		shared.with(|session| session.data().cloned()),
 		Err(CoreError::Invalid(_))
 	));
+}
+
+#[test]
+fn exporting_snapshots_first_and_writes_a_zip_actual_can_import() {
+	// R-IO-2, R-REL-3
+	let (root, dir) = imported("session-export");
+	let clock = TestClock::new();
+	let mut session = Session::<veritas_store::Store>::open(&dir, clock.options()).unwrap();
+	session.wait_for_open_check();
+	clock.advance(TimeDelta::minutes(5));
+	session.perform(&rename("Exported")).unwrap();
+	let to = root.path().join("out.zip");
+
+	let report = session.export_actual_zip(&to).unwrap();
+
+	assert!(report.is_clean(), "{report:?}");
+	assert!(
+		session
+			.snapshots()
+			.unwrap()
+			.iter()
+			.any(|snapshot| snapshot.reason == SnapshotReason::Export)
+	);
+	let again = root.path().join("again");
+	let reimported =
+		Session::<veritas_store::Store>::import_actual_zip(&to, &again, clock.options()).unwrap();
+	let id = first_account(reimported.data().unwrap());
+	assert_eq!(reimported.data().unwrap().accounts[&id].name, "Exported");
+}
+
+#[test]
+fn a_read_only_window_can_still_export() {
+	// R-IO-2: exporting reads the file, so a second window may do it, and it
+	// takes no snapshot because it can't write.
+	let (root, dir) = imported("session-export-read-only");
+	let _writer = Session::<veritas_store::Store>::open(&dir, TestClock::new().options()).unwrap();
+	let mut reader =
+		Session::<veritas_store::Store>::open(&dir, TestClock::new().options()).unwrap();
+	assert_eq!(reader.read_only(), Some(ReadOnlyReason::OpenElsewhere));
+
+	reader
+		.export_actual_zip(&root.path().join("out.zip"))
+		.unwrap();
+
+	assert!(root.path().join("out.zip").is_file());
+}
+
+#[test]
+fn back_up_now_names_the_file_like_actual_and_reports_failures_without_blocking() {
+	// R-REL-4
+	let (root, dir) = imported("session-backup");
+	let clock = TestClock::new();
+	let mut session = Session::<veritas_store::Store>::open(&dir, clock.options()).unwrap();
+	assert!(matches!(session.back_up_now(), Err(CoreError::Invalid(_))));
+
+	let folder = root.path().join("OneDrive");
+	std::fs::create_dir(&folder).unwrap();
+	session.set_backup_folder(Some(folder.clone()));
+	let written = session.back_up_now().unwrap();
+
+	let name = session.budget_name().unwrap().unwrap();
+	assert_eq!(written, folder.join(format!("2026-11-10-{name}.zip")));
+	assert_eq!(entries(&folder), [format!("2026-11-10-{name}.zip")]);
+	assert_eq!(session.last_backup().unwrap().outcome, Ok(written.clone()));
+	assert!(
+		entries(&dir)
+			.iter()
+			.all(|entry| !entry.ends_with(".partial"))
+	);
+
+	std::fs::remove_dir_all(&folder).unwrap();
+	assert!(matches!(session.back_up_now(), Err(CoreError::Io(_))));
+	assert!(session.last_backup().unwrap().outcome.is_err());
+	session.perform(&rename("Still editable")).unwrap();
 }

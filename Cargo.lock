@@ -1161,6 +1161,7 @@ dependencies = [
  "chrono",
  "proptest",
  "rusqlite",
+ "serde_json",
  "veritas-domain",
  "veritas-engine",
  "veritas-forecast",

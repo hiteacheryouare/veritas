@@ -4,11 +4,13 @@ use std::time::{Duration, SystemTime};
 
 use chrono::{DateTime, TimeDelta, Utc};
 use veritas_domain::{BudgetData, BudgetType, CoreError, ReadOnlyReason, Store};
-use veritas_interop::{ImportOutcome, Manifest, import_actual_zip};
+use veritas_interop::{ExportOutcome, ImportOutcome, Manifest, import_actual_zip};
 use veritas_store::{Access as StoreAccess, AuditReport, LoadReport, Loaded};
 
 use crate::background::{OpenCheck, Pending};
+use crate::backup::write_backup;
 use crate::bus::{ChangeListener, ChangeSet, Command, CommandBus, Listeners, Permit, Subscription};
+use crate::fsio::{io_error, reserve_partial};
 use crate::lock::{Access, WriterLock, acquire};
 use crate::retention::RetentionPolicy;
 use crate::snapshot::{
@@ -17,6 +19,7 @@ use crate::snapshot::{
 };
 
 pub const DB_FILE: &str = "db.sqlite";
+pub const METADATA_FILE: &str = "metadata.json";
 
 const LOCK_ATTEMPTS: u32 = 5;
 const LOCK_RETRY_DELAY: Duration = Duration::from_millis(20);
@@ -41,6 +44,17 @@ pub trait Backend: Store + Sized {
 	/// Tables from a newer Veritas return `ReadOnly(NewerVeritasSchema)`.
 	fn adopt(&mut self) -> Result<(), CoreError>;
 	fn load(&self) -> Result<Loaded, CoreError>;
+	/// Writes an Actual zip of the budget to `to`, after the invariant audit.
+	fn export_actual_zip(&self, metadata: &Path, to: &Path) -> Result<ExportOutcome, CoreError>;
+}
+
+/// How the last backup went. Backup failures are reported here and never
+/// block editing (R-REL-4).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BackupResult {
+	pub at: DateTime<Utc>,
+	/// The backup file, or what went wrong, in words for Ryan.
+	pub outcome: Result<PathBuf, String>,
 }
 
 pub type Clock = Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>;
@@ -81,6 +95,8 @@ pub struct Session<B: Backend> {
 	open_check: Option<Pending>,
 	snapshot_problem: Option<CoreError>,
 	audit: Option<AuditReport>,
+	backup_folder: Option<PathBuf>,
+	last_backup: Option<BackupResult>,
 }
 
 impl<B: Backend> Session<B> {
@@ -114,6 +130,8 @@ impl<B: Backend> Session<B> {
 			open_check: None,
 			snapshot_problem: None,
 			audit: None,
+			backup_folder: None,
+			last_backup: None,
 		};
 		let take_snapshot = session.read_only().is_none();
 		session.open_check = Some(
@@ -280,6 +298,88 @@ impl<B: Backend> Session<B> {
 
 	pub fn snapshots(&self) -> Result<Vec<Snapshot>, CoreError> {
 		list_snapshots(&self.snapshots)
+	}
+
+	/// `budgetName` from metadata.json, as Actual's budget list shows it.
+	pub fn budget_name(&self) -> Result<Option<String>, CoreError> {
+		budget_name(&self.dir)
+	}
+
+	/// Writes an Actual zip of the budget to `to` (R-IO-2). A writable budget
+	/// is snapshotted first. The invariant audit runs before anything is
+	/// written: SQLite damage refuses the export, and other findings come
+	/// back with it.
+	pub fn export_actual_zip(&mut self, to: &Path) -> Result<AuditReport, CoreError> {
+		self.poll();
+		if self.ensure_writer().is_ok() {
+			self.snapshot(SnapshotReason::Export)?;
+		}
+		let metadata = self.dir.join(METADATA_FILE);
+		match self.bus()?.store().export_actual_zip(&metadata, to)? {
+			ExportOutcome::Exported(report) => Ok(report),
+			ExportOutcome::Refused(report) => Err(CoreError::AuditFailed {
+				violations: report.violations.len(),
+			}),
+		}
+	}
+
+	/// Where backups go. Swift holds the folder's security-scoped access and
+	/// sets this each time it opens the budget.
+	pub fn set_backup_folder(&mut self, folder: Option<PathBuf>) {
+		self.backup_folder = folder;
+	}
+
+	pub fn backup_folder(&self) -> Option<&Path> {
+		self.backup_folder.as_deref()
+	}
+
+	pub fn last_backup(&self) -> Option<&BackupResult> {
+		self.last_backup.as_ref()
+	}
+
+	/// Writes today's backup into the backup folder as `YYYY-MM-DD-<budget
+	/// name>.zip`, the name Actual gives its own exports, replacing an
+	/// earlier one from the same day whole. The result is also kept for
+	/// `last_backup`.
+	pub fn back_up_now(&mut self) -> Result<PathBuf, CoreError> {
+		let folder = self
+			.backup_folder
+			.clone()
+			.ok_or_else(|| CoreError::Invalid("Choose a folder for backups first.".to_owned()))?;
+		let at = self.now();
+		let result = self.write_backup_into(&folder, at);
+		self.last_backup = Some(BackupResult {
+			at,
+			outcome: result
+				.as_ref()
+				.map(Clone::clone)
+				.map_err(ToString::to_string),
+		});
+		result
+	}
+
+	fn write_backup_into(
+		&mut self,
+		folder: &Path,
+		at: DateTime<Utc>,
+	) -> Result<PathBuf, CoreError> {
+		let name = backup_file_name(self.budget_name()?.as_deref(), at);
+		let (scratch, reserved) = reserve_partial(&self.dir, "backup.zip")?;
+		drop(reserved);
+		let metadata = self.dir.join(METADATA_FILE);
+		let bytes = self
+			.bus()
+			.and_then(|bus| bus.store().export_actual_zip(&metadata, &scratch))
+			.and_then(|outcome| match outcome {
+				ExportOutcome::Exported(_) => {
+					std::fs::read(&scratch).map_err(io_error("read", &scratch))
+				}
+				ExportOutcome::Refused(report) => Err(CoreError::AuditFailed {
+					violations: report.violations.len(),
+				}),
+			});
+		let _ = std::fs::remove_file(&scratch);
+		write_backup(folder, &name, &bytes?)
 	}
 
 	/// Puts the budget back to a snapshot, named by its file name, and reloads
@@ -514,4 +614,44 @@ fn open_backend<B: Backend>(
 		}
 		Err(error) => Err(error),
 	}
+}
+
+pub(crate) fn budget_name(dir: &Path) -> Result<Option<String>, CoreError> {
+	let path = dir.join(METADATA_FILE);
+	let text = match std::fs::read_to_string(&path) {
+		Ok(text) => text,
+		Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+		Err(error) => return Err(io_error("read", &path)(error)),
+	};
+	let metadata: serde_json::Value = serde_json::from_str(&text).map_err(|_| {
+		CoreError::NotAnActualBudget("its metadata.json isn't valid JSON".to_owned())
+	})?;
+	Ok(metadata
+		.get("budgetName")
+		.and_then(serde_json::Value::as_str)
+		.map(str::to_owned))
+}
+
+/// Actual names an export `yyyy-MM-dd-<budgetName>.zip`
+/// (desktop-client/src/components/settings/Export.tsx:41). Characters a file
+/// name can't hold become dashes.
+fn backup_file_name(budget_name: Option<&str>, at: DateTime<Utc>) -> String {
+	let cleaned: String = budget_name
+		.unwrap_or_default()
+		.chars()
+		.map(|c| {
+			if matches!(c, '/' | '\\' | ':') || c.is_control() {
+				'-'
+			} else {
+				c
+			}
+		})
+		.collect();
+	let cleaned = cleaned.trim().trim_start_matches('.');
+	let name = if cleaned.is_empty() {
+		"Budget"
+	} else {
+		cleaned
+	};
+	format!("{}-{name}.zip", at.format("%Y-%m-%d"))
 }
