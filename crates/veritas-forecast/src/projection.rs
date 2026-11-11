@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use veritas_domain::{
-	AccountId, BudgetData, CategoryId, CivilDate, CoreError, Money, ScheduleId, YearMonth,
+	AccountId, BudgetData, CategoryId, CivilDate, CoreError, Money, TransactionKind, YearMonth,
 };
 use veritas_reports::{Classification, Decision, Period, classify, net_worth};
 
@@ -9,7 +9,7 @@ use crate::band::{Band, band};
 use crate::baseline::{Baseline, WINDOW, complete_months};
 use crate::flows::{FlowKind, KnownFlow};
 use crate::history::{History, Series, Side, balances, bill_linked};
-use crate::math::{round_half_away, to_money};
+use crate::math::{median, round_half_away, to_money};
 use crate::scenario::{IncomeDelta, MAX_COMPARED, Scenario};
 
 /// FC-3's horizons, in complete months after the current month.
@@ -57,9 +57,24 @@ pub struct Projection {
 	/// Categories whose unlinked median is at least half an active bill's
 	/// amount, where a hand-typed bill may be counted twice (FC-2).
 	pub possible_double_counts: Vec<CategoryId>,
+	/// FC-3: the median monthly spending no baseline covers (uncategorized,
+	/// hidden, archived or deleted categories) over the window. It is shown,
+	/// never projected.
+	pub not_forecast: Money,
 	/// On-to-off transfers counted as spending in the baseline windows
 	/// (CLS-4 row 8). The projection lowers net worth by them.
 	pub capitalized_transfers: usize,
+}
+
+impl Projection {
+	/// "Not forecast: $X a month in uncategorized or hidden spending", in
+	/// whole dollars rounded half up, omitted when that rounds to $0.
+	pub fn not_forecast_note(&self) -> Option<String> {
+		let dollars = (self.not_forecast.minor().max(0) + 50) / 100;
+		(dollars > 0).then(|| {
+			format!("Not forecast: ${dollars} a month in uncategorized or hidden spending")
+		})
+	}
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -91,34 +106,41 @@ impl<'a> Forecaster<'a> {
 		&self.classification
 	}
 
+	/// FC-2: the category an income flow feeds. Its own category, or for a
+	/// schedule with none, the most common category of the rows it posted
+	/// (ties to the lower id).
+	fn feeding_category(&self, flow: &KnownFlow) -> Option<CategoryId> {
+		if let Some(category) = &flow.category {
+			return Some(category.clone());
+		}
+		let schedule = flow.schedule.as_ref()?;
+		let mut counts: BTreeMap<&CategoryId, usize> = BTreeMap::new();
+		for row in self.budget.transactions.values() {
+			if row.tombstone || row.schedule.as_ref() != Some(schedule) {
+				continue;
+			}
+			if let Some(category) = row
+				.category
+				.as_ref()
+				.and_then(|category| self.budget.resolve_category(category))
+			{
+				*counts.entry(category).or_default() += 1;
+			}
+		}
+		counts
+			.into_iter()
+			.max_by(|(a, x), (b, y)| x.cmp(y).then_with(|| b.cmp(a)))
+			.map(|(category, _)| category.clone())
+	}
+
 	/// The series that get a baseline: income categories fed by an income
-	/// schedule are known flows instead (FC-1). A schedule with no category
-	/// feeds the categories of the rows it posted.
+	/// schedule are known flows instead (FC-1, FC-2).
 	pub(crate) fn baselined_series(&self, known: &[KnownFlow]) -> Vec<&Series> {
-		let schedules: BTreeSet<&ScheduleId> = known
+		let scheduled_income: BTreeSet<CategoryId> = known
 			.iter()
 			.filter(|flow| flow.kind == FlowKind::Income)
-			.filter_map(|flow| flow.schedule.as_ref())
+			.filter_map(|flow| self.feeding_category(flow))
 			.collect();
-		let mut scheduled_income: BTreeSet<&CategoryId> = known
-			.iter()
-			.filter(|flow| flow.kind == FlowKind::Income)
-			.filter_map(|flow| flow.category.as_ref())
-			.collect();
-		scheduled_income.extend(
-			self.budget
-				.transactions
-				.values()
-				.filter(|row| {
-					!row.tombstone
-						&& row
-							.schedule
-							.as_ref()
-							.is_some_and(|schedule| schedules.contains(schedule))
-				})
-				.filter_map(|row| row.category.as_ref())
-				.filter_map(|category| self.budget.resolve_category(category)),
-		);
 		self.history
 			.series
 			.iter()
@@ -292,8 +314,9 @@ impl<'a> Forecaster<'a> {
 				.filter(|flow| flow.date < today)
 				.cloned()
 				.collect(),
-			possible_double_counts: double_counts(&baselines, known),
+			possible_double_counts: double_counts(self, &baselines, known),
 			capitalized_transfers: self.capitalized_transfers(&baselines, current)?,
+			not_forecast: self.not_forecast(&baselines, current)?,
 			baselines,
 			band,
 			months,
@@ -320,6 +343,42 @@ impl<'a> Forecaster<'a> {
 				.map(|scenario| self.project(today, known, scenario))
 				.collect::<Result<_, _>>()?,
 		})
+	}
+
+	fn not_forecast(&self, baselines: &[Baseline], current: YearMonth) -> Result<Money, CoreError> {
+		let spending: BTreeSet<&CategoryId> = baselines
+			.iter()
+			.filter(|baseline| baseline.side == Side::Spending)
+			.map(|baseline| &baseline.category)
+			.collect();
+		let first = self
+			.classification
+			.rows()
+			.first()
+			.map(|row| row.date.year_month());
+		let mut totals = Vec::new();
+		for month in complete_months(current, WINDOW)? {
+			if first.is_none_or(|first| month < first) {
+				continue;
+			}
+			let mut total = 0i64;
+			for row in self.classification.within(Period::month(month)) {
+				let covered = row
+					.category
+					.as_ref()
+					.is_some_and(|id| spending.contains(id));
+				if row.is_primary()
+					&& row.kind() == TransactionKind::Expense
+					&& !covered && !bill_linked(self.budget, row)
+				{
+					total = total
+						.checked_sub(row.amount.minor())
+						.ok_or(CoreError::Overflow)?;
+				}
+			}
+			totals.push(total);
+		}
+		Ok(Money::from_minor(median(&totals).unwrap_or(0)))
 	}
 
 	fn capitalized_transfers(
@@ -375,30 +434,32 @@ fn money_map(balances: &BTreeMap<AccountId, i64>) -> BTreeMap<AccountId, Money> 
 		.collect()
 }
 
-/// A spending baseline next to a bill in the same category, or an income
-/// baseline next to an income flow in it or in no category.
-fn double_counts(baselines: &[Baseline], known: &[KnownFlow]) -> Vec<CategoryId> {
+/// FC-2: a spending baseline at least half a bill in the same category, or
+/// an income baseline at least half an income flow that feeds no category.
+fn double_counts(
+	forecaster: &Forecaster,
+	baselines: &[Baseline],
+	known: &[KnownFlow],
+) -> Vec<CategoryId> {
+	let unfed: Vec<&KnownFlow> = known
+		.iter()
+		.filter(|flow| flow.kind == FlowKind::Income && forecaster.feeding_category(flow).is_none())
+		.collect();
 	baselines
 		.iter()
 		.filter(|baseline| baseline.level > Money::ZERO)
 		.filter(|baseline| {
-			known.iter().any(|flow| {
-				let same = match baseline.side {
-					Side::Spending => {
-						flow.kind == FlowKind::Expense
-							&& flow.category.as_ref() == Some(&baseline.category)
-					}
-					Side::Income => {
-						flow.kind == FlowKind::Income
-							&& flow
-								.category
-								.as_ref()
-								.is_none_or(|category| category == &baseline.category)
-					}
-				};
-				same && i128::from(baseline.level.minor()) * 2
-					>= i128::from(flow.amount.minor()).abs()
-			})
+			let half = |flow: &KnownFlow| {
+				i128::from(baseline.level.minor()) * 2 >= i128::from(flow.amount.minor()).abs()
+			};
+			match baseline.side {
+				Side::Spending => known.iter().any(|flow| {
+					flow.kind == FlowKind::Expense
+						&& flow.category.as_ref() == Some(&baseline.category)
+						&& half(flow)
+				}),
+				Side::Income => unfed.iter().any(|flow| half(flow)),
+			}
 		})
 		.map(|baseline| baseline.category.clone())
 		.collect()

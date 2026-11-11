@@ -730,3 +730,49 @@ fn fc_4_2_residuals_use_forecast_plus() {
 	let band = project(&book, &[], &Scenario::baseline()).band;
 	assert_eq!((band.low, band.high), (cents(3000), cents(3000)));
 }
+
+#[test]
+fn fc_2_an_income_schedule_feeds_its_most_common_posted_category() {
+	let mut book = Book::household();
+	for month in [
+		"2026-07", "2026-08", "2026-09", "2026-10", "2026-11", "2026-12",
+	] {
+		book.spend("Paycheck", &format!("{month}-01"), 300000)
+			.bill("pay");
+		book.spend("Side gigs", &format!("{month}-20"), 20000);
+	}
+	book.spend("Side gigs", "2026-12-01", 1000).bill("pay");
+	let mut flow = known("2027-02-01", "Paycheck", 300000, FlowKind::Income);
+	flow.category = None;
+	flow.schedule = Some(ScheduleId::new("pay"));
+	let projection = project(&book, &[flow], &Scenario::baseline());
+	let baselined: Vec<&str> = projection
+		.baselines
+		.iter()
+		.filter(|baseline| baseline.side == veritas_forecast::Side::Income)
+		.map(|baseline| baseline.category.as_str())
+		.collect();
+	assert_eq!(baselined, ["Side gigs"]);
+	assert!(projection.possible_double_counts.is_empty());
+}
+
+#[test]
+fn fc_3_spending_no_baseline_covers_is_noted_not_projected() {
+	let mut book = groceries_book(43000);
+	book.hide("Books");
+	for month in [
+		"2026-07", "2026-08", "2026-09", "2026-10", "2026-11", "2026-12",
+	] {
+		book.row("CHK", &format!("{month}-05"), -2000);
+		book.spend("Books", &format!("{month}-06"), -1050);
+	}
+	let projection = project(&book, &[], &Scenario::baseline());
+	assert_eq!(projection.not_forecast, cents(3050));
+	assert_eq!(
+		projection.not_forecast_note().as_deref(),
+		Some("Not forecast: $31 a month in uncategorized or hidden spending")
+	);
+	assert_eq!(projection.months[1].uncertain_net_flow, cents(-43000));
+	let clean = project(&groceries_book(43000), &[], &Scenario::baseline());
+	assert_eq!(clean.not_forecast_note(), None);
+}
