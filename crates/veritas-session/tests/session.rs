@@ -834,3 +834,30 @@ fn the_overview_names_the_budget_and_groups_every_live_account() {
 		.count();
 	assert!(listed >= live, "{listed} listed, {live} live");
 }
+
+#[test]
+fn creating_a_budget_checks_its_name_and_folder_before_the_store_is_asked() {
+	// D52, D53. The store's create_budget hasn't landed, so a valid request
+	// ends at the stand-in and leaves no folder behind.
+	let root = TempDir::new("session-create");
+	let format = veritas_session::NumberFormat {
+		currency: Some("USD".to_owned()),
+		style: veritas_session::NumberStyle::CommaDot,
+		hide_decimals: false,
+	};
+	let clock = TestClock::new();
+	let options = || clock.options();
+	assert!(matches!(
+		TestSession::create_budget("   ", &root.path().join("new"), &format, options()),
+		Err(CoreError::Invalid(_))
+	));
+	assert!(matches!(
+		TestSession::create_budget("Household", root.path(), &format, options()),
+		Err(CoreError::Io(_))
+	));
+	assert!(matches!(
+		TestSession::create_budget("Household", &root.path().join("new"), &format, options()),
+		Err(CoreError::Invalid(_))
+	));
+	assert!(!root.path().join("new").exists());
+}

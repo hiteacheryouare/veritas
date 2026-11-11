@@ -11,8 +11,8 @@ use veritas_domain::{CoreError, YearMonth};
 pub use commands::Command;
 pub use records::{
 	AccountGroup, AccountGroupSummary, AccountSummary, AuditCheck, AuditFinding, BackupInfo,
-	BudgetListing, Change, EntityKind, EntityRef, Overview, Retention, SessionState, SnapshotInfo,
-	SnapshotKind,
+	BudgetListing, Change, EntityKind, EntityRef, NumberFormat, NumberStyle, Overview, Retention,
+	SessionState, SnapshotInfo, SnapshotKind,
 };
 pub use session::{ChangeListener, Session};
 

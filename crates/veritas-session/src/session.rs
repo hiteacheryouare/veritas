@@ -49,6 +49,29 @@ pub trait Backend: Store + Sized {
 	fn export_actual_zip(&self, metadata: &Path, to: &Path) -> Result<ExportOutcome, CoreError>;
 }
 
+/// Actual's number format preferences: `numberFormat`, `hideFraction` and
+/// `defaultCurrencyCode` (loot-core/src/types/prefs.ts:26-31).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NumberFormat {
+	/// An ISO 4217 code, or `None` for no currency symbol, Actual's default.
+	pub currency: Option<String>,
+	pub style: NumberStyle,
+	pub hide_decimals: bool,
+}
+
+/// Actual's `numberFormat` values (loot-core/src/shared/util.ts:265-268).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NumberStyle {
+	/// `1,000.33`, Actual's default.
+	CommaDot,
+	/// `1.000,33`
+	DotComma,
+	/// `1 000,33`
+	SpaceComma,
+	/// `1'000.33`
+	ApostropheDot,
+}
+
 /// How the last backup went. Backup failures are reported here and never
 /// block editing (R-REL-4).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -147,6 +170,31 @@ impl<B: Backend> Session<B> {
 			.start(),
 		);
 		Ok(session)
+	}
+
+	/// Starts a brand-new budget in `budget_dir`, which must not exist yet,
+	/// from Veritas's pinned template, and opens it. No Actual export is
+	/// needed (D52, D53).
+	pub fn create_budget(
+		name: &str,
+		budget_dir: &Path,
+		format: &NumberFormat,
+		options: SessionOptions,
+	) -> Result<Self, CoreError> {
+		let name = name.trim();
+		if name.is_empty() {
+			return Err(CoreError::Invalid(
+				"Enter a name for the budget.".to_owned(),
+			));
+		}
+		if budget_dir.exists() {
+			return Err(CoreError::Io(format!(
+				"{} already exists. Choose a new folder for the budget",
+				budget_dir.display()
+			)));
+		}
+		create_from_template(budget_dir, name, format)?;
+		Session::open(budget_dir, options)
 	}
 
 	/// Copies an Actual export into `budget_dir`, which must not exist yet,
@@ -307,6 +355,7 @@ impl<B: Backend> Session<B> {
 		let today = CivilDate::from(self.now().date_naive());
 		Ok(Overview {
 			budget_name: self.budget_name()?,
+			number_format: None,
 			groups: account_groups(self.data()?, today)?,
 		})
 	}
@@ -665,4 +714,14 @@ fn backup_file_name(budget_name: Option<&str>, at: DateTime<Utc>) -> String {
 		cleaned
 	};
 	format!("{}-{name}.zip", at.format("%Y-%m-%d"))
+}
+
+/// Stands in for veritas-store's `create_budget` (the pinned template plus
+/// metadata.json) until it lands, so the shell can code against
+/// `create_budget` now.
+fn create_from_template(_dir: &Path, _name: &str, _format: &NumberFormat) -> Result<(), CoreError> {
+	Err(CoreError::Invalid(
+		"Starting a new budget isn't available in this build yet. Import an Actual export instead."
+			.to_owned(),
+	))
 }

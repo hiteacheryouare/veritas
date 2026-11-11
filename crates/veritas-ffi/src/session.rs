@@ -6,7 +6,7 @@ use veritas_session::{Backend, ChangeSet, Session as CoreSession, SessionOptions
 
 use crate::commands::Command;
 use crate::records::{
-	AuditFinding, BackupInfo, Change, Overview, Retention, SessionState, SnapshotInfo,
+	AuditFinding, BackupInfo, Change, NumberFormat, Overview, Retention, SessionState, SnapshotInfo,
 };
 use crate::{FfiError, guard};
 
@@ -57,6 +57,22 @@ impl<B: Backend> Core<B> {
 
 	pub(crate) fn open(directory: &str) -> Result<Self, FfiError> {
 		guard(|| CoreSession::open(Path::new(directory), SessionOptions::default())).map(Core::new)
+	}
+
+	pub(crate) fn create_budget(
+		name: &str,
+		directory: &str,
+		format: &NumberFormat,
+	) -> Result<Self, FfiError> {
+		guard(|| {
+			CoreSession::create_budget(
+				name,
+				Path::new(directory),
+				&format.into(),
+				SessionOptions::default(),
+			)
+		})
+		.map(Core::new)
 	}
 
 	pub(crate) fn import_actual_zip(zip: &str, into_directory: &str) -> Result<Self, FfiError> {
@@ -248,6 +264,17 @@ impl Session {
 	#[uniffi::constructor]
 	pub fn open(directory: String) -> Result<Arc<Session>, FfiError> {
 		Core::open(&directory).map(|core| Arc::new(Session { core }))
+	}
+
+	/// Starts a brand-new budget in `directory`, which must not exist yet,
+	/// and opens it. No Actual export is needed.
+	#[uniffi::constructor]
+	pub fn create_budget(
+		name: String,
+		directory: String,
+		format: NumberFormat,
+	) -> Result<Arc<Session>, FfiError> {
+		Core::create_budget(&name, &directory, &format).map(|core| Arc::new(Session { core }))
 	}
 
 	/// Copies an Actual export into `into_directory`, which must not exist

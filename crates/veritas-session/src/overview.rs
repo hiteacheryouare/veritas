@@ -3,6 +3,8 @@ use std::collections::BTreeSet;
 use veritas_domain::{AccountId, AccountKind, BudgetData, CivilDate, CoreError, Money};
 use veritas_reports::{account_balances, classify};
 
+use crate::session::NumberFormat;
+
 /// docs/finance/statements.md ST-9.2, in the order the sidebar lists them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum AccountGroupKind {
@@ -30,6 +32,9 @@ pub struct OverviewAccount {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Overview {
 	pub budget_name: Option<String>,
+	/// `None` until veritas-store loads Actual's preferences; the shell then
+	/// uses Actual's defaults.
+	pub number_format: Option<NumberFormat>,
 	pub groups: Vec<OverviewGroup>,
 }
 

@@ -1,8 +1,9 @@
 use chrono::{DateTime, Utc};
 use veritas_domain::{EntityRef as CoreEntity, ReadOnlyReason, YearMonth};
 use veritas_session::{
-	AccountGroupKind, BackupResult, BudgetEntry, ChangeSet, Overview as CoreOverview,
-	OverviewGroup, RetentionPolicy, Snapshot, SnapshotReason,
+	AccountGroupKind, BackupResult, BudgetEntry, ChangeSet, NumberFormat as CoreNumberFormat,
+	NumberStyle as CoreNumberStyle, Overview as CoreOverview, OverviewGroup, RetentionPolicy,
+	Snapshot, SnapshotReason,
 };
 use veritas_store::{Check, Violation};
 
@@ -199,7 +200,60 @@ pub struct AccountGroupSummary {
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct Overview {
 	pub budget_name: Option<String>,
+	/// `None` until the core reads Actual's preferences; use Actual's defaults.
+	pub number_format: Option<NumberFormat>,
 	pub groups: Vec<AccountGroupSummary>,
+}
+
+/// Actual's number format preferences.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct NumberFormat {
+	/// An ISO 4217 code such as `"USD"`, or `None` for no currency symbol.
+	pub currency: Option<String>,
+	pub style: NumberStyle,
+	pub hide_decimals: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum NumberStyle {
+	/// `1,000.33`
+	CommaDot,
+	/// `1.000,33`
+	DotComma,
+	/// `1 000,33`
+	SpaceComma,
+	/// `1'000.33`
+	ApostropheDot,
+}
+
+impl From<&NumberFormat> for CoreNumberFormat {
+	fn from(format: &NumberFormat) -> Self {
+		CoreNumberFormat {
+			currency: format.currency.clone(),
+			style: match format.style {
+				NumberStyle::CommaDot => CoreNumberStyle::CommaDot,
+				NumberStyle::DotComma => CoreNumberStyle::DotComma,
+				NumberStyle::SpaceComma => CoreNumberStyle::SpaceComma,
+				NumberStyle::ApostropheDot => CoreNumberStyle::ApostropheDot,
+			},
+			hide_decimals: format.hide_decimals,
+		}
+	}
+}
+
+impl From<&CoreNumberFormat> for NumberFormat {
+	fn from(format: &CoreNumberFormat) -> Self {
+		NumberFormat {
+			currency: format.currency.clone(),
+			style: match format.style {
+				CoreNumberStyle::CommaDot => NumberStyle::CommaDot,
+				CoreNumberStyle::DotComma => NumberStyle::DotComma,
+				CoreNumberStyle::SpaceComma => NumberStyle::SpaceComma,
+				CoreNumberStyle::ApostropheDot => NumberStyle::ApostropheDot,
+			},
+			hide_decimals: format.hide_decimals,
+		}
+	}
 }
 
 impl From<&OverviewGroup> for AccountGroupSummary {
@@ -232,6 +286,7 @@ impl From<&CoreOverview> for Overview {
 	fn from(overview: &CoreOverview) -> Self {
 		Overview {
 			budget_name: overview.budget_name.clone(),
+			number_format: overview.number_format.as_ref().map(NumberFormat::from),
 			groups: overview
 				.groups
 				.iter()
