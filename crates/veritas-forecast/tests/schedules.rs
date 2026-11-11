@@ -119,7 +119,7 @@ fn fc_2_exact_bill_repeats_monthly_through_the_horizon() {
 		&& flow.category == Some(cat("Rent"))
 		&& flow.certainty == Certainty::Exact
 		&& flow.account == acct("CHK")));
-	assert!(result.overdue.is_empty() && result.unforecast.is_empty());
+	assert!(result.unforecast.is_empty());
 }
 
 #[test]
@@ -211,7 +211,7 @@ fn fc_2_card_payment_schedules_are_transfers() {
 }
 
 #[test]
-fn fc_2_overdue_completed_and_unreadable_schedules_are_reported() {
+fn fc_3_overdue_bills_count_now_and_unreadable_schedules_are_reported() {
 	let mut book = Book::household();
 	schedule(
 		&mut book,
@@ -250,11 +250,14 @@ fn fc_2_overdue_completed_and_unreadable_schedules_are_reported() {
 	.clone();
 	book.budget.rules.get_mut(&broken).unwrap().conditions_json = "not json".to_owned();
 	let result = flows(&book);
-	assert_eq!(
-		result.overdue,
-		[(ScheduleId::new("Late"), date("2027-01-10"))]
-	);
-	assert_eq!(of(&result, "Late")[0].date, date("2027-02-10"));
+	let late: Vec<_> = of(&result, "Late").iter().map(|flow| flow.date).collect();
+	assert_eq!(late[..2], [date("2027-01-10"), date("2027-02-10")]);
+	let projection = Forecaster::new(&book.budget)
+		.unwrap()
+		.project(date(TODAY), &result.flows, None)
+		.unwrap();
+	assert_eq!(projection.months[0].known_net_income, cents(-2000));
+	assert_eq!(projection.overdue[0].date, date("2027-01-10"));
 	assert!(of(&result, "Done").is_empty());
 	assert!(of(&result, "Vague").is_empty());
 	let unforecast: Vec<_> = result

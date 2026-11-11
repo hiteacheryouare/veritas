@@ -24,10 +24,9 @@ pub struct Unforecast {
 /// Known flows (FC-2) from the budget's bills, income schedules and loans.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ScheduledFlows {
+	/// Actual's next date is the first unpaid occurrence, so an occurrence
+	/// dated today or earlier is due or missed and the projection counts it now.
 	pub flows: Vec<KnownFlow>,
-	/// Unpaid occurrences dated today or earlier: Actual's next date is in
-	/// the past, so the bill is due or missed. They are not in `flows`.
-	pub overdue: Vec<(ScheduleId, CivilDate)>,
 	pub unforecast: Vec<Unforecast>,
 }
 
@@ -115,7 +114,6 @@ impl Forecaster<'_> {
 	) -> Result<ScheduledFlows, CoreError> {
 		let mut result = ScheduledFlows {
 			flows: Vec::new(),
-			overdue: Vec::new(),
 			unforecast: Vec::new(),
 		};
 		for schedule in self.budget.schedules.values() {
@@ -193,10 +191,6 @@ impl Forecaster<'_> {
 			.or_else(|| resolved.map(|payee| payee.name.clone()))
 			.unwrap_or_default();
 		for date in dates {
-			if date <= today {
-				result.overdue.push((schedule.id.clone(), date));
-				continue;
-			}
 			result.flows.push(KnownFlow {
 				date,
 				account: bill.account.clone(),
