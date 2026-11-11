@@ -11,6 +11,7 @@ mod write;
 pub use audit::{AuditReport, Check, Violation, audit};
 pub use connection::{
 	Access, Store, audit_connection, integrity_check, migration_ids, open_read_only,
+	recover_after_crash,
 };
 pub use load::{LoadReport, Loaded, SkippedRow, load};
 pub use schema::VERITAS_SCHEMA_VERSION;

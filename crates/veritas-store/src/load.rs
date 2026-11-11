@@ -103,6 +103,23 @@ pub(crate) fn budget_type(conn: &Connection) -> Result<BudgetType, CoreError> {
 	})
 }
 
+/// The column, or `NULL` when a table from an earlier build lacks it. A
+/// read-only open can't add the column, so it reads the default instead.
+fn column_or_null(conn: &Connection, table: &str, column: &str) -> Result<String, CoreError> {
+	let present: bool = conn
+		.query_row(
+			&format!("SELECT EXISTS (SELECT 1 FROM pragma_table_info('{table}') WHERE name = ?1)"),
+			[column],
+			|row| row.get(0),
+		)
+		.map_err(storage)?;
+	Ok(if present {
+		column.to_owned()
+	} else {
+		"NULL".to_owned()
+	})
+}
+
 fn id(row: &Row<'_>, index: usize) -> Cell<String> {
 	required_text(at(row, index)?, "the row has no id")
 }
@@ -561,7 +578,10 @@ fn load_veritas_tables(
 		each_row(
 			conn,
 			"veritas_transaction_meta",
-			"SELECT transaction_id, adjustment, needs_actual FROM veritas_transaction_meta",
+			&format!(
+				"SELECT transaction_id, adjustment, {} FROM veritas_transaction_meta",
+				column_or_null(conn, "veritas_transaction_meta", "needs_actual")?
+			),
 			skipped,
 			|row| {
 				let transaction = TransactionId::new(id(row, 0)?);
