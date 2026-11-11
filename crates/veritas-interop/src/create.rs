@@ -1,22 +1,11 @@
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use veritas_domain::{Change, CivilDate, CoreError, FormatPrefs, Row, StoreTransaction};
-use veritas_store::{Access, NewAccount, StarterGroup, Store};
+use veritas_domain::{Change, CivilDate, CoreError, NewBudget, Row, StoreTransaction};
+use veritas_store::{Access, Store};
 
 use crate::canonical::json::{self, Str, Value};
 use crate::import::ImportedBudget;
-
-/// What a new budget starts with. `categories` replaces the template's seed
-/// categories (see `veritas_store::veritas_starter_set`).
-#[derive(Clone, Debug)]
-pub struct NewBudget<'a> {
-	pub name: &'a str,
-	pub format: &'a FormatPrefs,
-	pub categories: &'a [StarterGroup],
-	pub accounts: &'a [NewAccount],
-	pub today: CivilDate,
-}
 
 fn io_error(path: &Path, error: &std::io::Error) -> CoreError {
 	CoreError::Io(format!("{}: {error}", path.display()))
@@ -42,10 +31,16 @@ fn metadata(id: &str, name: &str) -> Result<Vec<u8>, CoreError> {
 
 /// Builds a complete new budget, db.sqlite and metadata.json, into `dir`,
 /// which must exist and be empty: the pinned template, an Actual-format file
-/// from its first write. This isn't atomic on its own; the caller builds in
+/// from its first write, with Veritas's starter categories, setup's accounts
+/// and then the 401(k) and HSA accounts it asked for. Starting balances are
+/// dated `today`. This isn't atomic on its own; the caller builds in
 /// a hidden folder and renames it into place, and discards the folder if
 /// this fails.
-pub fn create_budget(dir: &Path, budget: &NewBudget<'_>) -> Result<ImportedBudget, CoreError> {
+pub fn create_budget(
+	dir: &Path,
+	budget: &NewBudget,
+	today: CivilDate,
+) -> Result<ImportedBudget, CoreError> {
 	if budget.name.trim().is_empty() {
 		return Err(CoreError::Invalid("A budget needs a name.".to_owned()));
 	}
@@ -57,7 +52,7 @@ pub fn create_budget(dir: &Path, budget: &NewBudget<'_>) -> Result<ImportedBudge
 		.file_name()
 		.map(|name| name.to_string_lossy().into_owned())
 		.ok_or_else(|| CoreError::Io(format!("{} has no folder name", dir.display())))?;
-	let audit = build(dir, &id, budget)?;
+	let audit = build(dir, &id, budget, today)?;
 	Ok(ImportedBudget {
 		dir: dir.to_path_buf(),
 		db_path: dir.join("db.sqlite"),
@@ -70,26 +65,25 @@ pub fn create_budget(dir: &Path, budget: &NewBudget<'_>) -> Result<ImportedBudge
 fn build(
 	dir: &Path,
 	id: &str,
-	budget: &NewBudget<'_>,
+	budget: &NewBudget,
+	today: CivilDate,
 ) -> Result<veritas_store::AuditReport, CoreError> {
 	let db_path: PathBuf = dir.join("db.sqlite");
 	std::fs::write(&db_path, veritas_store::TEMPLATE_DB)
 		.map_err(|error| io_error(&db_path, &error))?;
 	let metadata_path = dir.join("metadata.json");
-	std::fs::write(&metadata_path, metadata(id, budget.name)?)
+	std::fs::write(&metadata_path, metadata(id, &budget.name)?)
 		.map_err(|error| io_error(&metadata_path, &error))?;
 
 	let mut store = Store::open(&db_path, Access::ReadWrite)?;
 	store.adopt()?;
 	let mut planned = store.load()?.data;
 	let mut writer = store.writer()?;
-	if let Some(format) = &budget.format.number_format {
-		writer.put_preference("numberFormat", format)?;
-	}
-	if budget.format.hide_fraction {
+	writer.put_preference("numberFormat", budget.format.style.actual_value())?;
+	if budget.format.hide_decimals {
 		writer.put_preference("hideFraction", "true")?;
 	}
-	if let Some(code) = &budget.format.currency_code {
+	if let Some(code) = &budget.format.currency {
 		writer.put_preference("defaultCurrencyCode", code)?;
 	}
 	let mut write =
@@ -101,11 +95,13 @@ fn build(
 			}
 			Ok(())
 		};
-	let categories = veritas_store::plan_starter_categories(&planned, budget.categories)?;
+	let categories =
+		veritas_store::plan_starter_categories(&planned, &veritas_store::veritas_starter_set())?;
 	write(&mut planned, categories)?;
 	let now = now_ms();
-	for account in budget.accounts {
-		let rows = veritas_store::plan_new_account(&planned, account, budget.today, now)?;
+	let paycheck = veritas_store::paycheck_accounts(budget.retirement_401k, budget.hsa);
+	for account in budget.accounts.iter().chain(&paycheck) {
+		let rows = veritas_store::plan_new_account(&planned, account, today, now)?;
 		write(&mut planned, rows)?;
 	}
 	writer.commit()?;
