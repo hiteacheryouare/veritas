@@ -1,6 +1,8 @@
 import SwiftUI
 import VeritasDesign
 
+/// Looks like a search field, as in the mockups. With a Spacer in its label
+/// SwiftUI left the item out of the toolbar entirely, so the width is fixed.
 struct GoToAnythingButton: View {
 	let action: () -> Void
 
@@ -9,12 +11,13 @@ struct GoToAnythingButton: View {
 			HStack(spacing: 6) {
 				Image(systemName: "magnifyingglass")
 				Text("Go to anything")
-				Spacer(minLength: Spacing.s4)
+			}
+			.frame(width: 186, alignment: .leading)
+			.overlay(alignment: .trailing) {
 				Text("⌘K")
 					.font(.text(.caption))
 			}
 			.foregroundStyle(.textTertiary)
-			.frame(width: 186)
 		}
 		.help("Go to anything (⌘K)")
 		.accessibilityLabel("Go to anything")
