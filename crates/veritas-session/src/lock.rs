@@ -1,5 +1,6 @@
 use std::fs::{File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use veritas_domain::{CoreError, ReadOnlyReason};
 
@@ -67,7 +68,12 @@ pub fn acquire(budget_dir: &Path) -> Result<Access, CoreError> {
 		.open(&path)
 		.map_err(io_error("open", &path))?;
 	match file.try_lock() {
-		Ok(()) => Ok(Access::Writer(WriterLock { _file: file, dir })),
+		Ok(()) => {
+			// The lock file's modified time is when a writer last opened the
+			// budget, which the budget list shows. Missing it costs nothing.
+			let _ = file.set_modified(SystemTime::now());
+			Ok(Access::Writer(WriterLock { _file: file, dir }))
+		}
 		Err(TryLockError::WouldBlock) => Ok(Access::ReadOnly(ReadOnlyReason::OpenElsewhere)),
 		Err(TryLockError::Error(error)) => Err(io_error("lock", &path)(error)),
 	}

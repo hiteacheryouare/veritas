@@ -2,9 +2,11 @@
 
 mod background;
 mod backup;
+mod budgets;
 mod bus;
 mod fsio;
 mod lock;
+mod overview;
 mod retention;
 mod session;
 mod shared;
@@ -12,8 +14,10 @@ mod snapshot;
 mod store;
 
 pub use backup::write_backup;
+pub use budgets::{BudgetEntry, list_budgets};
 pub use bus::{ChangeListener, ChangeSet, Command, CommandBus, Listeners, Permit, Subscription};
 pub use lock::{Access, LOCK_FILE, WriterLock, acquire};
+pub use overview::{AccountGroupKind, Overview, OverviewAccount, OverviewGroup, account_groups};
 pub use retention::{RetentionPolicy, expired};
 pub use session::{Backend, BackupResult, Clock, DB_FILE, METADATA_FILE, Session, SessionOptions};
 pub use shared::SharedSession;

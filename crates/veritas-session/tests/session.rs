@@ -777,3 +777,60 @@ fn back_up_now_names_the_file_like_actual_and_reports_failures_without_blocking(
 	assert!(session.last_backup().unwrap().outcome.is_err());
 	session.perform(&rename("Still editable")).unwrap();
 }
+
+#[test]
+fn the_budget_list_shows_each_imported_budget_most_recently_opened_first() {
+	let root = TempDir::new("session-list");
+	let budgets = root.path().join("budgets");
+	std::fs::create_dir(&budgets).unwrap();
+	let first = budgets.join("first");
+	let second = budgets.join("second");
+	veritas_interop::import_actual_zip(&fixture("small"), &first).unwrap();
+	veritas_interop::import_actual_zip(&fixture("all-features"), &second).unwrap();
+	std::fs::create_dir(budgets.join("not-a-budget")).unwrap();
+	std::fs::write(budgets.join("notes.txt"), b"").unwrap();
+
+	drop(TestSession::open(&first, TestClock::new().options()).unwrap());
+	std::thread::sleep(Duration::from_millis(20));
+	drop(TestSession::open(&second, TestClock::new().options()).unwrap());
+
+	let listed = veritas_session::list_budgets(&budgets).unwrap();
+	let folders: Vec<_> = listed.iter().map(|budget| budget.folder.clone()).collect();
+	assert_eq!(folders, [second.clone(), first.clone()]);
+	assert!(
+		listed
+			.iter()
+			.all(|budget| budget.name.is_some() && budget.last_opened.is_some())
+	);
+	assert!(listed.iter().all(|budget| !budget.id.is_empty()));
+	assert!(
+		veritas_session::list_budgets(&root.path().join("missing"))
+			.unwrap()
+			.is_empty()
+	);
+}
+
+#[test]
+fn the_overview_names_the_budget_and_groups_every_live_account() {
+	// docs/finance/statements.md ST-9
+	let (_root, dir) = imported("session-overview");
+	let session = TestSession::open(&dir, TestClock::new().options()).unwrap();
+
+	let overview = session.overview().unwrap();
+
+	assert_eq!(overview.budget_name, session.budget_name().unwrap());
+	assert_eq!(overview.groups.len(), 4);
+	let listed: usize = overview
+		.groups
+		.iter()
+		.map(|group| group.accounts.len())
+		.sum();
+	let live = session
+		.data()
+		.unwrap()
+		.accounts
+		.values()
+		.filter(|account| !account.tombstone)
+		.count();
+	assert!(listed >= live, "{listed} listed, {live} live");
+}

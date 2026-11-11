@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use chrono::{DateTime, TimeDelta, Utc};
-use veritas_domain::{BudgetData, BudgetType, CoreError, ReadOnlyReason, Store};
+use veritas_domain::{BudgetData, BudgetType, CivilDate, CoreError, ReadOnlyReason, Store};
 use veritas_interop::{ExportOutcome, ImportOutcome, Manifest, import_actual_zip};
 use veritas_store::{Access as StoreAccess, AuditReport, LoadReport, Loaded};
 
@@ -12,6 +12,7 @@ use crate::backup::write_backup;
 use crate::bus::{ChangeListener, ChangeSet, Command, CommandBus, Listeners, Permit, Subscription};
 use crate::fsio::{io_error, reserve_partial};
 use crate::lock::{Access, WriterLock, acquire};
+use crate::overview::{Overview, account_groups};
 use crate::retention::RetentionPolicy;
 use crate::snapshot::{
 	SNAPSHOTS_DIR, Snapshot, SnapshotReason, list_snapshots, prune_snapshots, restore_snapshot,
@@ -298,6 +299,16 @@ impl<B: Backend> Session<B> {
 
 	pub fn snapshots(&self) -> Result<Vec<Snapshot>, CoreError> {
 		list_snapshots(&self.snapshots)
+	}
+
+	/// The shell's first screen: the budget's name and its accounts in the
+	/// sidebar groups (docs/finance/statements.md ST-9), balances as of today.
+	pub fn overview(&self) -> Result<Overview, CoreError> {
+		let today = CivilDate::from(self.now().date_naive());
+		Ok(Overview {
+			budget_name: self.budget_name()?,
+			groups: account_groups(self.data()?, today)?,
+		})
 	}
 
 	/// `budgetName` from metadata.json, as Actual's budget list shows it.
