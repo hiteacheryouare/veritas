@@ -11,8 +11,8 @@ use veritas_domain::{
 };
 
 use crate::cells::{
-	Cell, date, date_from_int, db_month, flag, integer, money, required_text, sort_order, text,
-	text_month, tombstone,
+	Cell, date, date_from_int, db_month, flag, integer, is_zero, money, required_text, sort_order,
+	text, text_month, tombstone, transaction_tombstone,
 };
 use crate::connection::storage;
 
@@ -35,6 +35,9 @@ pub struct Loaded {
 	pub data: BudgetData,
 	pub report: LoadReport,
 }
+
+pub(crate) const DUPLICATE_BUDGET_CELL: &str =
+	"repeats an earlier row's month and category, and replaces it";
 
 fn at<'r>(row: &'r Row<'_>, index: usize) -> Cell<ValueRef<'r>> {
 	row.get_ref(index).map_err(|_| "a column is missing")
@@ -72,7 +75,7 @@ fn table_exists(conn: &Connection, table: &str) -> Result<bool, CoreError> {
 
 /// Actual treats a file as tracking only when `budgetType` is exactly
 /// `'tracking'`; a missing row or any other value is envelope.
-fn budget_type(conn: &Connection) -> Result<BudgetType, CoreError> {
+pub(crate) fn budget_type(conn: &Connection) -> Result<BudgetType, CoreError> {
 	if !table_exists(conn, "preferences")? {
 		return Ok(BudgetType::Envelope);
 	}
@@ -94,7 +97,7 @@ fn id(row: &Row<'_>, index: usize) -> Cell<String> {
 	required_text(at(row, index)?, "the row has no id")
 }
 
-pub(crate) fn load(conn: &Connection) -> Result<Loaded, CoreError> {
+pub fn load(conn: &Connection) -> Result<Loaded, CoreError> {
 	let mut data = BudgetData::empty(budget_type(conn)?);
 	let mut skipped = Vec::new();
 
@@ -206,7 +209,7 @@ pub(crate) fn load(conn: &Connection) -> Result<Loaded, CoreError> {
 		"transactions",
 		"SELECT id, acct, date, amount, description, category, notes, cleared, reconciled, \
 		 isParent, isChild, parent_id, transferred_id, schedule, starting_balance_flag, \
-		 sort_order, tombstone FROM transactions",
+		 sort_order, tombstone, imported_description FROM transactions",
 		&mut skipped,
 		|row| {
 			let transaction = transaction(row)?;
@@ -247,24 +250,28 @@ pub(crate) fn load(conn: &Connection) -> Result<Loaded, CoreError> {
 				.budget_cells
 				.insert((cell.month, cell.category.clone()), cell);
 			match shadowed {
-				Some(_) => Err("repeats an earlier row's month and category, and replaces it"),
+				Some(_) => Err(DUPLICATE_BUDGET_CELL),
 				None => Ok(()),
 			}
 		},
 	)?;
 
-	each_row(
-		conn,
-		"zero_budget_months",
-		"SELECT id, buffered FROM zero_budget_months",
-		&mut skipped,
-		|row| {
-			let month = text_month(at(row, 0)?)?.ok_or("the row has no id")?;
-			let held = money(at(row, 1)?)?;
-			data.holds.insert(month, held);
-			Ok(())
-		},
-	)?;
+	// Holds are an envelope feature; Actual doesn't read them for tracking
+	// budgets.
+	if data.budget_type == BudgetType::Envelope {
+		each_row(
+			conn,
+			"zero_budget_months",
+			"SELECT id, buffered FROM zero_budget_months",
+			&mut skipped,
+			|row| {
+				let month = text_month(at(row, 0)?)?.ok_or("the row has no id")?;
+				let held = money(at(row, 1)?)?;
+				data.holds.insert(month, held);
+				Ok(())
+			},
+		)?;
+	}
 
 	each_row(
 		conn,
@@ -342,8 +349,10 @@ pub(crate) fn load(conn: &Connection) -> Result<Loaded, CoreError> {
 		&mut skipped,
 		|row| {
 			let id = id(row, 0)?;
-			data.notes
-				.insert(id, text(at(row, 1)?)?.unwrap_or_default());
+			// Actual clears a note by writing NULL, so a NULL note is no note.
+			if let Some(note) = text(at(row, 1)?)? {
+				data.notes.insert(id, note);
+			}
 			Ok(())
 		},
 	)?;
@@ -385,19 +394,24 @@ pub(crate) fn load(conn: &Connection) -> Result<Loaded, CoreError> {
 fn transaction(row: &Row<'_>) -> Cell<Transaction> {
 	let id = TransactionId::new(id(row, 0)?);
 	let is_parent = flag(at(row, 9)?);
-	let split = match at(row, 10)? {
+	// Actual's views keep a row only when isChild = 0, or when it is 1 and
+	// its parent is alive, so any other value never reaches a total.
+	let is_child = match at(row, 10)? {
 		ValueRef::Null => return Err("the split-child flag is NULL"),
-		is_child if flag(is_child) && is_parent => {
-			return Err("the row is marked both split parent and split child");
-		}
-		is_child if flag(is_child) => SplitRole::Child {
+		value if flag(value) => true,
+		value if is_zero(value) => false,
+		_ => return Err("the split-child flag isn't 0 or 1"),
+	};
+	let split = match (is_parent, is_child) {
+		(true, true) => return Err("the row is marked both split parent and split child"),
+		(_, true) => SplitRole::Child {
 			parent: TransactionId::new(required_text(
 				at(row, 11)?,
 				"the split child has no parent",
 			)?),
 		},
-		_ if is_parent => SplitRole::Parent,
-		_ => SplitRole::None,
+		(true, false) => SplitRole::Parent,
+		(false, false) => SplitRole::None,
 	};
 	Ok(Transaction {
 		id,
@@ -408,7 +422,7 @@ fn transaction(row: &Row<'_>) -> Cell<Transaction> {
 		date: date(at(row, 2)?)?.ok_or("the transaction has no date")?,
 		amount: money(at(row, 3)?)?.unwrap_or(Money::ZERO),
 		payee: text(at(row, 4)?)?.map(PayeeId::new),
-		imported_payee: None,
+		imported_payee: text(at(row, 17)?)?,
 		// Actual always reads a split parent's category as NULL.
 		category: if is_parent {
 			None
@@ -423,7 +437,7 @@ fn transaction(row: &Row<'_>) -> Cell<Transaction> {
 		schedule: text(at(row, 13)?)?.map(ScheduleId::new),
 		starting_balance: flag(at(row, 14)?),
 		sort_order: sort_order(at(row, 15)?)?,
-		tombstone: tombstone(at(row, 16)?),
+		tombstone: transaction_tombstone(at(row, 16)?),
 	})
 }
 
@@ -554,6 +568,21 @@ fn load_veritas_tables(
 					adjustment: flag(at(row, 1)?),
 				};
 				data.transaction_meta.insert(transaction, meta);
+				Ok(())
+			},
+		)?;
+	}
+
+	if table_exists(conn, "veritas_tax_tag")? {
+		each_row(
+			conn,
+			"veritas_tax_tag",
+			"SELECT tag, bucket FROM veritas_tax_tag",
+			skipped,
+			|row| {
+				let tag = required_text(at(row, 0)?, "the row has no tag")?;
+				let bucket = required_text(at(row, 1)?, "the tag has no bucket")?;
+				data.tax_tags.insert(tag, bucket);
 				Ok(())
 			},
 		)?;
