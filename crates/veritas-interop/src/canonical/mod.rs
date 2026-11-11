@@ -44,17 +44,36 @@ fn has_non_finite_number(value: &Value) -> bool {
 	}
 }
 
-/// The raw part of the canonical dump (contracts/canonical-dump.md,
-/// docs/oracle.md "Canonical dump, version 1") of an Actual export zip. It is
+/// The raw part of the canonical dump of an Actual export zip. It is
 /// byte-identical to `tools/actual-oracle dump --raw-only`.
 pub fn canonical_dump(zip_path: &Path, out: impl Write) -> Result<(), CoreError> {
+	dump_zip(zip_path, Scope::Everything, out)
+}
+
+/// The dump without the `veritas_*` tables, which is what the round trip
+/// compares.
+pub fn canonical_dump_of_actual_tables(zip_path: &Path) -> Result<Vec<u8>, CoreError> {
+	let mut out = Vec::new();
+	dump_zip(zip_path, Scope::ActualTables, &mut out)?;
+	Ok(out)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Scope {
+	Everything,
+	ActualTables,
+}
+
+const VERITAS_PREFIX: &str = "veritas_";
+
+fn dump_zip(zip_path: &Path, scope: Scope, out: impl Write) -> Result<(), CoreError> {
 	let mut archive = BudgetArchive::open(zip_path)?;
 	let metadata = archive.metadata_bytes()?;
 	let scratch = ScratchDir::new("dump")?;
 	let db_path = scratch.path().join("db.sqlite");
 	archive.extract_db(&db_path)?;
 	let conn = veritas_store::open_read_only(&db_path)?;
-	let result = dump_database(&conn, &metadata, out);
+	let result = dump_database(&conn, &metadata, scope, out);
 	drop(conn);
 	result
 }
@@ -227,15 +246,30 @@ fn write_table(conn: &Connection, table: &str, out: &mut impl Write) -> Result<(
 	out.write_all(b"}").map_err(write_error)
 }
 
-pub(crate) fn dump_database(
+fn dump_database(
 	conn: &Connection,
 	metadata: &[u8],
+	scope: Scope,
 	out: impl Write,
 ) -> Result<(), CoreError> {
 	let mut out = BufWriter::new(out);
 	let metadata = normalize_metadata(metadata)?;
-	let schema = schema(conn)?;
-	let tables = table_names(conn)?;
+	let mut schema = schema(conn)?;
+	let mut tables = table_names(conn)?;
+	if scope == Scope::ActualTables {
+		tables.retain(|name| !name.starts_with(VERITAS_PREFIX));
+		if let Value::Array(entries) = &mut schema {
+			entries.retain(|entry| {
+				let Value::Object(fields) = entry else {
+					return true;
+				};
+				!fields.iter().any(|(key, value)| {
+					key.eq_ascii("tableName")
+						&& matches!(value, Value::String(Str::Utf8(name)) if name.starts_with(VERITAS_PREFIX))
+				})
+			});
+		}
+	}
 
 	let header = |out: &mut BufWriter<_>, key: &str| -> io::Result<()> {
 		write_indent(out, 1)?;

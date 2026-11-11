@@ -1,5 +1,5 @@
 use rusqlite::{Connection, OptionalExtension};
-use veritas_domain::CoreError;
+use veritas_domain::{CoreError, ReadOnlyReason};
 
 use crate::connection::storage;
 
@@ -30,9 +30,12 @@ pub(crate) fn adopt(conn: &mut Connection) -> Result<(), CoreError> {
 			.map_err(storage)?;
 		}
 		Some(Ok(version)) if version == VERITAS_SCHEMA_VERSION => {}
+		Some(Ok(version)) if version > VERITAS_SCHEMA_VERSION => {
+			return Err(CoreError::ReadOnly(ReadOnlyReason::NewerVeritasSchema));
+		}
 		Some(_) => {
 			return Err(CoreError::Storage(
-				"this budget's Veritas tables come from a different Veritas version".to_owned(),
+				"this budget's veritas_meta.schema_version isn't one Veritas ever wrote".to_owned(),
 			));
 		}
 	}

@@ -7,20 +7,24 @@ mod common;
 
 use std::time::Instant;
 
-use common::{Scratch, fixture};
+use common::{Scratch, fixture, imported};
 use veritas_interop::{Access, import_actual_zip};
 use veritas_store::Store;
 
 #[test]
-fn perf_100k_imports_and_loads_every_transaction_r_perf_5() {
+fn perf_100k_imports_loads_and_exports_r_perf_5() {
 	let scratch = Scratch::new("perf-load");
 	let started = Instant::now();
-	let budget = import_actual_zip(&fixture("perf-100k"), &scratch.join("budget")).unwrap();
+	let budget = imported(import_actual_zip(
+		&fixture("perf-100k"),
+		&scratch.join("budget"),
+	));
 	let imported = started.elapsed();
 	assert_eq!(budget.access, Access::ReadWrite);
+	assert!(budget.audit.is_clean());
 
 	let started = Instant::now();
-	let mut store = Store::open(&budget.db_path).unwrap();
+	let mut store = Store::open(&budget.db_path, Access::ReadWrite).unwrap();
 	store.adopt().unwrap();
 	let opened = started.elapsed();
 	let started = Instant::now();
@@ -30,7 +34,17 @@ fn perf_100k_imports_and_loads_every_transaction_r_perf_5() {
 	assert_eq!(loaded.data.transactions.len(), 105_186);
 	assert_eq!(loaded.data.categories.len(), 502);
 	assert!(loaded.report.skipped.is_empty());
+	let started = Instant::now();
+	let exported = scratch.join("exported.zip");
+	let outcome =
+		veritas_interop::export_actual_zip(&store, &budget.metadata_path, &exported).unwrap();
+	let export = started.elapsed();
+	assert!(matches!(
+		outcome,
+		veritas_interop::ExportOutcome::Exported(_)
+	));
+
 	eprintln!(
-		"perf-100k: import (copy + integrity_check + manifest) {imported:?}, open + adopt {opened:?}, load {load:?}"
+		"perf-100k: import (copy + integrity_check + manifest + load + audit) {imported:?}, open + adopt {opened:?}, load {load:?}, export (audit + VACUUM INTO + zip) {export:?}"
 	);
 }
