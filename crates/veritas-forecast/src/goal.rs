@@ -5,20 +5,21 @@ use crate::math::{ceil_div, median};
 use crate::scenario::Scenario;
 
 const PACE_MONTHS: i32 = 3;
-/// ETAs further out than 100 years are reported as too far, not computed.
+/// FC-6's cap: an ETA further out than this is "No ETA", never an error.
 const MAX_MONTHS: i32 = 1200;
 
+/// When a pace reaches the target: a month, or never within `MAX_MONTHS`,
+/// which FC-6 reads the same as a pace of 0.
 enum Reach {
 	At(YearMonth),
 	Never,
-	TooFar,
 }
 
 impl Reach {
 	fn month(self) -> Option<YearMonth> {
 		match self {
 			Reach::At(month) => Some(month),
-			Reach::Never | Reach::TooFar => None,
+			Reach::Never => None,
 		}
 	}
 }
@@ -30,8 +31,6 @@ pub enum EtaStatus {
 	NoHistory,
 	/// The median pace is 0 or less.
 	NotAdding,
-	/// The median pace takes more than 100 years.
-	TooFar,
 	Eta {
 		month: YearMonth,
 		optimistic: YearMonth,
@@ -59,7 +58,6 @@ impl GoalEta {
 			EtaStatus::Reached => "Reached".to_owned(),
 			EtaStatus::NoHistory => "No ETA yet".to_owned(),
 			EtaStatus::NotAdding => "No ETA: nothing is being added".to_owned(),
-			EtaStatus::TooFar => "No ETA: more than 100 years at this pace".to_owned(),
 			EtaStatus::Eta {
 				month,
 				optimistic,
@@ -157,7 +155,6 @@ pub fn goal_eta(
 		None => EtaStatus::NoHistory,
 		Some((mid, max, min)) => match eta(mid)? {
 			Reach::Never => EtaStatus::NotAdding,
-			Reach::TooFar => EtaStatus::TooFar,
 			Reach::At(month) => EtaStatus::Eta {
 				month,
 				optimistic: eta(max)?.month().unwrap_or(month),
@@ -198,7 +195,11 @@ fn months_to_go(
 ) -> Result<Reach, CoreError> {
 	let remaining = i128::from(remaining.minor());
 	let mut simulated = 0i32;
-	let mut saved = 0i128;
+	// `available` already holds this month's budget; a what-if can add to it.
+	let mut saved = i128::from(scenario.goal_contribution(goal, current)?.minor());
+	if saved >= remaining {
+		return Ok(Reach::At(current));
+	}
 	for (start, end) in scenario.goal_contribution_months(goal) {
 		let last = end.unwrap_or(start);
 		let span = months_between(current, last)?.min(MAX_MONTHS - 1) + 1;
@@ -218,7 +219,7 @@ fn months_to_go(
 	}
 	let total = i128::from(simulated) + ceil_div(remaining - saved, steady);
 	if total > i128::from(MAX_MONTHS) {
-		return Ok(Reach::TooFar);
+		return Ok(Reach::Never);
 	}
 	let total = i32::try_from(total).map_err(|_| CoreError::Overflow)?;
 	current.offset(total).map(Reach::At)

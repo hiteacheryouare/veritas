@@ -435,8 +435,8 @@ fn r_fc_2_goal_contribution_scenario_moves_the_eta() {
 fn fc_6_a_pace_slower_than_100_years_has_no_eta() {
 	let book = laptop_book(&[("2026-12", 1)]);
 	let result = eta(&book, 0, &Scenario::baseline());
-	assert_eq!(result.status, EtaStatus::TooFar);
-	assert_eq!(result.text(), "No ETA: more than 100 years at this pace");
+	assert_eq!(result.status, EtaStatus::NotAdding, "FC-6 cap");
+	assert_eq!(result.text(), "No ETA: nothing is being added");
 }
 
 #[test]
@@ -451,5 +451,38 @@ fn fc_6_a_contribution_ending_past_100_years_is_capped() {
 			end_month: Some(ym("2200-01")),
 		}],
 	};
-	assert_eq!(eta(&book, 0, &long).status, EtaStatus::TooFar);
+	assert_eq!(
+		eta(&book, 0, &long).status,
+		EtaStatus::NotAdding,
+		"FC-6 cap"
+	);
+}
+
+#[test]
+fn fc_6_e_8_a_gap_inside_the_history_counts_as_zero() {
+	let book = laptop_book(&[("2026-10", 25000), ("2026-12", 20000)]);
+	let result = eta(&book, 112000, &Scenario::baseline());
+	assert_eq!(result.pace, Some((cents(20000), cents(25000), cents(0))));
+	assert_eq!(result.text(), "ETA March 2027, no ETA at the slowest pace");
+}
+
+#[test]
+fn fc_6_e_9_and_e_10_history_starts_at_the_first_cell() {
+	let book = laptop_book(&[("2026-12", 25000)]);
+	assert_eq!(
+		eta(&book, 112000, &Scenario::baseline()).history_months,
+		1,
+		"E-9"
+	);
+	let this_month = laptop_book(&[("2027-01", 25000)]);
+	assert_eq!(
+		eta(&this_month, 25000, &Scenario::baseline()).text(),
+		"No ETA yet",
+		"E-10"
+	);
+	assert_eq!(
+		eta(&this_month, 150000, &Scenario::baseline()).text(),
+		"Reached",
+		"E-10"
+	);
 }

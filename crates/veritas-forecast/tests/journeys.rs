@@ -756,7 +756,6 @@ fn g_3_and_g_5_goal_suggestions() {
 }
 
 #[test]
-#[ignore = "R-FC-2 bug: a goal contribution what-if in the current month is ignored, because months_to_go starts counting at next month"]
 fn an_extra_goal_contribution_this_month_moves_the_eta() {
 	let mut book = Book::household();
 	book.category("New laptop", "Goals");
