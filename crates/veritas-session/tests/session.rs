@@ -51,6 +51,8 @@ impl Store for ReadPath {
 thread_local! {
 	/// Makes the store panic on the nth write of this thread's next command.
 	static PANIC_ON_WRITE: Cell<Option<usize>> = const { Cell::new(None) };
+	/// Makes adopt answer as veritas-store does for tables from a newer Veritas.
+	static NEWER_VERITAS_TABLES: Cell<bool> = const { Cell::new(false) };
 }
 
 impl StoreTransaction for Counted<'_> {
@@ -87,6 +89,9 @@ impl Backend for ReadPath {
 	}
 
 	fn adopt(&mut self) -> Result<(), CoreError> {
+		if NEWER_VERITAS_TABLES.get() {
+			return Err(CoreError::ReadOnly(ReadOnlyReason::NewerVeritasSchema));
+		}
 		self.store.adopt()
 	}
 
@@ -291,6 +296,20 @@ fn a_file_from_an_older_actual_is_refused() {
 		"{:?}",
 		result.err()
 	);
+}
+
+#[test]
+fn tables_from_a_newer_veritas_open_read_only() {
+	let (_root, dir) = imported("session-newer-veritas");
+	NEWER_VERITAS_TABLES.set(true);
+	let session = TestSession::open(&dir, TestClock::new().options());
+	NEWER_VERITAS_TABLES.set(false);
+	let session = session.unwrap();
+	assert_eq!(
+		session.read_only(),
+		Some(ReadOnlyReason::NewerVeritasSchema)
+	);
+	assert!(session.snapshots().unwrap().is_empty());
 }
 
 #[test]

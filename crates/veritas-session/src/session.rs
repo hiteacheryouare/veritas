@@ -29,6 +29,7 @@ pub trait Backend: Store + Sized {
 	/// What `PRAGMA integrity_check` reports. Empty means the file is sound.
 	fn integrity_problems(&self) -> Result<Vec<String>, CoreError>;
 	/// Creates the veritas_* tables. Only ever called on a writable budget.
+	/// Tables from a newer Veritas return `ReadOnly(NewerVeritasSchema)`.
 	fn adopt(&mut self) -> Result<(), CoreError>;
 	fn load(&self) -> Result<Loaded, CoreError>;
 }
@@ -318,8 +319,9 @@ fn acquire_with_retry(dir: &Path) -> Result<Option<WriterLock>, CoreError> {
 	}
 }
 
-/// Reasons a file can't be written come first, ahead of `OpenElsewhere`,
-/// which goes away on its own. On failure the listeners come back.
+/// Reasons a file can't be written come first (newer Actual, failed check,
+/// newer Veritas tables, tracking budget), ahead of `OpenElsewhere`, which
+/// goes away on its own. On failure the listeners come back.
 fn open_bus<B: Backend>(
 	db: &Path,
 	writable: bool,
@@ -335,7 +337,11 @@ fn open_bus<B: Backend>(
 			reason = Some(ReadOnlyReason::AuditFailed);
 		}
 		if reason.is_none() && writable {
-			backend.adopt()?;
+			match backend.adopt() {
+				Ok(()) => {}
+				Err(CoreError::ReadOnly(newer)) => reason = Some(newer),
+				Err(error) => return Err(error),
+			}
 		}
 		let loaded = backend.load()?;
 		if reason.is_none() && loaded.data.budget_type == BudgetType::Tracking {
