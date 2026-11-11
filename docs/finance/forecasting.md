@@ -40,7 +40,7 @@ Rounding rules used in this file:
 
 Applies to each non-hidden `expense`-kind category (a spending baseline) and each `income`-kind category not fed by an income schedule (an income baseline). Debt, savings and transfers are not baselined here (FC-3).
 
-**Monthly series.** For category `c` and complete month `m`: `x(c,m) = -sum(amount)` over rows of kind `expense` in `c` in `m` whose `schedule` column is empty (bill-linked rows are known flows, FC-2). For an income category, `x(c,m) = sum(amount)` of kind `income` rows not bill-linked. Refunds reduce `x`. `x` may be negative.
+**Monthly series.** For category `c` and complete month `m`: `x(c,m) = -sum(amount)` over rows of kind `expense` in `c` in `m` whose `schedule` column is empty (bill-linked rows are known flows, FC-2). For an income category, `x(c,m) = sum(amount)` of kind `income` rows not bill-linked. Refunds reduce `x`. Rows that move money between an on-budget and an off-budget account (CLS-4 rows 8 and 9) are left out of `x` in both directions, the way ST-4 line E2 treats them (FC-3, asset purchases). `x` may be negative.
 
 **Window.** The last `WINDOW` complete months, but never months before the category's first row (a category created last month has one month of history, not six). A month after the first row with no rows counts as 0.
 
@@ -97,7 +97,7 @@ Applies to each non-hidden `expense`-kind category (a spending baseline) and eac
 
 ## FC-3 Projection (R-FC-1)
 
-Open product question, not specified yet: how on-to-off transfers in an expense category (CLS-4 row 8) enter a baseline. Pending Ryan.
+**Asset purchases.** A transfer from an on-budget account into an off-budget asset with an expense category (CLS-4 row 8), and its reversal (row 9), is not spending: money still owned as an asset has not left net worth (ST-4 E2). These rows are excluded from every baseline series (FC-1), so the projection, the band's residuals and the suggestions never forecast them, and buying an asset does not lower projected net worth. Because the baseline cannot predict when such a purchase will happen, the projection shows "N asset purchase(s) excluded: ${total}" ("1 asset purchase", "2 asset purchases") for the baseline window (`WINDOW` complete months), where `N` is the count of excluded rows, `total` is the net of their amounts rounded half up to whole dollars, and the note is omitted when `N` is 0. Cash will really fall on the day of a purchase. A planned purchase belongs in a what-if as a one-time transfer, not in the baseline.
 
 **Horizon.** 3, 6, 10 and 12 months mean the end of the 3rd, 6th, 10th and 12th complete month after the current month, plus the remainder of the current month.
 
@@ -133,6 +133,7 @@ Today is 2027-01-15 and checking holds 388800. One exact bill, Rent -165000 on t
 | SC-3 Deltas add, they do not compound | Groceries `forecast+` 43000, active changes +1000 bp and +500 bp | 4300 + 2150 = 6450. Scenario forecast **49450** (not 49665) |
 | SC-4 Negative forecast | A category whose FC-1 forecast is -3000, change +1000 bp | `forecast+` is 0, delta 0, scenario forecast **0** |
 | SC-5 Goal contribution | Scenario adds 25000 a month to a goal from February | Net worth, balances and band offsets are identical to the baseline projection. Only the goal's ETA changes (E-7) |
+| AP-1 Asset purchase | Fuel window of 2 complete months: Jan 20000 of fuel, Feb 20000 of fuel plus a 50000 transfer from CHK to an off-budget CAR asset in category Fuel (row 8) | The 50000 row is excluded: `x` = 20000, 20000, `L` = **20000**. Counting it would give 20000 and 70000, `L` = 45000 and a projected net worth 25000 lower every month. Note: "1 asset purchase excluded: $500" (one purchase, 50000 cents) |
 
 ## FC-4 Confidence band
 
