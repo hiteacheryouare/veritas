@@ -26,6 +26,7 @@ Envelope budget math (To Budget, carryover, overspending, hold) is Actual's and 
 Rules:
 
 - **DEBT-2.1** Principal, interest, escrow and fees are integers >= 0. The sum must equal the payment total exactly. The wizard computes principal as the remainder, so a leftover cent can never go missing: `principal = total - interest - escrow - fees`.
+- **DEBT-2.1a** When a payment total is allocated to parts, as in a forecast (forecasting.md FC-2), it covers interest first, then escrow, then fees, then principal. Principal is what is left, floored at 0.
 - **DEBT-2.2** Principal must not be negative. If a payment is smaller than the interest owed, the wizard blocks and says so. Unpaid interest added to the loan balance is recorded by the user as an `adjustment` on the loan account (a non-cash change), never as a negative principal.
 - **DEBT-2.3** Principal larger than outstanding principal is a warning, not an error (a refund or escrow credit can explain it). The loan balance would turn positive and the account is listed as an asset that day by ST-2 (the side follows the sign of the balance, whatever the metadata says). The wizard shows "This pays off the loan and leaves a credit of $X".
 - **DEBT-2.4** Net Profit sees interest, escrow and fees as expenses and principal as Debt paydown (ST-1). Escrow is its own category and never lands in principal or interest.

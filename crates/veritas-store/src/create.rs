@@ -1,8 +1,8 @@
 use veritas_domain::{
-	Account, AccountId, AccountKind, AccountMeta, AccountMetaRow, BudgetData, Category,
-	CategoryGroup, CategoryGroupId, CategoryId, CategoryKind, CategoryMapping, CategoryMeta,
-	CategoryMetaRow, CivilDate, CoreError, Money, NewAccountKind, Payee, PayeeId, PayeeMapping,
-	Row, SplitRole, Transaction, TransactionId,
+	Account, AccountId, AccountMeta, AccountMetaRow, BudgetData, Category, CategoryGroup,
+	CategoryGroupId, CategoryId, CategoryKind, CategoryMapping, CategoryMeta, CategoryMetaRow,
+	CivilDate, CoreError, Money, NewAccount, NewAccountKind, Payee, PayeeId, PayeeMapping, Row,
+	SplitRole, Transaction, TransactionId,
 };
 
 use crate::audit::TAX_BUCKETS;
@@ -126,28 +126,6 @@ pub fn plan_starter_categories(
 	Ok(rows)
 }
 
-#[derive(Clone, Debug, PartialEq)]
-/// An account setup creates. A liability's `starting_balance` is what is
-/// owed, as a positive amount, and is stored negative as Actual expects.
-pub struct NewAccount {
-	pub name: String,
-	pub kind: NewAccountKind,
-	pub starting_balance: Money,
-}
-
-impl NewAccount {
-	fn off_budget(&self) -> bool {
-		self.kind.off_budget()
-	}
-
-	fn opening_amount(&self) -> Result<Money, CoreError> {
-		match self.kind.kind() {
-			AccountKind::Asset => Ok(self.starting_balance),
-			AccountKind::Liability => self.starting_balance.checked_neg(),
-		}
-	}
-}
-
 /// D56: off-budget accounts for a 401(k) and an HSA, when setup's boxes are
 /// checked, so gross-paycheck contributions classify as savings.
 pub fn paycheck_accounts(retirement_401k: bool, hsa: bool) -> Vec<NewAccount> {
@@ -199,7 +177,7 @@ pub fn plan_new_account(
 	let last = data
 		.accounts
 		.values()
-		.filter(|a| a.off_budget == account.off_budget())
+		.filter(|a| a.off_budget == account.kind.off_budget())
 		.map(|a| a.sort_order)
 		.fold(0.0, f64::max);
 	let id = AccountId::new(new_id());
@@ -208,7 +186,7 @@ pub fn plan_new_account(
 		Row::Account(Account {
 			id: id.clone(),
 			name: account.name.clone(),
-			off_budget: account.off_budget(),
+			off_budget: account.kind.off_budget(),
 			closed: false,
 			group: None,
 			sort_order: last + SORT_INCREMENT,
@@ -229,12 +207,12 @@ pub fn plan_new_account(
 		Row::AccountMeta(AccountMetaRow {
 			account: id.clone(),
 			meta: AccountMeta {
-				kind: Some(account.kind.kind()),
+				kind: Some(account.kind.account_kind()),
 				..AccountMeta::default()
 			},
 		}),
 	];
-	let opening = account.opening_amount()?;
+	let opening = account.opening_balance()?;
 	if opening != Money::ZERO {
 		let existing = data
 			.payees
@@ -267,7 +245,7 @@ pub fn plan_new_account(
 			amount: opening,
 			payee: Some(payee),
 			imported_payee: None,
-			category: if account.off_budget() {
+			category: if account.kind.off_budget() {
 				None
 			} else {
 				starting_balance_category(data)

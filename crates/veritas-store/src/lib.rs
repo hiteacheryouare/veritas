@@ -16,7 +16,7 @@ pub use connection::{
 	recover_after_crash,
 };
 pub use create::{
-	NewAccount, TEMPLATE_DB, new_id, paycheck_accounts, plan_new_account, plan_starter_categories,
+	TEMPLATE_DB, new_id, paycheck_accounts, plan_new_account, plan_starter_categories,
 };
 pub use load::{LoadReport, Loaded, SkippedRow, load};
 pub use schema::VERITAS_SCHEMA_VERSION;

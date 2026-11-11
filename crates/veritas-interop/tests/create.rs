@@ -6,20 +6,19 @@
 mod common;
 
 use std::io::Read;
-use std::path::Path;
 
 use common::{Scratch, oracle, write_zip};
 use rusqlite::Connection;
 use serde_json::{Value, json};
 use veritas_domain::{
-	AccountKind, BudgetCell, BudgetData, CategoryKind, CivilDate, CoreError, FormatPrefs, Money,
-	NewAccountKind, SplitRole, Transaction, TransactionId, YearMonth,
+	BudgetCell, BudgetData, CategoryKind, CivilDate, CoreError, FormatPrefs, Money, NewAccount,
+	NewAccountKind, NewBudget, NumberFormat, NumberStyle, SplitRole, Transaction, TransactionId,
+	YearMonth,
 };
 use veritas_interop::{
-	Access, ExportOutcome, Manifest, NewBudget, canonical_dump_to_vec, create_budget,
-	export_actual_zip,
+	Access, ExportOutcome, Manifest, canonical_dump_to_vec, create_budget, export_actual_zip,
 };
-use veritas_store::{NewAccount, Store, TEMPLATE_DB, paycheck_accounts, veritas_starter_set};
+use veritas_store::{Store, TEMPLATE_DB, paycheck_accounts};
 
 fn today() -> CivilDate {
 	CivilDate::new(2026, 11, 9).unwrap()
@@ -34,42 +33,45 @@ fn account(name: &str, kind: NewAccountKind, cents: i64) -> NewAccount {
 }
 
 fn accounts() -> Vec<NewAccount> {
-	let mut accounts = vec![
+	vec![
 		account("Checking", NewAccountKind::Checking, 150_000),
 		account("Savings", NewAccountKind::Savings, 50_000),
 		account("Brokerage", NewAccountKind::Investment, 1_000_000),
 		account("Wallet", NewAccountKind::Cash, 0),
 		account("Visa", NewAccountKind::CreditCard, 25_000),
 		account("Mortgage", NewAccountKind::Mortgage, 30_000_000),
-	];
-	accounts.extend(paycheck_accounts(true, true));
-	accounts
+	]
 }
 
-fn format() -> FormatPrefs {
-	FormatPrefs {
-		number_format: Some("comma-dot".to_owned()),
-		hide_fraction: true,
-		currency_code: Some("USD".to_owned()),
+/// What setup's accounts plus the 401(k) and HSA boxes add up to.
+fn all_accounts() -> Vec<NewAccount> {
+	let mut all = accounts();
+	all.extend(paycheck_accounts(true, true));
+	all
+}
+
+fn format() -> NumberFormat {
+	NumberFormat {
+		currency: Some("USD".to_owned()),
+		style: NumberStyle::CommaDot,
+		hide_decimals: true,
+	}
+}
+
+fn setup(name: &str) -> NewBudget {
+	NewBudget {
+		name: name.to_owned(),
+		format: format(),
+		retirement_401k: true,
+		hsa: true,
+		accounts: accounts(),
 	}
 }
 
 fn new_budget(scratch: &Scratch) -> veritas_interop::ImportedBudget {
-	let starter = veritas_starter_set();
-	let accounts = accounts();
 	let dir = scratch.join("Household-a1b2c3d");
 	std::fs::create_dir(&dir).unwrap();
-	create_budget(
-		&dir,
-		&NewBudget {
-			name: "Household",
-			format: &format(),
-			categories: &starter,
-			accounts: &accounts,
-			today: today(),
-		},
-	)
-	.unwrap()
+	create_budget(&dir, &setup("Household"), today()).unwrap()
 }
 
 #[test]
@@ -169,12 +171,12 @@ fn a_new_budget_has_the_starter_set_accounts_and_starting_balances_r_io_0() {
 	assert_eq!(starting.id.as_str(), "506e8d9d-7ed0-4397-84e4-07a9185dc6b2");
 
 	assert_eq!(data.accounts.len(), 8);
-	for new in accounts() {
+	for new in all_accounts() {
 		let made = data.accounts.values().find(|a| a.name == new.name).unwrap();
 		assert_eq!(made.off_budget, new.kind.off_budget(), "{}", new.name);
 		assert_eq!(
 			data.account_meta[&made.id].kind,
-			Some(new.kind.kind()),
+			Some(new.kind.account_kind()),
 			"{}",
 			new.name
 		);
@@ -184,12 +186,7 @@ fn a_new_budget_has_the_starter_set_accounts_and_starting_balances_r_io_0() {
 			.filter(|t| t.starting_balance && t.account == made.id)
 			.map(|t| t.amount.minor())
 			.sum();
-		let owed = new.kind.kind() == AccountKind::Liability;
-		let expected = if owed {
-			-new.starting_balance.minor()
-		} else {
-			new.starting_balance.minor()
-		};
+		let expected = new.opening_balance().unwrap().minor();
 		assert_eq!(
 			opening, expected,
 			"a liability's balance owed is stored negative: {}",
@@ -226,7 +223,24 @@ fn a_new_budget_has_the_starter_set_accounts_and_starting_balances_r_io_0() {
 			.count(),
 		8
 	);
-	assert_eq!(data.format, format());
+	assert_eq!(
+		data.format,
+		FormatPrefs {
+			number_format: Some("comma-dot".to_owned()),
+			hide_fraction: true,
+			currency_code: Some("USD".to_owned()),
+		}
+	);
+	assert!(
+		data.accounts
+			.values()
+			.any(|a| a.name == "401(k)" && a.off_budget)
+	);
+	assert!(
+		data.accounts
+			.values()
+			.any(|a| a.name == "HSA" && a.off_budget)
+	);
 
 	let conn = Connection::open(&budget.db_path).unwrap();
 	let currency: String = conn
@@ -240,28 +254,17 @@ fn a_new_budget_has_the_starter_set_accounts_and_starting_balances_r_io_0() {
 }
 
 #[test]
-fn create_refuses_a_bad_set_or_a_folder_that_isnt_empty() {
+fn create_refuses_a_nameless_budget_or_a_folder_that_isnt_empty() {
 	let scratch = Scratch::new("create-refused");
-	let mut starter = veritas_starter_set();
-	starter[0].categories[0].tax_bucket = Some("capital_gains".to_owned());
-	let empty = scratch.join("Broken");
+	let empty = scratch.join("Nameless");
 	std::fs::create_dir(&empty).unwrap();
-	let plain = FormatPrefs::default();
-	let budget = |categories| NewBudget {
-		name: "Broken",
-		format: &plain,
-		categories,
-		accounts: &[],
-		today: today(),
-	};
-	let result = create_budget(&empty, &budget(&starter));
+	let result = create_budget(&empty, &setup("  "), today());
 	assert!(matches!(result, Err(CoreError::Invalid(_))), "{result:?}");
 
 	let used = scratch.join("Used");
 	std::fs::create_dir(&used).unwrap();
 	std::fs::write(used.join("notes.txt"), b"mine").unwrap();
-	let starter = veritas_starter_set();
-	let result = create_budget(&used, &budget(&starter));
+	let result = create_budget(&used, &setup("Used"), today());
 	assert!(
 		matches!(result, Err(CoreError::Io(_))),
 		"a folder with files in it is never built into"
@@ -405,9 +408,13 @@ fn actual_opens_a_new_budget_with_the_same_balances_and_budget_r_io_0() {
 	let account_ops: Vec<Value> = accounts()
 		.iter()
 		.map(|a| {
-			let owed = a.kind.kind() == AccountKind::Liability;
-			let stored = if owed { -a.starting_balance.minor() } else { a.starting_balance.minor() };
-			json!({"op": "createAccount", "id": a.name, "name": a.name, "offBudget": a.kind.off_budget(), "initialBalance": stored})
+			json!({
+				"op": "createAccount",
+				"id": a.name,
+				"name": a.name,
+				"offBudget": a.kind.off_budget(),
+				"initialBalance": a.opening_balance().unwrap().minor()
+			})
 		})
 		.collect();
 	std::fs::write(
@@ -424,32 +431,8 @@ fn actual_opens_a_new_budget_with_the_same_balances_and_budget_r_io_0() {
 		actual_made.as_os_str(),
 	])
 	.unwrap();
-	let veritas_only = scratch.join("veritas-accounts.zip");
-	export_only_accounts(&scratch, &veritas_only);
 	assert_eq!(
-		starting_rows(&canonical_dump_to_vec(&veritas_only).unwrap()),
+		starting_rows(&canonical_dump_to_vec(&exported).unwrap()),
 		starting_rows(&canonical_dump_to_vec(&actual_made).unwrap())
 	);
-}
-
-fn export_only_accounts(scratch: &Scratch, to: &Path) {
-	let accounts = accounts();
-	let dir = scratch.join("Accounts-only");
-	std::fs::create_dir(&dir).unwrap();
-	let budget = create_budget(
-		&dir,
-		&NewBudget {
-			name: "Household",
-			format: &FormatPrefs::default(),
-			categories: &[],
-			accounts: &accounts,
-			today: today(),
-		},
-	)
-	.unwrap();
-	let store = Store::open(&budget.db_path, Access::ReadWrite).unwrap();
-	assert!(matches!(
-		export_actual_zip(&store, &budget.metadata_path, to).unwrap(),
-		ExportOutcome::Exported(_)
-	));
 }
