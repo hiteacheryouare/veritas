@@ -1,7 +1,7 @@
 import VeritasCore
 
 public extension NumberStyle {
-	static let allCases: [NumberStyle] = [.commaDot, .dotComma, .spaceComma, .apostropheDot]
+	static let allCases: [NumberStyle] = [.commaDot, .dotComma, .spaceComma, .apostropheDot, .commaDotIn]
 
 	/// How 1000.33 reads in this style, as Actual labels it.
 	var sample: String {
@@ -10,6 +10,7 @@ public extension NumberStyle {
 		case .dotComma: "1.000,33"
 		case .spaceComma: "1\u{202F}000,33"
 		case .apostropheDot: "1'000.33"
+		case .commaDotIn: "1,00,000.33"
 		}
 	}
 }
@@ -31,22 +32,12 @@ public struct CurrencyOption: Hashable, Identifiable, Sendable {
 	}
 }
 
-/// What kind of account a new one is. The core turns it into Actual's
-/// off-budget flag and Veritas's account kind, which place it in its
-/// sidebar group (ST-9.2, D8: cards on budget, loans off).
-public enum AccountType: String, CaseIterable, Hashable, Sendable {
-	case checking
-	case savings
-	case cash
-	case creditCard
-	case lineOfCredit
-	case investment
-	case retirement
-	case property
-	case loan
-	case mortgage
+public extension NewAccountKind {
+	static let allCases: [NewAccountKind] = [
+		.checking, .savings, .cash, .creditCard, .lineOfCredit, .investment, .retirement, .property, .loan, .mortgage
+	]
 
-	public var title: String {
+	var title: String {
 		switch self {
 		case .checking: "Checking"
 		case .savings: "Savings"
@@ -61,8 +52,9 @@ public enum AccountType: String, CaseIterable, Hashable, Sendable {
 		}
 	}
 
-	/// The sidebar group an account of this type lands in, which the picker groups by.
-	public var group: VeritasCore.AccountGroup {
+	/// Where the core places an account of this kind (ST-9.2, D8). The picker
+	/// groups by it so the choice shows where the account will appear.
+	var group: VeritasCore.AccountGroup {
 		switch self {
 		case .checking, .savings, .cash: .cash
 		case .creditCard, .lineOfCredit: .credit
@@ -71,8 +63,8 @@ public enum AccountType: String, CaseIterable, Hashable, Sendable {
 		}
 	}
 
-	/// For these the field asks what's owed, as a positive amount.
-	public var isOwed: Bool {
+	/// The core takes what's owed on these as a positive amount.
+	var isOwed: Bool {
 		group == .credit || group == .loans
 	}
 }
@@ -92,11 +84,11 @@ public extension VeritasCore.AccountGroup {
 
 public struct StartingAccount: Hashable, Sendable {
 	public let name: String
-	public let type: AccountType
+	public let type: NewAccountKind
 	/// What the account holds, or for an owed type what's owed, in cents.
 	public let balance: Int64
 
-	public init(name: String, type: AccountType, balance: Int64) {
+	public init(name: String, type: NewAccountKind, balance: Int64) {
 		self.name = name
 		self.type = type
 		self.balance = balance

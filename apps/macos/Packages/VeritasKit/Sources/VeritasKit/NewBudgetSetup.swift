@@ -17,7 +17,7 @@ public final class NewBudgetSetup: Identifiable {
 		public let id = UUID()
 		public var name = ""
 		public var balance = ""
-		public var type = AccountType.checking
+		public var type = NewAccountKind.checking
 		public var problem: String?
 
 		public init() {}
@@ -49,7 +49,7 @@ public final class NewBudgetSetup: Identifiable {
 	public var canContinue: Bool {
 		guard !isWorking else { return false }
 		switch step {
-		case .basics: return !name.trimmingCharacters(in: .whitespaces).isEmpty && !currencyCode.isEmpty
+		case .basics: return !name.trimmingCharacters(in: .whitespaces).isEmpty && currencies.contains { $0.code == currencyCode }
 		case .accounts, .paycheckSavings: return true
 		}
 	}
@@ -132,7 +132,7 @@ public final class NewBudgetSetup: Identifiable {
 			}
 			let text = draft.balance.trimmingCharacters(in: .whitespaces)
 			do {
-				let balance = text.isEmpty ? 0 : try await library.evaluateAmount(text)
+				let balance = text.isEmpty ? 0 : try await library.evaluateAmount(text, style: numberStyle)
 				result.append(StartingAccount(name: name, type: draft.type, balance: balance))
 			} catch {
 				accounts[index].problem = Self.message(for: error)

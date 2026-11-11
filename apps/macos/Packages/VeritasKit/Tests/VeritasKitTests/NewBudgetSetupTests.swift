@@ -20,9 +20,9 @@ struct NewBudgetSetupTests {
 	}
 
 	@Test func everyAccountTypeBelongsToOneSidebarGroup() {
-		#expect(AccountType.allCases.map(\.group) == [.cash, .cash, .cash, .credit, .credit, .investments, .investments, .investments, .loans, .loans])
-		#expect(AccountType.allCases.filter(\.isOwed) == [.creditCard, .lineOfCredit, .loan, .mortgage])
-		#expect(AccountType.checking == NewBudgetSetup.AccountDraft().type)
+		#expect(NewAccountKind.allCases.map(\.group) == [.cash, .cash, .cash, .credit, .credit, .investments, .investments, .investments, .loans, .loans])
+		#expect(NewAccountKind.allCases.filter(\.isOwed) == [.creditCard, .lineOfCredit, .loan, .mortgage])
+		#expect(NewAccountKind.checking == NewBudgetSetup.AccountDraft().type)
 	}
 
 	@Test func anUnknownPreferredCurrencyFallsBackToTheFirst() async {
@@ -170,7 +170,7 @@ final class SetupLibrary: BudgetLibrary, @unchecked Sendable {
 		FakeAmounts.currencies
 	}
 
-	func evaluateAmount(_ text: String) async throws -> Int64 {
+	func evaluateAmount(_ text: String, style: NumberStyle) async throws -> Int64 {
 		try FakeAmounts.evaluate(text)
 	}
 }

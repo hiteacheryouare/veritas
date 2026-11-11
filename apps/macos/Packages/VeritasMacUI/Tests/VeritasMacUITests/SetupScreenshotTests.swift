@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import Testing
+import VeritasCore
 import VeritasKit
 @testable import VeritasMacUI
 
@@ -25,7 +26,7 @@ struct SetupScreenshotTests {
 
 	@Test func accounts() async throws {
 		let setup = await setupAt(.accounts)
-		let rows: [(String, String, AccountType)] = [
+		let rows: [(String, String, NewAccountKind)] = [
 			("Checking", "2,140.18", .checking),
 			("Visa", "612.33", .creditCard),
 			("Brokerage", "24,310.55", .investment),

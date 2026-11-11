@@ -108,5 +108,5 @@ public protocol BudgetLibrary: Sendable {
 	func createBudget(_ budget: NewBudget, into directory: URL) async throws -> any BudgetSession
 	func currencies() async throws -> [CurrencyOption]
 	/// Reads an amount the way every amount field does, arithmetic included.
-	func evaluateAmount(_ text: String) async throws -> Int64
+	func evaluateAmount(_ text: String, style: NumberStyle) async throws -> Int64
 }

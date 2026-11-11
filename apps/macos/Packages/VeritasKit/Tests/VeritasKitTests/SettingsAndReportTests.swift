@@ -230,5 +230,5 @@ final class MaintainedLibrary: BudgetLibrary, @unchecked Sendable {
 	}
 
 	func currencies() async throws -> [CurrencyOption] { FakeAmounts.currencies }
-	func evaluateAmount(_ text: String) async throws -> Int64 { try FakeAmounts.evaluate(text) }
+	func evaluateAmount(_ text: String, style: NumberStyle) async throws -> Int64 { try FakeAmounts.evaluate(text) }
 }

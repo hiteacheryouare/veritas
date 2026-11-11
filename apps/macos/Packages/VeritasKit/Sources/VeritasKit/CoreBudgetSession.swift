@@ -45,30 +45,40 @@ final class CoreBudgetSession: BudgetSession {
 		_ = try await Core.run { try session.maintain() }
 	}
 
-	/// The sandbox lets Veritas write the file the user chose, but nothing beside
-	/// it, so the core writes into a replacement folder and the file moves into place.
+	/// In the sandbox the core writes only in the app's own folders (contract v2), so
+	/// the zip is made in the temporary directory, then moved onto the file the user chose.
 	func exportActualZip(to destination: URL) async throws -> [AuditFinding] {
 		let files = FileManager.default
-		let staging: URL
-		do {
-			staging = try files.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: destination, create: true)
-		} catch {
-			throw FfiError.Io(message: "Can't prepare the export next to \(destination.path(percentEncoded: false)). Check the folder still exists.")
-		}
+		let staging = files.temporaryDirectory.appending(path: "export-\(UUID().uuidString)", directoryHint: .isDirectory)
 		defer { try? files.removeItem(at: staging) }
 		let staged = staging.appending(path: destination.lastPathComponent)
+		do {
+			try files.createDirectory(at: staging, withIntermediateDirectories: true)
+		} catch {
+			throw FfiError.Io(message: "Can't prepare the export in \(staging.path(percentEncoded: false)). Check the disk has space.")
+		}
 		let session = session
 		let findings = try await Core.call { try await session.exportActualZip(to: staged.path(percentEncoded: false)) }
 		do {
-			if files.fileExists(atPath: destination.path(percentEncoded: false)) {
-				_ = try files.replaceItemAt(destination, withItemAt: staged)
-			} else {
-				try files.moveItem(at: staged, to: destination)
-			}
+			try Self.place(staged, at: destination)
 		} catch {
 			throw FfiError.Io(message: "Can't write \(destination.path(percentEncoded: false)). Check you can save files in that folder.")
 		}
 		return findings
+	}
+
+	/// Copies onto the destination's volume first, so the final replace is atomic there.
+	private static func place(_ file: URL, at destination: URL) throws {
+		let files = FileManager.default
+		let nearby = try files.url(for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: destination, create: true)
+		defer { try? files.removeItem(at: nearby) }
+		let copy = nearby.appending(path: destination.lastPathComponent)
+		try files.copyItem(at: file, to: copy)
+		if files.fileExists(atPath: destination.path(percentEncoded: false)) {
+			_ = try files.replaceItemAt(destination, withItemAt: copy)
+		} else {
+			try files.moveItem(at: copy, to: destination)
+		}
 	}
 
 	func observeChanges(_ changed: @escaping @Sendable () -> Void) async throws {

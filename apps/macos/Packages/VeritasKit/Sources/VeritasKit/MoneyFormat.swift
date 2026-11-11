@@ -9,6 +9,8 @@ public struct MoneyFormat: Hashable, Sendable {
 	public var currencySymbol: String
 	public var groupingSeparator: String
 	public var decimalSeparator: String
+	/// Lakh and crore grouping (`1,00,000.33`): three digits, then twos.
+	public var groupsInTwosAfterThousands = false
 
 	public init(currencySymbol: String = "$", groupingSeparator: String = ",", decimalSeparator: String = ".") {
 		self.currencySymbol = currencySymbol
@@ -31,12 +33,14 @@ public struct MoneyFormat: Hashable, Sendable {
 		case .dotComma: (".", ",")
 		case .spaceComma: ("\u{202F}", ",")
 		case .apostropheDot: ("'", ".")
+		case .commaDotIn: (",", ".")
 		}
 		self.init(
 			currencySymbol: format.currency.map(Self.symbol(forCurrency:)) ?? "",
 			groupingSeparator: separators.grouping,
 			decimalSeparator: separators.decimal
 		)
+		groupsInTwosAfterThousands = format.style == .commaDotIn
 	}
 
 	static func symbol(forCurrency code: String) -> String {
@@ -65,7 +69,11 @@ public struct MoneyFormat: Hashable, Sendable {
 		let cents = magnitude % 100
 		var grouped = ""
 		for (index, digit) in whole.enumerated() {
-			if index > 0, (whole.count - index) % 3 == 0 {
+			let remaining = whole.count - index
+			let startsGroup = groupsInTwosAfterThousands
+				? remaining == 3 || (remaining > 3 && (remaining - 3) % 2 == 0)
+				: remaining % 3 == 0
+			if index > 0, startsGroup {
 				grouped += groupingSeparator
 			}
 			grouped.append(digit)

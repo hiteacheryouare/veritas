@@ -98,7 +98,7 @@ struct StubLibrary: BudgetLibrary {
 	}
 
 	/// Plain decimals only. The real reader is the core's.
-	func evaluateAmount(_ text: String) async throws -> Int64 {
+	func evaluateAmount(_ text: String, style: NumberStyle) async throws -> Int64 {
 		let plain = text.replacing(",", with: "").trimmingCharacters(in: .whitespaces)
 		guard plain.wholeMatch(of: /-?\d+(\.\d+)?/) != nil, let value = Decimal(string: plain) else {
 			throw FfiError.Invalid(message: "Can't read \(text) as an amount. Fix it or clear it.")

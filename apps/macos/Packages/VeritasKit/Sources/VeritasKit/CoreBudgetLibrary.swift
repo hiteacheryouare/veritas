@@ -39,34 +39,28 @@ public struct CoreBudgetLibrary: BudgetLibrary {
 	}
 
 	public func createBudget(_ budget: NewBudget, into directory: URL) async throws -> any BudgetSession {
-		guard budget.accounts.isEmpty else {
-			throw Core.missing("starting accounts in createBudget")
-		}
 		try makeBudgetsDirectory()
 		let path = directory.path(percentEncoded: false)
-		let format = NumberFormat(currency: budget.currencyCode, style: budget.numberStyle, hideDecimals: false)
-		let options = NewBudgetOptions(retirement401k: budget.hasRetirementPlan, hsa: budget.hasHealthSavingsAccount)
+		let format = NumberFormat(currency: budget.currencyCode.isEmpty ? nil : budget.currencyCode, style: budget.numberStyle, hideDecimals: false)
+		let options = NewBudgetOptions(
+			retirement401k: budget.hasRetirementPlan,
+			hsa: budget.hasHealthSavingsAccount,
+			accounts: budget.accounts.map { NewAccount(name: $0.name, kind: $0.type, startingBalance: $0.balance) }
+		)
 		return CoreBudgetSession(try await Core.call {
 			try await Session.createBudget(name: budget.name, directory: path, format: format, options: options)
 		})
 	}
 
-	/// Until the core lists the currencies Actual supports, setup offers the Mac's own.
+	/// Actual's own currency list, in its order. "None" has an empty code.
 	public func currencies() async throws -> [CurrencyOption] {
-		let locale = Locale.current
-		let code = locale.currency?.identifier ?? "USD"
-		let style: NumberStyle = switch (locale.groupingSeparator, locale.decimalSeparator) {
-		case (".", ","): .dotComma
-		case ("'", _), ("’", _): .apostropheDot
-		case (" ", ","), ("\u{202F}", ","), ("\u{00A0}", ","): .spaceComma
-		default: .commaDot
+		try await Core.run { try VeritasCore.currencies() }.map { currency in
+			CurrencyOption(code: currency.code, name: currency.name, symbol: currency.symbol, numberStyle: currency.numberFormat)
 		}
-		let name = locale.localizedString(forCurrencyCode: code) ?? code
-		return [CurrencyOption(code: code, name: name, symbol: MoneyFormat.symbol(forCurrency: code), numberStyle: style)]
 	}
 
-	public func evaluateAmount(_ text: String) async throws -> Int64 {
-		throw Core.missing("evaluate_amount")
+	public func evaluateAmount(_ text: String, style: NumberStyle) async throws -> Int64 {
+		try await Core.run { try VeritasCore.evaluateAmount(text: text, style: style) }
 	}
 
 	private func makeBudgetsDirectory() throws {
@@ -97,7 +91,4 @@ enum Core {
 		}
 	}
 
-	static func missing(_ export: String) -> FfiError {
-		.Internal(message: "the core doesn't export \(export) yet")
-	}
 }

@@ -85,18 +85,49 @@ struct CoreBudgetLibraryTests {
 		await again.close()
 	}
 
-	@Test func startingAccountsWaitForTheCore() async throws {
+	@Test func aNewBudgetOpensWithItsAccountsInTheirGroups() async throws {
+		// R-IO-0, D56, ST-9.2
 		defer { try? FileManager.default.removeItem(at: budgets) }
 		let budget = NewBudget(
 			name: "Household", currencyCode: "USD", numberStyle: .commaDot,
-			accounts: [StartingAccount(name: "Checking", type: .checking, balance: 100)],
-			hasRetirementPlan: false, hasHealthSavingsAccount: false
+			accounts: [
+				StartingAccount(name: "Checking", type: .checking, balance: 214_018),
+				StartingAccount(name: "Visa", type: .creditCard, balance: 61_233),
+				StartingAccount(name: "Car loan", type: .loan, balance: 980_000)
+			],
+			hasRetirementPlan: true, hasHealthSavingsAccount: false
 		)
+		// Until veritas-store's create_budget lands, the core answers Invalid.
+		await withKnownIssue("veritas-store can't create budgets yet", isIntermittent: true) {
+			let session = try await library.createBudget(budget, into: library.newBudgetDirectory())
+			let overview = try await session.overview()
+			#expect(overview.name == "Household")
+			let groups = Dictionary(uniqueKeysWithValues: overview.accountGroups.map { group in (group.name, group.accounts.map(\.name)) })
+			#expect(groups["Cash"] == ["Checking"])
+			#expect(groups["Credit"] == ["Visa"])
+			#expect(groups["Loans"] == ["Car loan"])
+			#expect(groups["Investments"]?.count == 1, "the 401(k)")
+			#expect(overview.accounts.first { $0.name == "Visa" }?.balance == -61_233)
+			await session.close()
+			#expect(try await library.listBudgets().first?.name == "Household")
+		}
+	}
+
+	@Test func currenciesComeFromActualsTable() async throws {
+		let currencies = try await library.currencies()
+		#expect(currencies.first?.code == "")
+		#expect(currencies.contains { $0.code == "USD" && $0.numberStyle == .commaDot })
+		#expect(currencies.contains { $0.code == "EUR" })
+	}
+
+	@Test func amountsAreReadTheWayActualReadsThem() async throws {
+		#expect(try await library.evaluateAmount("12.50+3", style: .commaDot) == 1_550)
+		#expect(try await library.evaluateAmount("1.234,56", style: .dotComma) == 123_456)
 		await #expect {
-			_ = try await library.createBudget(budget, into: library.newBudgetDirectory())
+			_ = try await library.evaluateAmount("12+", style: .commaDot)
 		} throws: { error in
-			guard case FfiError.Internal(let message) = error else { return false }
-			return message.contains("starting accounts")
+			guard case FfiError.Invalid = error else { return false }
+			return true
 		}
 	}
 }

@@ -56,3 +56,10 @@ struct BudgetMoneyFormatTests {
 		#expect(MoneyFormat(NumberFormat(currency: nil, style: .commaDot, hideDecimals: false)).currency(31_240) == "312.40")
 	}
 }
+
+struct IndianGroupingTests {
+	@Test(arguments: [(Int64(10_000_033), "1,00,000.33"), (99_999_999, "9,99,999.99"), (123_456_789_00, "12,34,56,789.00"), (100_000, "1,000.00"), (5, "0.05")])
+	func lakhAndCroreGrouping(minorUnits: Int64, expected: String) {
+		#expect(MoneyFormat(NumberFormat(currency: nil, style: .commaDotIn, hideDecimals: false)).amount(minorUnits) == expected)
+	}
+}

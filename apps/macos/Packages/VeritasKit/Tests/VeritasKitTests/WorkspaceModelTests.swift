@@ -288,7 +288,7 @@ private final class FakeLibrary: BudgetLibrary, @unchecked Sendable {
 		FakeAmounts.currencies
 	}
 
-	func evaluateAmount(_ text: String) async throws -> Int64 {
+	func evaluateAmount(_ text: String, style: NumberStyle) async throws -> Int64 {
 		try FakeAmounts.evaluate(text)
 	}
 }
