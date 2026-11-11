@@ -865,6 +865,19 @@ impl<'conn> Writer<'conn> {
 		)
 	}
 
+	/// A synced preference, such as `defaultCurrencyCode` or `numberFormat`.
+	/// Actual stores every value as text.
+	pub fn put_preference(&mut self, id: &str, value: &str) -> Result<(), CoreError> {
+		self.tx
+			.execute(
+				"INSERT INTO preferences (id, value) VALUES (?1, ?2) \
+				 ON CONFLICT (id) DO UPDATE SET value = excluded.value",
+				[id, value],
+			)
+			.map(|_| ())
+			.map_err(storage)
+	}
+
 	/// A `veritas_tax_tag` row: which tax bucket an Actual tag means.
 	pub fn put_tax_tag(
 		&mut self,

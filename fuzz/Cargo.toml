@@ -1,0 +1,23 @@
+# The cargo-fuzz targets. A separate workspace so the main build never needs
+# nightly: run with `cargo +nightly fuzz run import_zip`.
+[package]
+name = "veritas-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4.13"
+veritas-interop = { path = "../crates/veritas-interop" }
+
+[[bin]]
+name = "import_zip"
+path = "fuzz_targets/import_zip.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

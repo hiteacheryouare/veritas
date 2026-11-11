@@ -729,4 +729,114 @@ mod tests {
 		assert_eq!(listed[0].folder, scratch.budget());
 		assert_eq!(listed[0].name, overview.budget_name);
 	}
+
+	/// Runs Actual's own API on a zip (tools/actual-oracle `dump`) with its
+	/// clock pinned to `today`: it imports the budget and reports what Actual
+	/// computes. `None` without the oracle, unless CI requires it.
+	fn actual_reads(zip: &Path, today: &str) -> Option<serde_json::Value> {
+		let oracle = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/actual-oracle");
+		if !oracle.join("node_modules").exists() {
+			assert!(
+				std::env::var_os("VERITAS_REQUIRE_ORACLE").is_none(),
+				"VERITAS_REQUIRE_ORACLE is set but tools/actual-oracle/node_modules is missing"
+			);
+			eprintln!("skipping the Actual side: run `cargo xtask oracle setup`");
+			return None;
+		}
+		let output = std::process::Command::new("node")
+			.current_dir(&oracle)
+			.arg("src/main.ts")
+			.arg("dump")
+			.arg(zip)
+			.args(["--today", today])
+			.output()
+			.expect("node runs");
+		assert!(
+			output.status.success(),
+			"Actual couldn't read the export: {}",
+			String::from_utf8_lossy(&output.stderr)
+		);
+		Some(serde_json::from_slice(&output.stdout).unwrap())
+	}
+
+	#[test]
+	fn a_budget_created_in_veritas_exports_into_actual_with_the_same_balances() {
+		// R-IO-0, R-IO-2, D52 to D56: create through the FFI with accounts of
+		// several kinds and the 401(k) and HSA, export, and let Actual import it.
+		use crate::{NewAccount, NewAccountKind, NewBudgetOptions, NumberFormat, NumberStyle};
+		let scratch = Scratch::new("create-export");
+		let account = |name: &str, kind, starting_balance| NewAccount {
+			name: name.to_owned(),
+			kind,
+			starting_balance,
+		};
+		let options = NewBudgetOptions {
+			retirement_401k: true,
+			hsa: true,
+			accounts: vec![
+				account("Checking", NewAccountKind::Checking, 250_000),
+				account("Savings", NewAccountKind::Savings, 1_000_000),
+				account("Visa", NewAccountKind::CreditCard, 45_000),
+				account("Brokerage", NewAccountKind::Investment, 900_000),
+				account("Mortgage", NewAccountKind::Mortgage, 25_000_000),
+				account("Car loan", NewAccountKind::Loan, 1_200_000),
+			],
+		};
+		let format = NumberFormat {
+			currency: Some("USD".to_owned()),
+			style: NumberStyle::CommaDot,
+			hide_decimals: false,
+		};
+		let core = Core::<veritas_store::Store>::create_budget(
+			"Household",
+			&scratch.budget(),
+			&format,
+			&options,
+			&CancelToken::default(),
+		)
+		.unwrap();
+
+		let overview = core.overview().unwrap();
+		assert_eq!(overview.budget_name.as_deref(), Some("Household"));
+		let balances: std::collections::BTreeMap<String, (String, i64)> = overview
+			.groups
+			.iter()
+			.flat_map(|group| group.accounts.iter())
+			.map(|account| (account.id.clone(), (account.name.clone(), account.balance)))
+			.collect();
+		assert_eq!(
+			balances.len(),
+			8,
+			"six accounts plus the 401(k) and HSA: {balances:?}"
+		);
+		let by_name = |name: &str| balances.values().find(|(n, _)| n == name).unwrap().1;
+		assert_eq!(by_name("Visa"), -45_000);
+		assert_eq!(by_name("Mortgage"), -25_000_000);
+		assert_eq!(by_name("Savings"), 1_000_000);
+
+		let zip = scratch.0.join("Household.zip");
+		let findings = core
+			.export_actual_zip(&zip.display().to_string(), &CancelToken::default())
+			.unwrap();
+		assert!(findings.is_empty(), "{findings:?}");
+
+		// The session dates starting balances by its clock; Actual must agree
+		// on what today is.
+		let today = chrono::DateTime::<chrono::Utc>::from(std::time::SystemTime::now())
+			.format("%Y-%m-%d")
+			.to_string();
+		let Some(actual) = actual_reads(&zip, &today) else {
+			return;
+		};
+		let computed = &actual["computed"]["accounts"];
+		for (id, (name, balance)) in &balances {
+			assert_eq!(
+				computed[id]["balance"].as_i64(),
+				Some(*balance),
+				"{name}: Actual reads {}",
+				computed[id]
+			);
+		}
+		assert_eq!(computed.as_object().unwrap().len(), balances.len());
+	}
 }
