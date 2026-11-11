@@ -7,7 +7,9 @@ use veritas_domain::{
 
 use crate::{Classification, ClassifiedRow, Decision, Period};
 
-/// A number and the rows behind it, primary legs only, by date then id.
+/// A number and the rows behind it, by date then id. Flow lines list primary
+/// legs only. The in-transit lines (E7 and its ST-6 twin) list whichever leg of
+/// a pair is dated in the period, mirror legs included.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Line {
 	pub total: Money,
@@ -22,6 +24,8 @@ pub struct CategoryLabels {
 	pub archived: bool,
 	pub deleted: bool,
 	pub closed_goal: bool,
+	/// The uncategorized line: its rows wait for a category.
+	pub needs_review: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -171,10 +175,13 @@ impl Accumulator {
 			.into_iter()
 			.map(|(category, (sum, rows))| {
 				Ok(CategoryLine {
-					labels: category
-						.as_ref()
-						.map(|category| labels(budget, category))
-						.unwrap_or_default(),
+					labels: category.as_ref().map_or(
+						CategoryLabels {
+							needs_review: true,
+							..CategoryLabels::default()
+						},
+						|category| labels(budget, category),
+					),
 					category,
 					total: magnitude(sum)?,
 					rows,
@@ -190,7 +197,7 @@ impl Accumulator {
 	}
 }
 
-fn labels(budget: &BudgetData, id: &CategoryId) -> CategoryLabels {
+pub(crate) fn labels(budget: &BudgetData, id: &CategoryId) -> CategoryLabels {
 	let category = budget.categories.get(id);
 	let group_hidden = category
 		.and_then(|category| budget.category_groups.get(&category.group))
@@ -206,6 +213,7 @@ fn labels(budget: &BudgetData, id: &CategoryId) -> CategoryLabels {
 			.goals
 			.values()
 			.any(|goal| &goal.category == id && goal.status == GoalStatus::Closed),
+		needs_review: false,
 	}
 }
 
