@@ -172,9 +172,9 @@ pub struct TransactionMeta {
 /// Actual's `custom_reports` row as stored. Its text columns stay as Actual
 /// wrote them, so a report Veritas never edits is written back unchanged;
 /// veritas-reports reads the settings out of it.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CustomReportRow {
-	pub id: String,
+	pub id: CustomReportId,
 	pub name: Option<String>,
 	pub start_date: Option<String>,
 	pub end_date: Option<String>,
@@ -194,7 +194,7 @@ pub struct CustomReportRow {
 	pub metadata: Option<String>,
 	pub interval: Option<String>,
 	pub color_scheme: Option<String>,
-	pub tombstone: Option<i64>,
+	pub tombstone: bool,
 	pub include_current: Option<i64>,
 	pub sort_by: Option<String>,
 	pub trim_intervals: Option<i64>,
