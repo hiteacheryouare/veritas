@@ -1,5 +1,6 @@
-//! R-REP-1, R-REP-2 on random budgets: every live non-parent row gets exactly
-//! one kind, and the Net Profit identities (CLS-6) tie on every period.
+//! R-REP-1, R-REP-2, R-REP-7 on random budgets: every live non-parent row
+//! gets exactly one kind, the Net Profit identities (CLS-6) tie, and the
+//! statement checks of ST-3 hold on every period.
 
 #![allow(clippy::unwrap_used)]
 
@@ -10,9 +11,13 @@ use std::collections::BTreeSet;
 use proptest::prelude::*;
 use support::*;
 use veritas_domain::{
-	BudgetData, CategoryKind, CivilDate, Money, SplitRole, TransactionId, TransactionKind,
+	AccountId, AccountKind, AccountMeta, BudgetData, CategoryKind, CivilDate, Money, SplitRole,
+	TransactionId, TransactionKind, YearMonth,
 };
-use veritas_reports::{Classification, Leg, NetProfit, Period, Section, net_profit};
+use veritas_reports::{
+	Classification, Leg, NetProfit, Period, Section, balance_sheet, cash_flow, net_profit,
+	net_worth_by_month, owners_equity,
+};
 
 // Index ACCOUNTS names an account that is never created, so rows there are
 // orphaned and transfers to it lose their counterpart account.
@@ -22,6 +27,8 @@ const CATEGORIES: usize = 5;
 #[derive(Clone, Debug)]
 struct AccountSpec {
 	off_budget: bool,
+	kind: Option<AccountKind>,
+	closed: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -74,6 +81,8 @@ enum MirrorState {
 	Missing,
 	Tombstoned,
 	OneWay,
+	Dated((u32, u32)),
+	OffBy(i64),
 }
 
 fn kind() -> impl Strategy<Value = Option<CategoryKind>> {
@@ -139,6 +148,8 @@ fn op() -> impl Strategy<Value = Op> {
 				1 => Just(MirrorState::Missing),
 				1 => Just(MirrorState::Tombstoned),
 				1 => Just(MirrorState::OneWay),
+				2 => day().prop_map(MirrorState::Dated),
+				1 => (1i64..5_000).prop_map(MirrorState::OffBy),
 			],
 		)
 			.prop_map(|(from, to, day, amount, category, mirror)| Op::Transfer {
@@ -174,7 +185,20 @@ fn op() -> impl Strategy<Value = Op> {
 fn scenario() -> impl Strategy<Value = Scenario> {
 	(
 		proptest::collection::vec(
-			any::<bool>().prop_map(|off_budget| AccountSpec { off_budget }),
+			(
+				any::<bool>(),
+				prop_oneof![
+					Just(None),
+					Just(Some(AccountKind::Asset)),
+					Just(Some(AccountKind::Liability)),
+				],
+				proptest::bool::weighted(0.2),
+			)
+				.prop_map(|(off_budget, kind, closed)| AccountSpec {
+					off_budget,
+					kind,
+					closed,
+				}),
 			ACCOUNTS,
 		),
 		proptest::collection::vec(
@@ -228,6 +252,20 @@ fn build(scenario: &Scenario) -> Book {
 	book.group("Income", true).group("Spending", false);
 	for (index, spec) in accounts.iter().enumerate() {
 		book.account(&account(index), spec.off_budget);
+		book.budget
+			.accounts
+			.get_mut(&AccountId::new(account(index)))
+			.unwrap()
+			.closed = spec.closed;
+		if spec.kind.is_some() {
+			book.budget.account_meta.insert(
+				AccountId::new(account(index)),
+				AccountMeta {
+					kind: spec.kind,
+					..AccountMeta::default()
+				},
+			);
+		}
 	}
 	for (index, spec) in categories.iter().enumerate() {
 		let group = if spec.is_income { "Income" } else { "Spending" };
@@ -301,6 +339,14 @@ fn build(scenario: &Scenario) -> Book {
 							.get_mut(&mirror_id)
 							.unwrap()
 							.transfer = None;
+					}
+					MirrorState::Dated(other_day) => {
+						book.budget.transactions.get_mut(&mirror_id).unwrap().date =
+							date(&on(*other_day));
+					}
+					MirrorState::OffBy(delta) => {
+						let mirror = book.budget.transactions.get_mut(&mirror_id).unwrap();
+						mirror.amount = Money::from_minor(mirror.amount.minor() + delta);
 					}
 				}
 			}
@@ -454,6 +500,7 @@ proptest! {
 					"a mirror's link must be reciprocal"
 				);
 				prop_assert_eq!(primary.decision, row.decision);
+				prop_assert_eq!(primary.amount.minor() + row.amount.minor(), 0);
 			}
 			if row.adjustment_source().is_some() {
 				prop_assert_eq!(row.kind(), TransactionKind::Adjustment);
@@ -479,5 +526,62 @@ proptest! {
 		prop_assert_eq!(sum(|r| r.expenses.total), both.expenses.total.minor());
 		prop_assert_eq!(sum(|r| r.net_cash_flow.total), both.net_cash_flow.total.minor());
 		prop_assert_eq!(sum(|r| r.unreviewed.total), both.unreviewed.total.minor());
+	}
+
+	#[test]
+	fn statements_always_balance_and_reconcile(scenario in scenario()) {
+		let book = build(&scenario);
+		let classification = book.classify();
+		let periods = [
+			(in_2027(1, 1), in_2027(1, 31)),
+			(in_2027(2, 1), in_2027(2, 28)),
+			(in_2027(1, 15), in_2027(3, 10)),
+			(in_2027(3, 1), in_2027(3, 31)),
+		];
+		for (first, last) in periods {
+			let period = Period::new(first, last).unwrap();
+			let equity = owners_equity(&book.budget, &classification, period).unwrap();
+			prop_assert_eq!(equity.unexplained().unwrap(), Money::ZERO, "ST-4 on {:?}", period);
+			let sheet = balance_sheet(&book.budget, &classification, last).unwrap();
+			prop_assert_eq!(
+				sheet.total_assets.checked_sub(sheet.total_liabilities).unwrap(),
+				sheet.net_worth,
+				"ST-3 check 1"
+			);
+			let shown: i64 = sheet
+				.assets
+				.iter()
+				.chain(&sheet.liabilities)
+				.map(|section| section.total.minor())
+				.sum::<i64>();
+			let assets: i64 = sheet.assets.iter().map(|section| section.total.minor()).sum();
+			prop_assert_eq!(assets, sheet.total_assets.minor());
+			prop_assert_eq!(shown - assets, sheet.total_liabilities.minor());
+			prop_assert_eq!(sheet.net_worth, equity.closing, "ST-3 check 3");
+			let report = net_profit(&book.budget, &classification, period).unwrap();
+			prop_assert_eq!(&equity.net_income, &report.net_profit, "ST-3 check 2");
+			let flow = cash_flow(&book.budget, &classification, period).unwrap();
+			prop_assert_eq!(flow.unexplained().unwrap(), Money::ZERO, "ST-3 check 4 on {:?}", period);
+		}
+
+		let january = owners_equity(&book.budget, &classification, Period::new(in_2027(1, 1), in_2027(1, 31)).unwrap()).unwrap();
+		let february = owners_equity(&book.budget, &classification, Period::new(in_2027(2, 1), in_2027(2, 28)).unwrap()).unwrap();
+		prop_assert_eq!(january.closing, february.opening);
+
+		let series = net_worth_by_month(
+			&book.budget,
+			&classification,
+			YearMonth::new(2027, 1).unwrap(),
+			YearMonth::new(2027, 3).unwrap(),
+		)
+		.unwrap();
+		for point in series {
+			let last = Period::month(point.month).last();
+			let sheet = balance_sheet(&book.budget, &classification, last).unwrap();
+			prop_assert_eq!(
+				(point.assets, point.liabilities, point.net_worth),
+				(sheet.total_assets, sheet.total_liabilities, sheet.net_worth)
+			);
+		}
 	}
 }

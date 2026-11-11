@@ -115,9 +115,18 @@ pub struct ClassifiedRow {
 	pub on_budget: bool,
 	/// The other account of a transfer, from the payee's `transfer_acct`.
 	pub transfer_account: Option<AccountId>,
+	/// The other leg of a paired transfer. Its date may differ, since Actual
+	/// does not keep the two legs' dates in sync.
+	pub partner: Option<Partner>,
 	pub decision: Decision,
 	pub leg: Leg,
 	pub flags: Flags,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Partner {
+	pub id: TransactionId,
+	pub date: CivilDate,
 }
 
 impl ClassifiedRow {
@@ -131,6 +140,15 @@ impl ClassifiedRow {
 
 	pub fn is_primary(&self) -> bool {
 		self.leg == Leg::Primary
+	}
+
+	/// A paired leg inside `period` whose partner is dated outside it.
+	pub fn in_transit(&self, period: Period) -> bool {
+		period.contains(self.date)
+			&& self
+				.partner
+				.as_ref()
+				.is_some_and(|partner| !period.contains(partner.date))
 	}
 }
 
@@ -155,6 +173,18 @@ impl Classification {
 		let start = self.rows.partition_point(|row| row.date < period.first());
 		let end = self.rows.partition_point(|row| row.date <= period.last());
 		self.rows.get(start..end).unwrap_or_default()
+	}
+
+	/// Every row dated on or before `date`: what an account balance on that
+	/// date sums.
+	pub fn through(&self, date: CivilDate) -> &[ClassifiedRow] {
+		let end = self.rows.partition_point(|row| row.date <= date);
+		self.rows.get(..end).unwrap_or_default()
+	}
+
+	pub fn before(&self, date: CivilDate) -> &[ClassifiedRow] {
+		let end = self.rows.partition_point(|row| row.date < date);
+		self.rows.get(..end).unwrap_or_default()
 	}
 
 	/// Live rows whose own account is missing from the budget. No account holds
@@ -204,7 +234,13 @@ pub fn classify(budget: &BudgetData) -> Classification {
 	let mut mirrors = Vec::new();
 	for candidate in candidates.values() {
 		let partner = partner(&candidates, candidate);
-		let row = candidate.row();
+		let row = ClassifiedRow {
+			partner: partner.map(|partner| Partner {
+				id: partner.transaction.id.clone(),
+				date: partner.transaction.date,
+			}),
+			..candidate.row()
+		};
 		match decide(budget, candidate, partner) {
 			Outcome::Decided(decision, flags) => rows.push(ClassifiedRow {
 				decision,
@@ -347,6 +383,7 @@ impl<'a> Candidate<'a> {
 				.transfer
 				.as_ref()
 				.map(|transfer| transfer.account.clone()),
+			partner: None,
 			decision: Decision::Uncategorized,
 			leg: Leg::Primary,
 			flags: Flags::default(),
@@ -354,8 +391,9 @@ impl<'a> Candidate<'a> {
 	}
 }
 
-/// The other leg, only when the link is reciprocal: each row points at the
-/// other and sits in the other's transfer account.
+/// The other leg, only when the link is reciprocal (each row points at the
+/// other and sits in the other's transfer account) and the amounts net to
+/// zero. Dates may differ.
 fn partner<'c, 'a>(
 	candidates: &'c BTreeMap<&TransactionId, Candidate<'a>>,
 	candidate: &Candidate<'a>,
@@ -369,7 +407,14 @@ fn partner<'c, 'a>(
 		.transfer
 		.as_ref()
 		.is_some_and(|transfer| transfer.account == own.account);
-	(points_back && other_points_here && other.transaction.account == transfer.account)
+	let nets_to_zero = own
+		.amount
+		.checked_add(other.transaction.amount)
+		.is_ok_and(|sum| sum == Money::ZERO);
+	(points_back
+		&& other_points_here
+		&& nets_to_zero
+		&& other.transaction.account == transfer.account)
 		.then_some(other)
 }
 

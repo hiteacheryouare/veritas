@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 
 use crate::{
 	AccountGroupId, AccountId, AccountKind, BudgetType, CategoryGroupId, CategoryId, CategoryKind,
-	CivilDate, GoalId, GoalStatus, Money, PayeeId, RuleId, ScheduleId, TagId, TransactionId,
-	YearMonth,
+	CivilDate, CustomReportId, DashboardPageId, GoalId, GoalStatus, Money, PayeeId, RuleId,
+	ScheduleId, TagId, TransactionId, WidgetId, YearMonth,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -169,6 +169,61 @@ pub struct TransactionMeta {
 	pub adjustment: bool,
 }
 
+/// Actual's `custom_reports` row as stored. Its text columns stay as Actual
+/// wrote them, so a report Veritas never edits is written back unchanged;
+/// veritas-reports reads the settings out of it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CustomReportRow {
+	pub id: CustomReportId,
+	pub name: Option<String>,
+	pub start_date: Option<String>,
+	pub end_date: Option<String>,
+	pub date_static: Option<i64>,
+	pub date_range: Option<String>,
+	pub mode: Option<String>,
+	pub group_by: Option<String>,
+	pub balance_type: Option<String>,
+	pub show_empty: Option<i64>,
+	pub show_offbudget: Option<i64>,
+	pub show_hidden: Option<i64>,
+	pub show_uncategorized: Option<i64>,
+	pub selected_categories: Option<String>,
+	pub graph_type: Option<String>,
+	pub conditions: Option<String>,
+	pub conditions_op: Option<String>,
+	pub metadata: Option<String>,
+	pub interval: Option<String>,
+	pub color_scheme: Option<String>,
+	pub tombstone: bool,
+	pub include_current: Option<i64>,
+	pub sort_by: Option<String>,
+	pub trim_intervals: Option<i64>,
+	pub show_trend_lines: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DashboardPage {
+	pub id: DashboardPageId,
+	pub name: Option<String>,
+	pub tombstone: bool,
+}
+
+/// One `dashboard` row. `kind` is Actual's widget `type`, kept as text so
+/// widget types Veritas doesn't know survive untouched, and `meta` is the
+/// stored JSON text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Widget {
+	pub id: WidgetId,
+	pub kind: Option<String>,
+	pub width: Option<i64>,
+	pub height: Option<i64>,
+	pub x: Option<i64>,
+	pub y: Option<i64>,
+	pub meta: Option<String>,
+	pub page: Option<DashboardPageId>,
+	pub tombstone: bool,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Goal {
 	pub id: GoalId,
@@ -214,6 +269,9 @@ pub struct BudgetData {
 	/// `veritas_tax_tag`: Actual tag name (without `#`) to TAX-2 bucket id.
 	pub tax_tags: BTreeMap<String, String>,
 	pub goals: BTreeMap<GoalId, Goal>,
+	pub custom_reports: BTreeMap<CustomReportId, CustomReportRow>,
+	pub dashboard_pages: BTreeMap<DashboardPageId, DashboardPage>,
+	pub widgets: BTreeMap<WidgetId, Widget>,
 }
 
 impl BudgetData {
@@ -239,6 +297,9 @@ impl BudgetData {
 			transaction_meta: BTreeMap::new(),
 			tax_tags: BTreeMap::new(),
 			goals: BTreeMap::new(),
+			custom_reports: BTreeMap::new(),
+			dashboard_pages: BTreeMap::new(),
+			widgets: BTreeMap::new(),
 		}
 	}
 
@@ -249,6 +310,21 @@ impl BudgetData {
 		self.category_mapping.get(id)
 	}
 
+	/// The kind a category acts as (CLS-3.1), from its `is_income` flag and
+	/// its `veritas_category_meta` kind. A category the budget doesn't have
+	/// counts as not income.
+	pub fn category_kind(&self, id: &CategoryId) -> CategoryKind {
+		self.effective_category_kind(id).0
+	}
+
+	/// [`BudgetData::category_kind`] plus CLS-3.1's `kind_conflict`: true when
+	/// the stored kind disagrees with Actual's income/expense flag.
+	pub fn effective_category_kind(&self, id: &CategoryId) -> (CategoryKind, bool) {
+		let is_income = self.categories.get(id).is_some_and(|c| c.is_income);
+		let stored = self.category_meta.get(id).and_then(|meta| meta.kind);
+		CategoryKind::effective(is_income, stored)
+	}
+
 	pub fn resolve_payee(&self, id: &PayeeId) -> Option<&PayeeId> {
 		self.payee_mapping.get(id)
 	}
@@ -257,6 +333,57 @@ impl BudgetData {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	/// CLS-3.1 through the budget: the category's flag plus its stored kind.
+	#[test]
+	fn cls_3_1_category_kinds_come_from_the_flag_and_the_metadata() {
+		let mut budget = BudgetData::empty(BudgetType::Envelope);
+		let id = CategoryId::new;
+		for (name, is_income) in [
+			("salary", true),
+			("loan", false),
+			("odd", false),
+			("rent", false),
+		] {
+			budget.categories.insert(
+				id(name),
+				Category {
+					id: id(name),
+					name: name.to_owned(),
+					group: CategoryGroupId::new("g"),
+					is_income,
+					hidden: false,
+					sort_order: 0.0,
+					tombstone: false,
+				},
+			);
+		}
+		let meta = |kind| CategoryMeta {
+			kind: Some(kind),
+			tax_bucket: None,
+			archived_on: None,
+		};
+		budget
+			.category_meta
+			.insert(id("loan"), meta(CategoryKind::DebtPrincipal));
+		budget
+			.category_meta
+			.insert(id("odd"), meta(CategoryKind::Income));
+		assert_eq!(
+			budget.effective_category_kind(&id("salary")),
+			(CategoryKind::Income, false)
+		);
+		assert_eq!(
+			budget.category_kind(&id("loan")),
+			CategoryKind::DebtPrincipal
+		);
+		assert_eq!(
+			budget.effective_category_kind(&id("odd")),
+			(CategoryKind::Expense, true)
+		);
+		assert_eq!(budget.category_kind(&id("rent")), CategoryKind::Expense);
+		assert_eq!(budget.category_kind(&id("missing")), CategoryKind::Expense);
+	}
 
 	#[test]
 	fn categories_resolve_with_one_lookup_like_actuals_views() {

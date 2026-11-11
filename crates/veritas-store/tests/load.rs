@@ -3,60 +3,27 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+mod common;
 
+use std::path::Path;
+
+use common::{Scratch, count, fixture_db};
 use rusqlite::Connection;
 use veritas_domain::{
-	BudgetType, CategoryId, CategoryKind, GoalStatus, Money, PayeeId, ScheduleId, SplitRole,
-	TransactionId, YearMonth,
+	BudgetType, CategoryId, CategoryKind, CoreError, GoalStatus, Money, PayeeId, ReadOnlyReason,
+	ScheduleId, SplitRole, TransactionId, YearMonth,
 };
-use veritas_store::{Store, VERITAS_SCHEMA_VERSION};
-
-struct Scratch(PathBuf);
-
-static NEXT: AtomicU64 = AtomicU64::new(0);
-
-impl Scratch {
-	fn new(label: &str) -> Scratch {
-		let path = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
-			"store-{label}-{}-{}",
-			std::process::id(),
-			NEXT.fetch_add(1, Ordering::Relaxed)
-		));
-		let _ = std::fs::remove_dir_all(&path);
-		std::fs::create_dir_all(&path).unwrap();
-		Scratch(path)
-	}
-}
-
-impl Drop for Scratch {
-	fn drop(&mut self) {
-		let _ = std::fs::remove_dir_all(&self.0);
-	}
-}
-
-fn fixture_db(name: &str, scratch: &Scratch) -> PathBuf {
-	let zip_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-		.join("../../fixtures/synthetic")
-		.join(format!("{name}.zip"));
-	let mut archive = zip::ZipArchive::new(std::fs::File::open(zip_path).unwrap()).unwrap();
-	let db_path = scratch.0.join("db.sqlite");
-	let mut out = std::fs::File::create(&db_path).unwrap();
-	std::io::copy(&mut archive.by_name("db.sqlite").unwrap(), &mut out).unwrap();
-	db_path
-}
-
-fn count(conn: &Connection, sql: &str) -> usize {
-	conn.query_row(sql, [], |row| row.get::<_, i64>(0)).unwrap() as usize
-}
+use veritas_store::{Access, Store, VERITAS_SCHEMA_VERSION};
 
 #[test]
 fn all_features_loads_every_modeled_row_including_tombstones() {
 	let scratch = Scratch::new("all-features");
 	let db_path = fixture_db("all-features", &scratch);
 	let raw = Connection::open(&db_path).unwrap();
-	let loaded = Store::open(&db_path).unwrap().load().unwrap();
+	let loaded = Store::open(&db_path, Access::ReadWrite)
+		.unwrap()
+		.load()
+		.unwrap();
 	let data = &loaded.data;
 
 	assert_eq!(loaded.report.skipped, vec![]);
@@ -204,7 +171,7 @@ fn all_features_loads_every_modeled_row_including_tombstones() {
 #[test]
 fn the_working_copy_runs_in_wal_with_full_sync_and_no_foreign_keys() {
 	let scratch = Scratch::new("pragmas");
-	let store = Store::open(&fixture_db("small", &scratch)).unwrap();
+	let store = Store::open(&fixture_db("small", &scratch), Access::ReadWrite).unwrap();
 	assert_eq!(store.pragma_text("journal_mode").unwrap(), "wal");
 	assert_eq!(store.pragma_text("synchronous").unwrap(), "2");
 	assert_eq!(store.pragma_text("foreign_keys").unwrap(), "0");
@@ -225,7 +192,7 @@ fn adopting_adds_the_veritas_tables_and_leaves_migrations_alone() {
 			.unwrap()
 	};
 	let before = migrations(&db_path);
-	let mut store = Store::open(&db_path).unwrap();
+	let mut store = Store::open(&db_path, Access::ReadWrite).unwrap();
 	store.adopt().unwrap();
 	store.adopt().unwrap();
 	assert_eq!(store.migration_ids().unwrap().len(), 60);
@@ -258,10 +225,10 @@ fn adopting_adds_the_veritas_tables_and_leaves_migrations_alone() {
 }
 
 #[test]
-fn a_budget_from_another_veritas_schema_is_refused_on_adopt() {
+fn a_budget_from_a_newer_veritas_schema_is_read_only() {
 	let scratch = Scratch::new("schema-version");
 	let db_path = fixture_db("small", &scratch);
-	let mut store = Store::open(&db_path).unwrap();
+	let mut store = Store::open(&db_path, Access::ReadWrite).unwrap();
 	store.adopt().unwrap();
 	Connection::open(&db_path)
 		.unwrap()
@@ -270,14 +237,25 @@ fn a_budget_from_another_veritas_schema_is_refused_on_adopt() {
 			[],
 		)
 		.unwrap();
-	assert!(store.adopt().is_err());
+	assert!(matches!(
+		store.adopt(),
+		Err(CoreError::ReadOnly(ReadOnlyReason::NewerVeritasSchema))
+	));
+	Connection::open(&db_path)
+		.unwrap()
+		.execute(
+			"UPDATE veritas_meta SET value = 'banana' WHERE key = 'schema_version'",
+			[],
+		)
+		.unwrap();
+	assert!(matches!(store.adopt(), Err(CoreError::Storage(_))));
 }
 
 #[test]
 fn veritas_metadata_loads_when_present() {
 	let scratch = Scratch::new("veritas-meta");
 	let db_path = fixture_db("small", &scratch);
-	let mut store = Store::open(&db_path).unwrap();
+	let mut store = Store::open(&db_path, Access::ReadWrite).unwrap();
 	assert!(store.load().unwrap().data.goals.is_empty());
 	store.adopt().unwrap();
 	let raw = Connection::open(&db_path).unwrap();
@@ -293,6 +271,7 @@ fn veritas_metadata_loads_when_present() {
 		"INSERT INTO veritas_category_meta VALUES ('{category}', 'savings', 'hsa', 20270115);
 		 INSERT INTO veritas_account_meta VALUES ('{account}', 'liability', 649, 31250, 15, 'Credit union');
 		 INSERT INTO veritas_category_meta VALUES ('kindless', NULL, NULL, NULL);
+		 INSERT INTO veritas_tax_tag VALUES ('medical', 'medical'), ('gift', 'none');
 		 INSERT INTO veritas_transaction_meta VALUES ('t-adjust', 1), ('t-plain', 0);
 		 INSERT INTO veritas_goal (id, category_id, target_cents, target_date, status, reached_month, created_at)
 		   VALUES ('g1', '{category}', 500000, 20271201, 'reached', '2027-06', 0);"
@@ -304,6 +283,8 @@ fn veritas_metadata_loads_when_present() {
 	assert_eq!(meta.tax_bucket.as_deref(), Some("hsa"));
 	assert_eq!(meta.archived_on.unwrap().to_string(), "2027-01-15");
 	assert_eq!(data.category_meta[&CategoryId::new("kindless")].kind, None);
+	assert_eq!(data.tax_tags["medical"], "medical");
+	assert_eq!(data.tax_tags["gift"], "none");
 	assert!(data.transaction_meta[&TransactionId::new("t-adjust")].adjustment);
 	assert!(!data.transaction_meta[&TransactionId::new("t-plain")].adjustment);
 	let loan = &data.account_meta[&veritas_domain::AccountId::new(&account)];
@@ -338,6 +319,11 @@ fn actuals_quirks_load_and_unrepresentable_rows_are_counted_not_fatal() {
 		 INSERT INTO zero_budgets (id, month, category, amount) VALUES ('2019-04-{category}', 201904, '{category}', 99);
 		 INSERT INTO transactions (id, acct, amount, date, description) VALUES ('null-amount', '{account}', NULL, 20261101, NULL);
 		 INSERT INTO transactions (id, acct, amount, date) VALUES ('no-date', '{account}', 100, NULL);
+		 INSERT INTO transactions (id, acct, amount, date, isChild, parent_id) VALUES ('child-flag-2', '{account}', 1, 20261101, 2, 'parent');
+		 INSERT INTO transactions (id, acct, amount, date, isChild) VALUES ('child-flag-text', '{account}', 1, 20261101, 'yes');
+		 INSERT INTO transactions (id, acct, amount, date, tombstone) VALUES ('null-tombstone', '{account}', 1, 20261101, NULL);
+		 INSERT INTO categories (id, name, cat_group, tombstone) VALUES ('null-tombstone', 'Gone', '{group}', NULL);
+		 INSERT INTO transactions (id, acct, amount, date, imported_description) VALUES ('imported', '{account}', -100, 20261101, 'ACME*STORE 123');
 		 INSERT INTO transactions (id, acct, amount, date) VALUES ('bad-date', '{account}', 100, 20270230);
 		 INSERT INTO transactions (id, acct, amount, date) VALUES ('fraction', '{account}', 12.5, 20261101);
 		 INSERT INTO transactions (id, acct, amount, date) VALUES ('no-account', NULL, 100, 20261101);
@@ -359,7 +345,10 @@ fn actuals_quirks_load_and_unrepresentable_rows_are_counted_not_fatal() {
 	.unwrap();
 	drop(raw);
 
-	let loaded = Store::open(&db_path).unwrap().load().unwrap();
+	let loaded = Store::open(&db_path, Access::ReadWrite)
+		.unwrap()
+		.load()
+		.unwrap();
 	let data = &loaded.data;
 	let march = YearMonth::parse("2019-03").unwrap();
 	let april = YearMonth::parse("2019-04").unwrap();
@@ -372,6 +361,11 @@ fn actuals_quirks_load_and_unrepresentable_rows_are_counted_not_fatal() {
 	assert!(!april_cell.carryover);
 
 	let transaction = |id: &str| data.transactions.get(&TransactionId::new(id));
+	assert_eq!(
+		transaction("imported").unwrap().imported_payee.as_deref(),
+		Some("ACME*STORE 123")
+	);
+	assert_eq!(transaction("null-amount").unwrap().imported_payee, None);
 	assert_eq!(transaction("null-amount").unwrap().amount, Money::ZERO);
 	assert_eq!(transaction("null-amount").unwrap().payee, None);
 	assert_eq!(transaction("parent").unwrap().category, None);
@@ -391,7 +385,10 @@ fn actuals_quirks_load_and_unrepresentable_rows_are_counted_not_fatal() {
 		data.rules[&veritas_domain::RuleId::new("odd-stage")].stage,
 		veritas_domain::RuleStage::Default
 	);
-	assert_eq!(data.notes["empty-note"], "");
+	assert!(!data.notes.contains_key("empty-note"));
+	// Actual's transaction views use IFNULL(tombstone, 0); every other read is tombstone = 0.
+	assert!(!transaction("null-tombstone").unwrap().tombstone);
+	assert!(data.categories[&CategoryId::new("null-tombstone")].tombstone);
 	assert_eq!(data.holds[&march], None);
 
 	let mut skipped: Vec<(&str, Option<String>)> = loaded
@@ -411,6 +408,8 @@ fn actuals_quirks_load_and_unrepresentable_rows_are_counted_not_fatal() {
 			("rules", some("no-actions")),
 			("schedules", some("no-rule")),
 			("transactions", some("bad-date")),
+			("transactions", some("child-flag-2")),
+			("transactions", some("child-flag-text")),
 			("transactions", some("fraction")),
 			("transactions", some("no-account")),
 			("transactions", some("no-date")),
@@ -432,9 +431,14 @@ fn a_tracking_budget_reads_reflect_budgets() {
 	.unwrap();
 	let reflect = count(&raw, "SELECT count(*) FROM reflect_budgets");
 	drop(raw);
-	let data = Store::open(&db_path).unwrap().load().unwrap().data;
+	let data = Store::open(&db_path, Access::ReadWrite)
+		.unwrap()
+		.load()
+		.unwrap()
+		.data;
 	assert_eq!(data.budget_type, BudgetType::Tracking);
 	assert_eq!(data.budget_cells.len(), reflect);
+	assert!(data.holds.is_empty(), "tracking budgets have no holds");
 }
 
 #[test]
@@ -447,7 +451,7 @@ fn a_missing_or_legacy_budget_type_is_envelope() {
 		[],
 	)
 	.unwrap();
-	let store = Store::open(&db_path).unwrap();
+	let store = Store::open(&db_path, Access::ReadWrite).unwrap();
 	assert_eq!(store.load().unwrap().data.budget_type, BudgetType::Envelope);
 	raw.execute("DELETE FROM preferences WHERE id = 'budgetType'", [])
 		.unwrap();
@@ -481,7 +485,10 @@ fn loaded_counts(loaded: &veritas_store::Loaded) -> Vec<(&'static str, usize)> {
 fn no_odd_value_in_any_modeled_column_aborts_the_load_or_drops_a_row_silently() {
 	let scratch = Scratch::new("odd-values");
 	let pristine = fixture_db("all-features", &scratch);
-	let baseline = Store::open(&pristine).unwrap().load().unwrap();
+	let baseline = Store::open(&pristine, Access::ReadWrite)
+		.unwrap()
+		.load()
+		.unwrap();
 	assert_eq!(baseline.report.skipped, vec![]);
 	let baseline_counts = loaded_counts(&baseline);
 	let mut tables: Vec<&str> = baseline_counts.iter().map(|(table, _)| *table).collect();
@@ -515,10 +522,16 @@ fn no_odd_value_in_any_modeled_column_aborts_the_load_or_drops_a_row_silently() 
 				{
 					continue;
 				}
-				let rows = count(&raw, &format!("SELECT count(*) FROM {table}"));
+				// A NULL note is how Actual clears one, so it is no row at all.
+				let present = if table == "notes" {
+					" WHERE note IS NOT NULL"
+				} else {
+					""
+				};
+				let rows = count(&raw, &format!("SELECT count(*) FROM {table}{present}"));
 				drop(raw);
 
-				let loaded = Store::open(&db_path)
+				let loaded = Store::open(&db_path, Access::ReadWrite)
 					.unwrap()
 					.load()
 					.unwrap_or_else(|error| panic!("{case}: the load failed: {error}"));
