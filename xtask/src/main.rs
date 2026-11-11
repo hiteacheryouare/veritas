@@ -180,8 +180,10 @@ fn template() -> Result {
 		"--out".to_owned(),
 		zip_path.to_string_lossy().into_owned(),
 	])?;
-	let file = std::fs::File::open(&zip_path).map_err(|e| format!("{}: {e}", zip_path.display()))?;
-	let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("{}: {e}", zip_path.display()))?;
+	let file =
+		std::fs::File::open(&zip_path).map_err(|e| format!("{}: {e}", zip_path.display()))?;
+	let mut archive =
+		zip::ZipArchive::new(file).map_err(|e| format!("{}: {e}", zip_path.display()))?;
 	let mut db = archive
 		.by_name("db.sqlite")
 		.map_err(|e| format!("the template zip has no db.sqlite: {e}"))?;
@@ -189,7 +191,8 @@ fn template() -> Result {
 	if let Some(parent) = target.parent() {
 		std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
 	}
-	let mut out = std::fs::File::create(&target).map_err(|e| format!("{}: {e}", target.display()))?;
+	let mut out =
+		std::fs::File::create(&target).map_err(|e| format!("{}: {e}", target.display()))?;
 	std::io::copy(&mut db, &mut out).map_err(|e| format!("{}: {e}", target.display()))?;
 	drop(out);
 	let _ = std::fs::remove_file(&zip_path);
