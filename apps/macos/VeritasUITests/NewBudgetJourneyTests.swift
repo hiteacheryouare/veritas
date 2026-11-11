@@ -42,6 +42,13 @@ final class NewBudgetJourneyTests: XCTestCase {
 		balance.click()
 		balance.typeKey("a", modifierFlags: .command)
 		balance.typeText("2140.18")
+		let type = app.popUpButtons["newBudget.account.type"].firstMatch
+		XCTAssertEqual(type.value as? String, "Checking")
+		type.click()
+		XCTAssertTrue(app.menuItems["Savings"].waitForExistence(timeout: 5))
+		attachScreenshot(of: app, named: "new-budget-2-type-picker", wholeScreen: true)
+		app.menuItems["Savings"].click()
+		XCTAssertEqual(type.value as? String, "Savings")
 		attachScreenshot(of: app, named: "new-budget-2-accounts")
 		app.buttons["newBudget.continue"].click()
 
@@ -53,6 +60,7 @@ final class NewBudgetJourneyTests: XCTestCase {
 
 		XCTAssertTrue(app.screen("budget").waitForExistence(timeout: 10))
 		XCTAssertTrue(app.sidebar("account.new-0").exists)
+		XCTAssertTrue(app.staticTexts["Cash"].exists)
 		attachScreenshot(of: app, named: "new-budget-opened")
 	}
 

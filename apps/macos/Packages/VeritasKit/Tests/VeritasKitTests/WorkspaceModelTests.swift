@@ -217,7 +217,7 @@ private final class FakeSession: BudgetSession, @unchecked Sendable {
 			canUndo: undoable > 0,
 			canRedo: redoable > 0,
 			isChecking: checking,
-			accountGroups: [AccountGroup(name: "Cash", accounts: [AccountSummary(id: "chk", name: "Checking", balance: 214_018)])]
+			accountGroups: [SidebarGroup(name: "Cash", accounts: [SidebarAccount(id: "chk", name: "Checking", balance: 214_018)])]
 		)
 	}
 
@@ -239,9 +239,10 @@ private final class FakeSession: BudgetSession, @unchecked Sendable {
 		}
 	}
 
-	func exportActualZip(to destination: URL) async throws {
+	func exportActualZip(to destination: URL) async throws -> [AuditFinding] {
 		exports += 1
 		if let exportError { throw exportError }
+		return []
 	}
 
 	func observeChanges(_ changed: @escaping @Sendable () -> Void) async throws {

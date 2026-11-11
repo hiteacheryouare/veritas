@@ -39,7 +39,7 @@ private struct AccountDraftRow: View {
 			HStack(spacing: Spacing.s3) {
 				TextField("Name", text: $account.name)
 					.accessibilityIdentifier("newBudget.account.name")
-				TextField("Starting balance", text: $account.balance)
+				TextField(account.type.isOwed ? "Amount owed" : "Starting balance", text: $account.balance)
 					.font(.figures(.body))
 					.multilineTextAlignment(.trailing)
 					.frame(width: 150)
@@ -49,9 +49,7 @@ private struct AccountDraftRow: View {
 						}
 					}
 					.accessibilityIdentifier("newBudget.account.balance")
-				Toggle("Off budget", isOn: $account.isOffBudget)
-					.toggleStyle(.checkbox)
-					.accessibilityIdentifier("newBudget.account.offBudget")
+				AccountTypePicker(type: $account.type)
 				Button(action: remove) {
 					Image(systemName: "minus.circle")
 				}

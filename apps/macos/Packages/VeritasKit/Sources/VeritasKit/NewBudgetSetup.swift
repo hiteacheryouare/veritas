@@ -17,7 +17,7 @@ public final class NewBudgetSetup: Identifiable {
 		public let id = UUID()
 		public var name = ""
 		public var balance = ""
-		public var isOffBudget = false
+		public var type = AccountType.checking
 		public var problem: String?
 
 		public init() {}
@@ -31,7 +31,7 @@ public final class NewBudgetSetup: Identifiable {
 	public var name = ""
 	public private(set) var currencies: [CurrencyOption] = []
 	public private(set) var currencyCode = ""
-	public var numberFormat = NumberFormat.commaDot
+	public var numberStyle = NumberStyle.commaDot
 	public var accounts = [AccountDraft()]
 	public var hasRetirementPlan = false
 	public var hasHealthSavingsAccount = false
@@ -64,11 +64,11 @@ public final class NewBudgetSetup: Identifiable {
 		}
 	}
 
-	/// Picking a currency also picks the number format it usually uses. The user can change it after.
+	/// Picking a currency also picks the number style it usually uses. The user can change it after.
 	public func choose(currency code: String) {
 		guard let currency = currencies.first(where: { $0.code == code }) else { return }
 		currencyCode = currency.code
-		numberFormat = currency.numberFormat
+		numberStyle = currency.numberStyle
 	}
 
 	public func addAccount() {
@@ -101,7 +101,7 @@ public final class NewBudgetSetup: Identifiable {
 			return NewBudget(
 				name: name.trimmingCharacters(in: .whitespaces),
 				currencyCode: currencyCode,
-				numberFormat: numberFormat,
+				numberStyle: numberStyle,
 				accounts: accounts,
 				hasRetirementPlan: hasRetirementPlan,
 				hasHealthSavingsAccount: hasHealthSavingsAccount
@@ -133,7 +133,7 @@ public final class NewBudgetSetup: Identifiable {
 			let text = draft.balance.trimmingCharacters(in: .whitespaces)
 			do {
 				let balance = text.isEmpty ? 0 : try await library.evaluateAmount(text)
-				result.append(StartingAccount(name: name, balance: balance, isOffBudget: draft.isOffBudget))
+				result.append(StartingAccount(name: name, type: draft.type, balance: balance))
 			} catch {
 				accounts[index].problem = Self.message(for: error)
 				allGood = false

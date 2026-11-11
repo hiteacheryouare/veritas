@@ -5,8 +5,8 @@ import VeritasKit
 /// Stands in for the core's amount reader in tests: plain decimals only.
 enum FakeAmounts {
 	static let currencies = [
-		CurrencyOption(code: "USD", name: "US Dollar", symbol: "$", numberFormat: .commaDot),
-		CurrencyOption(code: "EUR", name: "Euro", symbol: "€", numberFormat: .dotComma)
+		CurrencyOption(code: "USD", name: "US Dollar", symbol: "$", numberStyle: .commaDot),
+		CurrencyOption(code: "EUR", name: "Euro", symbol: "€", numberStyle: .dotComma)
 	]
 
 	static func evaluate(_ text: String) throws -> Int64 {

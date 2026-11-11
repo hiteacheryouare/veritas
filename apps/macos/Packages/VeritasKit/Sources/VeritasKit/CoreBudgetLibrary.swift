@@ -15,42 +15,72 @@ public struct CoreBudgetLibrary: BudgetLibrary {
 
 	public func open(directory: URL) async throws -> any BudgetSession {
 		let path = directory.path(percentEncoded: false)
-		return CoreBudgetSession(try await Core.run { try Session.open(directory: path) })
+		return CoreBudgetSession(try await Core.call { try await Session.open(directory: path) })
 	}
 
 	public func importActualZip(_ zip: URL, into directory: URL) async throws -> any BudgetSession {
-		let budgets = budgetsDirectory
+		try makeBudgetsDirectory()
 		let zipPath = zip.path(percentEncoded: false)
-		let directoryPath = directory.path(percentEncoded: false)
-		let session = try await Core.run {
-			try FileManager.default.createDirectory(at: budgets, withIntermediateDirectories: true)
-			return try Session.importActualZip(zip: zipPath, intoDirectory: directoryPath)
-		}
-		return CoreBudgetSession(session)
+		let path = directory.path(percentEncoded: false)
+		return CoreBudgetSession(try await Core.call { try await Session.importActualZip(zip: zipPath, intoDirectory: path) })
 	}
 
 	public func createBudget(_ budget: NewBudget, into directory: URL) async throws -> any BudgetSession {
-		throw Core.missing("Session.create_budget")
+		guard budget.accounts.isEmpty else {
+			throw Core.missing("starting accounts in createBudget")
+		}
+		try makeBudgetsDirectory()
+		let path = directory.path(percentEncoded: false)
+		let format = NumberFormat(currency: budget.currencyCode, style: budget.numberStyle, hideDecimals: false)
+		let options = NewBudgetOptions(retirement401k: budget.hasRetirementPlan, hsa: budget.hasHealthSavingsAccount)
+		return CoreBudgetSession(try await Core.call {
+			try await Session.createBudget(name: budget.name, directory: path, format: format, options: options)
+		})
 	}
 
+	/// Until the core lists the currencies Actual supports, setup offers the Mac's own.
 	public func currencies() async throws -> [CurrencyOption] {
-		throw Core.missing("currencies")
+		let locale = Locale.current
+		let code = locale.currency?.identifier ?? "USD"
+		let style: NumberStyle = switch (locale.groupingSeparator, locale.decimalSeparator) {
+		case (".", ","): .dotComma
+		case ("'", _), ("’", _): .apostropheDot
+		case (" ", ","), ("\u{202F}", ","), ("\u{00A0}", ","): .spaceComma
+		default: .commaDot
+		}
+		let name = locale.localizedString(forCurrencyCode: code) ?? code
+		return [CurrencyOption(code: code, name: name, symbol: MoneyFormat.symbol(forCurrency: code), numberStyle: style)]
 	}
 
 	public func evaluateAmount(_ text: String) async throws -> Int64 {
 		throw Core.missing("evaluate_amount")
 	}
+
+	private func makeBudgetsDirectory() throws {
+		do {
+			try FileManager.default.createDirectory(at: budgetsDirectory, withIntermediateDirectories: true)
+		} catch {
+			throw FfiError.Io(message: "Can't create \(budgetsDirectory.path(percentEncoded: false)). Check the disk has space.")
+		}
+	}
 }
 
 enum Core {
-	/// Core calls block while SQLite works, so they run off the main actor.
+	/// Synchronous core calls block while SQLite works, so they run off the main actor.
 	static func run<T: Sendable>(_ call: @escaping @Sendable () throws -> T) async throws -> T {
+		try await self.call { try await Task.detached(priority: .userInitiated, operation: call).value }
+	}
+
+	/// Everything the core throws is an `FfiError`. A cancelled Swift task becomes `Cancelled`.
+	static func call<T>(_ call: () async throws -> T) async throws -> T {
 		do {
-			return try await Task.detached(priority: .userInitiated, operation: call).value
+			return try await call()
 		} catch let error as FfiError {
 			throw error
+		} catch is CancellationError {
+			throw FfiError.Cancelled
 		} catch {
-			throw FfiError.Io(message: error.localizedDescription)
+			throw FfiError.Internal(message: String(describing: error))
 		}
 	}
 

@@ -66,16 +66,21 @@ struct StubLibrary: BudgetLibrary {
 	}
 
 	func createBudget(_ budget: NewBudget, into directory: URL) async throws -> any BudgetSession {
-		StubSession(readOnly: readOnly, name: budget.name, accounts: budget.accounts.enumerated().map { index, account in
-			AccountSummary(id: "new-\(index)", name: account.name, balance: account.balance)
-		})
+		let accounts = budget.accounts.enumerated().map { index, account in
+			(account.type.group, SidebarAccount(id: "new-\(index)", name: account.name, balance: account.isOwedBalance))
+		}
+		let groups = VeritasCore.AccountGroup.allCases.compactMap { group -> SidebarGroup? in
+			let members = accounts.filter { $0.0 == group }.map(\.1)
+			return members.isEmpty ? nil : SidebarGroup(name: group.title, accounts: members)
+		}
+		return StubSession(readOnly: readOnly, name: budget.name, groups: groups)
 	}
 
 	func currencies() async throws -> [CurrencyOption] {
 		[
-			CurrencyOption(code: "USD", name: "US Dollar", symbol: "$", numberFormat: .commaDot),
-			CurrencyOption(code: "EUR", name: "Euro", symbol: "€", numberFormat: .dotComma),
-			CurrencyOption(code: "CHF", name: "Swiss Franc", symbol: "Fr.", numberFormat: .apostropheDot)
+			CurrencyOption(code: "USD", name: "US Dollar", symbol: "$", numberStyle: .commaDot),
+			CurrencyOption(code: "EUR", name: "Euro", symbol: "€", numberStyle: .dotComma),
+			CurrencyOption(code: "CHF", name: "Swiss Franc", symbol: "Fr.", numberStyle: .apostropheDot)
 		]
 	}
 
@@ -92,21 +97,21 @@ struct StubLibrary: BudgetLibrary {
 final class StubSession: BudgetSession {
 	let readOnly: ReadOnlyKind?
 	let name: String
-	let accountGroups: [AccountGroup]
+	let accountGroups: [SidebarGroup]
 
 	init(readOnly: ReadOnlyKind?) {
 		self.readOnly = readOnly
 		name = "Stub"
 		accountGroups = [
-			AccountGroup(name: "Cash", accounts: [AccountSummary(id: "checking", name: "Checking", balance: 0)]),
-			AccountGroup(name: "Credit", accounts: [AccountSummary(id: "card", name: "Card", balance: 0)])
+			SidebarGroup(name: "Cash", accounts: [SidebarAccount(id: "checking", name: "Checking", balance: 0)]),
+			SidebarGroup(name: "Credit", accounts: [SidebarAccount(id: "card", name: "Card", balance: 0)])
 		]
 	}
 
-	init(readOnly: ReadOnlyKind?, name: String, accounts: [AccountSummary]) {
+	init(readOnly: ReadOnlyKind?, name: String, groups: [SidebarGroup]) {
 		self.readOnly = readOnly
 		self.name = name
-		accountGroups = accounts.isEmpty ? [] : [AccountGroup(name: "Accounts", accounts: accounts)]
+		accountGroups = groups
 	}
 
 	let canExport = true
@@ -121,10 +126,19 @@ final class StubSession: BudgetSession {
 
 	func maintain() async throws {}
 
-	func exportActualZip(to destination: URL) async throws {}
+	func exportActualZip(to destination: URL) async throws -> [AuditFinding] { [] }
 
 	func observeChanges(_ changed: @escaping @Sendable () -> Void) async throws {}
 
 	func close() async {}
+}
+#endif
+
+#if DEBUG
+private extension StartingAccount {
+	/// Liabilities are negative, as the core stores them.
+	var isOwedBalance: Int64 {
+		type.isOwed ? -balance : balance
+	}
 }
 #endif

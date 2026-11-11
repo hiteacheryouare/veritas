@@ -4,9 +4,9 @@ import VeritasKit
 struct CommandPaletteTests {
 	let index = PaletteIndex(
 		accounts: [
-			AccountSummary(id: "chk", name: "Checking", balance: 214_018),
-			AccountSummary(id: "sav", name: "Savings", balance: 841_200),
-			AccountSummary(id: "car", name: "Car loan", balance: -980_000)
+			SidebarAccount(id: "chk", name: "Checking", balance: 214_018),
+			SidebarAccount(id: "sav", name: "Savings", balance: 841_200),
+			SidebarAccount(id: "car", name: "Car loan", balance: -980_000)
 		],
 		format: MoneyFormat()
 	)

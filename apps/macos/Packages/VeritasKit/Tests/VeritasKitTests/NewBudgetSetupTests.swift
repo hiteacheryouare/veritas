@@ -12,11 +12,17 @@ struct NewBudgetSetupTests {
 		let setup = NewBudgetSetup(library: library, preferredCurrencyCode: "EUR")
 		await setup.loadCurrencies()
 		#expect(setup.currencyCode == "EUR")
-		#expect(setup.numberFormat == .dotComma)
+		#expect(setup.numberStyle == .dotComma)
 		setup.choose(currency: "USD")
-		#expect(setup.numberFormat == .commaDot)
-		setup.numberFormat = .spaceComma
-		#expect(setup.numberFormat == .spaceComma)
+		#expect(setup.numberStyle == .commaDot)
+		setup.numberStyle = .spaceComma
+		#expect(setup.numberStyle == .spaceComma)
+	}
+
+	@Test func everyAccountTypeBelongsToOneSidebarGroup() {
+		#expect(AccountType.allCases.map(\.group) == [.cash, .cash, .cash, .credit, .credit, .investments, .investments, .investments, .loans, .loans])
+		#expect(AccountType.allCases.filter(\.isOwed) == [.creditCard, .lineOfCredit, .loan, .mortgage])
+		#expect(AccountType.checking == NewBudgetSetup.AccountDraft().type)
 	}
 
 	@Test func anUnknownPreferredCurrencyFallsBackToTheFirst() async {
@@ -46,7 +52,7 @@ struct NewBudgetSetupTests {
 		setup.addAccount()
 		setup.accounts[1].name = "Brokerage"
 		setup.accounts[1].balance = "24310.55"
-		setup.accounts[1].isOffBudget = true
+		setup.accounts[1].type = .investment
 		setup.addAccount()
 		_ = await setup.advance()
 		#expect(setup.step == .paycheckSavings)
@@ -55,10 +61,10 @@ struct NewBudgetSetupTests {
 		#expect(budget == NewBudget(
 			name: "Household",
 			currencyCode: "USD",
-			numberFormat: .commaDot,
+			numberStyle: .commaDot,
 			accounts: [
-				StartingAccount(name: "Checking", balance: 214_018, isOffBudget: false),
-				StartingAccount(name: "Brokerage", balance: 2_431_055, isOffBudget: true)
+				StartingAccount(name: "Checking", type: .checking, balance: 214_018),
+				StartingAccount(name: "Brokerage", type: .investment, balance: 2_431_055)
 			],
 			hasRetirementPlan: true,
 			hasHealthSavingsAccount: false
@@ -118,7 +124,7 @@ struct NewBudgetSetupTests {
 	@Test func aFailedCreateSaysNothingWasSavedAndRetriesIntoTheSameFolder() async throws {
 		library.createErrors = [.Storage(message: "disk I/O error")]
 		let model = WorkspaceModel(library: library, format: MoneyFormat())
-		let budget = NewBudget(name: "Household", currencyCode: "USD", numberFormat: .commaDot, accounts: [], hasRetirementPlan: false, hasHealthSavingsAccount: false)
+		let budget = NewBudget(name: "Household", currencyCode: "USD", numberStyle: .commaDot, accounts: [], hasRetirementPlan: false, hasHealthSavingsAccount: false)
 		await model.createBudget(budget)
 		#expect(model.phase == .empty)
 		#expect(model.alert?.title == "Couldn't create the budget")
@@ -184,7 +190,7 @@ private final class SetupSession: BudgetSession {
 	func undo() async throws {}
 	func redo() async throws {}
 	func maintain() async throws {}
-	func exportActualZip(to destination: URL) async throws {}
+	func exportActualZip(to destination: URL) async throws -> [AuditFinding] { [] }
 	func observeChanges(_ changed: @escaping @Sendable () -> Void) async throws {}
 	func close() async {}
 }

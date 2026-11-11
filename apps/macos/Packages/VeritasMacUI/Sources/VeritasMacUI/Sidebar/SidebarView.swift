@@ -16,7 +16,7 @@ struct SidebarView: View {
 			SectionRow(screen: .budget)
 			SectionRow(screen: .accounts)
 			ForEach(model.overview?.accountGroups ?? []) { group in
-				AccountGroupRows(group: group, format: model.format)
+				SidebarGroupRows(group: group, format: model.format)
 			}
 			SectionRow(screen: .bills)
 			SectionRow(screen: .goals)
@@ -61,8 +61,8 @@ private struct SectionWithPages: View {
 	}
 }
 
-private struct AccountGroupRows: View {
-	let group: AccountGroup
+private struct SidebarGroupRows: View {
+	let group: SidebarGroup
 	let format: MoneyFormat
 
 	var body: some View {
@@ -81,17 +81,17 @@ private struct AccountGroupRows: View {
 }
 
 private struct AccountRow: View {
-	let account: AccountSummary
+	let account: SidebarAccount
 	let format: MoneyFormat
 
 	var body: some View {
 		HStack {
 			Text(account.name)
-				.foregroundStyle(.textSecondary)
+				.foregroundStyle(account.isInactive ? .textTertiary : .textSecondary)
 			Spacer(minLength: Spacing.s2)
 			Text(format.amount(account.balance))
 				.font(.figures(.body))
-				.foregroundStyle(.textPrimary)
+				.foregroundStyle(account.isInactive ? .textTertiary : .textPrimary)
 		}
 		.padding(.leading, 26)
 		.accessibilityElement(children: .combine)

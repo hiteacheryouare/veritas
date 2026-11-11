@@ -24,9 +24,13 @@ public final class WorkspaceModel {
 	public var isPaletteShown = false
 	public var isFindShown = false
 	public var isDense = false
-	public let format: MoneyFormat
+	/// The budget's own format once the core reports it, else the Mac's.
+	public var format: MoneyFormat {
+		overview?.format ?? fallbackFormat
+	}
 
 	@ObservationIgnored private let library: any BudgetLibrary
+	@ObservationIgnored private let fallbackFormat: MoneyFormat
 	@ObservationIgnored private var session: (any BudgetSession)?
 	@ObservationIgnored private var retry: (@MainActor () async -> Void)?
 	@ObservationIgnored private var maintenance: Task<Void, Never>?
@@ -42,7 +46,7 @@ public final class WorkspaceModel {
 		checkingInterval: Duration = .seconds(2)
 	) {
 		self.library = library
-		self.format = format
+		fallbackFormat = format
 		self.maintenanceInterval = maintenanceInterval
 		self.checkingInterval = checkingInterval
 	}
@@ -105,7 +109,7 @@ public final class WorkspaceModel {
 	public func exportActualZip(to destination: URL) async {
 		guard let session, canExport else { return }
 		do {
-			try await session.exportActualZip(to: destination)
+			_ = try await session.exportActualZip(to: destination)
 		} catch {
 			present(error, during: .export) { [weak self] in await self?.exportActualZip(to: destination) }
 		}

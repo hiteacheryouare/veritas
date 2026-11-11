@@ -1,25 +1,28 @@
 import Foundation
 import VeritasCore
 
-public struct AccountSummary: Hashable, Identifiable, Sendable {
+public struct SidebarAccount: Hashable, Identifiable, Sendable {
 	public let id: String
 	public let name: String
 	public let balance: Int64
+	/// Closed, or deleted but kept for its history (ST-9.4).
+	public let isInactive: Bool
 
-	public init(id: String, name: String, balance: Int64) {
+	public init(id: String, name: String, balance: Int64, isInactive: Bool = false) {
 		self.id = id
 		self.name = name
 		self.balance = balance
+		self.isInactive = isInactive
 	}
 }
 
-public struct AccountGroup: Hashable, Identifiable, Sendable {
+public struct SidebarGroup: Hashable, Identifiable, Sendable {
 	public let name: String
-	public let accounts: [AccountSummary]
+	public let accounts: [SidebarAccount]
 
 	public var id: String { name }
 
-	public init(name: String, accounts: [AccountSummary]) {
+	public init(name: String, accounts: [SidebarAccount]) {
 		self.name = name
 		self.accounts = accounts
 	}
@@ -34,7 +37,9 @@ public struct BudgetOverview: Hashable, Sendable {
 	public let canRedo: Bool
 	/// The full integrity check still runs in the background. The budget is usable meanwhile.
 	public let isChecking: Bool
-	public let accountGroups: [AccountGroup]
+	public let accountGroups: [SidebarGroup]
+	/// `nil` until the core reads the budget's own format.
+	public let format: MoneyFormat?
 
 	public init(
 		name: String?,
@@ -43,7 +48,8 @@ public struct BudgetOverview: Hashable, Sendable {
 		canUndo: Bool = false,
 		canRedo: Bool = false,
 		isChecking: Bool = false,
-		accountGroups: [AccountGroup]
+		accountGroups: [SidebarGroup],
+		format: MoneyFormat? = nil
 	) {
 		self.name = name
 		self.directory = directory
@@ -52,9 +58,10 @@ public struct BudgetOverview: Hashable, Sendable {
 		self.canRedo = canRedo
 		self.isChecking = isChecking
 		self.accountGroups = accountGroups
+		self.format = format
 	}
 
-	public var accounts: [AccountSummary] {
+	public var accounts: [SidebarAccount] {
 		accountGroups.flatMap(\.accounts)
 	}
 }
@@ -69,7 +76,8 @@ public protocol BudgetSession: AnyObject, Sendable {
 	func redo() async throws
 	/// Collects the background integrity check and takes the hourly snapshot when one is due.
 	func maintain() async throws
-	func exportActualZip(to destination: URL) async throws
+	/// The core snapshots, audits and writes the zip. Findings that don't stop the export come back.
+	func exportActualZip(to destination: URL) async throws -> [AuditFinding]
 	/// Calls `changed` after every commit, undo, redo or restore, from any thread.
 	func observeChanges(_ changed: @escaping @Sendable () -> Void) async throws
 	func close() async

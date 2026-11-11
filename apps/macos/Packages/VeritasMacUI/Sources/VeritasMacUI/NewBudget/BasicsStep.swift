@@ -1,4 +1,5 @@
 import SwiftUI
+import VeritasCore
 import VeritasDesign
 import VeritasKit
 
@@ -30,9 +31,9 @@ struct BasicsStep: View {
 			}
 			Divider().padding(.leading, Spacing.s4)
 			LabeledRow("Number format") {
-				Picker("Number format", selection: $setup.numberFormat) {
-					ForEach(NumberFormat.allCases, id: \.self) { format in
-						Text(format.sample).tag(format)
+				Picker("Number format", selection: $setup.numberStyle) {
+					ForEach(NumberStyle.allCases, id: \.self) { style in
+						Text(style.sample).tag(style)
 					}
 				}
 				.labelsHidden()

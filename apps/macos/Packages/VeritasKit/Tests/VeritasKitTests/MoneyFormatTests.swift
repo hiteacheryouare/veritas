@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import VeritasCore
 import VeritasKit
 
 struct MoneyFormatTests {
@@ -37,5 +38,21 @@ struct MoneyFormatTests {
 	@Test func separatorsFollowTheLocale() {
 		let german = MoneyFormat(locale: Locale(identifier: "de_DE"), currencySymbol: "€")
 		#expect(german.amount(214_018) == "2.140,18")
+	}
+}
+
+struct BudgetMoneyFormatTests {
+	@Test(arguments: [
+		(NumberStyle.commaDot, "2,140.18"),
+		(.dotComma, "2.140,18"),
+		(.spaceComma, "2\u{202F}140,18"),
+		(.apostropheDot, "2'140.18")
+	])
+	func theBudgetsStyleSetsTheSeparators(style: NumberStyle, expected: String) {
+		#expect(MoneyFormat(NumberFormat(currency: nil, style: style, hideDecimals: false)).amount(214_018) == expected)
+	}
+
+	@Test func noCurrencyMeansNoSymbol() {
+		#expect(MoneyFormat(NumberFormat(currency: nil, style: .commaDot, hideDecimals: false)).currency(31_240) == "312.40")
 	}
 }

@@ -1,4 +1,5 @@
 import Foundation
+import VeritasCore
 
 /// Formats amounts that cross the bridge as integer minor units (cents).
 /// Negatives use a real minus sign, U+2212.
@@ -21,6 +22,28 @@ public struct MoneyFormat: Hashable, Sendable {
 			groupingSeparator: locale.groupingSeparator ?? ",",
 			decimalSeparator: locale.decimalSeparator ?? "."
 		)
+	}
+
+	/// The budget's own preference from the core. The symbol comes from the Mac's currency data.
+	public init(_ format: NumberFormat) {
+		let separators: (grouping: String, decimal: String) = switch format.style {
+		case .commaDot: (",", ".")
+		case .dotComma: (".", ",")
+		case .spaceComma: ("\u{202F}", ",")
+		case .apostropheDot: ("'", ".")
+		}
+		self.init(
+			currencySymbol: format.currency.map(Self.symbol(forCurrency:)) ?? "",
+			groupingSeparator: separators.grouping,
+			decimalSeparator: separators.decimal
+		)
+	}
+
+	static func symbol(forCurrency code: String) -> String {
+		let formatter = NumberFormatter()
+		formatter.numberStyle = .currency
+		formatter.currencyCode = code
+		return formatter.currencySymbol
 	}
 
 	/// `2,140.18`, `−612.33`: rows, columns and the sidebar.

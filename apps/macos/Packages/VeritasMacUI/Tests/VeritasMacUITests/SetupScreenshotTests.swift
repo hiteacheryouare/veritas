@@ -25,15 +25,18 @@ struct SetupScreenshotTests {
 
 	@Test func accounts() async throws {
 		let setup = await setupAt(.accounts)
-		setup.accounts[0].name = "Checking"
-		setup.accounts[0].balance = "2,140.18"
-		setup.addAccount()
-		setup.accounts[1].name = "Visa"
-		setup.accounts[1].balance = "-612.33"
-		setup.addAccount()
-		setup.accounts[2].name = "Brokerage"
-		setup.accounts[2].balance = "24,310.55"
-		setup.accounts[2].isOffBudget = true
+		let rows: [(String, String, AccountType)] = [
+			("Checking", "2,140.18", .checking),
+			("Visa", "612.33", .creditCard),
+			("Brokerage", "24,310.55", .investment),
+			("Car loan", "9,800.00", .loan)
+		]
+		for (index, row) in rows.enumerated() {
+			if index > 0 { setup.addAccount() }
+			setup.accounts[index].name = row.0
+			setup.accounts[index].balance = row.1
+			setup.accounts[index].type = row.2
+		}
 		try render(NewBudgetSheet(setup: setup) { _ in }, named: "3-accounts")
 	}
 

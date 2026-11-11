@@ -27,8 +27,10 @@ extension XCUIElement {
 
 extension XCTestCase {
 	@MainActor
-	func attachScreenshot(of app: XCUIApplication, named name: String) {
-		let attachment = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+	/// An open menu sits outside the window, so `wholeScreen` captures it too.
+	func attachScreenshot(of app: XCUIApplication, named name: String, wholeScreen: Bool = false) {
+		let screenshot = wholeScreen ? XCUIScreen.main.screenshot() : app.windows.firstMatch.screenshot()
+		let attachment = XCTAttachment(screenshot: screenshot)
 		attachment.name = name
 		attachment.lifetime = .keepAlways
 		add(attachment)
