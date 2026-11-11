@@ -788,7 +788,6 @@ fn an_extra_goal_contribution_this_month_moves_the_eta() {
 }
 
 #[test]
-#[ignore = "R-FC-1 bug: known flows dated today are dropped as if already posted, so a bill that is due today (or missed) and unpaid never lowers the projection"]
 fn an_unpaid_bill_due_today_still_lowers_the_projection() {
 	let mut book = Book::household();
 	book.opening("CHK", "2026-12-31", 400000);
@@ -816,4 +815,109 @@ fn an_invalid_cadence_is_rejected_not_projected() {
 		&scenario,
 	);
 	assert!(matches!(result, Err(CoreError::Invalid(_))));
+}
+
+/// Paychecks that post from an uncategorized schedule in some months and
+/// are typed by hand in others, next to side income with no schedule.
+fn mixed_paychecks() -> Book {
+	let mut book = Book::household();
+	book.opening("CHK", "2026-06-30", 100000);
+	for (month, linked) in HISTORY.iter().zip([true, false, true, false, true, false]) {
+		let pay = book.spend("Paycheck", &format!("{month}-01"), 300000);
+		if linked {
+			pay.bill("pay");
+		}
+		book.spend("Side gigs", &format!("{month}-25"), 20000);
+	}
+	book
+}
+
+#[test]
+fn hand_typed_paychecks_are_not_counted_on_top_of_their_schedule() {
+	let book = mixed_paychecks();
+	let mut pay = known("2027-02-01", "Paycheck", 300000, FlowKind::Income);
+	pay.category = None;
+	pay.schedule = Some(veritas_domain::ScheduleId::new("pay"));
+	let projection = project(&book, &[pay], &Scenario::baseline());
+	assert_eq!(projection.months[1].net_income, cents(300000 + 20000));
+	let side = projection
+		.baselines
+		.iter()
+		.find(|baseline| baseline.category == cat("Side gigs"))
+		.unwrap();
+	assert_eq!(
+		side.level,
+		cents(20000),
+		"unscheduled income stays baselined"
+	);
+}
+
+#[test]
+fn interest_the_payment_does_not_cover_compounds_month_after_month() {
+	let mut book = Book::household();
+	book.opening("CHK", "2026-12-31", 200000)
+		.opening("LOAN", "2026-12-31", -1_500_000);
+	let loan = LoanPayment {
+		from: acct("CHK"),
+		loan: acct("LOAN"),
+		name: "Student loan".to_owned(),
+		payment: cents(10000),
+		rate_bps: Some(1000),
+		last_interest: cents(0),
+		outstanding: cents(1_500_000),
+		interest_category: Some(cat("Loan interest")),
+		principal_category: Some(cat("Loan principal")),
+	};
+	let dates = [date("2027-02-10"), date("2027-03-10"), date("2027-04-10")];
+	let projection = project(&book, &loan.flows(&dates).unwrap(), &Scenario::baseline());
+	let path: Vec<(i64, i64, i64)> = projection.months[1..4]
+		.iter()
+		.map(|month| {
+			(
+				month.balances[&acct("CHK")].minor(),
+				month.balances[&acct("LOAN")].minor(),
+				month.net_income.minor(),
+			)
+		})
+		.collect();
+	assert_eq!(
+		path,
+		[
+			(190000, -1_502_500, -12500),
+			(180000, -1_505_021, -12521),
+			(170000, -1_507_563, -12542),
+		]
+	);
+	assert_eq!(
+		projection.months[3].net_worth,
+		cents(200000 - 1_500_000 - 37563)
+	);
+}
+
+#[test]
+#[ignore = "R-FC-3 bug: capitalized interest posts on the off-budget loan, yet the suggestion counts it as a scheduled bill, so the interest envelope is over-budgeted by the uncovered interest every month"]
+fn a_loan_below_its_interest_budgets_only_the_cash_that_leaves_checking() {
+	let book = Book::household();
+	let loan = LoanPayment {
+		from: acct("CHK"),
+		loan: acct("LOAN"),
+		name: "Student loan".to_owned(),
+		payment: cents(10000),
+		rate_bps: Some(1000),
+		last_interest: cents(0),
+		outstanding: cents(1_500_000),
+		interest_category: Some(cat("Loan interest")),
+		principal_category: Some(cat("Loan principal")),
+	};
+	let flows = loan.flows(&[date("2027-02-10")]).unwrap();
+	let suggestions = Forecaster::new(&book.budget)
+		.unwrap()
+		.suggestions(date(TODAY), &flows, &BTreeMap::new())
+		.unwrap();
+	let interest = suggestions
+		.items
+		.iter()
+		.find(|item| item.category == cat("Loan interest"))
+		.unwrap();
+	assert_eq!(interest.amount, Some(cents(10000)), "{}", interest.reason);
 }
