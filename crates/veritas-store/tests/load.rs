@@ -620,3 +620,42 @@ fn rules_and_schedules_read_a_null_tombstone_as_deleted() {
 	assert!(data.rules[&veritas_domain::RuleId::new("null-rule")].tombstone);
 	assert!(data.schedules[&ScheduleId::new("null-schedule")].tombstone);
 }
+
+#[test]
+fn a_child_of_a_parent_with_a_null_tombstone_is_left_out_like_actuals_alive_view() {
+	let scratch = Scratch::new("null-parent");
+	let db_path = fixture_db("small", &scratch);
+	let raw = Connection::open(&db_path).unwrap();
+	let account: String = raw
+		.query_row("SELECT id FROM accounts ORDER BY id LIMIT 1", [], |row| {
+			row.get(0)
+		})
+		.unwrap();
+	// v_transactions_internal_alive keeps a child only when t2.tombstone = 0,
+	// so a NULL there drops the child while IFNULL keeps the parent.
+	raw.execute_batch(&format!(
+		"INSERT INTO transactions (id, acct, amount, date, isParent, tombstone)
+		   VALUES ('null-parent', '{account}', -500, 20261101, 1, NULL);
+		 INSERT INTO transactions (id, acct, amount, date, isChild, parent_id)
+		   VALUES ('null-parent/child', '{account}', -500, 20261101, 1, 'null-parent');"
+	))
+	.unwrap();
+	let loaded = Store::open(&db_path, Access::ReadWrite)
+		.unwrap()
+		.load()
+		.unwrap();
+	assert!(!loaded.data.transactions[&TransactionId::new("null-parent")].tombstone);
+	assert!(
+		!loaded
+			.data
+			.transactions
+			.contains_key(&TransactionId::new("null-parent/child"))
+	);
+	assert!(
+		loaded
+			.report
+			.skipped
+			.iter()
+			.any(|row| row.id.as_deref() == Some("null-parent/child"))
+	);
+}

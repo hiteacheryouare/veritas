@@ -219,7 +219,9 @@ pub fn load(conn: &Connection) -> Result<Loaded, CoreError> {
 		"transactions",
 		"SELECT id, acct, date, amount, description, category, notes, cleared, reconciled, \
 		 isParent, isChild, parent_id, transferred_id, schedule, starting_balance_flag, \
-		 sort_order, tombstone, imported_description FROM transactions",
+		 sort_order, tombstone, imported_description, \
+		 CASE WHEN isChild = 1 THEN (SELECT p.tombstone IS NULL FROM transactions p \
+		 WHERE p.id = t.parent_id) END FROM transactions t",
 		&mut skipped,
 		|row| {
 			let transaction = transaction(row)?;
@@ -409,6 +411,11 @@ fn transaction(row: &Row<'_>) -> Cell<Transaction> {
 	};
 	let split = match (is_parent, is_child) {
 		(true, true) => return Err("the row is marked both split parent and split child"),
+		// Actual's alive view keeps a child only when t2.tombstone = 0, so a
+		// NULL parent tombstone, which IFNULL keeps alive, still drops it.
+		(_, true) if flag(at(row, 18)?) => {
+			return Err("the split parent's tombstone is NULL, which drops this child in Actual");
+		}
 		(_, true) => SplitRole::Child {
 			parent: TransactionId::new(required_text(
 				at(row, 11)?,
