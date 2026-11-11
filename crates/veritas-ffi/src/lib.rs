@@ -10,7 +10,8 @@ use veritas_domain::{CoreError, YearMonth};
 
 pub use commands::Command;
 pub use records::{
-	AuditCheck, AuditFinding, Change, EntityKind, EntityRef, Retention, SessionState, SnapshotInfo,
+	AccountGroup, AccountGroupSummary, AccountSummary, AuditCheck, AuditFinding, BackupInfo,
+	BudgetListing, Change, EntityKind, EntityRef, Overview, Retention, SessionState, SnapshotInfo,
 	SnapshotKind,
 };
 pub use session::{ChangeListener, Session};
@@ -107,6 +108,15 @@ pub struct Month {
 #[uniffi::export]
 pub fn core_version() -> Result<String, FfiError> {
 	guard(|| Ok(env!("CARGO_PKG_VERSION").to_owned()))
+}
+
+/// Every budget folder in `budgets_dir`, most recently opened first.
+#[uniffi::export]
+pub fn list_budgets(budgets_dir: String) -> Result<Vec<BudgetListing>, FfiError> {
+	guard(|| {
+		veritas_session::list_budgets(std::path::Path::new(&budgets_dir))
+			.map(|budgets| budgets.iter().map(BudgetListing::from).collect())
+	})
 }
 
 #[uniffi::export]

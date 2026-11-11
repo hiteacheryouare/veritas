@@ -1105,6 +1105,7 @@ dependencies = [
 name = "veritas-ffi"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "thiserror",
  "uniffi",
  "veritas-domain",

@@ -1,5 +1,9 @@
+use chrono::{DateTime, Utc};
 use veritas_domain::{EntityRef as CoreEntity, ReadOnlyReason, YearMonth};
-use veritas_session::{ChangeSet, RetentionPolicy, Snapshot, SnapshotReason};
+use veritas_session::{
+	AccountGroupKind, BackupResult, BudgetEntry, ChangeSet, Overview as CoreOverview,
+	OverviewGroup, RetentionPolicy, Snapshot, SnapshotReason,
+};
 use veritas_store::{Check, Violation};
 
 use crate::{Month, ReadOnlyKind};
@@ -128,6 +132,133 @@ pub struct SessionState {
 	/// What the invariant audit found, once the background check is done.
 	/// `audit_report` lists the findings.
 	pub audit_findings: Option<u64>,
+	pub backup_folder: Option<String>,
+	pub last_backup: Option<BackupInfo>,
+}
+
+/// UTC as `"YYYY-MM-DDTHH:MM:SSZ"`.
+pub(crate) fn utc(at: DateTime<Utc>) -> String {
+	at.format("%Y-%m-%dT%H:%M:%SZ").to_string()
+}
+
+/// How the last backup went. A failure never blocks editing; the shell
+/// shows `problem` and offers to choose another folder.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct BackupInfo {
+	pub at: String,
+	pub file: Option<String>,
+	pub problem: Option<String>,
+}
+
+impl From<&BackupResult> for BackupInfo {
+	fn from(result: &BackupResult) -> Self {
+		let (file, problem) = match &result.outcome {
+			Ok(file) => (Some(file.display().to_string()), None),
+			Err(problem) => (None, Some(problem.clone())),
+		};
+		BackupInfo {
+			at: utc(result.at),
+			file,
+			problem,
+		}
+	}
+}
+
+/// docs/finance/statements.md ST-9. The shell picks the words; Fred suggests
+/// showing `Investments` as "Other assets", since a house or car lands there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum AccountGroup {
+	Cash,
+	Credit,
+	Investments,
+	Loans,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct AccountSummary {
+	pub id: String,
+	pub name: String,
+	/// Cents as of today. Liabilities are negative, as in Actual.
+	pub balance: i64,
+	pub closed: bool,
+	/// Deleted, but kept because it still has transactions.
+	pub deleted: bool,
+	/// Only a negative balance put it here, so offer "Set account type".
+	pub placed_by_balance: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct AccountGroupSummary {
+	pub group: AccountGroup,
+	pub accounts: Vec<AccountSummary>,
+	pub total: i64,
+}
+
+/// The shell's first screen. A `Change` naming an account or transaction
+/// means refetch it.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct Overview {
+	pub budget_name: Option<String>,
+	pub groups: Vec<AccountGroupSummary>,
+}
+
+impl From<&OverviewGroup> for AccountGroupSummary {
+	fn from(group: &OverviewGroup) -> Self {
+		AccountGroupSummary {
+			group: match group.kind {
+				AccountGroupKind::Cash => AccountGroup::Cash,
+				AccountGroupKind::Credit => AccountGroup::Credit,
+				AccountGroupKind::Investments => AccountGroup::Investments,
+				AccountGroupKind::Loans => AccountGroup::Loans,
+			},
+			accounts: group
+				.accounts
+				.iter()
+				.map(|account| AccountSummary {
+					id: account.id.to_string(),
+					name: account.name.clone(),
+					balance: account.balance.minor(),
+					closed: account.closed,
+					deleted: account.deleted,
+					placed_by_balance: account.placed_by_balance,
+				})
+				.collect(),
+			total: group.total.minor(),
+		}
+	}
+}
+
+impl From<&CoreOverview> for Overview {
+	fn from(overview: &CoreOverview) -> Self {
+		Overview {
+			budget_name: overview.budget_name.clone(),
+			groups: overview
+				.groups
+				.iter()
+				.map(AccountGroupSummary::from)
+				.collect(),
+		}
+	}
+}
+
+/// One budget folder for the open-a-budget screen.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct BudgetListing {
+	pub id: String,
+	pub name: Option<String>,
+	pub folder: String,
+	pub last_opened: Option<String>,
+}
+
+impl From<&BudgetEntry> for BudgetListing {
+	fn from(entry: &BudgetEntry) -> Self {
+		BudgetListing {
+			id: entry.id.clone(),
+			name: entry.name.clone(),
+			folder: entry.folder.display().to_string(),
+			last_opened: entry.last_opened.map(utc),
+		}
+	}
 }
 
 /// One problem the integrity check or invariant audit found. It names rows
@@ -239,7 +370,7 @@ impl From<&Snapshot> for SnapshotInfo {
 				.file_name()
 				.map(|name| name.to_string_lossy().into_owned())
 				.unwrap_or_default(),
-			taken_at: snapshot.taken_at.format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+			taken_at: utc(snapshot.taken_at),
 			reason: snapshot.reason.into(),
 		}
 	}

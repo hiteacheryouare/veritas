@@ -15,6 +15,7 @@ crate-type = ["lib", "staticlib", "cdylib"]
 veritas-domain = { path = "../veritas-domain" }
 veritas-session = { path = "../veritas-session" }
 veritas-store = { path = "../veritas-store" }
+chrono.workspace = true
 thiserror.workspace = true
 uniffi.workspace = true
 

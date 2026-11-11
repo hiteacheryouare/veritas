@@ -5,7 +5,9 @@ use veritas_domain::CoreError;
 use veritas_session::{Backend, ChangeSet, Session as CoreSession, SessionOptions, SharedSession};
 
 use crate::commands::Command;
-use crate::records::{AuditFinding, Change, Retention, SessionState, SnapshotInfo};
+use crate::records::{
+	AuditFinding, BackupInfo, Change, Overview, Retention, SessionState, SnapshotInfo,
+};
 use crate::{FfiError, guard};
 
 /// Implemented in Swift. Called after every commit, undo, redo, restore or
@@ -113,8 +115,35 @@ impl<B: Backend> Core<B> {
 				audit_findings: session
 					.audit_report()
 					.map(|report| report.violations.len() as u64),
+				backup_folder: session
+					.backup_folder()
+					.map(|folder| folder.display().to_string()),
+				last_backup: session.last_backup().map(BackupInfo::from),
 			})
 		})
+	}
+
+	pub(crate) fn overview(&self) -> Result<Overview, FfiError> {
+		self.call(|session| session.overview().map(|overview| Overview::from(&overview)))
+	}
+
+	pub(crate) fn export_actual_zip(&self, to: &str) -> Result<Vec<AuditFinding>, FfiError> {
+		self.call(|session| {
+			session
+				.export_actual_zip(Path::new(to))
+				.map(|report| report.violations.iter().map(AuditFinding::from).collect())
+		})
+	}
+
+	pub(crate) fn set_backup_folder(&self, folder: Option<String>) -> Result<(), FfiError> {
+		self.call(|session| {
+			session.set_backup_folder(folder.map(Into::into));
+			Ok(())
+		})
+	}
+
+	pub(crate) fn back_up_now(&self) -> Result<String, FfiError> {
+		self.call(|session| session.back_up_now().map(|file| file.display().to_string()))
 	}
 
 	pub(crate) fn audit_report(&self) -> Result<Option<Vec<AuditFinding>>, FfiError> {
@@ -238,6 +267,32 @@ impl Session {
 	/// `None` while the background check still runs, or if it couldn't run.
 	pub fn audit_report(&self) -> Result<Option<Vec<AuditFinding>>, FfiError> {
 		self.core.audit_report()
+	}
+
+	/// The budget's name and its accounts in the sidebar groups, balances as
+	/// of today.
+	pub fn overview(&self) -> Result<Overview, FfiError> {
+		self.core.overview()
+	}
+
+	/// Writes an Actual zip to `to` (R-IO-2), snapshotting a writable budget
+	/// first. SQLite damage refuses it with `AuditFailed`. Other audit
+	/// findings come back with the export.
+	pub fn export_actual_zip(&self, to: String) -> Result<Vec<AuditFinding>, FfiError> {
+		self.core.export_actual_zip(&to)
+	}
+
+	/// The folder `back_up_now` writes to. Swift starts security-scoped
+	/// access to it before setting it and keeps that access while the budget
+	/// is open.
+	pub fn set_backup_folder(&self, folder: Option<String>) -> Result<(), FfiError> {
+		self.core.set_backup_folder(folder)
+	}
+
+	/// Writes today's `YYYY-MM-DD-<budget name>.zip` into the backup folder
+	/// and returns its path. The outcome also shows in `state().last_backup`.
+	pub fn back_up_now(&self) -> Result<String, FfiError> {
+		self.core.back_up_now()
 	}
 
 	pub fn perform(&self, command: Command) -> Result<Change, FfiError> {
@@ -554,5 +609,41 @@ mod tests {
 		.unwrap();
 		assert_eq!(core.state().unwrap().audit_findings, Some(0));
 		assert_eq!(core.audit_report().unwrap(), Some(Vec::new()));
+	}
+
+	#[test]
+	fn the_shell_gets_an_overview_an_export_a_backup_and_the_budget_list() {
+		// R-IO-2, R-REL-4, docs/finance/statements.md ST-9
+		let (scratch, core) = imported("shell");
+		let overview = core.overview().unwrap();
+		assert!(overview.budget_name.is_some());
+		assert_eq!(overview.groups.len(), 4);
+		assert!(
+			overview
+				.groups
+				.iter()
+				.any(|group| !group.accounts.is_empty())
+		);
+
+		let zip = scratch.0.join("export.zip");
+		core.export_actual_zip(&zip.display().to_string()).unwrap();
+		assert!(zip.is_file());
+
+		assert!(matches!(core.back_up_now(), Err(FfiError::Invalid { .. })));
+		let folder = scratch.0.join("Backups");
+		std::fs::create_dir(&folder).unwrap();
+		core.set_backup_folder(Some(folder.display().to_string()))
+			.unwrap();
+		let file = core.back_up_now().unwrap();
+		let state = core.state().unwrap();
+		assert_eq!(state.backup_folder, Some(folder.display().to_string()));
+		let last = state.last_backup.unwrap();
+		assert_eq!(last.file, Some(file));
+		assert_eq!(last.problem, None);
+
+		let listed = crate::list_budgets(scratch.0.display().to_string()).unwrap();
+		assert_eq!(listed.len(), 1);
+		assert_eq!(listed[0].folder, scratch.budget());
+		assert_eq!(listed[0].name, overview.budget_name);
 	}
 }

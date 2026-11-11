@@ -118,3 +118,25 @@ private final class Recorder: ChangeListener, @unchecked Sendable {
 	#expect(recorder.changes == [change])
 	#expect(try session.snapshots().map(\.reason).contains(.restore))
 }
+
+@Test func theShellGetsAnOverviewAnExportABackupAndTheBudgetList() throws {
+	let scratch = try Scratch()
+	let session = try importSmall(into: scratch)
+
+	let overview = try session.overview()
+	#expect(overview.budgetName != nil)
+	#expect(overview.groups.map(\.group) == [.cash, .credit, .investments, .loans])
+
+	let zip = scratch.url.appending(path: "export.zip").path
+	_ = try session.exportActualZip(to: zip)
+	#expect(FileManager.default.fileExists(atPath: zip))
+
+	let folder = scratch.url.appending(path: "Backups")
+	try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+	try session.setBackupFolder(folder: folder.path)
+	let file = try session.backUpNow()
+	#expect(try session.state().lastBackup?.file == file)
+
+	let listed = try listBudgets(budgetsDir: scratch.url.path)
+	#expect(listed.map(\.name) == [overview.budgetName])
+}
