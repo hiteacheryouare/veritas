@@ -270,7 +270,9 @@ fn parse_date_string(text: &str) -> Result<DateValue, Gap> {
 pub enum EvalError {
 	#[error(transparent)]
 	Recurrence(#[from] RecurError),
-	#[error("the text has characters a JavaScript regex reads as two")]
+	#[error(
+		"the text it matches has an emoji or another character Actual's regex reads differently"
+	)]
 	AstralText,
 }
 

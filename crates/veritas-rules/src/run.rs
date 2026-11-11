@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use veritas_domain::{BudgetData, CategoryId, ConditionsOp, PayeeId, RuleId, ScheduleId};
 
 use crate::action::{Action, RuleTransaction, SetField};
-use crate::condition::{Field, FieldValue};
+use crate::condition::{Field, FieldValue, Gap};
 use crate::rule::{IndexKey, ParsedRule, RuleSupport, rank};
 
 /// The budget's live rules, parsed once, with merged ids mapped to their
@@ -26,8 +26,12 @@ pub struct RunOutcome {
 	/// Rules whose actions were applied, in the order they ran.
 	pub applied: Vec<RuleId>,
 	/// Rules Actual would have evaluated or applied here but Veritas can't
-	/// (a regex condition, a template action). Their effect is missing.
+	/// (a template action, a regex it can't read the JS way). Their effect
+	/// is missing.
 	pub undetermined: Vec<RuleId>,
+	/// Why each undetermined rule couldn't run, in words for the person
+	/// looking at the transaction.
+	pub reasons: BTreeMap<RuleId, String>,
 }
 
 /// Where `set payee_name` finds or makes its payee. `None` when more than
@@ -88,11 +92,19 @@ impl PayeeDirectory for BudgetPayees<'_> {
 
 /// Three-valued outcome of a rule's conditions: a condition Veritas can't
 /// evaluate only matters when the others don't settle the answer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum Verdict {
 	Match,
 	NoMatch,
-	Unknown,
+	Unknown(String),
+}
+
+fn gap_reason(gap: &Gap) -> String {
+	match gap {
+		Gap::Unsupported(what) | Gap::RejectedByActual(what) => {
+			format!("it uses {what}, which Veritas doesn't run")
+		}
+	}
 }
 
 impl RuleBook {
@@ -199,6 +211,7 @@ impl RuleBook {
 			transaction: transaction.clone(),
 			applied: Vec::new(),
 			undetermined: Vec::new(),
+			reasons: BTreeMap::new(),
 		};
 		for rule in rank(self.candidates(transaction)) {
 			let verdict = if schedule_rule == Some(&rule.id) {
@@ -216,12 +229,15 @@ impl RuleBook {
 			};
 			match verdict {
 				Verdict::NoMatch => {}
-				Verdict::Unknown => outcome.undetermined.push(rule.id.clone()),
+				Verdict::Unknown(reason) => {
+					outcome.undetermined.push(rule.id.clone());
+					outcome.reasons.insert(rule.id.clone(), reason);
+				}
 				Verdict::Match => {
-					let actions: Option<Vec<&Action>> = rule
+					let actions: Result<Vec<&Action>, String> = rule
 						.actions
 						.iter()
-						.map(|item| item.parsed.as_ref().ok())
+						.map(|item| item.parsed.as_ref().map_err(gap_reason))
 						.collect();
 					let result = actions.and_then(|actions| {
 						let mut next = working.clone();
@@ -243,19 +259,26 @@ impl RuleBook {
 						if new_payee {
 							next.payee = match next_name.as_deref().filter(|name| !name.is_empty())
 							{
-								Some(name) => Some(payees.find_or_create(name)?),
+								Some(name) => Some(payees.find_or_create(name).ok_or_else(|| {
+									format!(
+										"more than one payee is named {name}, and Actual's pick depends on how its database orders them"
+									)
+								})?),
 								None => None,
 							};
 						}
-						Some((next, next_name))
+						Ok((next, next_name))
 					});
 					match result {
-						Some((next, name)) => {
+						Ok((next, name)) => {
 							working = next;
 							payee_name = name;
 							outcome.applied.push(rule.id.clone());
 						}
-						None => outcome.undetermined.push(rule.id.clone()),
+						Err(reason) => {
+							outcome.undetermined.push(rule.id.clone());
+							outcome.reasons.insert(rule.id.clone(), reason);
+						}
 					}
 				}
 			}
@@ -322,7 +345,7 @@ fn evaluate(
 		return Verdict::NoMatch;
 	}
 	let any = rule.conditions_op == ConditionsOp::Or;
-	let mut unknown = false;
+	let mut unknown: Option<String> = None;
 	for item in &rule.conditions {
 		let result = match &item.parsed {
 			Ok(condition) => condition
@@ -330,20 +353,22 @@ fn evaluate(
 					field_value(condition.field, transaction, payee_name, budget),
 					account_off_budget,
 				)
-				.ok(),
-			Err(_) => None,
+				.map_err(|error| error.to_string()),
+			Err(gap) => Err(gap_reason(gap)),
 		};
 		match result {
-			Some(true) if any => return Verdict::Match,
-			Some(false) if !any => return Verdict::NoMatch,
-			None => unknown = true,
+			Ok(true) if any => return Verdict::Match,
+			Ok(false) if !any => return Verdict::NoMatch,
+			Err(reason) => {
+				unknown.get_or_insert(reason);
+			}
 			_ => {}
 		}
 	}
 	match (unknown, any) {
-		(true, _) => Verdict::Unknown,
-		(false, true) => Verdict::NoMatch,
-		(false, false) => Verdict::Match,
+		(Some(reason), _) => Verdict::Unknown(reason),
+		(None, true) => Verdict::NoMatch,
+		(None, false) => Verdict::Match,
 	}
 }
 
@@ -515,6 +540,45 @@ mod tests {
 		assert_eq!(
 			outcome.transaction.notes, None,
 			"nothing from the rule is applied"
+		);
+		assert!(
+			outcome.reasons[&RuleId::new("rename")]
+				.starts_with("more than one payee is named amazon")
+		);
+	}
+
+	#[test]
+	fn an_emoji_in_the_text_a_regex_reads_says_so() {
+		let mut budget = budget();
+		add_rule(
+			&mut budget,
+			"regex",
+			RuleStage::Default,
+			ConditionsOp::And,
+			json!([{"op": "matches", "field": "imported_payee", "value": "^coffee"}]),
+			json!([{"op": "set", "field": "notes", "value": "coffee"}]),
+		);
+		let outcome = run(&budget, &transaction("☕️ Coffee 🍩"));
+		assert_eq!(outcome.undetermined, [RuleId::new("regex")]);
+		assert!(
+			outcome.reasons[&RuleId::new("regex")].contains("emoji"),
+			"{:?}",
+			outcome.reasons
+		);
+
+		let mut budget = self::budget();
+		add_rule(
+			&mut budget,
+			"template",
+			RuleStage::Default,
+			ConditionsOp::And,
+			json!([{"op": "contains", "field": "imported_payee", "value": "x"}]),
+			json!([{"op": "set", "field": "notes", "value": "", "options": {"template": "{{date}}"}}]),
+		);
+		let templated = run(&budget, &transaction("x"));
+		assert_eq!(
+			templated.reasons[&RuleId::new("template")],
+			"it uses template actions, which Veritas doesn't run"
 		);
 	}
 
