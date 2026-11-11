@@ -50,6 +50,50 @@ pub enum AccountKind {
 	Liability,
 }
 
+/// What setup's account picker offers (statements.md ST-9.2, D8): cash
+/// accounts and cards are on budget, everything else is tracked off budget.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NewAccountKind {
+	Checking,
+	Savings,
+	Cash,
+	CreditCard,
+	LineOfCredit,
+	Investment,
+	Retirement,
+	Property,
+	Loan,
+	Mortgage,
+}
+
+impl NewAccountKind {
+	pub fn kind(self) -> AccountKind {
+		match self {
+			NewAccountKind::Checking
+			| NewAccountKind::Savings
+			| NewAccountKind::Cash
+			| NewAccountKind::Investment
+			| NewAccountKind::Retirement
+			| NewAccountKind::Property => AccountKind::Asset,
+			NewAccountKind::CreditCard
+			| NewAccountKind::LineOfCredit
+			| NewAccountKind::Loan
+			| NewAccountKind::Mortgage => AccountKind::Liability,
+		}
+	}
+
+	pub fn off_budget(self) -> bool {
+		matches!(
+			self,
+			NewAccountKind::Investment
+				| NewAccountKind::Retirement
+				| NewAccountKind::Property
+				| NewAccountKind::Loan
+				| NewAccountKind::Mortgage
+		)
+	}
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BudgetType {
 	Envelope,

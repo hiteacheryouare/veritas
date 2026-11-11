@@ -5,9 +5,9 @@ use rusqlite::{Connection, OptionalExtension, Row};
 use veritas_domain::{
 	Account, AccountGroup, AccountGroupId, AccountId, AccountKind, AccountMeta, BudgetCell,
 	BudgetData, BudgetType, Category, CategoryGroup, CategoryGroupId, CategoryId, CategoryKind,
-	CategoryMeta, CivilDate, ConditionsOp, CoreError, Goal, GoalId, GoalStatus, Money, Payee,
-	PayeeId, Rule, RuleId, RuleStage, Schedule, ScheduleId, SplitRole, Tag, TagId, Transaction,
-	TransactionId, TransactionMeta,
+	CategoryMeta, CivilDate, ConditionsOp, CoreError, FormatPrefs, Goal, GoalId, GoalStatus, Money,
+	Payee, PayeeId, Rule, RuleId, RuleStage, Schedule, ScheduleId, SplitRole, Tag, TagId,
+	Transaction, TransactionId, TransactionMeta,
 };
 
 use crate::cells::{
@@ -120,12 +120,39 @@ fn column_or_null(conn: &Connection, table: &str, column: &str) -> Result<String
 	})
 }
 
+/// Actual's number-format preferences. `hideFraction` is on only when it is
+/// the text `true`, as Actual's useFormat reads it.
+fn format_prefs(conn: &Connection) -> Result<FormatPrefs, CoreError> {
+	let mut prefs = FormatPrefs::default();
+	if !table_exists(conn, "preferences")? {
+		return Ok(prefs);
+	}
+	let mut statement = conn
+		.prepare(
+			"SELECT id, CAST(value AS TEXT) FROM preferences \
+			 WHERE id IN ('numberFormat', 'hideFraction', 'defaultCurrencyCode')",
+		)
+		.map_err(storage)?;
+	let mut rows = statement.query([]).map_err(storage)?;
+	while let Some(row) = rows.next().map_err(storage)? {
+		let id: String = row.get(0).map_err(storage)?;
+		let value: Option<String> = row.get(1).map_err(storage)?;
+		match id.as_str() {
+			"numberFormat" => prefs.number_format = value,
+			"hideFraction" => prefs.hide_fraction = value.as_deref() == Some("true"),
+			_ => prefs.currency_code = value,
+		}
+	}
+	Ok(prefs)
+}
+
 fn id(row: &Row<'_>, index: usize) -> Cell<String> {
 	required_text(at(row, index)?, "the row has no id")
 }
 
 pub fn load(conn: &Connection) -> Result<Loaded, CoreError> {
 	let mut data = BudgetData::empty(budget_type(conn)?);
+	data.format = format_prefs(conn)?;
 	let mut skipped = Vec::new();
 
 	each_row(

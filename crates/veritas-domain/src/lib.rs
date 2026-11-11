@@ -16,7 +16,9 @@ pub use change::{
 pub use date::{CivilDate, YearMonth};
 pub use error::{CoreError, ReadOnlyReason};
 pub use ids::*;
-pub use kinds::{AccountKind, BudgetType, CategoryKind, GoalStatus, TransactionKind};
+pub use kinds::{
+	AccountKind, BudgetType, CategoryKind, GoalStatus, NewAccountKind, TransactionKind,
+};
 pub use model::*;
 pub use money::Money;
 pub use store::{Store, StoreTransaction};

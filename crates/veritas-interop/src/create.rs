@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use veritas_domain::{Change, CivilDate, CoreError, Row, StoreTransaction};
+use veritas_domain::{Change, CivilDate, CoreError, FormatPrefs, Row, StoreTransaction};
 use veritas_store::{Access, NewAccount, StarterGroup, Store};
 
 use crate::canonical::json::{self, Str, Value};
@@ -12,8 +12,7 @@ use crate::import::ImportedBudget;
 #[derive(Clone, Debug)]
 pub struct NewBudget<'a> {
 	pub name: &'a str,
-	pub currency_code: Option<&'a str>,
-	pub number_format: Option<&'a str>,
+	pub format: &'a FormatPrefs,
 	pub categories: &'a [StarterGroup],
 	pub accounts: &'a [NewAccount],
 	pub today: CivilDate,
@@ -41,50 +40,31 @@ fn metadata(id: &str, name: &str) -> Result<Vec<u8>, CoreError> {
 	Ok(out)
 }
 
-/// Makes a new budget in `budget_dir`, which must not exist yet, from the
-/// pinned template: an Actual-format file from its first write. It is built
-/// in a hidden sibling folder and renamed into place, so a crash leaves
-/// either no budget or a whole one.
-pub fn create_budget(
-	budget_dir: &Path,
-	budget: &NewBudget<'_>,
-) -> Result<ImportedBudget, CoreError> {
+/// Builds a complete new budget, db.sqlite and metadata.json, into `dir`,
+/// which must exist and be empty: the pinned template, an Actual-format file
+/// from its first write. This isn't atomic on its own; the caller builds in
+/// a hidden folder and renames it into place, and discards the folder if
+/// this fails.
+pub fn create_budget(dir: &Path, budget: &NewBudget<'_>) -> Result<ImportedBudget, CoreError> {
 	if budget.name.trim().is_empty() {
 		return Err(CoreError::Invalid("A budget needs a name.".to_owned()));
 	}
-	if budget_dir.exists() {
-		return Err(CoreError::Io(format!(
-			"{} already exists",
-			budget_dir.display()
-		)));
+	let mut entries = std::fs::read_dir(dir).map_err(|error| io_error(dir, &error))?;
+	if entries.next().is_some() {
+		return Err(CoreError::Io(format!("{} isn't empty", dir.display())));
 	}
-	let id = budget_dir
+	let id = dir
 		.file_name()
 		.map(|name| name.to_string_lossy().into_owned())
-		.ok_or_else(|| CoreError::Io(format!("{} has no folder name", budget_dir.display())))?;
-	let building = budget_dir.with_file_name(format!(".{id}.creating"));
-	if building.exists() {
-		std::fs::remove_dir_all(&building).map_err(|error| io_error(&building, &error))?;
-	}
-	std::fs::create_dir(&building).map_err(|error| io_error(&building, &error))?;
-
-	let built = build(&building, &id, budget).and_then(|audit| {
-		std::fs::rename(&building, budget_dir).map_err(|error| io_error(budget_dir, &error))?;
-		Ok(audit)
-	});
-	match built {
-		Ok(audit) => Ok(ImportedBudget {
-			dir: budget_dir.to_path_buf(),
-			db_path: budget_dir.join("db.sqlite"),
-			metadata_path: budget_dir.join("metadata.json"),
-			access: Access::ReadWrite,
-			audit,
-		}),
-		Err(error) => {
-			let _ = std::fs::remove_dir_all(&building);
-			Err(error)
-		}
-	}
+		.ok_or_else(|| CoreError::Io(format!("{} has no folder name", dir.display())))?;
+	let audit = build(dir, &id, budget)?;
+	Ok(ImportedBudget {
+		dir: dir.to_path_buf(),
+		db_path: dir.join("db.sqlite"),
+		metadata_path: dir.join("metadata.json"),
+		access: Access::ReadWrite,
+		audit,
+	})
 }
 
 fn build(
@@ -103,11 +83,14 @@ fn build(
 	store.adopt()?;
 	let mut planned = store.load()?.data;
 	let mut writer = store.writer()?;
-	if let Some(code) = budget.currency_code {
-		writer.put_preference("defaultCurrencyCode", code)?;
-	}
-	if let Some(format) = budget.number_format {
+	if let Some(format) = &budget.format.number_format {
 		writer.put_preference("numberFormat", format)?;
+	}
+	if budget.format.hide_fraction {
+		writer.put_preference("hideFraction", "true")?;
+	}
+	if let Some(code) = &budget.format.currency_code {
+		writer.put_preference("defaultCurrencyCode", code)?;
 	}
 	let mut write =
 		|planned: &mut veritas_domain::BudgetData, rows: Vec<Row>| -> Result<(), CoreError> {
