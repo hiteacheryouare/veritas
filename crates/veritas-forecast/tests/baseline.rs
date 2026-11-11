@@ -215,3 +215,11 @@ fn r_rel_7_a_month_too_large_to_sum_is_an_overflow_not_a_clamp() {
 		Err(veritas_domain::CoreError::Overflow)
 	));
 }
+
+#[test]
+fn cls_3_1_a_kind_conflict_baselines_by_actuals_flag() {
+	let mut book = book_with("Fun", "2026-07", &[1000; 6]);
+	book.kind("Fun", veritas_domain::CategoryKind::Income);
+	let fun = baseline(&book, "2027-01-15", "Fun");
+	assert_eq!((fun.side, fun.level), (Side::Spending, cents(1000)));
+}

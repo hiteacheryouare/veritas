@@ -8,7 +8,7 @@ use veritas_reports::Period;
 use crate::baseline::Baseline;
 use crate::flows::{FlowKind, KnownFlow};
 use crate::goal::month_name;
-use crate::history::{Side, archived, balances, category_kind, hidden};
+use crate::history::{Side, archived, balances, hidden};
 use crate::math::{ceil_div, round_half_up, to_money};
 use crate::projection::Forecaster;
 
@@ -126,7 +126,7 @@ impl Forecaster<'_> {
 				reason: format!("{text}, keeping {kept}"),
 			};
 			let goal = self.budget.goals.values().find(|goal| &goal.category == id);
-			let item = match (category_kind(self.budget, id), goal) {
+			let item = match (self.budget.category_kind(id), goal) {
 				(CategoryKind::Expense, Some(goal)) => match goal.target_date {
 					None => keeping(Basis::NoTargetDate, &format!("{name}: no target date")),
 					Some(target) => {

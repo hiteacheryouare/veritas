@@ -95,7 +95,7 @@ impl History {
 			.keys()
 			.filter(|id| baselined(budget, id))
 			.filter_map(|id| {
-				let side = match category_kind(budget, id) {
+				let side = match budget.category_kind(id) {
 					CategoryKind::Expense => Side::Spending,
 					CategoryKind::Income => Side::Income,
 					CategoryKind::DebtPrincipal | CategoryKind::Savings => return None,
@@ -147,21 +147,6 @@ impl History {
 		Ok(History {
 			series: series.into_values().collect(),
 		})
-	}
-}
-
-/// CLS-3.1's effective kind: Actual's `is_income` wins on the income/expense
-/// axis. veritas-reports keeps the same rule private to `classify`.
-pub(crate) fn category_kind(budget: &BudgetData, id: &CategoryId) -> CategoryKind {
-	let is_income = budget
-		.categories
-		.get(id)
-		.is_some_and(|category| category.is_income);
-	let stored = budget.category_meta.get(id).and_then(|meta| meta.kind);
-	match (is_income, stored) {
-		(true, _) => CategoryKind::Income,
-		(false, None | Some(CategoryKind::Income)) => CategoryKind::Expense,
-		(false, Some(kind)) => kind,
 	}
 }
 
