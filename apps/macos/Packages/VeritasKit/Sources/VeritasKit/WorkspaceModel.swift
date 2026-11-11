@@ -20,6 +20,7 @@ public final class WorkspaceModel {
 	public var sheet: WorkspaceSheet?
 	public var alert: ErrorAlert?
 	public var isImportPanelShown = false
+	public var newBudgetSetup: NewBudgetSetup?
 	public var isPaletteShown = false
 	public var isFindShown = false
 	public var isDense = false
@@ -83,6 +84,15 @@ public final class WorkspaceModel {
 			defer { if access { zip.stopAccessingSecurityScopedResource() } }
 			return try await library.importActualZip(zip, into: directory)
 		}
+	}
+
+	public func startNewBudget() {
+		newBudgetSetup = NewBudgetSetup(library: library)
+	}
+
+	public func finishNewBudget(_ budget: NewBudget) async {
+		newBudgetSetup = nil
+		await createBudget(budget)
 	}
 
 	/// The same folder is reused if the user retries, so a retry never makes a second budget.
