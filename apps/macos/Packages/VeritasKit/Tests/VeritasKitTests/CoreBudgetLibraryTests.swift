@@ -66,7 +66,7 @@ struct CoreBudgetLibraryTests {
 		let overview = try await session.overview()
 		#expect(!overview.accounts.isEmpty)
 		#expect(overview.accountGroups.allSatisfy { !$0.accounts.isEmpty })
-		#expect(Set(overview.accountGroups.map(\.name)).isSubset(of: ["Cash", "Credit", "Investments", "Loans"]))
+		#expect(Set(overview.accountGroups.map(\.name)).isSubset(of: ["Cash", "Credit", "Investments & Other assets", "Loans"]))
 		await session.close()
 	}
 
@@ -106,7 +106,7 @@ struct CoreBudgetLibraryTests {
 			#expect(groups["Cash"] == ["Checking"])
 			#expect(groups["Credit"] == ["Visa"])
 			#expect(groups["Loans"] == ["Car loan"])
-			#expect(groups["Investments"]?.count == 1, "the 401(k)")
+			#expect(groups["Investments & Other assets"]?.count == 1, "the 401(k)")
 			#expect(overview.accounts.first { $0.name == "Visa" }?.balance == -61_233)
 			await session.close()
 			#expect(try await library.listBudgets().first?.name == "Household")

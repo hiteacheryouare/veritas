@@ -76,7 +76,7 @@ public extension VeritasCore.AccountGroup {
 		switch self {
 		case .cash: "Cash"
 		case .credit: "Credit"
-		case .investments: "Investments"
+		case .investments: "Investments & Other assets"
 		case .loans: "Loans"
 		}
 	}

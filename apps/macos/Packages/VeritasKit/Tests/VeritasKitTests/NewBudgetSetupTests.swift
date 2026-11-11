@@ -194,3 +194,9 @@ private final class SetupSession: BudgetSession {
 	func observeChanges(_ changed: @escaping @Sendable () -> Void) async throws {}
 	func close() async {}
 }
+
+struct SidebarGroupTitleTests {
+	@Test func groupTitlesAreRyansWording() {
+		#expect(VeritasCore.AccountGroup.allCases.map(\.title) == ["Cash", "Credit", "Investments & Other assets", "Loans"])
+	}
+}
