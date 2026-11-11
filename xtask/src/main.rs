@@ -8,6 +8,7 @@ commands:
 	oracle setup       install the oracle's pinned dependencies (npm ci)
 	oracle <args...>   run the Actual oracle CLI (dump, apply, generate)
 	fixtures           regenerate fixtures/synthetic with the oracle
+	template           regenerate the new-budget template db in veritas-store with the oracle
 	bindings           build the core and generate its Swift bindings into VeritasKit
 	ci                 run every check CI runs";
 
@@ -22,6 +23,7 @@ fn main() -> ExitCode {
 		Some("oracle") => oracle(&args[1..]),
 		Some("fixtures") => fixtures(),
 		Some("bindings") => bindings(),
+		Some("template") => template(),
 		Some("ci") => ci(),
 		_ => Err(USAGE.to_owned()),
 	};
@@ -161,6 +163,37 @@ fn fixtures() -> Result {
 	for spec in FIXTURE_SPECS {
 		oracle(&["generate".to_owned(), spec.to_owned()])?;
 	}
+	Ok(())
+}
+
+/// Where veritas-store keeps the db of a brand-new Actual budget. The name
+/// carries the Actual version, so a bump makes a new file (docs/actual-bump.md).
+const TEMPLATE_DB: &str = "crates/veritas-store/template/actual-26.11.0.sqlite";
+
+fn template() -> Result {
+	let root = root();
+	let zip_path = root.join("target/template/new-budget.zip");
+	let _ = std::fs::remove_file(&zip_path);
+	oracle(&[
+		"generate".to_owned(),
+		"template".to_owned(),
+		"--out".to_owned(),
+		zip_path.to_string_lossy().into_owned(),
+	])?;
+	let file = std::fs::File::open(&zip_path).map_err(|e| format!("{}: {e}", zip_path.display()))?;
+	let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("{}: {e}", zip_path.display()))?;
+	let mut db = archive
+		.by_name("db.sqlite")
+		.map_err(|e| format!("the template zip has no db.sqlite: {e}"))?;
+	let target = root.join(TEMPLATE_DB);
+	if let Some(parent) = target.parent() {
+		std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+	}
+	let mut out = std::fs::File::create(&target).map_err(|e| format!("{}: {e}", target.display()))?;
+	std::io::copy(&mut db, &mut out).map_err(|e| format!("{}: {e}", target.display()))?;
+	drop(out);
+	let _ = std::fs::remove_file(&zip_path);
+	eprintln!("wrote {TEMPLATE_DB}");
 	Ok(())
 }
 

@@ -76,7 +76,14 @@ const generate = (determinism: Determinism, specName: string, out: string) => {
 		throw new Error(`Unknown fixture spec "${specName}". Known specs: ${Object.keys(fixtureSpecs).join(', ')}`);
 	}
 	return withActual(determinism, async session => {
-		await session.api.runImport(spec.budgetName, async () => {});
+		if (spec.freshBudget) {
+			const result = await session.internal.send('create-budget', { budgetName: spec.budgetName, avoidUpload: true });
+			if (result?.error) {
+				throw new Error(`Actual could not create a budget: ${result.error}`);
+			}
+		} else {
+			await session.api.runImport(spec.budgetName, async () => {});
+		}
 		await applyOps(session, spec.build());
 		writeZip(out, await session.api.exportBudget());
 	});

@@ -4,6 +4,9 @@ import { nameId } from '../rng.ts';
 export interface FixtureSpec {
 	budgetName: string;
 	build: () => Op[];
+	// Start from Actual's "create new file" (create-budget), which keeps every
+	// seed row, instead of runImport, which deletes the expense seeds.
+	freshBudget?: boolean;
 }
 
 // Rows that ship in Actual's bundled default-db.sqlite and survive api.runImport.
