@@ -929,3 +929,160 @@ fn a_loan_below_its_interest_budgets_only_the_cash_that_leaves_checking() {
 		.unwrap();
 	assert_eq!(interest.amount, Some(cents(10000)), "{}", interest.reason);
 }
+
+fn mortgage(payment: i64) -> LoanPayment {
+	LoanPayment {
+		from: acct("CHK"),
+		loan: acct("LOAN"),
+		name: "Mortgage".to_owned(),
+		payment: cents(payment),
+		rate_bps: Some(600),
+		last_interest: cents(0),
+		escrow: cents(50000),
+		outstanding: cents(30_000_000),
+		interest_category: Some(cat("Loan interest")),
+		escrow_category: Some(cat("Property tax and insurance")),
+		principal_category: Some(cat("Loan principal")),
+	}
+}
+
+fn suggested(book: &Book, flows: &[KnownFlow], category: &str) -> (Option<i64>, String) {
+	let suggestions = Forecaster::new(&book.budget)
+		.unwrap()
+		.suggestions(date(TODAY), flows, &BTreeMap::new())
+		.unwrap();
+	let item = suggestions
+		.items
+		.iter()
+		.find(|item| item.category == cat(category))
+		.unwrap();
+	(
+		item.amount.map(|amount| amount.minor()),
+		item.reason.clone(),
+	)
+}
+
+#[test]
+fn a_mortgage_with_escrow_funds_interest_and_escrow_envelopes_separately() {
+	let mut book = Book::household();
+	book.category("Property tax and insurance", "Bills");
+	let flows = mortgage(220000).flows(&[date("2027-02-01")]).unwrap();
+	assert_eq!(
+		suggested(&book, &flows, "Loan interest"),
+		(
+			Some(150000),
+			"Loan interest $1500, scheduled: Mortgage".to_owned()
+		)
+	);
+	assert_eq!(
+		suggested(&book, &flows, "Property tax and insurance"),
+		(
+			Some(50000),
+			"Property tax and insurance $500, scheduled: Mortgage".to_owned()
+		)
+	);
+
+	// FL-3: 160000 covers the interest and only 10000 of the escrow.
+	let short = mortgage(160000).flows(&[date("2027-02-01")]).unwrap();
+	assert_eq!(
+		suggested(&book, &short, "Property tax and insurance").0,
+		Some(10000)
+	);
+	assert_eq!(suggested(&book, &short, "Loan interest").0, Some(150000));
+}
+
+/// Car upkeep of 6000 a month on checking, with a car bought into an
+/// off-budget asset account in the same category.
+fn car_book(purchase_on: Option<&str>) -> Book {
+	let mut book = Book::household();
+	book.account("CAR", true).category("Car", "Everyday");
+	book.opening("CHK", "2026-06-30", 3_000_000);
+	for month in HISTORY {
+		book.spend("Car", &format!("{month}-12"), -6000);
+	}
+	book.spend("Car", "2027-01-05", -2000);
+	if let Some(on) = purchase_on {
+		book.transfer("CHK", "CAR", on, -1_800_000)
+			.in_category("Car");
+	}
+	book
+}
+
+#[test]
+fn buying_a_car_this_month_leaves_the_upkeep_forecast_alone() {
+	let without = project(&car_book(None), &[], &Scenario::baseline());
+	let with = project(&car_book(Some("2027-01-10")), &[], &Scenario::baseline());
+	let car = |projection: &Projection| {
+		projection
+			.baselines
+			.iter()
+			.find(|baseline| baseline.category == cat("Car"))
+			.map(|baseline| (baseline.level.minor(), baseline.month_to_date.minor()))
+			.unwrap()
+	};
+	assert_eq!(car(&with), (6000, 2000));
+	assert_eq!(with.months[0].baselined_net_flow, cents(-4000));
+	assert_eq!(with.net_worth_today, without.net_worth_today);
+	assert_eq!(with.balances_today[&acct("CAR")], cents(1_800_000));
+	assert_eq!(
+		with.horizons[3].net_worth, without.horizons[3].net_worth,
+		"owning the car instead of the cash changes no projected net worth"
+	);
+}
+
+#[test]
+fn a_car_bought_and_sold_in_the_window_moves_no_baseline_band_or_suggestion() {
+	let quiet = car_book(None);
+	let mut traded = car_book(Some("2026-09-20"));
+	traded
+		.transfer("CHK", "CAR", "2026-11-20", 1_500_000)
+		.in_category("Car");
+	let base = project(&quiet, &[], &Scenario::baseline());
+	let projection = project(&traded, &[], &Scenario::baseline());
+	assert_eq!(projection.baselines, base.baselines);
+	assert_eq!(projection.band, base.band);
+	for (traded, quiet) in projection.months.iter().zip(&base.months) {
+		assert_eq!(traded.net_income, quiet.net_income, "{}", traded.month);
+		assert_eq!(
+			traded.net_worth, quiet.net_worth,
+			"the car still holds the money"
+		);
+		assert_eq!(
+			traded.balances[&acct("CHK")].minor(),
+			quiet.balances[&acct("CHK")].minor() - 300000
+		);
+		assert_eq!(traded.balances[&acct("CAR")], cents(300000));
+	}
+	assert_eq!(projection.asset_purchases, 2);
+	assert_eq!(
+		suggested(&traded, &[], "Car"),
+		(Some(6000), "Car $60, 6-month median".to_owned())
+	);
+}
+
+#[test]
+fn rent_still_owed_mid_month_lands_where_paid_rent_would() {
+	let paid = project(&household(), &household_flows(), &Scenario::baseline());
+	let mut unpaid = household();
+	unpaid.budget.transactions.retain(|_, row| {
+		!(row.date == date("2027-01-01")
+			&& row.schedule.as_ref().map(|s| s.as_str()) == Some("Rent"))
+	});
+	let mut flows = household_flows();
+	flows.push(known("2027-01-01", "Rent", -165000, FlowKind::Expense));
+	let projection = project(&unpaid, &flows, &Scenario::baseline());
+
+	assert_eq!(
+		projection.net_worth_today.minor() - paid.net_worth_today.minor(),
+		165000
+	);
+	assert_eq!(projection.months[0].net_worth, paid.months[0].net_worth);
+	assert_eq!(projection.months[0].balances, paid.months[0].balances);
+	assert_eq!(projection.horizons, paid.horizons);
+	let overdue: Vec<(&str, String)> = projection
+		.overdue
+		.iter()
+		.map(|flow| (flow.name.as_str(), flow.date.to_string()))
+		.collect();
+	assert_eq!(overdue, [("Rent", "2027-01-01".to_owned())]);
+}
