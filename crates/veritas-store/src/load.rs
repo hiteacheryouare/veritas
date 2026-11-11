@@ -6,9 +6,9 @@ use veritas_domain::{
 	Account, AccountGroup, AccountGroupId, AccountId, AccountKind, AccountMeta, BudgetCell,
 	BudgetData, BudgetType, Category, CategoryGroup, CategoryGroupId, CategoryId, CategoryKind,
 	CategoryMeta, CivilDate, ConditionsOp, CoreError, CustomReportId, CustomReportRow,
-	DashboardPage, DashboardPageId, Goal, GoalId, GoalStatus, Money, Payee, PayeeId, Rule, RuleId,
-	RuleStage, Schedule, ScheduleId, SplitRole, Tag, TagId, Transaction, TransactionId,
-	TransactionMeta, Widget, WidgetId,
+	DashboardPage, DashboardPageId, FormatPrefs, Goal, GoalId, GoalStatus, Money, Payee, PayeeId,
+	Rule, RuleId, RuleStage, Schedule, ScheduleId, SplitRole, Tag, TagId, Transaction,
+	TransactionId, TransactionMeta, Widget, WidgetId,
 };
 
 use crate::cells::{
@@ -104,12 +104,56 @@ pub(crate) fn budget_type(conn: &Connection) -> Result<BudgetType, CoreError> {
 	})
 }
 
+/// The column, or `NULL` when a table from an earlier build lacks it. A
+/// read-only open can't add the column, so it reads the default instead.
+fn column_or_null(conn: &Connection, table: &str, column: &str) -> Result<String, CoreError> {
+	let present: bool = conn
+		.query_row(
+			&format!("SELECT EXISTS (SELECT 1 FROM pragma_table_info('{table}') WHERE name = ?1)"),
+			[column],
+			|row| row.get(0),
+		)
+		.map_err(storage)?;
+	Ok(if present {
+		column.to_owned()
+	} else {
+		"NULL".to_owned()
+	})
+}
+
+/// Actual's number-format preferences. `hideFraction` is on only when it is
+/// the text `true`, as Actual's useFormat reads it.
+fn format_prefs(conn: &Connection) -> Result<FormatPrefs, CoreError> {
+	let mut prefs = FormatPrefs::default();
+	if !table_exists(conn, "preferences")? {
+		return Ok(prefs);
+	}
+	let mut statement = conn
+		.prepare(
+			"SELECT id, CAST(value AS TEXT) FROM preferences \
+			 WHERE id IN ('numberFormat', 'hideFraction', 'defaultCurrencyCode')",
+		)
+		.map_err(storage)?;
+	let mut rows = statement.query([]).map_err(storage)?;
+	while let Some(row) = rows.next().map_err(storage)? {
+		let id: String = row.get(0).map_err(storage)?;
+		let value: Option<String> = row.get(1).map_err(storage)?;
+		match id.as_str() {
+			"numberFormat" => prefs.number_format = value,
+			"hideFraction" => prefs.hide_fraction = value.as_deref() == Some("true"),
+			_ => prefs.currency_code = value,
+		}
+	}
+	Ok(prefs)
+}
+
 fn id(row: &Row<'_>, index: usize) -> Cell<String> {
 	required_text(at(row, index)?, "the row has no id")
 }
 
 pub fn load(conn: &Connection) -> Result<Loaded, CoreError> {
 	let mut data = BudgetData::empty(budget_type(conn)?);
+	data.format = format_prefs(conn)?;
 	let mut skipped = Vec::new();
 
 	each_row(
@@ -653,7 +697,10 @@ fn load_veritas_tables(
 		each_row(
 			conn,
 			"veritas_transaction_meta",
-			"SELECT transaction_id, adjustment, needs_actual FROM veritas_transaction_meta",
+			&format!(
+				"SELECT transaction_id, adjustment, {} FROM veritas_transaction_meta",
+				column_or_null(conn, "veritas_transaction_meta", "needs_actual")?
+			),
 			skipped,
 			|row| {
 				let transaction = TransactionId::new(id(row, 0)?);
