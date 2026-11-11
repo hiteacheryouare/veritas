@@ -417,7 +417,7 @@ impl<'conn> Writer<'conn> {
 	}
 
 	/// For veritas_* rows, which Veritas owns outright and may delete.
-	fn put_veritas<T>(
+	fn put_veritas<T: ?Sized>(
 		&self,
 		table: &str,
 		key_column: &'static str,
@@ -862,6 +862,23 @@ impl<'conn> Writer<'conn> {
 			before,
 			after,
 			transaction_meta_columns,
+		)
+	}
+
+	/// A `veritas_tax_tag` row: which tax bucket an Actual tag means.
+	pub fn put_tax_tag(
+		&mut self,
+		tag: &str,
+		before: Option<&str>,
+		after: Option<&str>,
+	) -> Result<(), CoreError> {
+		self.put_veritas(
+			"veritas_tax_tag",
+			"tag",
+			tag,
+			before,
+			after,
+			|bucket: &str| vec![("bucket", owned(bucket))],
 		)
 	}
 

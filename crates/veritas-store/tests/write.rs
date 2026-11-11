@@ -596,3 +596,24 @@ fn a_new_budget_row_leaves_goal_columns_null_like_actuals_set_budget() {
 	assert_eq!(value("carryover"), Value::Integer(0));
 	assert_eq!(loaded(&db).budget_cells[&(cell.month, category)], cell);
 }
+
+#[test]
+fn tax_tags_are_added_changed_and_removed() {
+	let scratch = Scratch::new("write-tax-tags");
+	let db = fixture_db("small", &scratch);
+	let mut store = Store::open(&db, Access::ReadWrite).unwrap();
+	store.adopt().unwrap();
+	let mut writer = store.writer().unwrap();
+	writer.put_tax_tag("rx", None, Some("medical")).unwrap();
+	writer.put_tax_tag("notax", None, Some("none")).unwrap();
+	writer.commit().unwrap();
+	let mut writer = store.writer().unwrap();
+	writer
+		.put_tax_tag("rx", Some("medical"), Some("hsa"))
+		.unwrap();
+	writer.put_tax_tag("notax", Some("none"), None).unwrap();
+	writer.commit().unwrap();
+	let tags = loaded(&db).tax_tags;
+	assert_eq!(tags.len(), 1);
+	assert_eq!(tags["rx"], "hsa");
+}
