@@ -8,10 +8,10 @@ mod common;
 
 use std::path::{Path, PathBuf};
 
-use common::{Scratch, actual_opens, actual_reexport, fixture, unpack, write_zip};
+use common::{Scratch, actual_opens, actual_reexport, fixture, imported, unpack, write_zip};
 use rusqlite::Connection;
 use veritas_domain::{CoreError, ReadOnlyReason};
-use veritas_interop::{Access, import_actual_zip};
+use veritas_interop::{Access, ImportOutcome, import_actual_zip};
 
 #[derive(Debug)]
 enum Verdict {
@@ -42,7 +42,8 @@ fn zip_of(scratch: &Scratch, name: &str, entries: &[(&str, &[u8])]) -> PathBuf {
 fn veritas_verdict(zip: &Path, scratch: &Scratch, name: &str) -> Result<Verdict, CoreError> {
 	let target = scratch.join(&format!("imported-{name}"));
 	let verdict = match import_actual_zip(zip, &target) {
-		Ok(budget) => match budget.access {
+		Ok(ImportOutcome::Refused(_)) => Verdict::Refused(""),
+		Ok(ImportOutcome::Imported(budget)) => match budget.access {
 			Access::ReadWrite => Verdict::ReadWrite,
 			Access::ReadOnly(ReadOnlyReason::NewerActualVersion) => Verdict::ReadOnly,
 			Access::ReadOnly(other) => panic!("{name}: unexpected read-only reason {other:?}"),
@@ -284,7 +285,7 @@ fn a_folder_compressed_in_finder_imports_like_the_export_inside_it_r_io_1() {
 		"{names:?}"
 	);
 
-	let budget = import_actual_zip(&zip, &scratch.join("imported")).unwrap();
+	let budget = imported(import_actual_zip(&zip, &scratch.join("imported")));
 	assert_eq!(budget.access, Access::ReadWrite);
 	assert_eq!(
 		std::fs::read(&budget.db_path).unwrap(),
