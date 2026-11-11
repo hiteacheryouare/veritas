@@ -16,6 +16,8 @@ pub enum Side {
 #[derive(Clone, Debug, PartialEq)]
 pub struct AccountBalance {
 	pub account: AccountId,
+	/// `None` when the account has no group, or its group was deleted or is
+	/// missing: Actual treats both as ungrouped.
 	pub group: Option<AccountGroupId>,
 	/// Actual's sign: a liability's balance is negative.
 	pub balance: Money,
@@ -82,7 +84,12 @@ pub(crate) fn describe(
 			};
 			AccountBalance {
 				account: account.id.clone(),
-				group: account.group.clone(),
+				group: account.group.clone().filter(|id| {
+					budget
+						.account_groups
+						.get(id)
+						.is_some_and(|group| !group.tombstone)
+				}),
 				balance,
 				side,
 				on_budget: !account.off_budget,
