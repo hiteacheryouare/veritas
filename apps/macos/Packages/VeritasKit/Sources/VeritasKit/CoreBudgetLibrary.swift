@@ -10,11 +10,15 @@ public struct CoreBudgetLibrary: BudgetLibrary {
 		self.budgetsDirectory = budgetsDirectory
 	}
 
+	public func newBudgetDirectory() -> URL {
+		budgetsDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+	}
+
 	public func open(directory: URL) async throws -> any BudgetSession {
 		throw Self.sessionMissing
 	}
 
-	public func importActualZip(_ zip: URL) async throws -> any BudgetSession {
+	public func importActualZip(_ zip: URL, into directory: URL) async throws -> any BudgetSession {
 		throw Self.sessionMissing
 	}
 

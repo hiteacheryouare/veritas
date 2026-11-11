@@ -28,6 +28,9 @@ struct WorkspaceWindow: View {
 			guard case .success(let zip) = result else { return }
 			Task { await importActualZip(zip) }
 		}
+		.sheet(item: $model.sheet) { sheet in
+			PlaceholderSheet(sheet: sheet)
+		}
 		.errorAlert(model: model)
 		.onChange(of: model.destination) { _, destination in
 			storedDestination = destination
@@ -39,6 +42,9 @@ struct WorkspaceWindow: View {
 			model.destination = storedDestination
 			if let directory = LaunchEnvironment.budgetToOpenOnLaunch ?? restoredBudgetDirectory {
 				await model.reopen(directory: directory)
+				if model.phase != .open {
+					storedBudgetDirectory = ""
+				}
 			}
 		}
 	}
@@ -56,8 +62,6 @@ struct WorkspaceWindow: View {
 	}
 
 	private func importActualZip(_ zip: URL) async {
-		let access = zip.startAccessingSecurityScopedResource()
-		defer { if access { zip.stopAccessingSecurityScopedResource() } }
 		await model.importActualZip(zip)
 	}
 }

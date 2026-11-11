@@ -95,11 +95,52 @@ struct WorkspaceModelTests {
 		#expect(model.isDense)
 		#expect(!model.canToggleDense)
 	}
+
+	@Test func aFailedAuditDuringImportOpensTheIntegrityReport() async {
+		let model = WorkspaceModel(library: FakeLibrary(importError: .AuditFailed(violations: 4)), format: MoneyFormat())
+		await model.importActualZip(URL(filePath: "/tmp/a.zip"))
+		#expect(model.phase == .empty)
+		#expect(model.sheet == .integrityReport)
+	}
+
+	@Test func aSessionThatCantDescribeItselfIsClosedSoItsLockIsFreed() async {
+		// R-REL-6
+		let library = FakeLibrary()
+		library.session.overviewErrors = [.Storage(message: "disk I/O error")]
+		let model = WorkspaceModel(library: library, format: MoneyFormat())
+		await model.reopen(directory: URL(filePath: "/tmp/budget"))
+		#expect(model.phase == .empty)
+		#expect(library.session.closed)
+		#expect(model.alert?.title == "Couldn't open this budget")
+	}
+
+	@Test func retryingAFailedImportReusesItsFolder() async {
+		let library = FakeLibrary(importError: .Storage(message: "disk I/O error"))
+		let model = WorkspaceModel(library: library, format: MoneyFormat())
+		await model.importActualZip(URL(filePath: "/tmp/a.zip"))
+		#expect(model.alert?.title == "Couldn't import that budget")
+		await model.retryFailedAction()
+		#expect(model.phase == .open)
+		#expect(library.importDirectories.count == 2)
+		#expect(Set(library.importDirectories).count == 1)
+	}
+
+	@Test func aMissingRowDuringARefreshDoesntRefreshForever() async throws {
+		let library = FakeLibrary()
+		let model = WorkspaceModel(library: library, format: MoneyFormat())
+		await model.importActualZip(URL(filePath: "/tmp/a.zip"))
+		library.session.overviewErrors = Array(repeating: .NotFound(entity: "account", id: "a"), count: 50)
+		await model.refresh()
+		try await Task.sleep(for: .milliseconds(50))
+		#expect(library.session.overviews == 2)
+	}
 }
 
 private final class FakeSession: BudgetSession, @unchecked Sendable {
 	let readOnly: ReadOnlyKind?
 	let exportError: FfiError?
+	var overviewErrors: [FfiError] = []
+	var overviews = 0
 	var exports = 0
 	var closed = false
 
@@ -109,7 +150,9 @@ private final class FakeSession: BudgetSession, @unchecked Sendable {
 	}
 
 	func overview() async throws -> BudgetOverview {
-		BudgetOverview(
+		overviews += 1
+		if !overviewErrors.isEmpty { throw overviewErrors.removeFirst() }
+		return BudgetOverview(
 			name: "Household",
 			directory: URL(filePath: "/tmp/budget"),
 			readOnly: readOnly,
@@ -127,21 +170,27 @@ private final class FakeSession: BudgetSession, @unchecked Sendable {
 	}
 }
 
-private struct FakeLibrary: BudgetLibrary {
+private final class FakeLibrary: BudgetLibrary, @unchecked Sendable {
 	let session: FakeSession
-	let importError: FfiError?
+	var importErrors: [FfiError]
+	var importDirectories: [URL] = []
 
 	init(readOnly: ReadOnlyKind? = nil, importError: FfiError? = nil, exportError: FfiError? = nil) {
 		session = FakeSession(readOnly: readOnly, exportError: exportError)
-		self.importError = importError
+		importErrors = importError.map { [$0] } ?? []
+	}
+
+	func newBudgetDirectory() -> URL {
+		URL(filePath: "/tmp/budgets/\(UUID().uuidString)", directoryHint: .isDirectory)
 	}
 
 	func open(directory: URL) async throws -> any BudgetSession {
 		session
 	}
 
-	func importActualZip(_ zip: URL) async throws -> any BudgetSession {
-		if let importError { throw importError }
+	func importActualZip(_ zip: URL, into directory: URL) async throws -> any BudgetSession {
+		importDirectories.append(directory)
+		if !importErrors.isEmpty { throw importErrors.removeFirst() }
 		return session
 	}
 }

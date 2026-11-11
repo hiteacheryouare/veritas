@@ -52,11 +52,15 @@ struct StubLibrary: BudgetLibrary {
 	let readOnly: ReadOnlyKind?
 	let importError: FfiError?
 
+	func newBudgetDirectory() -> URL {
+		StubLaunch.budgetDirectory
+	}
+
 	func open(directory: URL) async throws -> any BudgetSession {
 		StubSession(readOnly: readOnly)
 	}
 
-	func importActualZip(_ zip: URL) async throws -> any BudgetSession {
+	func importActualZip(_ zip: URL, into directory: URL) async throws -> any BudgetSession {
 		if let importError { throw importError }
 		return StubSession(readOnly: readOnly)
 	}

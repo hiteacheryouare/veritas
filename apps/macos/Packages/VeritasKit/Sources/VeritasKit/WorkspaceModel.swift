@@ -50,12 +50,18 @@ public final class WorkspaceModel {
 
 	public func reopen(directory: URL) async {
 		let library = library
-		await open { try await library.open(directory: directory) }
+		await open(during: .open) { try await library.open(directory: directory) }
 	}
 
+	/// Holds the zip's sandbox access for each attempt, so a retry can still read it.
 	public func importActualZip(_ zip: URL) async {
 		let library = library
-		await open { try await library.importActualZip(zip) }
+		let directory = library.newBudgetDirectory()
+		await open(during: .importing) {
+			let access = zip.startAccessingSecurityScopedResource()
+			defer { if access { zip.stopAccessingSecurityScopedResource() } }
+			return try await library.importActualZip(zip, into: directory)
+		}
 	}
 
 	public func exportActualZip(to destination: URL) async {
@@ -63,7 +69,7 @@ public final class WorkspaceModel {
 		do {
 			try await session.exportActualZip(to: destination)
 		} catch {
-			present(error) { [weak self] in await self?.exportActualZip(to: destination) }
+			present(error, during: .export) { [weak self] in await self?.exportActualZip(to: destination) }
 		}
 	}
 
@@ -82,16 +88,24 @@ public final class WorkspaceModel {
 		do {
 			apply(try await session.overview())
 		} catch {
-			present(error)
+			present(error, during: .open, isRefresh: true)
 		}
 	}
 
-	public func present(_ error: any Error, retry: (@MainActor () async -> Void)? = nil) {
-		switch ErrorPresentation(error).withoutField {
+	/// A `NotFound` asks for a refresh, except from a refresh, which would loop.
+	public func present(
+		_ error: any Error,
+		during operation: Operation = .change,
+		isRefresh: Bool = false,
+		retry: (@MainActor () async -> Void)? = nil
+	) {
+		switch ErrorPresentation(error, during: operation).withoutField {
 		case .nothing, .inline:
 			break
 		case .refresh:
-			Task { await refresh() }
+			if !isRefresh {
+				Task { await refresh() }
+			}
 		case .readOnly(let kind):
 			readOnly = kind
 		case .integrityReport:
@@ -130,12 +144,21 @@ public final class WorkspaceModel {
 		isDense.toggle()
 	}
 
-	private func open(_ opening: @escaping @MainActor () async throws -> any BudgetSession) async {
+	private func open(
+		during operation: Operation,
+		_ opening: @escaping @MainActor () async throws -> any BudgetSession
+	) async {
 		let previousPhase = phase
 		phase = .working
 		do {
 			let opened = try await opening()
-			let overview = try await opened.overview()
+			let overview: BudgetOverview
+			do {
+				overview = try await opened.overview()
+			} catch {
+				await opened.close()
+				throw error
+			}
 			if let session, session !== opened {
 				await session.close()
 			}
@@ -144,7 +167,7 @@ public final class WorkspaceModel {
 			phase = .open
 		} catch {
 			phase = previousPhase == .open ? .open : .empty
-			present(error) { [weak self] in await self?.open(opening) }
+			present(error, during: operation) { [weak self] in await self?.open(during: operation, opening) }
 		}
 	}
 

@@ -33,9 +33,6 @@ struct WorkspaceView: View {
 				model.isPaletteShown = false
 			}
 		}
-		.sheet(item: $model.sheet) { sheet in
-			PlaceholderSheet(sheet: sheet)
-		}
 	}
 
 	/// Runs after the palette has gone, so a command that opens a sheet

@@ -53,6 +53,8 @@ public protocol BudgetSession: AnyObject, Sendable {
 
 /// Opens budgets in the app's budgets folder and imports Actual exports into it.
 public protocol BudgetLibrary: Sendable {
+	/// A folder for one new budget. A retried import reuses it, so it never makes a second copy.
+	func newBudgetDirectory() -> URL
 	func open(directory: URL) async throws -> any BudgetSession
-	func importActualZip(_ zip: URL) async throws -> any BudgetSession
+	func importActualZip(_ zip: URL, into directory: URL) async throws -> any BudgetSession
 }
