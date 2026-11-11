@@ -19,6 +19,18 @@ const SPACE: &str = "\\t\\n\\x0B\\x0C\\r \\x{A0}\\x{1680}\\x{2000}-\\x{200A}\\x{
 pub struct JsPattern {
 	pub source: String,
 	regex: Regex,
+	/// `(?-u:\B)` can match between the bytes of one UTF-8 character, and
+	/// `regex` then drops that empty match and can miss another branch.
+	non_boundary: bool,
+}
+
+/// Why `test` can't give JavaScript's answer for a text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Unreadable {
+	/// A character JS splits into two surrogates, which `.` and classes see.
+	Astral,
+	/// A `\B` in the pattern and a non-ASCII character in the text.
+	NonBoundary,
 }
 
 impl PartialEq for JsPattern {
@@ -37,27 +49,34 @@ impl JsPattern {
 			);
 		}
 		if source.chars().count() > MAX_SOURCE_CHARS {
-			return Err(format!("a regex longer than {MAX_SOURCE_CHARS} characters"));
+			return Err("a regex longer than 10,000 characters".into());
 		}
-		let translated = translate(source)?;
+		let mut non_boundary = false;
+		let translated = translate(source, &mut non_boundary)
+			.map_err(|detail| format!("a regex with {detail}"))?;
 		if translated.len() > MAX_TRANSLATED_BYTES {
 			return Err("a regex too large for Veritas to check".into());
 		}
+		// The crate's own diagnostic is for developers, so it stays out of the
+		// text people see.
 		let regex = Regex::new(&translated)
-			.map_err(|error| format!("a pattern Veritas can't read the JS way: {error}"))?;
+			.map_err(|_| "a regex Veritas can't compile the way JavaScript reads it".to_owned())?;
 		Ok(JsPattern {
 			source: source.to_owned(),
 			regex,
+			non_boundary,
 		})
 	}
 
-	/// `RegExp.prototype.test`. `None` when the text has characters JS would
-	/// see as surrogate pairs, which `.` and classes treat differently.
-	pub fn test(&self, text: &str) -> Option<bool> {
+	/// `RegExp.prototype.test`, or why Veritas can't give JS's answer.
+	pub fn test(&self, text: &str) -> Result<bool, Unreadable> {
 		if text.chars().any(|c| c.len_utf16() > 1) {
-			return None;
+			return Err(Unreadable::Astral);
 		}
-		Some(self.regex.is_match(text))
+		if self.non_boundary && !text.is_ascii() {
+			return Err(Unreadable::NonBoundary);
+		}
+		Ok(self.regex.is_match(text))
 	}
 }
 
@@ -73,7 +92,7 @@ fn literal(c: char) -> String {
 
 /// Longer patterns are refused rather than compiled: real rules are short,
 /// and a pathological one shouldn't stall loading the rules.
-const MAX_SOURCE_CHARS: usize = 1_000;
+const MAX_SOURCE_CHARS: usize = 10_000;
 const MAX_TRANSLATED_BYTES: usize = 50_000;
 
 fn hex(chars: &[char], at: usize, len: usize) -> Option<char> {
@@ -93,7 +112,7 @@ enum Escape {
 
 fn escape(chars: &[char], i: &mut usize, in_class: bool) -> Result<Escape, String> {
 	let Some(&c) = chars.get(*i) else {
-		return Err("a pattern ending in a backslash".into());
+		return Err("a trailing backslash".into());
 	};
 	*i += 1;
 	Ok(match c {
@@ -160,7 +179,7 @@ fn class_text(set: &str, negated: bool) -> String {
 	format!("[{}{set}]", if negated { "^" } else { "" })
 }
 
-fn translate(source: &str) -> Result<String, String> {
+fn translate(source: &str, non_boundary: &mut bool) -> Result<String, String> {
 	let chars: Vec<char> = source.chars().collect();
 	let mut out = String::new();
 	let mut i = 0;
@@ -196,7 +215,10 @@ fn translate(source: &str) -> Result<String, String> {
 				Escape::Char(value) => out.push_str(&literal(value)),
 				Escape::Class(set, negated) => out.push_str(&class_text(set, negated)),
 				Escape::Boundary(true) => out.push_str("(?-u:\\b)"),
-				Escape::Boundary(false) => out.push_str("(?-u:\\B)"),
+				Escape::Boundary(false) => {
+					*non_boundary = true;
+					out.push_str("(?-u:\\B)");
+				}
 			},
 			'[' => out.push_str(&translate_class(&chars, &mut i)?),
 			'(' => {
@@ -263,6 +285,10 @@ fn translate_class(chars: &[char], i: &mut usize) -> Result<String, String> {
 	}
 	let mut members = String::new();
 	let mut previous: Option<char> = None;
+	// After a class escape, `-x` is a literal `-` and a literal `x`, and the
+	// `x` can't start a range (Annex B `ClassAtom - ClassAtom` with a class
+	// escape on one side): `[\d-a-z]` is digits, `-`, `a`, `-` and `z`.
+	let mut after_class_escape = false;
 	loop {
 		let Some(&c) = chars.get(*i) else {
 			return Err("an unterminated class".into());
@@ -275,6 +301,7 @@ fn translate_class(chars: &[char], i: &mut usize) -> Result<String, String> {
 				Escape::Class(set, false) => {
 					members.push_str(set);
 					previous = None;
+					after_class_escape = true;
 					continue;
 				}
 				Escape::Class(_, true) => {
@@ -282,6 +309,25 @@ fn translate_class(chars: &[char], i: &mut usize) -> Result<String, String> {
 				}
 				Escape::Boundary(_) => return Err("a boundary inside a class".into()),
 			},
+			'-' if after_class_escape && chars.get(*i).is_some_and(|next| *next != ']') => {
+				after_class_escape = false;
+				members.push_str(&literal('-'));
+				let next = chars[*i];
+				*i += 1;
+				match next {
+					'\\' => match escape(chars, i, true)? {
+						Escape::Char(value) => members.push_str(&literal(value)),
+						Escape::Class(set, false) => members.push_str(set),
+						Escape::Class(_, true) => {
+							return Err("a negated class escape inside a class".into());
+						}
+						Escape::Boundary(_) => return Err("a boundary inside a class".into()),
+					},
+					other => members.push_str(&literal(other)),
+				}
+				previous = None;
+				continue;
+			}
 			'-' if previous.is_some() && chars.get(*i).is_some_and(|next| *next != ']') => {
 				let low = previous.take().ok_or("a range without a start")?;
 				let high = match chars.get(*i) {
@@ -306,6 +352,7 @@ fn translate_class(chars: &[char], i: &mut usize) -> Result<String, String> {
 			}
 			other => Some(other),
 		};
+		after_class_escape = false;
 		if let Some(member) = member {
 			members.push_str(&literal(member));
 			previous = Some(member);
@@ -313,7 +360,7 @@ fn translate_class(chars: &[char], i: &mut usize) -> Result<String, String> {
 	}
 	if members.is_empty() {
 		return Ok(if negated {
-			return Err("[^], which matches anything in JS".into());
+			return Err("a [^] class, which matches anything in JavaScript".into());
 		} else {
 			"[^\\x{0}-\\x{10FFFF}]".into()
 		});
@@ -388,12 +435,52 @@ mod tests {
 		] {
 			assert!(JsPattern::new(pattern).is_err(), "{pattern}");
 		}
-		assert_eq!(JsPattern::new("a").unwrap().test("😀a"), None);
-		assert!(JsPattern::new(&"a".repeat(1_001)).is_err());
-		assert!(
-			JsPattern::new(&"\\s".repeat(900)).is_err(),
-			"each \\s expands, so the translation is capped too"
+		assert_eq!(
+			JsPattern::new("a").unwrap().test("😀a"),
+			Err(Unreadable::Astral)
 		);
-		assert!(JsPattern::new(&"ab".repeat(400)).is_ok());
+	}
+
+	#[test]
+	fn both_size_caps_can_trip() {
+		assert!(JsPattern::new(&"ab".repeat(5_000)).is_ok());
+		assert!(JsPattern::new(&"a".repeat(10_001)).is_err());
+		// `\s` expands the most, so a run of them reaches the translation cap
+		// well inside the source cap.
+		let per_space = SPACE.len() + 2;
+		let fits = MAX_TRANSLATED_BYTES / per_space;
+		assert!(fits * 2 < MAX_SOURCE_CHARS);
+		assert!(JsPattern::new(&"\\s".repeat(fits)).is_ok());
+		assert_eq!(
+			JsPattern::new(&"\\s".repeat(fits + 1)).unwrap_err(),
+			"a regex too large for Veritas to check"
+		);
+	}
+
+	#[test]
+	fn a_dash_after_a_class_escape_is_literal_and_ends_no_range() {
+		// Annex B: `[\d-a-z]` is digits, `-`, `a`, `-`, `z`; `[\d--z]` is
+		// digits, `-` and `z`.
+		assert!(!test("[\\d-a-z]", "m"));
+		assert!(
+			test("[\\d-a-z]", "a")
+				&& test("[\\d-a-z]", "z")
+				&& test("[\\d-a-z]", "-")
+				&& test("[\\d-a-z]", "7")
+		);
+		assert!(!test("[\\d--z]", "a") && !test("[\\d--z]", "!"));
+		assert!(test("[\\d--z]", "-") && test("[\\d--z]", "z"));
+		assert!(test("[\\w-.-z]", ".") && !test("[\\w-.-z]", "/"));
+		assert!(test("[\\d-]", "-"));
+		// After the literal pair, a later range still forms as in JS.
+		assert!(test("[\\d-a--z]", "m"));
+	}
+
+	#[test]
+	fn a_non_boundary_on_non_ascii_text_is_left_to_actual() {
+		let pattern = JsPattern::new("\\B|é").unwrap();
+		assert_eq!(pattern.test("sé1"), Err(Unreadable::NonBoundary));
+		assert_eq!(pattern.test("se1"), Ok(true));
+		assert_eq!(JsPattern::new("\\b").unwrap().test("é b"), Ok(true));
 	}
 }

@@ -7,7 +7,7 @@ use serde_json::Value;
 use veritas_domain::YearMonth;
 
 use crate::js;
-use crate::jsregex::JsPattern;
+use crate::jsregex::{JsPattern, Unreadable};
 use crate::recur::{RecurError, Recurrence};
 
 /// Why a stored condition or action isn't one Veritas runs.
@@ -248,7 +248,11 @@ fn parse_date_string(text: &str) -> Result<DateValue, Gap> {
 				.zip(parts)
 				.all(|(piece, len)| piece.len() == *len && digits(piece))
 	};
-	let other_form = || unsupported(format!("{text:?} is a date form Veritas doesn't read"));
+	let other_form = || {
+		unsupported(format!(
+			"a date written as {text:?}, a form Veritas doesn't read"
+		))
+	};
 	match js_length(text) {
 		10 => match js::strict_date(text) {
 			Some(date) => Ok(DateValue::Day(date)),
@@ -270,10 +274,10 @@ fn parse_date_string(text: &str) -> Result<DateValue, Gap> {
 pub enum EvalError {
 	#[error(transparent)]
 	Recurrence(#[from] RecurError),
-	#[error(
-		"the text it matches has an emoji or another character Actual's regex reads differently"
-	)]
+	#[error("text with an emoji or another character Actual's regex reads differently")]
 	AstralText,
+	#[error("a \\B in a regex run on text with accented or other non-ASCII letters")]
+	NonBoundary,
 }
 
 /// `new RegExp(source)`, refused when Veritas can't promise JS's reading.
@@ -286,7 +290,7 @@ fn pattern(source: &str) -> Result<ConditionValue, Gap> {
 pub(crate) fn recur_gap(error: RecurError) -> Gap {
 	match error {
 		RecurError::Rejected(reason) => Gap::RejectedByActual(reason),
-		other => Gap::Unsupported(other.to_string()),
+		_ => Gap::Unsupported("a repeating date Veritas can't read".into()),
 	}
 }
 
@@ -473,7 +477,10 @@ impl Condition {
 				.iter()
 				.any(|entry| entry.as_deref() == Some(text.as_str())),
 			(Op::Matches, F::Text(text), V::Pattern(pattern)) => {
-				pattern.test(text).ok_or(EvalError::AstralText)?
+				pattern.test(text).map_err(|unreadable| match unreadable {
+					Unreadable::Astral => EvalError::AstralText,
+					Unreadable::NonBoundary => EvalError::NonBoundary,
+				})?
 			}
 			(Op::HasTags, F::Text(text), V::Text(tags)) => extract_tags(tags)
 				.iter()
@@ -529,7 +536,7 @@ fn parse_text(op: Op, value: Option<&Value>) -> Result<ConditionValue, Gap> {
 		for entry in entries.iter().filter(|entry| js::truthy(Some(entry))) {
 			match entry {
 				Value::String(text) => list.push(text.to_lowercase()),
-				_ => return unsupported("a oneOf entry that isn't text"),
+				_ => return unsupported("a list entry that isn't text"),
 			}
 		}
 		return Ok(ConditionValue::TextList(list));
@@ -576,7 +583,7 @@ fn parse_id(op: Op, value: Option<&Value>) -> Result<ConditionValue, Gap> {
 		},
 		Op::Contains | Op::DoesNotContain => match value {
 			Some(Value::String(needle)) => Ok(ConditionValue::Id(Some(needle.clone()))),
-			_ => unsupported("contains with a value that isn't text"),
+			_ => unsupported("a “contains” value that isn't text"),
 		},
 		_ => match value {
 			Some(value) => Ok(ConditionValue::Id(id(value)?)),

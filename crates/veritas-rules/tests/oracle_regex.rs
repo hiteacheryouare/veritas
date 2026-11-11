@@ -245,10 +245,11 @@ const MERCHANTS: &[&str] = &[
 	"apple\\.com/bill",
 ];
 
-/// Rules that list many merchants run long. Up to Veritas's 1,000 character
+/// Rules that list many merchants run long. Up to Veritas's 10,000 character
 /// cap they must run and agree with Actual, and past it they must be left to
 /// Actual. Each comes with whether Veritas should read it. A run of `\s`
-/// expands the most per character, yet stays under the translation cap.
+/// expands the most per character (96 bytes each), so 521 of them pass the
+/// 50,000 byte translation cap well inside the source cap.
 fn sized_patterns() -> Vec<(String, bool)> {
 	let alternation = |chars: usize| {
 		let mut names: Vec<String> = MERCHANTS.iter().map(|name| (*name).to_owned()).collect();
@@ -259,10 +260,10 @@ fn sized_patterns() -> Vec<(String, bool)> {
 		names.join("|")
 	};
 	vec![
-		(alternation(1_000), true),
-		(alternation(1_200), false),
-		("\\s".repeat(500), true),
-		("\\s".repeat(501), false),
+		(alternation(10_000), true),
+		(alternation(10_200), false),
+		("\\s".repeat(520), true),
+		("\\s".repeat(521), false),
 	]
 }
 
@@ -378,11 +379,9 @@ fn class_char(rng: &mut Rng) -> char {
 	}
 }
 
-/// A class member list. It never puts `-` right after a class escape like
-/// `\d`, the shape `js_reads_a_dash_after_a_class_escape_as_a_literal` holds.
+/// A class member list, dashes after class escapes included.
 fn class(rng: &mut Rng) -> String {
 	let mut out = String::from(if rng.chance(25) { "[^" } else { "[" });
-	let mut after_class_escape = false;
 	for _ in 0..rng.below(4) {
 		let chunk = match rng.below(6) {
 			0 => format!("{}-{}", class_char(rng), class_char(rng)),
@@ -390,12 +389,6 @@ fn class(rng: &mut Rng) -> String {
 			2 => (*rng.pick(CLASS_CHUNKS)).to_owned(),
 			_ => class_char(rng).to_string(),
 		};
-		if after_class_escape && chunk.starts_with('-') {
-			continue;
-		}
-		after_class_escape = ["\\d", "\\w", "\\s", "\\D", "\\W", "\\S"]
-			.iter()
-			.any(|escape| chunk.eq_ignore_ascii_case(escape));
 		out.push_str(&chunk);
 	}
 	out.push(']');
@@ -703,12 +696,10 @@ fn every_matches_verdict_agrees_with_actual_or_is_undetermined() {
 }
 
 /// In a JS class, `\d-x` is `\d`, `-` and `x`, and `x` can't start a range
-/// (Annex B `ClassAtom - ClassAtom` with a class escape on one side). The
-/// translator turns the `-` into a literal but lets `x` start a range, so
-/// `[\d-a-z]` takes in all of a-z and `[\d--z]` takes in `-` through `z`.
-/// Text fields lowercase the pattern, so `\S` and `\W` are hit as well.
+/// (Annex B `ClassAtom - ClassAtom` with a class escape on one side), so
+/// `[\d-a-z]` doesn't take in `m` and `[\d--z]` only adds `-` and `z`. Text
+/// fields lowercase the pattern, so `\S` and `\W` take the same path.
 #[test]
-#[ignore = "known bug: a dash after a class escape lets the next atom start a range (PR #27)"]
 fn js_reads_a_dash_after_a_class_escape_as_a_literal() {
 	let Some(oracle) = oracle_dir() else {
 		return;
@@ -780,12 +771,11 @@ fn js_reads_a_dash_after_a_class_escape_as_a_literal() {
 
 /// `(?-u:\B)` can match between the bytes of one UTF-8 character. The
 /// `regex` crate drops that empty match and then misses the alternative that
-/// does match, so `\B|é` fails on "sé1" where JS matches the `é`. Only id
+/// does match, so `\B|é` would fail on "sé1" where JS matches the `é`. Only id
 /// fields keep `\B` (text fields lowercase it to `\b`), and real ids are
-/// ASCII UUIDs, so no budget can hit this today.
+/// ASCII UUIDs, but Veritas leaves any `\B` on non-ASCII text to Actual.
 #[test]
-#[ignore = "latent bug: \\B beside non-ASCII text misses a match; ids are ASCII so unreachable today (PR #27)"]
-fn a_non_boundary_beside_non_ascii_text_still_lets_other_branches_match() {
+fn a_non_boundary_beside_non_ascii_text_is_left_to_actual() {
 	let Some(oracle) = oracle_dir() else {
 		return;
 	};
@@ -824,5 +814,6 @@ fn a_non_boundary_beside_non_ascii_text_still_lets_other_branches_match() {
 		&budget,
 		&mut BudgetPayees::new(&budget, || PayeeId::new("made")),
 	);
-	assert_eq!(outcome.applied, [RuleId::new(uuid(8, 0))]);
+	assert_eq!(outcome.undetermined, [RuleId::new(uuid(8, 0))]);
+	assert!(outcome.reasons[&RuleId::new(uuid(8, 0))].contains("non-ASCII"));
 }
