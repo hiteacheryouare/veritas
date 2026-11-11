@@ -1,10 +1,13 @@
 // Test helpers outside #[test] fns, so clippy.toml's test allowances miss them.
 #![allow(dead_code, clippy::unwrap_used, clippy::panic)]
 
+pub mod household;
+
 use veritas_domain::{
-	Account, AccountId, BudgetData, BudgetType, Category, CategoryGroup, CategoryGroupId,
-	CategoryId, CategoryKind, CategoryMeta, CivilDate, Money, Payee, PayeeId, SplitRole,
-	Transaction, TransactionId, TransactionKind, TransactionMeta, YearMonth,
+	Account, AccountGroup, AccountGroupId, AccountId, BudgetData, BudgetType, Category,
+	CategoryGroup, CategoryGroupId, CategoryId, CategoryKind, CategoryMeta, CivilDate, Money,
+	Payee, PayeeId, SplitRole, Transaction, TransactionId, TransactionKind, TransactionMeta,
+	YearMonth,
 };
 use veritas_reports::{
 	Classification, ClassifiedRow, Leg, NetProfit, Period, classify, net_profit,
@@ -74,6 +77,19 @@ impl Book {
 				transfer_account: Some(AccountId::new(id)),
 				favorite: false,
 				learn_categories: true,
+				tombstone: false,
+			},
+		);
+		self
+	}
+
+	pub fn account_group(&mut self, id: &str, sort_order: f64) -> &mut Self {
+		self.budget.account_groups.insert(
+			AccountGroupId::new(id),
+			AccountGroup {
+				id: AccountGroupId::new(id),
+				name: id.to_owned(),
+				sort_order,
 				tombstone: false,
 			},
 		);
@@ -395,4 +411,76 @@ pub fn master() -> Book {
 		.in_category("Groceries");
 	book.transfer("T13", "CHK", "VISA", "2027-02-03", -10_000);
 	book
+}
+
+/// Balances summed straight from the transactions, never through the
+/// classification: live rows that are not split parents, in accounts that
+/// exist. Prefix sums keep a query cheap on a 100k-row fixture.
+pub struct RawLedger {
+	dates: Vec<CivilDate>,
+	net_worth: Vec<i64>,
+	budget_cash: Vec<i64>,
+}
+
+impl RawLedger {
+	pub fn new(budget: &BudgetData) -> Self {
+		let mut rows: Vec<(CivilDate, bool, i64)> = budget
+			.transactions
+			.values()
+			.filter(|row| !row.tombstone)
+			.filter(|row| match &row.split {
+				SplitRole::None => true,
+				SplitRole::Parent => false,
+				SplitRole::Child { parent } => budget
+					.transactions
+					.get(parent)
+					.is_some_and(|parent| !parent.tombstone),
+			})
+			.filter_map(|row| {
+				let account = budget.accounts.get(&row.account)?;
+				Some((row.date, !account.off_budget, row.amount.minor()))
+			})
+			.collect();
+		rows.sort_by_key(|(date, _, _)| *date);
+		let mut ledger = RawLedger {
+			dates: Vec::with_capacity(rows.len()),
+			net_worth: vec![0],
+			budget_cash: vec![0],
+		};
+		for (date, on_budget, amount) in rows {
+			ledger.dates.push(date);
+			ledger
+				.net_worth
+				.push(ledger.net_worth.last().unwrap() + amount);
+			let cash = if on_budget { amount } else { 0 };
+			ledger
+				.budget_cash
+				.push(ledger.budget_cash.last().unwrap() + cash);
+		}
+		ledger
+	}
+
+	fn through(&self, on: CivilDate) -> usize {
+		self.dates.partition_point(|date| *date <= on)
+	}
+
+	fn before(&self, first: CivilDate) -> usize {
+		self.dates.partition_point(|date| *date < first)
+	}
+
+	pub fn net_worth(&self, on: CivilDate) -> i64 {
+		self.net_worth[self.through(on)]
+	}
+
+	pub fn net_worth_before(&self, first: CivilDate) -> i64 {
+		self.net_worth[self.before(first)]
+	}
+
+	pub fn budget_cash(&self, on: CivilDate) -> i64 {
+		self.budget_cash[self.through(on)]
+	}
+
+	pub fn budget_cash_before(&self, first: CivilDate) -> i64 {
+		self.budget_cash[self.before(first)]
+	}
 }

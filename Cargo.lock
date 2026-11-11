@@ -1139,12 +1139,17 @@ dependencies = [
  "proptest",
  "veritas-domain",
  "veritas-engine",
+ "veritas-interop",
+ "veritas-store",
 ]
 
 [[package]]
 name = "veritas-rules"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "serde_json",
+ "thiserror",
  "veritas-domain",
 ]
 
