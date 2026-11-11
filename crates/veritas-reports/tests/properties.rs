@@ -16,7 +16,7 @@ use veritas_domain::{
 };
 use veritas_reports::{
 	Classification, Leg, NetProfit, NodeKind, Period, Sankey, Section, balance_sheet, cash_flow,
-	net_profit, net_worth_by_month, owners_equity, sankey, tax_summary,
+	cash_flow_by_month, net_profit, net_worth_by_month, owners_equity, sankey, tax_summary,
 };
 
 // Index ACCOUNTS names an account that is never created, so rows there are
@@ -615,6 +615,17 @@ proptest! {
 		let january = owners_equity(&book.budget, &classification, Period::new(in_2027(1, 1), in_2027(1, 31)).unwrap()).unwrap();
 		let february = owners_equity(&book.budget, &classification, Period::new(in_2027(2, 1), in_2027(2, 28)).unwrap()).unwrap();
 		prop_assert_eq!(january.closing, february.opening);
+
+		let flows = cash_flow_by_month(
+			&book.budget,
+			&classification,
+			YearMonth::new(2027, 1).unwrap(),
+			YearMonth::new(2027, 3).unwrap(),
+		)
+		.unwrap();
+		for flow in &flows {
+			prop_assert_eq!(flow, &cash_flow(&book.budget, &classification, flow.period).unwrap());
+		}
 
 		let series = net_worth_by_month(
 			&book.budget,

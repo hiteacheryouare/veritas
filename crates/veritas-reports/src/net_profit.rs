@@ -7,7 +7,9 @@ use veritas_domain::{
 
 use crate::{Classification, ClassifiedRow, Decision, Period};
 
-/// A number and the rows behind it, primary legs only, by date then id.
+/// A number and the rows behind it, by date then id. Flow lines list primary
+/// legs only. The in-transit lines (E7 and its ST-6 twin) list whichever leg of
+/// a pair is dated in the period, mirror legs included.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Line {
 	pub total: Money,
