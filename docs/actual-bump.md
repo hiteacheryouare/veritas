@@ -28,13 +28,14 @@ Also diff `server/budget/`, `server/transactions/`, `server/rules/`, `server/sch
 2. **Reference.** Delete the checkout, then recreate it: `rm -rf reference/actual && cargo xtask reference`.
 3. **Oracle.** In `tools/actual-oracle/`, run `npm install --save-exact @actual-app/api@NEWVER`. Commit the lockfile. If Actual raised its Node engine floor, update `.nvmrc`.
 4. **Notices.** Bump the pinned version in THIRD_PARTY_NOTICES.md.
+5. **Template.** Run `cargo xtask template` to regenerate the new-budget template from the new oracle, then commit it. Its manifest test fails until you do.
 
 ## 3. Update Veritas
 
 1. `veritas-store` mappings and insert defaults, for every default, semantic or destructive change from step 1.
 2. `docs/actual-format.md`: re-verify every claim whose cited file changed, and update its citations.
 3. Ported logic (engine, rules, arithmetic): port the change, and add the new upstream test vectors.
-4. Regenerate the fixtures with `cargo xtask fixtures`, then commit them.
+4. Regenerate the fixtures with `cargo xtask fixtures`, then commit them. Regenerate the new-budget template the same way: rename `crates/veritas-store/template/actual-OLDVER.sqlite` and `TEMPLATE_DB` in `xtask/src/main.rs` and `crates/veritas-store/src/create.rs` to the new version, run `cargo xtask template`, and commit the file.
 
 ## 4. Prove it
 
