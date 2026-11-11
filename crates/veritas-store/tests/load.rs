@@ -272,7 +272,7 @@ fn veritas_metadata_loads_when_present() {
 		 INSERT INTO veritas_account_meta VALUES ('{account}', 'liability', 649, 31250, 15, 'Credit union');
 		 INSERT INTO veritas_category_meta VALUES ('kindless', NULL, NULL, NULL);
 		 INSERT INTO veritas_tax_tag VALUES ('medical', 'medical'), ('gift', 'none');
-		 INSERT INTO veritas_transaction_meta VALUES ('t-adjust', 1), ('t-plain', 0);
+		 INSERT INTO veritas_transaction_meta VALUES ('t-adjust', 1, 'a rule ran a template'), ('t-plain', 0, NULL);
 		 INSERT INTO veritas_goal (id, category_id, target_cents, target_date, status, reached_month, created_at)
 		   VALUES ('g1', '{category}', 500000, 20271201, 'reached', '2027-06', 0);"
 	))
@@ -287,6 +287,16 @@ fn veritas_metadata_loads_when_present() {
 	assert_eq!(data.tax_tags["gift"], "none");
 	assert!(data.transaction_meta[&TransactionId::new("t-adjust")].adjustment);
 	assert!(!data.transaction_meta[&TransactionId::new("t-plain")].adjustment);
+	assert_eq!(
+		data.transaction_meta[&TransactionId::new("t-adjust")]
+			.needs_actual
+			.as_deref(),
+		Some("a rule ran a template")
+	);
+	assert_eq!(
+		data.transaction_meta[&TransactionId::new("t-plain")].needs_actual,
+		None
+	);
 	let loan = &data.account_meta[&veritas_domain::AccountId::new(&account)];
 	assert_eq!(loan.loan_payment, Some(Money::from_minor(31250)));
 	assert_eq!(loan.loan_payment_day, Some(15));
@@ -385,7 +395,7 @@ fn actuals_quirks_load_and_unrepresentable_rows_are_counted_not_fatal() {
 		data.rules[&veritas_domain::RuleId::new("odd-stage")].stage,
 		veritas_domain::RuleStage::Default
 	);
-	assert!(!data.notes.contains_key("empty-note"));
+	assert_eq!(data.notes["empty-note"], None);
 	// Actual's transaction views use IFNULL(tombstone, 0); every other read is tombstone = 0.
 	assert!(!transaction("null-tombstone").unwrap().tombstone);
 	assert!(data.categories[&CategoryId::new("null-tombstone")].tombstone);
@@ -414,7 +424,7 @@ fn actuals_quirks_load_and_unrepresentable_rows_are_counted_not_fatal() {
 			("transactions", some("no-account")),
 			("transactions", some("no-date")),
 			("transactions", some("orphan-child")),
-			("zero_budgets", Some(format!("2019-04-{category}"))),
+			("zero_budgets", Some(format!("201904-{category}"))),
 		]
 	);
 }
@@ -522,13 +532,7 @@ fn no_odd_value_in_any_modeled_column_aborts_the_load_or_drops_a_row_silently() 
 				{
 					continue;
 				}
-				// A NULL note is how Actual clears one, so it is no row at all.
-				let present = if table == "notes" {
-					" WHERE note IS NOT NULL"
-				} else {
-					""
-				};
-				let rows = count(&raw, &format!("SELECT count(*) FROM {table}{present}"));
+				let rows = count(&raw, &format!("SELECT count(*) FROM {table}"));
 				drop(raw);
 
 				let loaded = Store::open(&db_path, Access::ReadWrite)
@@ -559,4 +563,99 @@ fn no_odd_value_in_any_modeled_column_aborts_the_load_or_drops_a_row_silently() 
 		}
 	}
 	assert!(exercised > 400, "only {exercised} cases ran");
+}
+
+#[test]
+fn retired_rule_stages_load_as_pre_and_stay_in_the_file() {
+	let scratch = Scratch::new("legacy-stages");
+	let db_path = fixture_db("small", &scratch);
+	let raw = Connection::open(&db_path).unwrap();
+	raw.execute_batch(
+		"INSERT INTO rules (id, stage, conditions, actions) VALUES
+		   ('old-cleanup', 'cleanup', '[]', '[]'), ('old-modify', 'modify', '[]', '[]'),
+		   ('unknown-stage', 'later', '[]', '[]');",
+	)
+	.unwrap();
+	let mut store = Store::open(&db_path, Access::ReadWrite).unwrap();
+	let data = store.load().unwrap().data;
+	let stage = |id: &str| data.rules[&veritas_domain::RuleId::new(id)].stage;
+	assert_eq!(stage("old-cleanup"), veritas_domain::RuleStage::Pre);
+	assert_eq!(stage("old-modify"), veritas_domain::RuleStage::Pre);
+	assert_eq!(stage("unknown-stage"), veritas_domain::RuleStage::Default);
+
+	let rule = data.rules[&veritas_domain::RuleId::new("old-cleanup")].clone();
+	let renamed = veritas_domain::Rule {
+		actions_json: "[{\"op\":\"set\",\"field\":\"notes\",\"value\":\"x\"}]".to_owned(),
+		..rule.clone()
+	};
+	let mut writer = store.writer().unwrap();
+	writer.put_rule(Some(&rule), Some(&renamed)).unwrap();
+	writer.commit().unwrap();
+	let stored: String = raw
+		.query_row(
+			"SELECT stage FROM rules WHERE id = 'old-cleanup'",
+			[],
+			|row| row.get(0),
+		)
+		.unwrap();
+	assert_eq!(stored, "cleanup", "an edit leaves the stage column alone");
+}
+
+#[test]
+fn rules_and_schedules_read_a_null_tombstone_as_deleted() {
+	let scratch = Scratch::new("null-tombstones");
+	let db_path = fixture_db("small", &scratch);
+	Connection::open(&db_path)
+		.unwrap()
+		.execute_batch(
+			"INSERT INTO rules (id, conditions, actions, tombstone) VALUES ('null-rule', '[]', '[]', NULL);
+			 INSERT INTO schedules (id, rule, tombstone) VALUES ('null-schedule', 'null-rule', NULL);",
+		)
+		.unwrap();
+	let data = Store::open(&db_path, Access::ReadWrite)
+		.unwrap()
+		.load()
+		.unwrap()
+		.data;
+	assert!(data.rules[&veritas_domain::RuleId::new("null-rule")].tombstone);
+	assert!(data.schedules[&ScheduleId::new("null-schedule")].tombstone);
+}
+
+#[test]
+fn a_child_of_a_parent_with_a_null_tombstone_is_left_out_like_actuals_alive_view() {
+	let scratch = Scratch::new("null-parent");
+	let db_path = fixture_db("small", &scratch);
+	let raw = Connection::open(&db_path).unwrap();
+	let account: String = raw
+		.query_row("SELECT id FROM accounts ORDER BY id LIMIT 1", [], |row| {
+			row.get(0)
+		})
+		.unwrap();
+	// v_transactions_internal_alive keeps a child only when t2.tombstone = 0,
+	// so a NULL there drops the child while IFNULL keeps the parent.
+	raw.execute_batch(&format!(
+		"INSERT INTO transactions (id, acct, amount, date, isParent, tombstone)
+		   VALUES ('null-parent', '{account}', -500, 20261101, 1, NULL);
+		 INSERT INTO transactions (id, acct, amount, date, isChild, parent_id)
+		   VALUES ('null-parent/child', '{account}', -500, 20261101, 1, 'null-parent');"
+	))
+	.unwrap();
+	let loaded = Store::open(&db_path, Access::ReadWrite)
+		.unwrap()
+		.load()
+		.unwrap();
+	assert!(!loaded.data.transactions[&TransactionId::new("null-parent")].tombstone);
+	assert!(
+		!loaded
+			.data
+			.transactions
+			.contains_key(&TransactionId::new("null-parent/child"))
+	);
+	assert!(
+		loaded
+			.report
+			.skipped
+			.iter()
+			.any(|row| row.id.as_deref() == Some("null-parent/child"))
+	);
 }

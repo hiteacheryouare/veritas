@@ -5,6 +5,7 @@ mod cells;
 mod connection;
 mod load;
 mod schema;
+mod store_trait;
 mod write;
 
 pub use audit::{AuditReport, Check, Violation, audit};

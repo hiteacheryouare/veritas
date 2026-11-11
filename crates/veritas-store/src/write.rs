@@ -11,6 +11,7 @@ use veritas_domain::{
 };
 
 use crate::connection::storage;
+use crate::load::{BUDGET_CELL_PICK, NEXT_DATE_PICK};
 
 /// A row as the columns Veritas models, in a fixed order per table.
 type Columns = Vec<(&'static str, Value)>;
@@ -242,7 +243,10 @@ fn account_meta_columns(row: &AccountMeta) -> Columns {
 }
 
 fn transaction_meta_columns(row: &TransactionMeta) -> Columns {
-	vec![("adjustment", flag(row.adjustment))]
+	vec![
+		("adjustment", flag(row.adjustment)),
+		("needs_actual", text(row.needs_actual.as_deref())),
+	]
 }
 
 fn goal_columns(row: &Goal) -> Columns {
@@ -413,7 +417,7 @@ impl<'conn> Writer<'conn> {
 	}
 
 	/// For veritas_* rows, which Veritas owns outright and may delete.
-	fn put_veritas<T>(
+	fn put_veritas<T: ?Sized>(
 		&self,
 		table: &str,
 		key_column: &'static str,
@@ -597,7 +601,10 @@ impl<'conn> Writer<'conn> {
 		let existing: Option<(String, Option<i64>)> = self
 			.tx
 			.query_row(
-				"SELECT id, base_next_date_ts FROM schedules_next_date WHERE schedule_id = ?1 ORDER BY rowid LIMIT 1",
+				&format!(
+					"SELECT id, base_next_date_ts FROM schedules_next_date WHERE schedule_id = ?1 \
+					 ORDER BY {NEXT_DATE_PICK} LIMIT 1"
+				),
 				[&id],
 				|row| Ok((row.get(0)?, row.get(1)?)),
 			)
@@ -679,7 +686,8 @@ impl<'conn> Writer<'conn> {
 			.tx
 			.query_row(
 				&format!(
-					"SELECT id FROM {table} WHERE month = ?1 AND category = ?2 ORDER BY rowid LIMIT 1"
+					"SELECT id FROM {table} WHERE month = ?1 AND category = ?2 \
+					 ORDER BY {BUDGET_CELL_PICK} LIMIT 1"
 				),
 				params_from_iter([Value::Integer(month), owned(after.category.as_str())]),
 				|row| row.get(0),
@@ -694,19 +702,25 @@ impl<'conn> Writer<'conn> {
 				&budget_cell_columns(after),
 			),
 			(Some(_), None) => Err(invalid("that budget row already exists")),
-			(None, _) => self.insert(
-				table,
-				&[("id", owned(&format!("{month}-{}", after.category)))],
-				&[
-					vec![
-						("month", Value::Integer(month)),
-						("category", owned(after.category.as_str())),
-					],
-					budget_cell_columns(after),
-				]
-				.concat(),
-				Nulls::Skip,
-			),
+			(None, _) => {
+				// Actual's setBudget writes only the amount, so a goal-less
+				// row keeps long_goal NULL, which reads as false.
+				let mut columns = budget_cell_columns(after);
+				columns.retain(|(name, value)| !(*name == "long_goal" && *value == flag(false)));
+				self.insert(
+					table,
+					&[("id", owned(&format!("{month}-{}", after.category)))],
+					&[
+						vec![
+							("month", Value::Integer(month)),
+							("category", owned(after.category.as_str())),
+						],
+						columns,
+					]
+					.concat(),
+					Nulls::Skip,
+				)
+			}
 		}
 	}
 
@@ -736,34 +750,19 @@ impl<'conn> Writer<'conn> {
 	}
 
 	/// Actual clears a note by writing NULL, so a removed note becomes NULL.
+	/// `None` text is a NULL note, which is how Actual clears one.
 	pub fn put_note(
 		&mut self,
 		id: &str,
-		before: Option<&str>,
-		after: Option<&str>,
+		before: Option<Option<&str>>,
+		after: Option<Option<&str>>,
 	) -> Result<(), CoreError> {
 		let key = [("id", owned(id))];
-		match before {
-			None => match after {
-				None => Ok(()),
-				// A cleared note is a NULL row that memory doesn't hold, so the
-				// insert takes it over instead of failing on its id.
-				Some(text) => self
-					.tx
-					.execute(
-						"INSERT INTO notes (id, note) VALUES (?1, ?2) \
-						 ON CONFLICT (id) DO UPDATE SET note = excluded.note",
-						[id, text],
-					)
-					.map(|_| ())
-					.map_err(storage),
-			},
-			Some(old) => self.update(
-				"notes",
-				&key,
-				&vec![("note", owned(old))],
-				&vec![("note", text(after))],
-			),
+		let columns = |note: Option<&str>| vec![("note", text(note))];
+		match (before, after) {
+			(_, None) => Err(invalid("notes are cleared, never deleted")),
+			(None, Some(note)) => self.insert("notes", &key, &columns(note), Nulls::Write),
+			(Some(old), Some(note)) => self.update("notes", &key, &columns(old), &columns(note)),
 		}
 	}
 
@@ -863,6 +862,23 @@ impl<'conn> Writer<'conn> {
 			before,
 			after,
 			transaction_meta_columns,
+		)
+	}
+
+	/// A `veritas_tax_tag` row: which tax bucket an Actual tag means.
+	pub fn put_tax_tag(
+		&mut self,
+		tag: &str,
+		before: Option<&str>,
+		after: Option<&str>,
+	) -> Result<(), CoreError> {
+		self.put_veritas(
+			"veritas_tax_tag",
+			"tag",
+			tag,
+			before,
+			after,
+			|bucket: &str| vec![("bucket", owned(bucket))],
 		)
 	}
 

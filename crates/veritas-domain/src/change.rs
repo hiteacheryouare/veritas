@@ -40,7 +40,7 @@ pub struct Hold {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Note {
 	pub id: String,
-	pub text: String,
+	pub text: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -95,7 +95,7 @@ pub trait Record: Clone + PartialEq + Debug + Sized {
 /// One row before and after a command. `before` is always what memory and
 /// storage held when the change was made, so a store can update only the
 /// columns that differ. `after: None` means the row goes away, which only
-/// happens on undo for notes (Actual writes a NULL note) and `veritas_*` rows.
+/// happens on undo for `veritas_*` rows.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Delta<T: Record> {
 	pub key: T::Key,
@@ -368,8 +368,12 @@ impl Record for Note {
 		put(&mut data.notes, key, value.map(|note| note.text));
 	}
 
-	fn retired(_: &Self) -> Retired<Self> {
-		Retired::Removed
+	/// Actual's undo of a new note writes NULL and keeps the row.
+	fn retired(created: &Self) -> Retired<Self> {
+		Retired::Becomes(Note {
+			id: created.id.clone(),
+			text: None,
+		})
 	}
 
 	fn entity(key: &String) -> EntityRef {
@@ -495,9 +499,9 @@ impl Record for TransactionMetaRow {
 	fn read(data: &BudgetData, key: &TransactionId) -> Option<Self> {
 		data.transaction_meta
 			.get(key)
-			.map(|&meta| TransactionMetaRow {
+			.map(|meta| TransactionMetaRow {
 				transaction: key.clone(),
-				meta,
+				meta: meta.clone(),
 			})
 	}
 

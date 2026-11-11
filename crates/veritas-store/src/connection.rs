@@ -190,13 +190,20 @@ pub fn open_read_only(db_path: &Path) -> Result<Connection, CoreError> {
 }
 
 /// The problems `PRAGMA integrity_check` reports. Empty means the file is sound.
+/// CHECK constraints are left out: a row that breaks one is bad data for the
+/// invariant audit to report, not damage that stops the budget opening.
 pub fn integrity_check(conn: &Connection) -> Result<Vec<String>, CoreError> {
-	let mut statement = conn.prepare("PRAGMA integrity_check").map_err(storage)?;
-	let lines = statement
-		.query_map([], |row| row.get::<_, String>(0))
-		.map_err(storage)?
-		.collect::<Result<Vec<_>, _>>()
+	conn.execute_batch("PRAGMA ignore_check_constraints = ON")
 		.map_err(storage)?;
+	let lines = (|| {
+		let mut statement = conn.prepare("PRAGMA integrity_check")?;
+		statement
+			.query_map([], |row| row.get::<_, String>(0))?
+			.collect::<Result<Vec<_>, _>>()
+	})();
+	conn.execute_batch("PRAGMA ignore_check_constraints = OFF")
+		.map_err(storage)?;
+	let lines = lines.map_err(storage)?;
 	Ok(if lines == ["ok"] { Vec::new() } else { lines })
 }
 
