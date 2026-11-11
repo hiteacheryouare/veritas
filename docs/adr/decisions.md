@@ -250,3 +250,32 @@ Every decision behind Veritas, so no question gets asked twice. D1–D24 are PLA
 - **Options:** an independent Fred instance / the code reviewer alone / Ryan
 - **Decision:** An independent Fred instance, a fresh agent that had no part in writing the spec, re-derives the examples and signs off as `fred`. Fred's earlier self-sign-offs on #6, #10 and #18 happened before this rule.
 - **Date:** 2026-11-10
+
+### D50. Where do scenario types live, and how are they stored?
+- **Options:** keep them in veritas-forecast / move them to veritas-domain
+- **Decision:** Move them to `veritas-domain/src/scenario.rs` (Scenario, ScenarioEvent, ScenarioChange, Cadence, IncomeDelta, ScenarioEventId) and add them to BudgetData. `veritas_scenario.created_at` is unix milliseconds. The store validates event rows on load and skips invalid ones with a report (D37). Per-kind CHECKs wait for schema v2. The transfer counterpart column is deferred. Events are ordered by id.
+- **Date:** 2026-11-10
+
+### D51. Which audit findings make a budget read-only?
+- **Options:** only damage SQLite finds / any finding
+- **Decision:** Only damage SQLite itself finds (`AuditFailed`). Other findings are reported and the budget stays writable, which matches import accepting non-corrupt budgets that have findings.
+- **Date:** 2026-11-10
+
+### D52. Does Veritas need Actual to start?
+- **Options:** Actual-first (import is the way in) / Veritas stands on its own
+- **Decision:** Veritas stands on its own, with excellent Actual interop (R-IO-0). Ryan chose to keep the Actual-format SQLite file as Veritas's native storage, so a budget made in Veritas is a valid Actual budget from the first write and export stays lossless by construction.
+- **Date:** 2026-11-10
+
+### D53. What does first launch offer?
+- **Options:** a guided new budget first / a blank new budget first / two equal choices
+- **Decision:** Two equal choices, New budget and Import from Actual, with neither one primary. This replaces PLAN §9 scenario 20.
+- **Date:** 2026-11-10
+
+### D54. Which categories does a new budget start with?
+- **Options:** Actual's seed set / a Veritas starter set / empty
+- **Decision:** A Veritas starter set that Fred designs to fit the classification layer (kinds, savings, debt and tax buckets already set). Ryan approves the proposal before it ships. It's written up in docs/finance/starter-categories.md.
+- **Date:** 2026-11-10
+
+### D55. Mac shell UI defaults
+- **Decision:** Ryan kept the shell's defaults: Apple title case in menus and sentence case elsewhere, the ⌘K palette as a native sheet, ⌘F as a find bar under the toolbar, "Integrity report" as the user-facing name of the audit, and the placeholder bundle id `app.veritas.Veritas` with ad-hoc signing until he picks a domain and team.
+- **Date:** 2026-11-10

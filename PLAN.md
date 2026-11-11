@@ -129,6 +129,7 @@ Priority: **P0** = required for the first daily-driver release (v1, end of Phase
 
 | ID | Requirement | P |
 |---|---|---|
+| R-IO-0 | **Veritas stands on its own.** Create a new budget without Actual: a name, currency and number format, accounts with starting balances, and the Veritas starter categories (docs/finance/starter-categories.md). The file is an Actual-format budget from the first write, built from the pinned template (Appendix A), so exporting it imports into Actual cleanly. | P0 |
 | R-IO-1 | Import an Actual export `.zip`: `db.sqlite` + `metadata.json`, either at the zip root or both in exactly one shared subfolder (same rule as Actual's `importBuffer`). | P0 |
 | R-IO-2 | Export an Actual `.zip` that Actual (Electron, pinned version) imports with no warnings or errors. | P0 |
 | R-IO-3 | **Lossless round trip of Actual data.** Actual → Veritas → Actual with no edits produces a canonical dump (§6.4) identical to the original for every Actual table except `kvcache`/`kvcache_key`. Metadata ids may differ. | P0 |
@@ -508,7 +509,8 @@ Each workstream runs on its own branch (`ws/<id>`), in its own git worktree, and
   7. Zip import (copy → audit → adopt) and export (`VACUUM INTO` → zip → atomic rename).
   8. Manifest guard.
   9. Rust `canonical_dump`.
-- **Done when:** round-trip tests pass on every fixture (R-IO-1 to R-IO-8), the oracle imports every export cleanly, and the importer fuzz target has run 1 h with no crash.
+  10. New budget (R-IO-0): copy the pinned template db (`cargo xtask template` regenerates it with the oracle), write `metadata.json`, and add the starter categories, accounts and starting balances.
+- **Done when:** round-trip tests pass on every fixture (R-IO-0 to R-IO-8), a new budget's export imports into Actual through the oracle with no errors, the oracle imports every export cleanly, and the importer fuzz target has run 1 h with no crash.
 
 ### WS-ENGINE: budget math
 - **Owns:** `veritas-engine`.
@@ -536,7 +538,7 @@ Each workstream runs on its own branch (`ws/<id>`), in its own git worktree, and
 ### WS-SESSION: session, FFI, reliability
 - **Owns:** `veritas-session`, `veritas-ffi`, crash harness.
 - **Steps:**
-  1. Open/close, single-writer lock.
+  1. Create (R-IO-0), open and close, single-writer lock.
   2. Command bus with one transaction per command.
   3. Undo/redo inverses.
   4. Change-event stream.
@@ -590,7 +592,7 @@ Shared rule: views go in `VeritasMacUI`, view models in `VeritasKit`, and no bus
 
 | Workstream | Builds | Key requirements |
 |---|---|---|
-| **WS-MAC-SHELL** | App shell, sidebar, toolbar, menus, ⌘K palette, open/import/export, settings (backups, interop, AI, appearance), snapshot restore UI, read-only mode banners, error presentation | R-IO-*, R-REL-3/4/6, §5.2 |
+| **WS-MAC-SHELL** | App shell, sidebar, toolbar, menus, ⌘K palette, new budget/open/import/export, settings (backups, interop, AI, appearance), snapshot restore UI, read-only mode banners, error presentation | R-IO-*, R-REL-3/4/6, §5.2 |
 | **WS-MAC-BUDGET** | Budget screen, envelope rows, arithmetic field component (**reused by every amount field app-wide**: build it first and publish it to the others), move budget, cover overspending, dense mode, goal cards + create/close/archive flows | R-BUD-*, R-GOAL-* |
 | **WS-MAC-ACCOUNTS** | Account list, `NSTableView` register, quick entry ⌘N with payee memory, Move money sheet, transfer rendering, on→off "what is this?" prompt, loan setup + payment wizard, reconcile flow, payee manager, account close (Actual's flow: an optional closing transfer moves the balance to the chosen account; see docs/actual-format.md) | R-ACC-*, R-XFER-*, R-DEBT-* |
 | **WS-MAC-BILLS** | Bills list/editor, upcoming tray, Paid/skip, sentence-style rule editor, read-only unsupported rules | R-BILL-*, R-RULE-* |
@@ -649,13 +651,14 @@ Shared rule: views go in `VeritasMacUI`, view models in `VeritasKit`, and no bus
 
 **Scale & UX**
 19. 100k+ transactions, 15+ years of months, 500 categories: still within the perf budgets.
-20. First launch with no budget: empty state with **Import from Actual** as the primary action.
+20. First launch with no budget: two equal choices, **New budget** and **Import from Actual**.
 
 ---
 
 # 10. Acceptance criteria
 
 **Interop & safety**
+- [ ] A budget created in Veritas (accounts with starting balances, starter categories, a month of budgeting and transactions) exports to a zip that Actual imports with no errors, and Actual shows the same balances and budgets.
 - [ ] Ryan exports from Actual, imports into Veritas, and immediately exports. The oracle reports a canonical dump identical to the original.
 - [ ] After a scripted session in Veritas (budget edits, transfers, a split loan payment, a new bill, a closed goal, an edited custom report), the export imports into Actual with no errors, and Actual shows the same balances, budgets, schedules and report config.
 - [ ] A file with an injected unknown table and an unknown column survives import → edit → export unchanged in those parts.
