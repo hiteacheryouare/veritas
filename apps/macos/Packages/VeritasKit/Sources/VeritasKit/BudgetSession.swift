@@ -81,12 +81,28 @@ public protocol BudgetSession: AnyObject, Sendable {
 	/// Calls `changed` after every commit, undo, redo or restore, from any thread.
 	func observeChanges(_ changed: @escaping @Sendable () -> Void) async throws
 	func close() async
+
+	func backupStatus() async throws -> BackupStatus
+	/// Swift holds the folder's sandbox access; the core only writes into it.
+	func setBackupFolder(_ folder: URL?) async throws
+	/// Writes today's backup zip. A failure also lands in `backupStatus().lastProblem`.
+	func backUpNow() async throws
+	/// `nil` while the background check still runs.
+	func integrityFindings() async throws -> [AuditFinding]?
+	/// Newest first.
+	func snapshots() async throws -> [SnapshotInfo]
+	/// Snapshots the budget as it is first, so a restore can itself be undone (R-REL-3).
+	func restoreSnapshot(id: String) async throws
+	func retention() async throws -> Retention
+	func setRetention(_ retention: Retention) async throws
 }
 
 /// The budgets in the app's budgets folder: new ones, Actual imports and reopened ones.
 public protocol BudgetLibrary: Sendable {
 	/// A folder for one new budget. A retried import or create reuses it, so it never makes a second copy.
 	func newBudgetDirectory() -> URL
+	/// Most recently opened first.
+	func listBudgets() async throws -> [BudgetListingItem]
 	func open(directory: URL) async throws -> any BudgetSession
 	func importActualZip(_ zip: URL, into directory: URL) async throws -> any BudgetSession
 	func createBudget(_ budget: NewBudget, into directory: URL) async throws -> any BudgetSession

@@ -4,11 +4,13 @@ import VeritasCore
 import VeritasKit
 
 /// UI tests launch the app with `-VeritasStub empty` or `-VeritasStub open`, plus
-/// optionally `-VeritasStubReadOnly <kind>` or `-VeritasStubImportError <kind>`.
-/// The stub stands in for the core until FFI v1 exports `Session`.
+/// optionally `-VeritasStubReadOnly <kind>`, `-VeritasStubImportError <kind>`,
+/// `-VeritasStubFindings YES` or `-VeritasStubBackupProblem YES`. The stub keeps
+/// the UI tests independent of fixtures, file panels and the sandbox.
 struct StubLaunch {
 	static let budgetDirectory = URL(filePath: "/stub/budget", directoryHint: .isDirectory)
 	static let zip = URL(filePath: "/stub/Budget.zip")
+	static let backupFolder = URL(filePath: "/stub/Backups", directoryHint: .isDirectory)
 
 	static let current: StubLaunch? = StubLaunch(defaults: .standard)
 
@@ -20,7 +22,9 @@ struct StubLaunch {
 		opensBudgetOnLaunch = mode == "open"
 		library = StubLibrary(
 			readOnly: defaults.string(forKey: "VeritasStubReadOnly").flatMap(Self.readOnlyKind),
-			importError: defaults.string(forKey: "VeritasStubImportError").flatMap(Self.error)
+			importError: defaults.string(forKey: "VeritasStubImportError").flatMap(Self.error),
+			hasFindings: defaults.bool(forKey: "VeritasStubFindings"),
+			backupFails: defaults.bool(forKey: "VeritasStubBackupProblem")
 		)
 	}
 
@@ -51,18 +55,27 @@ struct StubLaunch {
 struct StubLibrary: BudgetLibrary {
 	let readOnly: ReadOnlyKind?
 	let importError: FfiError?
+	var hasFindings = false
+	var backupFails = false
+
+	func listBudgets() async throws -> [BudgetListingItem] {
+		[
+			BudgetListingItem(id: "household", name: "Household", folder: StubLaunch.budgetDirectory, lastOpened: Date(timeIntervalSince1970: 1_794_384_000)),
+			BudgetListingItem(id: "untitled", name: nil, folder: StubLaunch.budgetDirectory, lastOpened: nil)
+		]
+	}
 
 	func newBudgetDirectory() -> URL {
 		StubLaunch.budgetDirectory
 	}
 
 	func open(directory: URL) async throws -> any BudgetSession {
-		StubSession(readOnly: readOnly)
+		StubSession(readOnly: readOnly, hasFindings: hasFindings, backupFails: backupFails)
 	}
 
 	func importActualZip(_ zip: URL, into directory: URL) async throws -> any BudgetSession {
 		if let importError { throw importError }
-		return StubSession(readOnly: readOnly)
+		return StubSession(readOnly: readOnly, hasFindings: hasFindings, backupFails: backupFails)
 	}
 
 	func createBudget(_ budget: NewBudget, into directory: URL) async throws -> any BudgetSession {
@@ -94,13 +107,24 @@ struct StubLibrary: BudgetLibrary {
 	}
 }
 
-final class StubSession: BudgetSession {
+final class StubSession: BudgetSession, @unchecked Sendable {
 	let readOnly: ReadOnlyKind?
 	let name: String
 	let accountGroups: [SidebarGroup]
+	let hasFindings: Bool
+	let backupFails: Bool
+	private let lock = NSLock()
+	private var backup = BackupStatus.none
+	private var snapshotList = [
+		SnapshotInfo(id: "hourly", takenAt: "2026-11-11T15:00:00Z", reason: .hourly),
+		SnapshotInfo(id: "open", takenAt: "2026-11-11T14:00:00Z", reason: .open)
+	]
+	private var keep = Retention(hourly: 48, daily: 30, monthly: 12, operationDays: 30)
 
-	init(readOnly: ReadOnlyKind?) {
+	init(readOnly: ReadOnlyKind?, hasFindings: Bool = false, backupFails: Bool = false) {
 		self.readOnly = readOnly
+		self.hasFindings = hasFindings
+		self.backupFails = backupFails
 		name = "Stub"
 		accountGroups = [
 			SidebarGroup(name: "Cash", accounts: [SidebarAccount(id: "checking", name: "Checking", balance: 0)]),
@@ -112,6 +136,8 @@ final class StubSession: BudgetSession {
 		self.readOnly = readOnly
 		self.name = name
 		accountGroups = groups
+		hasFindings = false
+		backupFails = false
 	}
 
 	let canExport = true
@@ -131,6 +157,46 @@ final class StubSession: BudgetSession {
 	func observeChanges(_ changed: @escaping @Sendable () -> Void) async throws {}
 
 	func close() async {}
+
+	func backupStatus() async throws -> BackupStatus {
+		lock.withLock { backup }
+	}
+
+	func setBackupFolder(_ folder: URL?) async throws {
+		lock.withLock { backup = BackupStatus(folder: folder, lastAt: backup.lastAt, lastFile: backup.lastFile, lastProblem: backup.lastProblem) }
+	}
+
+	func backUpNow() async throws {
+		let fails = backupFails
+		lock.withLock {
+			backup = BackupStatus(
+				folder: backup.folder,
+				lastAt: .now,
+				lastFile: fails ? nil : "2026-11-11-Stub.zip",
+				lastProblem: fails ? "Can't write to /stub/Backups. Check that the folder exists." : nil
+			)
+		}
+	}
+
+	func integrityFindings() async throws -> [AuditFinding]? {
+		hasFindings ? [AuditFinding(check: .unpairedTransfer, detail: nil, table: "transactions", id: "t1", related: nil)] : []
+	}
+
+	func snapshots() async throws -> [SnapshotInfo] {
+		lock.withLock { snapshotList }
+	}
+
+	func restoreSnapshot(id: String) async throws {
+		lock.withLock { snapshotList.insert(SnapshotInfo(id: "restore", takenAt: "2026-11-11T16:00:00Z", reason: .restore), at: 0) }
+	}
+
+	func retention() async throws -> Retention {
+		lock.withLock { keep }
+	}
+
+	func setRetention(_ retention: Retention) async throws {
+		lock.withLock { keep = retention }
+	}
 }
 #endif
 

@@ -23,6 +23,9 @@ struct VeritasCommands: Commands {
 			Divider()
 			Button("New Budget…") { model?.startNewBudget() }
 				.disabled(model == nil || model?.phase == .working)
+			Button("Open Budget…") { model?.showOpenPicker() }
+				.keyboardShortcut("o")
+				.disabled(model == nil || model?.phase == .working)
 			Button("Import from Actual…") { model?.isImportPanelShown = true }
 				.disabled(model == nil || model?.phase == .working)
 			Button("Export to Actual…") {

@@ -11,15 +11,27 @@ struct WorkspaceView: View {
 			SidebarView(model: model)
 				.navigationSplitViewColumnWidth(min: 200, ideal: Size.sidebar, max: 320)
 		} detail: {
-			ScreenView(destination: model.destination, title: model.title(of: model.destination))
+			Group {
+				if model.destination == .screen(.settings) {
+					SettingsView(model: model)
+				} else {
+					ScreenView(destination: model.destination, title: model.title(of: model.destination))
+				}
+			}
 				.safeAreaInset(edge: .top, spacing: 0) {
 					VStack(spacing: 0) {
 						if let readOnly = model.readOnly {
 							ReadOnlyBanner(notice: readOnly.notice) { action in
 								switch action {
-								case .showIntegrityReport: model.sheet = .integrityReport
+								case .showIntegrityReport: model.showIntegrityReport()
 								}
 							}
+						}
+						if let problem = model.settings?.backup.lastProblem {
+							NoticeBanner(symbol: "externaldrive.badge.exclamationmark", message: "The last backup failed. \(problem)", actionTitle: "Show settings") {
+								model.go(to: .screen(.settings))
+							}
+							.accessibilityIdentifier("backupBanner")
 						}
 						FindBar(isShown: $model.isFindShown)
 					}

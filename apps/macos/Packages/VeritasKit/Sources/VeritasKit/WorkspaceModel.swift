@@ -16,6 +16,10 @@ public final class WorkspaceModel {
 	public private(set) var overview: BudgetOverview?
 	public private(set) var readOnly: ReadOnlyKind?
 	public private(set) var canExport = false
+	public private(set) var settings: BudgetSettingsModel?
+	public private(set) var integrityReport: IntegrityReport?
+	public private(set) var budgetList: [BudgetListingItem]?
+	public var isOpenPickerShown = false
 	public var destination = Destination.start
 	public var sheet: WorkspaceSheet?
 	public var alert: ErrorAlert?
@@ -30,6 +34,7 @@ public final class WorkspaceModel {
 	}
 
 	@ObservationIgnored private let library: any BudgetLibrary
+	@ObservationIgnored private let localSettings: any LocalBudgetSettings
 	@ObservationIgnored private let fallbackFormat: MoneyFormat
 	@ObservationIgnored private var session: (any BudgetSession)?
 	@ObservationIgnored private var retry: (@MainActor () async -> Void)?
@@ -41,11 +46,13 @@ public final class WorkspaceModel {
 	/// its open check runs, because that check can turn the budget read-only.
 	public init(
 		library: any BudgetLibrary,
+		localSettings: any LocalBudgetSettings = InMemoryBudgetSettings(),
 		format: MoneyFormat = MoneyFormat(locale: .current),
 		maintenanceInterval: Duration = .seconds(300),
 		checkingInterval: Duration = .seconds(2)
 	) {
 		self.library = library
+		self.localSettings = localSettings
 		fallbackFormat = format
 		self.maintenanceInterval = maintenanceInterval
 		self.checkingInterval = checkingInterval
@@ -109,10 +116,46 @@ public final class WorkspaceModel {
 	public func exportActualZip(to destination: URL) async {
 		guard let session, canExport else { return }
 		do {
-			_ = try await session.exportActualZip(to: destination)
+			let findings = try await session.exportActualZip(to: destination)
+			if !findings.isEmpty {
+				integrityReport = .export(findings: findings)
+				sheet = .integrityReport
+			}
 		} catch {
 			present(error, during: .export) { [weak self] in await self?.exportActualZip(to: destination) }
 		}
+	}
+
+	/// The open budget's own check. Findings arrive when the background check finishes.
+	public func showIntegrityReport() {
+		integrityReport = .budget(findings: nil)
+		sheet = .integrityReport
+		guard let session else { return }
+		Task {
+			do {
+				integrityReport = .budget(findings: try await session.integrityFindings())
+			} catch {
+				present(error)
+			}
+		}
+	}
+
+	public func showOpenPicker() {
+		budgetList = nil
+		isOpenPickerShown = true
+		Task {
+			do {
+				budgetList = try await library.listBudgets()
+			} catch {
+				isOpenPickerShown = false
+				present(error, during: .open)
+			}
+		}
+	}
+
+	public func openListedBudget(_ budget: BudgetListingItem) async {
+		isOpenPickerShown = false
+		await reopen(directory: budget.folder)
 	}
 
 	public func undo() async {
@@ -143,6 +186,8 @@ public final class WorkspaceModel {
 		overview = nil
 		readOnly = nil
 		canExport = false
+		settings = nil
+		integrityReport = nil
 		sheet = nil
 		destination = .start
 		phase = .empty
@@ -152,6 +197,9 @@ public final class WorkspaceModel {
 		guard let session else { return }
 		do {
 			apply(try await session.overview())
+			if sheet == .integrityReport, integrityReport == .budget(findings: nil) {
+				integrityReport = .budget(findings: try await session.integrityFindings())
+			}
 		} catch {
 			present(error, during: .open, isRefresh: true)
 		}
@@ -173,8 +221,13 @@ public final class WorkspaceModel {
 			}
 		case .readOnly(let kind):
 			readOnly = kind
-		case .integrityReport:
-			sheet = .integrityReport
+		case .integrityReport(let problems):
+			if operation == .importing || session == nil {
+				integrityReport = .refusedImport(problems: problems)
+				sheet = .integrityReport
+			} else {
+				showIntegrityReport()
+			}
 		case .alert(let content):
 			self.retry = content.offersRetry ? retry : nil
 			alert = content
@@ -234,7 +287,13 @@ public final class WorkspaceModel {
 			canExport = opened.canExport
 			apply(overview)
 			phase = .open
+			let settings = BudgetSettingsModel(session: opened, local: localSettings, budget: overview.directory) { [weak self] error in
+				self?.present(error)
+			}
+			self.settings = settings
 			startMaintenance(of: opened)
+			await settings.connectBackupFolder()
+			await settings.backUpIfDue()
 		} catch {
 			phase = previousPhase == .open ? .open : .empty
 			present(error, during: operation) { [weak self] in await self?.open(during: operation, opening) }
@@ -252,6 +311,7 @@ public final class WorkspaceModel {
 				do {
 					try await session.maintain()
 					await self.refresh()
+					await self.settings?.backUpIfDue()
 				} catch {
 					self.present(error)
 				}

@@ -82,6 +82,53 @@ final class CoreBudgetSession: BudgetSession {
 		let session = session
 		_ = try? await Core.run { try session.close() }
 	}
+
+	func backupStatus() async throws -> BackupStatus {
+		let session = session
+		let state = try await Core.run { try session.state() }
+		return BackupStatus(
+			folder: state.backupFolder.map { URL(filePath: $0, directoryHint: .isDirectory) },
+			lastAt: CoreTime.date(state.lastBackup?.at),
+			lastFile: state.lastBackup?.file,
+			lastProblem: state.lastBackup?.problem
+		)
+	}
+
+	func setBackupFolder(_ folder: URL?) async throws {
+		let session = session
+		let path = folder?.path(percentEncoded: false)
+		try await Core.run { try session.setBackupFolder(folder: path) }
+	}
+
+	func backUpNow() async throws {
+		let session = session
+		_ = try await Core.run { try session.backUpNow() }
+	}
+
+	func integrityFindings() async throws -> [AuditFinding]? {
+		let session = session
+		return try await Core.run { try session.auditReport() }
+	}
+
+	func snapshots() async throws -> [SnapshotInfo] {
+		let session = session
+		return try await Core.run { try session.snapshots() }
+	}
+
+	func restoreSnapshot(id: String) async throws {
+		let session = session
+		_ = try await Core.run { try session.restoreSnapshot(id: id) }
+	}
+
+	func retention() async throws -> Retention {
+		let session = session
+		return try await Core.run { try session.retention() }
+	}
+
+	func setRetention(_ retention: Retention) async throws {
+		let session = session
+		try await Core.run { try session.setRetention(retention: retention) }
+	}
 }
 
 /// The core calls this on whichever thread made the call that changed something.

@@ -13,6 +13,19 @@ public struct CoreBudgetLibrary: BudgetLibrary {
 		budgetsDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
 	}
 
+	public func listBudgets() async throws -> [BudgetListingItem] {
+		let path = budgetsDirectory.path(percentEncoded: false)
+		guard FileManager.default.fileExists(atPath: path) else { return [] }
+		return try await Core.run { try VeritasCore.listBudgets(budgetsDir: path) }.map { listing in
+			BudgetListingItem(
+				id: listing.id,
+				name: listing.name,
+				folder: URL(filePath: listing.folder, directoryHint: .isDirectory),
+				lastOpened: CoreTime.date(listing.lastOpened)
+			)
+		}
+	}
+
 	public func open(directory: URL) async throws -> any BudgetSession {
 		let path = directory.path(percentEncoded: false)
 		return CoreBudgetSession(try await Core.call { try await Session.open(directory: path) })

@@ -13,6 +13,24 @@ enum LaunchEnvironment {
 		return CoreBudgetLibrary()
 	}
 
+	static func localSettings() -> any LocalBudgetSettings {
+		#if DEBUG
+		if StubLaunch.current != nil {
+			return InMemoryBudgetSettings()
+		}
+		#endif
+		return BookmarkedBudgetSettings()
+	}
+
+	/// UI tests can't drive a folder panel, so the stub picks its folder itself.
+	static var backupFolderWithoutPanel: URL? {
+		#if DEBUG
+		return StubLaunch.current == nil ? nil : StubLaunch.backupFolder
+		#else
+		return nil
+		#endif
+	}
+
 	static var budgetToOpenOnLaunch: URL? {
 		#if DEBUG
 		return StubLaunch.current?.opensBudgetOnLaunch == true ? StubLaunch.budgetDirectory : nil

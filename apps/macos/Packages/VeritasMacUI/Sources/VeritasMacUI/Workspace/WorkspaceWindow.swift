@@ -7,7 +7,7 @@ import VeritasKit
 struct WorkspaceWindow: View {
 	static let id = "workspace"
 
-	@State private var model = WorkspaceModel(library: LaunchEnvironment.library())
+	@State private var model = WorkspaceModel(library: LaunchEnvironment.library(), localSettings: LaunchEnvironment.localSettings())
 	@SceneStorage("destination") private var storedDestination = Destination.start
 	@SceneStorage("budgetDirectory") private var storedBudgetDirectory = ""
 
@@ -35,7 +35,16 @@ struct WorkspaceWindow: View {
 			}
 		}
 		.sheet(item: $model.sheet) { sheet in
-			PlaceholderSheet(sheet: sheet)
+			if sheet == .integrityReport {
+				IntegrityReportSheet(report: model.integrityReport)
+			} else {
+				PlaceholderSheet(sheet: sheet)
+			}
+		}
+		.sheet(isPresented: $model.isOpenPickerShown) {
+			OpenBudgetSheet(budgets: model.budgetList) { budget in
+				Task { await model.openListedBudget(budget) }
+			}
 		}
 		.errorAlert(model: model)
 		.onChange(of: model.destination) { _, destination in
