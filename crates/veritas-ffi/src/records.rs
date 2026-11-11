@@ -52,7 +52,6 @@ pub enum EntityKind {
 	CategoryMeta,
 	AccountMeta,
 	TransactionMeta,
-	TaxTag,
 	Goal,
 }
 
@@ -98,7 +97,6 @@ impl From<&CoreEntity> for EntityRef {
 			CoreEntity::CategoryMeta(id) => row(EntityKind::CategoryMeta, id),
 			CoreEntity::AccountMeta(id) => row(EntityKind::AccountMeta, id),
 			CoreEntity::TransactionMeta(id) => row(EntityKind::TransactionMeta, id),
-			CoreEntity::TaxTag(tag) => row(EntityKind::TaxTag, tag),
 			CoreEntity::Goal(id) => row(EntityKind::Goal, id),
 		}
 	}
@@ -160,6 +158,7 @@ pub enum AuditCheck {
 	MappingChain,
 	MappingCycle,
 	DuplicateBudgetCell,
+	UnknownTaxBucket,
 }
 
 impl From<&Violation> for AuditFinding {
@@ -184,6 +183,7 @@ impl From<&Violation> for AuditFinding {
 			Check::MappingChain => (AuditCheck::MappingChain, None),
 			Check::MappingCycle => (AuditCheck::MappingCycle, None),
 			Check::DuplicateBudgetCell => (AuditCheck::DuplicateBudgetCell, None),
+			Check::UnknownTaxBucket => (AuditCheck::UnknownTaxBucket, None),
 		};
 		AuditFinding {
 			check,

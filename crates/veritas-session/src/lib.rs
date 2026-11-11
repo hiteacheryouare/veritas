@@ -9,7 +9,7 @@ mod retention;
 mod session;
 mod shared;
 mod snapshot;
-mod store_backend;
+mod store;
 
 pub use backup::write_backup;
 pub use bus::{ChangeListener, ChangeSet, Command, CommandBus, Listeners, Permit, Subscription};
@@ -21,4 +21,3 @@ pub use snapshot::{
 	SNAPSHOTS_DIR, Snapshot, SnapshotReason, list_snapshots, prune_snapshots, restore_snapshot,
 	take_snapshot,
 };
-pub use store_backend::{StoreBackend, StoreWrite};

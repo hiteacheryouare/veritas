@@ -22,7 +22,7 @@ use veritas_domain::{
 };
 use veritas_session::{
 	Access, Backend, ChangeListener, ChangeSet, Command, Session, SessionOptions, SharedSession,
-	SnapshotReason, StoreBackend, acquire,
+	SnapshotReason, acquire,
 };
 use veritas_store::Loaded;
 
@@ -107,7 +107,7 @@ impl Backend for ReadPath {
 				]));
 			}
 		}
-		StoreBackend::verify(db)
+		<veritas_store::Store as Backend>::verify(db)
 	}
 
 	fn adopt(&mut self) -> Result<(), CoreError> {
@@ -627,7 +627,7 @@ fn edits_through_the_store_backend_survive_closing_and_reopening() {
 	// each land in the file, and a fresh session loads what memory held.
 	let (_root, dir) = imported("session-store-backend");
 	let clock = TestClock::new();
-	let mut session = Session::<StoreBackend>::open(&dir, clock.options()).unwrap();
+	let mut session = Session::<veritas_store::Store>::open(&dir, clock.options()).unwrap();
 	assert_eq!(session.wait_for_open_check(), None);
 	let id = first_account(session.data().unwrap());
 	let original = session.data().unwrap().accounts[&id].name.clone();
@@ -635,16 +635,16 @@ fn edits_through_the_store_backend_survive_closing_and_reopening() {
 	session.perform(&rename("Everyday")).unwrap();
 	let renamed = session.data().unwrap().clone();
 	drop(session);
-	let reopened = Session::<StoreBackend>::open(&dir, clock.options()).unwrap();
+	let reopened = Session::<veritas_store::Store>::open(&dir, clock.options()).unwrap();
 	assert_eq!(reopened.data().unwrap(), &renamed);
 	assert_eq!(reopened.data().unwrap().accounts[&id].name, "Everyday");
 	drop(reopened);
 
-	let mut session = Session::<StoreBackend>::open(&dir, clock.options()).unwrap();
+	let mut session = Session::<veritas_store::Store>::open(&dir, clock.options()).unwrap();
 	session.perform(&rename("Again")).unwrap();
 	session.undo().unwrap();
 	drop(session);
-	let reopened = Session::<StoreBackend>::open(&dir, clock.options()).unwrap();
+	let reopened = Session::<veritas_store::Store>::open(&dir, clock.options()).unwrap();
 	assert_eq!(reopened.data().unwrap().accounts[&id].name, "Everyday");
 	assert_ne!(original, "Everyday");
 }
@@ -660,7 +660,8 @@ fn the_open_audit_finds_broken_references_and_keeps_the_report_for_the_shell() {
 		"UPDATE transactions SET acct = 'no-such-account'
 		WHERE id = (SELECT id FROM transactions WHERE tombstone = 0 AND isParent = 0 LIMIT 1);",
 	);
-	let mut session = Session::<StoreBackend>::open(&dir, TestClock::new().options()).unwrap();
+	let mut session =
+		Session::<veritas_store::Store>::open(&dir, TestClock::new().options()).unwrap();
 	assert!(session.audit_report().is_none());
 
 	assert_eq!(session.wait_for_open_check(), None);

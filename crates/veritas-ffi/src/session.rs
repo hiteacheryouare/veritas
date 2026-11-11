@@ -2,9 +2,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use veritas_domain::CoreError;
-use veritas_session::{
-	Backend, ChangeSet, Session as CoreSession, SessionOptions, SharedSession, StoreBackend,
-};
+use veritas_session::{Backend, ChangeSet, Session as CoreSession, SessionOptions, SharedSession};
 
 use crate::commands::Command;
 use crate::records::{AuditFinding, Change, Retention, SessionState, SnapshotInfo};
@@ -211,7 +209,7 @@ impl<B: Backend> Core<B> {
 /// on the same budget opens read-only, and `state().read_only` says why.
 #[derive(uniffi::Object)]
 pub struct Session {
-	core: Core<StoreBackend>,
+	core: Core<veritas_store::Store>,
 }
 
 #[uniffi::export]
@@ -341,14 +339,14 @@ mod tests {
 			.to_string()
 	}
 
-	fn imported(label: &str) -> (Scratch, Arc<Core<StoreBackend>>) {
+	fn imported(label: &str) -> (Scratch, Arc<Core<veritas_store::Store>>) {
 		let scratch = Scratch::new(label);
-		let core =
-			Core::<StoreBackend>::import_actual_zip(&small_zip(), &scratch.budget()).unwrap();
+		let core = Core::<veritas_store::Store>::import_actual_zip(&small_zip(), &scratch.budget())
+			.unwrap();
 		(scratch, Arc::new(core))
 	}
 
-	fn accounts(core: &Core<StoreBackend>) -> Vec<(String, String, bool)> {
+	fn accounts(core: &Core<veritas_store::Store>) -> Vec<(String, String, bool)> {
 		core.call(|session| {
 			Ok(session
 				.data()?
@@ -366,7 +364,7 @@ mod tests {
 		.unwrap()
 	}
 
-	fn live_account(core: &Core<StoreBackend>) -> String {
+	fn live_account(core: &Core<veritas_store::Store>) -> String {
 		accounts(core)
 			.into_iter()
 			.find(|(_, _, tombstone)| !tombstone)
@@ -377,7 +375,7 @@ mod tests {
 	/// Calls back into the session from inside the callback, the way a view
 	/// model refetching straight away would.
 	struct Refetcher {
-		core: Mutex<Option<Arc<Core<StoreBackend>>>>,
+		core: Mutex<Option<Arc<Core<veritas_store::Store>>>>,
 		heard: Mutex<Vec<(Change, bool)>>,
 	}
 
@@ -389,7 +387,7 @@ mod tests {
 		}
 	}
 
-	fn refetcher(core: &Arc<Core<StoreBackend>>) -> Arc<Refetcher> {
+	fn refetcher(core: &Arc<Core<veritas_store::Store>>) -> Arc<Refetcher> {
 		let listener = Arc::new(Refetcher {
 			core: Mutex::new(Some(core.clone())),
 			heard: Mutex::new(Vec::new()),
@@ -480,7 +478,7 @@ mod tests {
 		assert_eq!(state.snapshot_problem, None);
 		assert!(state.directory.ends_with("budget"));
 
-		let second = Core::<StoreBackend>::open(&scratch.budget()).unwrap();
+		let second = Core::<veritas_store::Store>::open(&scratch.budget()).unwrap();
 		assert_eq!(
 			second.state().unwrap().read_only,
 			Some(ReadOnlyKind::OpenElsewhere)
@@ -541,7 +539,7 @@ mod tests {
 		let (scratch, core) = imported("close");
 		core.close().unwrap();
 		assert!(matches!(core.state(), Err(FfiError::Invalid { .. })));
-		let reopened = Core::<StoreBackend>::open(&scratch.budget()).unwrap();
+		let reopened = Core::<veritas_store::Store>::open(&scratch.budget()).unwrap();
 		assert_eq!(reopened.state().unwrap().read_only, None);
 	}
 
