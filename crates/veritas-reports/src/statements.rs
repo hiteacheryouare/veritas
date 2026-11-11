@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 
 use veritas_domain::{
-	AccountGroupId, AccountId, BudgetData, CivilDate, CoreError, Money, TransactionKind,
+	AccountGroupId, AccountId, BudgetData, CivilDate, CoreError, Money, TransactionKind, YearMonth,
 };
 
 use crate::balances::{self, AccountBalance, Side};
-use crate::{Classification, ClassifiedRow, Decision, Line, Period, Section, net_profit};
+use crate::{Classification, ClassifiedRow, Decision, Line, Period, Section, months, net_profit};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SheetLine {
@@ -87,12 +87,10 @@ fn sections(
 		})
 		.collect::<Result<Vec<_>, CoreError>>()?;
 	let order = |group: &Option<AccountGroupId>| {
-		group.as_ref().map(|id| {
-			budget
-				.account_groups
-				.get(id)
-				.map_or(f64::MAX, |group| group.sort_order)
-		})
+		group
+			.as_ref()
+			.and_then(|id| budget.account_groups.get(id))
+			.map(|group| group.sort_order)
 	};
 	sections.sort_by(|a, b| match (order(&a.group), order(&b.group)) {
 		(None, None) => std::cmp::Ordering::Equal,
@@ -243,6 +241,42 @@ pub fn cash_flow(
 	classification: &Classification,
 	period: Period,
 ) -> Result<CashFlow, CoreError> {
+	let opening = on_budget_sum(classification.before(period.first()))?;
+	cash_flow_from(budget, classification, period, opening)
+}
+
+/// The Cash flow report: one Cash Flow Statement per month, each opening where
+/// the previous one closed, so the history is read once.
+pub fn cash_flow_by_month(
+	budget: &BudgetData,
+	classification: &Classification,
+	first: YearMonth,
+	last: YearMonth,
+) -> Result<Vec<CashFlow>, CoreError> {
+	let mut opening = on_budget_sum(classification.before(first.first_day()))?;
+	let mut statements = Vec::new();
+	for month in months(first, last)? {
+		let statement = cash_flow_from(budget, classification, Period::month(month), opening)?;
+		opening = statement.closing;
+		statements.push(statement);
+	}
+	Ok(statements)
+}
+
+fn on_budget_sum(rows: &[ClassifiedRow]) -> Result<Money, CoreError> {
+	Money::checked_sum(
+		rows.iter()
+			.filter(|row| row.on_budget)
+			.map(|row| row.amount),
+	)
+}
+
+fn cash_flow_from(
+	budget: &BudgetData,
+	classification: &Classification,
+	period: Period,
+	opening: Money,
+) -> Result<CashFlow, CoreError> {
 	let report = net_profit(budget, classification, period)?;
 	let mut starting = Lines::default();
 	let mut reconciliation = Lines::default();
@@ -269,16 +303,9 @@ pub fn cash_flow(
 	};
 	let unreviewed = negated(report.unreviewed)?;
 	let change_from_operations = report.net_cash_flow.total.checked_add(unreviewed.total)?;
-	let on_budget = |rows: &[ClassifiedRow]| {
-		Money::checked_sum(
-			rows.iter()
-				.filter(|row| row.on_budget)
-				.map(|row| row.amount),
-		)
-	};
 	Ok(CashFlow {
 		period,
-		opening: on_budget(classification.before(period.first()))?,
+		opening,
 		net_profit: report.net_profit,
 		debt_paydown: negated(section_line(report.debt_paydown))?,
 		savings: negated(section_line(report.savings))?,
@@ -288,7 +315,7 @@ pub fn cash_flow(
 		in_transit: in_transit.0,
 		starting_balances: starting.0,
 		reconciliation_adjustments: reconciliation.0,
-		closing: on_budget(classification.through(period.last()))?,
+		closing: opening.checked_add(on_budget_sum(classification.within(period))?)?,
 	})
 }
 
