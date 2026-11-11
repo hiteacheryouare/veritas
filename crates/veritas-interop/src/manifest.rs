@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
 use veritas_domain::{CoreError, ReadOnlyReason};
+pub use veritas_store::Access;
 
 const MANIFEST_JSON: &str = include_str!("../manifest/actual-26.11.0.json");
 
@@ -13,12 +14,6 @@ pub struct Manifest {
 	pub api_version: String,
 	pub additive_only_cutoff: i64,
 	pub migrations: Vec<i64>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Access {
-	ReadWrite,
-	ReadOnly(ReadOnlyReason),
 }
 
 impl Manifest {
@@ -55,8 +50,7 @@ impl Manifest {
 		})
 	}
 
-	/// R-IO-7, with Actual's own `checkDatabaseValidity` rules
-	/// (docs/actual-format.md §3.7): a file Actual itself would refuse is not
+	/// Applies Actual's own `checkDatabaseValidity` rules: a file Actual itself would refuse is not
 	/// a budget; one with unknown post-cutoff ids is from a newer Actual and
 	/// opens read-only; one with ids still to apply is from an older Actual.
 	pub fn check(&self, applied: &[i64]) -> Result<Access, CoreError> {
