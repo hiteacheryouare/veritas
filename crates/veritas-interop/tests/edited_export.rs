@@ -168,7 +168,10 @@ fn edit_in_veritas(store: &mut Store, data: &BudgetData, picks: &Picks) {
 		.put_transaction_meta(
 			&groceries.id,
 			None,
-			Some(&TransactionMeta { adjustment: false }),
+			Some(&TransactionMeta {
+				adjustment: false,
+				needs_actual: None,
+			}),
 		)
 		.unwrap();
 	writer
@@ -289,6 +292,37 @@ fn actual_computes_the_same_budget_from_veritas_edits_as_from_its_own_r_io_2() {
 	assert_eq!(cell(&ours), cell(&theirs));
 	assert_eq!(ours["accounts"], theirs["accounts"]);
 	assert_eq!(ours, theirs, "Actual computes a different budget");
+
+	// The rows themselves, as stored: the edited budget cell, the new
+	// transaction and the deleted one, column for column. Only sort_order
+	// differs by design (Actual stamps Date.now()).
+	let raw = |zip: &Path| -> Value {
+		serde_json::from_slice(&canonical_dump_to_vec(zip).unwrap()).unwrap()
+	};
+	let (ours, theirs) = (raw(&exported), raw(&actual_edited));
+	let stored = |dump: &Value, table: &str, column: &str, value: &str| -> Value {
+		let mut found = dump["tables"][table]["rows"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.find(|row| row[column] == json!(value))
+			.unwrap_or_else(|| panic!("no {table} row with {column} = {value}"))
+			.clone();
+		found.as_object_mut().unwrap().remove("sort_order");
+		found
+	};
+	let cell_id = format!("{}-{}", MONTH.replace('-', ""), picks.category);
+	for (table, column, value) in [
+		("zero_budgets", "id", cell_id.as_str()),
+		("transactions", "id", "veritas-groceries"),
+		("transactions", "id", picks.deleted.id.as_str()),
+	] {
+		assert_eq!(
+			stored(&ours, table, column, value),
+			stored(&theirs, table, column, value),
+			"{table} {value}"
+		);
+	}
 }
 
 fn table_sections(dump: &[u8], prefix: &str) -> Vec<String> {
