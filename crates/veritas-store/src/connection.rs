@@ -1,11 +1,14 @@
 use std::path::Path;
 use std::time::Duration;
 
-use rusqlite::{Connection, ErrorCode, OpenFlags};
+use rusqlite::{Connection, ErrorCode, OpenFlags, TransactionBehavior};
 use veritas_domain::CoreError;
+use veritas_domain::{BudgetType, ReadOnlyReason};
 
+use crate::audit::{AuditReport, audit};
 use crate::load::{self, Loaded};
 use crate::schema;
+use crate::write::Writer;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -18,36 +21,77 @@ pub(crate) fn storage(error: rusqlite::Error) -> CoreError {
 	}
 }
 
-/// A budget's working copy, opened for Veritas to read and write. Never an
-/// Actual source file: those go through [`open_read_only`].
+/// Whether Veritas may write a budget. A read-only budget is opened without
+/// any write, so it isn't switched to WAL, adopted or edited.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Access {
+	ReadWrite,
+	ReadOnly(ReadOnlyReason),
+}
+
+/// A budget's working copy. Never an Actual source file: those go through
+/// [`open_read_only`].
 pub struct Store {
 	conn: Connection,
+	budget_type: BudgetType,
+	access: Access,
 }
 
 impl Store {
-	pub fn open(db_path: &Path) -> Result<Store, CoreError> {
-		let conn = Connection::open_with_flags(
-			db_path,
-			OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-		)
-		.map_err(storage)?;
-		conn.busy_timeout(BUSY_TIMEOUT).map_err(storage)?;
-		let mode: String = conn
-			.query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))
-			.map_err(storage)?;
-		if !mode.eq_ignore_ascii_case("wal") {
-			return Err(CoreError::Storage(format!(
-				"SQLite kept journal mode {mode} instead of WAL"
-			)));
+	pub fn open(db_path: &Path, access: Access) -> Result<Store, CoreError> {
+		let conn = match access {
+			Access::ReadWrite => {
+				let conn = Connection::open_with_flags(
+					db_path,
+					OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+				)
+				.map_err(storage)?;
+				// SQLite quietly opens a write-protected file read-only.
+				if conn.is_readonly("main").map_err(storage)? {
+					return Err(CoreError::Io(format!(
+						"{} can't be written; check its permissions",
+						db_path.display()
+					)));
+				}
+				conn.busy_timeout(BUSY_TIMEOUT).map_err(storage)?;
+				// Every open, because a restored snapshot comes back in DELETE mode.
+				let mode: String = conn
+					.query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))
+					.map_err(storage)?;
+				if !mode.eq_ignore_ascii_case("wal") {
+					return Err(CoreError::Storage(format!(
+						"SQLite kept journal mode {mode} instead of WAL"
+					)));
+				}
+				conn.execute_batch("PRAGMA synchronous = FULL; PRAGMA foreign_keys = OFF;")
+					.map_err(storage)?;
+				conn
+			}
+			Access::ReadOnly(_) => open_read_only(db_path)?,
+		};
+		let budget_type = load::budget_type(&conn)?;
+		Ok(Store {
+			conn,
+			budget_type,
+			access,
+		})
+	}
+
+	pub fn access(&self) -> Access {
+		self.access
+	}
+
+	fn ensure_writable(&self) -> Result<(), CoreError> {
+		match self.access {
+			Access::ReadWrite => Ok(()),
+			Access::ReadOnly(reason) => Err(CoreError::ReadOnly(reason)),
 		}
-		conn.execute_batch("PRAGMA synchronous = FULL; PRAGMA foreign_keys = OFF;")
-			.map_err(storage)?;
-		Ok(Store { conn })
 	}
 
 	/// Creates any missing veritas_* tables and records the schema version.
 	/// Actual's tables, `__migrations__` included, are never touched.
 	pub fn adopt(&mut self) -> Result<(), CoreError> {
+		self.ensure_writable()?;
 		schema::adopt(&mut self.conn)
 	}
 
@@ -55,12 +99,68 @@ impl Store {
 		load::load(&self.conn)
 	}
 
+	/// One command's writes, as one SQLite transaction. Dropping the
+	/// writer without committing rolls everything back.
+	pub fn writer(&mut self) -> Result<Writer<'_>, CoreError> {
+		self.ensure_writable()?;
+		let tx = self
+			.conn
+			.transaction_with_behavior(TransactionBehavior::Immediate)
+			.map_err(storage)?;
+		Ok(Writer::new(tx, self.budget_type))
+	}
+
 	pub fn integrity_check(&self) -> Result<Vec<String>, CoreError> {
 		integrity_check(&self.conn)
 	}
 
+	/// SQLite's integrity check, then, when the file is
+	/// sound, the load and the invariant audit of what it loaded.
+	pub fn open_audit(&self) -> Result<(Option<Loaded>, AuditReport), CoreError> {
+		audit_connection(&self.conn)
+	}
+
 	pub fn migration_ids(&self) -> Result<Vec<i64>, CoreError> {
 		migration_ids(&self.conn)
+	}
+
+	/// Writes a standalone copy of the budget for an Actual export, the way
+	/// Actual's `exportBuffer` shapes one: the caches emptied and a rollback
+	/// journal instead of WAL. The working copy itself is not changed.
+	pub fn export_copy(&self, to: &Path) -> Result<(), CoreError> {
+		let target = to
+			.to_str()
+			.ok_or_else(|| CoreError::Io(format!("{} isn't a UTF-8 path", to.display())))?;
+		self.conn
+			.execute("VACUUM INTO ?1", [target])
+			.map_err(storage)?;
+		let copy = Connection::open_with_flags(
+			to,
+			OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+		)
+		.map_err(storage)?;
+		for cache in ["kvcache", "kvcache_key"] {
+			let exists: bool = copy
+				.query_row(
+					"SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+					[cache],
+					|row| row.get(0),
+				)
+				.map_err(storage)?;
+			if exists {
+				copy.execute(&format!("DELETE FROM {cache}"), [])
+					.map_err(storage)?;
+			}
+		}
+		let mode: String = copy
+			.query_row("PRAGMA journal_mode = DELETE", [], |row| row.get(0))
+			.map_err(storage)?;
+		if !mode.eq_ignore_ascii_case("delete") {
+			return Err(CoreError::Storage(format!(
+				"the export copy kept journal mode {mode}"
+			)));
+		}
+		copy.close().map_err(|(_, error)| storage(error))
 	}
 
 	pub fn pragma_text(&self, pragma: &str) -> Result<String, CoreError> {
@@ -130,4 +230,16 @@ pub fn migration_ids(conn: &Connection) -> Result<Vec<i64>, CoreError> {
 		}
 	}
 	Ok(ids)
+}
+
+/// The integrity check, and when it passes, the load and invariant audit.
+/// A corrupt file isn't loaded: nothing read from it could be trusted.
+pub fn audit_connection(conn: &Connection) -> Result<(Option<Loaded>, AuditReport), CoreError> {
+	let problems = integrity_check(conn)?;
+	if !problems.is_empty() {
+		return Ok((None, AuditReport::from_integrity(problems)));
+	}
+	let loaded = load::load(conn)?;
+	let report = audit(&loaded);
+	Ok((Some(loaded), report))
 }

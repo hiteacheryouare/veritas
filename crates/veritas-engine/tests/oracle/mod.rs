@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde_json::Value;
 use veritas_domain::{BudgetData, YearMonth};
 use veritas_engine::EnvelopeSheet;
-use veritas_interop::import_actual_zip;
+use veritas_interop::{Access, ImportOutcome, import_actual_zip};
 use veritas_store::Store;
 
 pub fn repo_root() -> PathBuf {
@@ -82,8 +82,12 @@ pub fn replay(zip: &Path, sessions: &[Value]) -> Vec<Value> {
 /// Imports a zip the way the app does and loads it into the domain model.
 pub fn load(zip: &Path) -> BudgetData {
 	let scratch = Scratch::new("load");
-	let imported = import_actual_zip(zip, &scratch.join("budget")).unwrap();
-	let mut store = Store::open(&imported.db_path).unwrap();
+	let ImportOutcome::Imported(imported) =
+		import_actual_zip(zip, &scratch.join("budget")).unwrap()
+	else {
+		panic!("{} failed its audit on import", zip.display());
+	};
+	let mut store = Store::open(&imported.db_path, Access::ReadWrite).unwrap();
 	store.adopt().unwrap();
 	store.load().unwrap().data
 }

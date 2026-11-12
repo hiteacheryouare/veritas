@@ -8,6 +8,10 @@ use zip::ZipArchive;
 /// Actual's `safeUnzip` cap, applied to the archive, each entry and the total.
 const MAX_ZIP_SIZE: u64 = 500 * 1024 * 1024;
 
+/// Actual's metadata.json is a few hundred bytes. The cap keeps a hostile one
+/// from costing more than a moment to parse.
+pub(crate) const MAX_METADATA_SIZE: u64 = 1024 * 1024;
+
 fn not_a_budget(message: impl Into<String>) -> CoreError {
 	CoreError::NotAnActualBudget(message.into())
 }
@@ -134,29 +138,43 @@ impl BudgetArchive {
 
 	pub(crate) fn metadata_bytes(&mut self) -> Result<Vec<u8>, CoreError> {
 		let mut bytes = Vec::new();
-		self.copy_entry(self.metadata_index, &mut bytes)?;
+		self.copy_entry(
+			self.metadata_index,
+			&mut bytes,
+			MAX_METADATA_SIZE,
+			"metadata.json is larger than 1 MB, which no Actual budget writes",
+		)?;
 		Ok(bytes)
 	}
 
 	pub(crate) fn extract_db(&mut self, to: &Path) -> Result<(), CoreError> {
 		let mut file = File::create_new(to).map_err(|error| io_error(to, &error))?;
-		self.copy_entry(self.db_index, &mut file)?;
+		self.copy_entry(
+			self.db_index,
+			&mut file,
+			MAX_ZIP_SIZE,
+			"a file in the zip is larger than Actual's 500 MB import limit",
+		)?;
 		file.sync_all().map_err(|error| io_error(to, &error))
 	}
 
-	fn copy_entry(&mut self, index: usize, into: &mut impl Write) -> Result<(), CoreError> {
+	fn copy_entry(
+		&mut self,
+		index: usize,
+		into: &mut impl Write,
+		limit: u64,
+		too_large: &'static str,
+	) -> Result<(), CoreError> {
 		let entry = self
 			.archive
 			.by_index(index)
 			.map_err(|_| not_a_budget("a budget file in the zip can't be decompressed"))?;
 		// The declared size can lie, so the cap also applies to what comes out.
-		let mut limited = entry.take(MAX_ZIP_SIZE + 1);
+		let mut limited = entry.take(limit + 1);
 		let copied = io::copy(&mut limited, into)
 			.map_err(|_| not_a_budget("a budget file in the zip is damaged"))?;
-		if copied > MAX_ZIP_SIZE {
-			return Err(not_a_budget(
-				"a file in the zip is larger than Actual's 500 MB import limit",
-			));
+		if copied > limit {
+			return Err(not_a_budget(too_large));
 		}
 		Ok(())
 	}

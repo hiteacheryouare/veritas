@@ -10,9 +10,9 @@ use std::path::{Path, PathBuf};
 
 use support::*;
 use veritas_domain::BudgetData;
-use veritas_interop::import_actual_zip;
+use veritas_interop::{ImportOutcome, import_actual_zip};
 use veritas_reports::{Period, balance_sheet, cash_flow, classify, months, owners_equity};
-use veritas_store::Store;
+use veritas_store::{Access, Store};
 
 struct Scratch(PathBuf);
 
@@ -32,8 +32,12 @@ fn load_fixture(name: &str) -> BudgetData {
 	);
 	let _ = std::fs::remove_dir_all(&scratch.0);
 	std::fs::create_dir_all(&scratch.0).unwrap();
-	let budget = import_actual_zip(&zip, &scratch.0.join("budget")).unwrap();
-	let mut store = Store::open(&budget.db_path).unwrap();
+	let ImportOutcome::Imported(budget) =
+		import_actual_zip(&zip, &scratch.0.join("budget")).unwrap()
+	else {
+		panic!("{name} imports cleanly");
+	};
+	let mut store = Store::open(&budget.db_path, Access::ReadWrite).unwrap();
 	store.adopt().unwrap();
 	store.load().unwrap().data
 }
