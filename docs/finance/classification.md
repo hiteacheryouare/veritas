@@ -252,11 +252,24 @@ Check: 400000 - 50000 - 20000 - 30600 - 40000 - 10000 - 15000 = 234400. `income_
 
 ## CLS-12 Currency and decimal places
 
-Actual stores amounts as integers in the smallest unit it shows for the budget's `defaultCurrencyCode`: its currency table gives `decimalPlaces` (`reference/actual/packages/loot-core/src/shared/currencies.ts`), and its conversions divide by `10^decimalPlaces` (`shared/util.ts`, `integerToAmount`). Most currencies have 2 places. JPY, KRW and IRR have 0, so a stored `5000` is 5000 yen, not 50.00. The "None" currency has 2.
+Actual's currency table gives each currency its `decimalPlaces` (`reference/actual/packages/loot-core/src/shared/currencies.ts`). `getDecimalPlaces` falls back to 2 for a code that is not in the table (`currencies.ts:85`). Most currencies have 2 places. IRR, JPY and KRW have 0.
 
-- **CLS-12.1** Every place a spec says "cents", "two places" or "whole dollars" means the budget currency's minor unit, its decimal places and its major unit. Code never hard-codes 2. The stored integer is never rescaled.
-- **CLS-12.2** Amounts shown or exported as decimal text use the currency's decimal places: 2 places for USD (`-5000` is `-50.00`), 0 for JPY (`-5000` is `-5000`). This covers the tax summary `total` (TAX-5), the `#goal` note line (DEBT-8.2) and every report.
-- **CLS-12.3** Rounding to whole major units (FC-5 suggestions and notices, FC-3 notes) rounds to a multiple of `10^decimalPlaces` minor units: 100 for USD, 1 for JPY. With 0 decimal places a rounding to whole units changes nothing.
-- **CLS-12.4** Integer arithmetic, rounding rules and identities are unchanged by the number of places. Nothing is converted through a float.
-- **CLS-12.5** Example, with made-up amounts: a USD budget's `12345` shows `123.45` and rounds to `12300` to the nearest whole dollar. A JPY budget's `12345` shows `12345` and stays `12345`. An FC-5 suggestion of 7089 rounds to 7100 in USD and stays 7089 in JPY.
-- **CLS-12.6** Open question for Ryan: a budget whose `defaultCurrencyCode` is not in Actual's table. Option A: treat it as 2 places and list it in the audit (R-REL-2). Option B: refuse to open it read-write. Until decided, code must not guess a different number of places.
+**What Actual 26.11 does with 0 places (read in `reference/actual`).** It is not consistent:
+
+- Code that goes through `useFormat` converts with the currency's places: `toAmount` and `fromAmount` (`desktop-client/src/hooks/useFormat.ts:221-227`). Budget cells and the goal-template editors use it, for example `budget/goals/editor/*`, which call `amountToInteger(value, format.currency.decimalPlaces)`.
+- The transaction register enters amounts with `amountToInteger(amount)` at the default of 2 places (`desktop-client/src/components/transactions/table/utils.ts:85`) and shows them with `integerToCurrencyWithDecimal` and `integerToCurrency`, which also default to 2 (`table/utils.ts:63-64`, `shared/util.ts:447-455`). `amountToInteger` and `integerToAmount` default to 2 places too (`shared/util.ts:541-555`).
+- So in a 0-place budget, 5000 yen typed in the register is stored as `500000`, and 5000 yen typed in a budget cell is stored as `5000`. One file holds two scales 100 times apart. With 2 places there is one scale, and every rule below is exact.
+
+- **CLS-12.1** For a 2-place currency, "cents", "two places" and "whole dollars" in these specs are exact: the minor unit, two decimal places and the major unit. Code reads the places from the currency table and never hard-codes 2.
+- **CLS-12.2** The stored integer is never rescaled. Veritas reads and writes exactly the integer Actual stores, so a file round-trips unchanged.
+- **CLS-12.3** Amounts shown or exported as decimal text use the currency's places (USD: `-5000` is `-50.00`). This covers the tax summary `total` (TAX-5), the `#goal` note line (DEBT-8.2) and every report. Copy shows the currency's symbol, in its position (`symbolFirst` in the currency table). A `$` in a copy template in these specs stands for that symbol, so FC-3 notes and FC-5 reasons print `¥`, `€` or no symbol as the budget's currency says.
+- **CLS-12.4** Rounding to whole major units (FC-5 suggestions and notices, FC-3 notes) rounds to a multiple of `10^decimalPlaces` minor units: 100 for a 2-place currency.
+- **CLS-12.5** Integer arithmetic, rounding rules and identities do not depend on the number of places. Nothing is converted through a float.
+- **CLS-12.6** Example, USD, made-up amounts: `12345` shows `123.45` and rounds to `12300` to the nearest whole dollar. An FC-5 suggestion of 7089 rounds to 7100.
+- **CLS-12.7** A budget whose `defaultCurrencyCode` is not in Actual's table uses 2 places, as Actual does (`?? 2`, D62). The audit lists it (R-REL-2). This is a rule, not a question.
+- **CLS-12.8** **Open question for Ryan: 0-place currencies (IRR, JPY, KRW).** Actual itself mixes two scales (above), so there is no single reading of a stored integer that matches Actual everywhere. Options:
+  - **A.** Follow Actual path by path: the register's integers at 2 places, budget cells and goal templates at the currency's places. Exact compatibility, but the same file shows 100 times apart numbers, and To Budget (income from rows minus budgeted amounts) adds the two scales as Actual does.
+  - **B.** Read every stored integer at 2 places. One consistent scale, but budget cells will not match what Actual shows.
+  - **C.** Do not support 0-place currencies in v1: setup does not offer them, and an existing 0-place budget opens read-only with a notice.
+  - **Recommendation:** C until Actual's inconsistency is settled, because A and B would each show a wrong number somewhere and a household budget cannot tolerate that. Engine arithmetic stays equal to Actual's under every option, because it adds the stored integers as Actual does.
+  - **Until decided:** no 0-place display, export or parity test is built on this section, and the CLS-12 rules above are exact for 2-place currencies only.
