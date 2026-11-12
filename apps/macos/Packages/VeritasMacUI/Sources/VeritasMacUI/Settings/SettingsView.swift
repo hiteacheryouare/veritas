@@ -2,22 +2,18 @@ import SwiftUI
 import VeritasDesign
 import VeritasKit
 
-/// Settings, with the sections the mockup's segmented control names.
+/// Settings, with the mockup's segmented control. AI and Tags stay hidden until they work (D69).
 struct SettingsView: View {
 	enum Section: String, CaseIterable {
 		case backups
 		case actual
-		case ai
 		case appearance
-		case tags
 
 		var title: String {
 			switch self {
 			case .backups: "Backups"
 			case .actual: "Actual"
-			case .ai: "AI"
 			case .appearance: "Appearance"
-			case .tags: "Tags"
 			}
 		}
 	}
@@ -36,12 +32,6 @@ struct SettingsView: View {
 				ActualSettingsView(model: model)
 			case .appearance:
 				AppearanceSettingsView()
-			case .ai, .tags:
-				ContentUnavailableView {
-					Text(section.title)
-						.font(.text(.title, weight: .semibold))
-						.foregroundStyle(.textTertiary)
-				}
 			}
 		}
 		.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)

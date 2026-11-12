@@ -71,3 +71,10 @@ struct ShellScreenshotTests {
 		}
 	}
 }
+
+struct SettingsSectionTests {
+	@Test func onlyTheSectionsThatWorkAreShown() {
+		// D69: AI and Tags come back when they work.
+		#expect(SettingsView.Section.allCases.map(\.title) == ["Backups", "Actual", "Appearance"])
+	}
+}
