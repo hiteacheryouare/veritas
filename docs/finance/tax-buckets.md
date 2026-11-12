@@ -50,6 +50,8 @@ Scope (D13): a summary export that helps hand clean numbers to tax software or a
    - An unknown id never makes a row a conflict and is never counted as a bucket of its own.
    - The audit (R-REL-2) reports every unknown id so the user can fix it. The report is informational only: it never makes the budget read-only and never blocks an export (only corruption refuses).
 
+7. **Merged categories.** The category of a row is the row's category resolved through `category_mapping` (CLS-1). Its bucket is the bucket of that resolved category. A merged-away category's own `tax_bucket` plays no part, and nothing is copied or written on a merge. A category deleted with no transfer target keeps its own bucket, because it resolves to itself (CLS-1).
+
 ## TAX-4 Sign convention
 
 `amount` is Actual's signed value. `counted_cents`:
@@ -71,7 +73,7 @@ Positive counted means "adds to this bucket". A refund in an outflow bucket is n
 | `bucket` | bucket id |
 | `direction` | `inflow` or `outflow` |
 | `total_cents` | integer, signed |
-| `total` | same value as a decimal string with two places, formatted from the integer (never from a float), `-` prefix if negative |
+| `total` | same value as a decimal string with the budget currency's decimal places (CLS-12), formatted from the integer (never from a float), `-` prefix if negative |
 | `transaction_count` | number of counted rows |
 
 **Detail file** `veritas-tax-detail-<year>.csv`, one row per counted or conflicting row (split children, not parents), sorted by bucket, then date, then id:
@@ -126,4 +128,6 @@ PDF copy: the title is "Tax summary", the footer reads "Organized from your own 
 
 - Totals are only what was recorded. `w2_income` is the sum of the rows in that bucket. If a paycheck is not split into gross and withholding rows (CLS-10), the deposit is counted as recorded.
 - Interest earned inside an off-budget account is an `adjustment` (CLS-4 row 11) and is not counted unless it is recorded in an on-budget income category.
+- A refund counts where it is recorded. A refund of a tagged purchase that carries no tag of its own lands in its category's bucket (or in none), not in the bucket of the purchase. Example: a pharmacy purchase of -3000 tagged `#medical` counts +3000 in `medical`. Its refund of +1000, recorded in Groceries with no tag, counts nothing in `medical`, so `medical` reads 3000 and not 2000. Tag the refund `#medical` to net it (TAX-3.3, TAX-4).
+- A merged category's rows follow the target (CLS-1). When a category with a `tax_bucket` is merged into a category with a different bucket or none, the merged rows count under the target's bucket from then on, in every tax year. The source's bucket is not copied (TAX-3.7). Veritas warns when the user confirms the merge: "{Source} is in tax bucket {bucket}. {Target} has {none or its bucket}. Its rows will count under {Target}." The warning is informational and never blocks the merge or an export. The user may set the target's bucket before confirming.
 - A bucket is a label the user chose. Whether an amount affects a tax return is for the user's tax software or accountant.
