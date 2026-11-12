@@ -135,13 +135,17 @@ const dumpMonth = (month: any): CanonicalObject => {
 	return { ...totals, groups, categories };
 };
 
-export const computedDump = async ({ api, internal, today }: ActualSession): Promise<CanonicalObject> => {
-	const budgetType = (await internal.db.first("SELECT value FROM preferences WHERE id = 'budgetType'"))?.value ?? 'envelope';
-
+export const budgetMonthsDump = async (api: any): Promise<CanonicalObject> => {
 	const months: CanonicalObject = {};
 	for (const month of await api.getBudgetMonths()) {
 		months[month] = dumpMonth(await api.getBudgetMonth(month));
 	}
+	return months;
+};
+
+export const computedDump = async ({ api, internal, today }: ActualSession): Promise<CanonicalObject> => {
+	const budgetType = (await internal.db.first("SELECT value FROM preferences WHERE id = 'budgetType'"))?.value ?? 'envelope';
+	const months = await budgetMonthsDump(api);
 
 	const accounts: CanonicalObject = {};
 	for (const account of await api.getAccounts()) {

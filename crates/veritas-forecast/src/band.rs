@@ -107,10 +107,11 @@ pub(crate) fn baselines_at(
 	budget: &BudgetData,
 	series: &[&Series],
 	origin: YearMonth,
+	season_min: i32,
 ) -> Result<Vec<Baseline>, CoreError> {
 	series
 		.iter()
-		.map(|series| Baseline::new(budget, series, origin, None))
+		.map(|series| Baseline::new(budget, series, origin, None, season_min))
 		.collect()
 }
 
@@ -141,6 +142,7 @@ pub(crate) fn band(
 	budget: &BudgetData,
 	series: &[&Series],
 	current: YearMonth,
+	season_min: i32,
 ) -> Result<Band, CoreError> {
 	let Some(first) = first_month(series) else {
 		return Band::from_residuals(Vec::new(), &[]);
@@ -152,7 +154,7 @@ pub(crate) fn band(
 		.collect::<Result<Vec<i64>, _>>()?;
 	let mut residuals = Vec::new();
 	for (month, actual) in months.iter().zip(&actuals).skip(MIN_MONTHS_BEFORE) {
-		let forecast = forecast_flow(&baselines_at(budget, series, *month)?, *month)?;
+		let forecast = forecast_flow(&baselines_at(budget, series, *month, season_min)?, *month)?;
 		residuals.push(actual.checked_sub(forecast).ok_or(CoreError::Overflow)?);
 	}
 	Band::from_residuals(residuals, &actuals)

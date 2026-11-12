@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use veritas_domain::{
 	AccountId, BudgetData, CategoryId, CategoryKind, CivilDate, Money, SplitRole, Transaction,
@@ -156,7 +156,8 @@ impl ClassifiedRow {
 #[derive(Clone, Debug, Default)]
 pub struct Classification {
 	rows: Vec<ClassifiedRow>,
-	by_id: HashMap<TransactionId, usize>,
+	/// Positions in `rows`, in id order, for lookup by id.
+	by_id: Vec<usize>,
 	orphans: Vec<TransactionId>,
 }
 
@@ -166,7 +167,17 @@ impl Classification {
 	}
 
 	pub fn get(&self, id: &TransactionId) -> Option<&ClassifiedRow> {
-		self.by_id.get(id).and_then(|&index| self.rows.get(index))
+		let found = self
+			.by_id
+			.binary_search_by(|&position| {
+				self.rows
+					.get(position)
+					.map_or(std::cmp::Ordering::Less, |row| row.id.cmp(id))
+			})
+			.ok()?;
+		self.by_id
+			.get(found)
+			.and_then(|&position| self.rows.get(position))
 	}
 
 	pub fn within(&self, period: Period) -> &[ClassifiedRow] {
@@ -217,47 +228,52 @@ impl Classification {
 
 pub fn classify(budget: &BudgetData) -> Classification {
 	let mut orphans = Vec::new();
-	let mut candidates = BTreeMap::new();
+	let mut candidates = Vec::with_capacity(budget.transactions.len());
 	for transaction in budget.transactions.values() {
 		if !is_row(budget, transaction) {
 			continue;
 		}
 		match Candidate::new(budget, transaction) {
-			Some(candidate) => {
-				candidates.insert(&transaction.id, candidate);
-			}
+			Some(candidate) => candidates.push(candidate),
 			None => orphans.push(transaction.id.clone()),
 		}
 	}
+	let index: HashMap<&TransactionId, usize> = candidates
+		.iter()
+		.enumerate()
+		.map(|(position, candidate)| (&candidate.transaction.id, position))
+		.collect();
 
-	let mut rows = Vec::with_capacity(candidates.len());
+	let mut decided: Vec<Option<ClassifiedRow>> = Vec::with_capacity(candidates.len());
 	let mut mirrors = Vec::new();
-	for candidate in candidates.values() {
-		let partner = partner(&candidates, candidate);
+	for (position, candidate) in candidates.iter().enumerate() {
+		let partner = partner(&candidates, &index, candidate);
+		let partner_candidate = partner.and_then(|other| candidates.get(other));
 		let row = ClassifiedRow {
-			partner: partner.map(|partner| Partner {
-				id: partner.transaction.id.clone(),
-				date: partner.transaction.date,
+			partner: partner_candidate.map(|other| Partner {
+				id: other.transaction.id.clone(),
+				date: other.transaction.date,
 			}),
 			..candidate.row()
 		};
-		match decide(budget, candidate, partner) {
-			Outcome::Decided(decision, flags) => rows.push(ClassifiedRow {
+		match decide(budget, candidate, partner_candidate) {
+			Outcome::Decided(decision, flags) => decided.push(Some(ClassifiedRow {
 				decision,
 				flags,
 				..row
-			}),
-			Outcome::MirrorOf(primary) => mirrors.push((row, primary)),
+			})),
+			Outcome::Mirror => {
+				decided.push(None);
+				mirrors.push((position, row, partner));
+			}
 		}
 	}
-
-	let decided: HashMap<TransactionId, Decision> = rows
-		.iter()
-		.map(|row| (row.id.clone(), row.decision))
-		.collect();
-	for (row, primary) in mirrors {
-		let classified = match decided.get(&primary) {
-			Some(&decision) => ClassifiedRow {
+	for (position, row, primary) in mirrors {
+		let primary = primary
+			.and_then(|primary| decided.get(primary))
+			.and_then(|primary| primary.as_ref().map(|primary| primary.decision));
+		let classified = match primary {
+			Some(decision) => ClassifiedRow {
 				decision,
 				leg: Leg::Mirror,
 				..row
@@ -272,14 +288,29 @@ pub fn classify(budget: &BudgetData) -> Classification {
 				..row
 			},
 		};
-		rows.push(classified);
+		if let Some(slot) = decided.get_mut(position) {
+			*slot = Some(classified);
+		}
 	}
 
-	rows.sort_by(|a, b| a.date.cmp(&b.date).then_with(|| a.id.cmp(&b.id)));
-	let by_id = rows
+	// Rows arrive in id order, so a stable sort by date gives date-then-id.
+	let mut order: Vec<usize> = (0..decided.len()).collect();
+	order.sort_by_key(|&position| {
+		decided
+			.get(position)
+			.and_then(Option::as_ref)
+			.map(|row| row.date)
+	});
+	let mut by_id = vec![0; decided.len()];
+	for (sorted, &position) in order.iter().enumerate() {
+		if let Some(slot) = by_id.get_mut(position) {
+			*slot = sorted;
+		}
+	}
+	let mut slots: Vec<Option<ClassifiedRow>> = decided;
+	let rows = order
 		.iter()
-		.enumerate()
-		.map(|(index, row)| (row.id.clone(), index))
+		.filter_map(|&position| slots.get_mut(position).and_then(Option::take))
 		.collect();
 	Classification {
 		rows,
@@ -394,14 +425,16 @@ impl<'a> Candidate<'a> {
 /// The other leg, only when the link is reciprocal (each row points at the
 /// other and sits in the other's transfer account) and the amounts net to
 /// zero. Dates may differ.
-fn partner<'c, 'a>(
-	candidates: &'c BTreeMap<&TransactionId, Candidate<'a>>,
-	candidate: &Candidate<'a>,
-) -> Option<&'c Candidate<'a>> {
+fn partner(
+	candidates: &[Candidate],
+	index: &HashMap<&TransactionId, usize>,
+	candidate: &Candidate,
+) -> Option<usize> {
 	let own = candidate.transaction;
 	let transfer = candidate.transfer.as_ref()?;
 	let id = own.transfer.as_ref().filter(|id| *id != &own.id)?;
-	let other = candidates.get(id)?;
+	let position = *index.get(id)?;
+	let other = candidates.get(position)?;
 	let points_back = other.transaction.transfer.as_ref() == Some(&own.id);
 	let other_points_here = other
 		.transfer
@@ -415,32 +448,12 @@ fn partner<'c, 'a>(
 		&& other_points_here
 		&& nets_to_zero
 		&& other.transaction.account == transfer.account)
-		.then_some(other)
+		.then_some(position)
 }
 
 enum Outcome {
 	Decided(Decision, Flags),
-	MirrorOf(TransactionId),
-}
-
-/// The category's effective kind. Actual's `is_income` wins over Veritas
-/// metadata on the income/expense axis, and a disagreement is a conflict.
-fn category_kind(budget: &BudgetData, category: &CategoryId) -> (CategoryKind, bool) {
-	let is_income = budget
-		.categories
-		.get(category)
-		.is_some_and(|category| category.is_income);
-	let stored = budget
-		.category_meta
-		.get(category)
-		.and_then(|meta| meta.kind);
-	match (is_income, stored) {
-		(true, None | Some(CategoryKind::Income)) => (CategoryKind::Income, false),
-		(true, Some(_)) => (CategoryKind::Income, true),
-		(false, None) => (CategoryKind::Expense, false),
-		(false, Some(CategoryKind::Income)) => (CategoryKind::Expense, true),
-		(false, Some(kind)) => (kind, false),
-	}
+	Mirror,
 }
 
 fn decide(budget: &BudgetData, candidate: &Candidate, partner: Option<&Candidate>) -> Outcome {
@@ -448,7 +461,7 @@ fn decide(budget: &BudgetData, candidate: &Candidate, partner: Option<&Candidate
 	let category_kind = candidate
 		.category
 		.as_ref()
-		.map(|category| category_kind(budget, category));
+		.map(|category| budget.effective_category_kind(category));
 
 	let Some(transfer) = &candidate.transfer else {
 		let decision = if candidate.starting_balance {
@@ -497,7 +510,7 @@ fn decide(budget: &BudgetData, candidate: &Candidate, partner: Option<&Candidate
 	};
 
 	if !candidate.on_budget && transfer.other_on_budget {
-		return Outcome::MirrorOf(partner.transaction.id.clone());
+		return Outcome::Mirror;
 	}
 	flags.needs_review = candidate.marked() || partner.marked();
 	Outcome::Decided(

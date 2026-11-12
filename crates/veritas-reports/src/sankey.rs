@@ -67,9 +67,15 @@ pub fn sankey(
 		income_rows.extend(line.rows.iter().cloned());
 		if line.total.is_negative() {
 			reversals.absorb(line.total.checked_neg()?, &line.rows)?;
-		} else if let Some(category) = &line.category {
+		} else if line.total != Money::ZERO {
+			// Classification never makes uncategorized income, so a source
+			// without a category means the classification layer broke.
+			let category = line
+				.category
+				.clone()
+				.ok_or_else(|| CoreError::Internal("an income line has no category".to_owned()))?;
 			sources.push(Node {
-				kind: NodeKind::IncomeCategory(category.clone()),
+				kind: NodeKind::IncomeCategory(category),
 				value: line.total,
 				labels: line.labels,
 				rows: line.rows.clone(),
