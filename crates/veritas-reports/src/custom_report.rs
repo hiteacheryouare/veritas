@@ -1,4 +1,4 @@
-use veritas_domain::{CoreError, CustomReportRow};
+use veritas_domain::{CoreError, CustomReportId, CustomReportRow};
 
 use crate::json::Json;
 
@@ -51,7 +51,7 @@ pub enum SortBy {
 /// `to_row` writes only what an edit changed.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CustomReport {
-	pub id: String,
+	pub id: CustomReportId,
 	pub name: String,
 	pub start_date: String,
 	pub end_date: String,

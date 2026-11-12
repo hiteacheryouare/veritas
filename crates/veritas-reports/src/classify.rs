@@ -456,32 +456,12 @@ enum Outcome {
 	Mirror,
 }
 
-/// The category's effective kind. Actual's `is_income` wins over Veritas
-/// metadata on the income/expense axis, and a disagreement is a conflict.
-fn category_kind(budget: &BudgetData, category: &CategoryId) -> (CategoryKind, bool) {
-	let is_income = budget
-		.categories
-		.get(category)
-		.is_some_and(|category| category.is_income);
-	let stored = budget
-		.category_meta
-		.get(category)
-		.and_then(|meta| meta.kind);
-	match (is_income, stored) {
-		(true, None | Some(CategoryKind::Income)) => (CategoryKind::Income, false),
-		(true, Some(_)) => (CategoryKind::Income, true),
-		(false, None) => (CategoryKind::Expense, false),
-		(false, Some(CategoryKind::Income)) => (CategoryKind::Expense, true),
-		(false, Some(kind)) => (kind, false),
-	}
-}
-
 fn decide(budget: &BudgetData, candidate: &Candidate, partner: Option<&Candidate>) -> Outcome {
 	let mut flags = Flags::default();
 	let category_kind = candidate
 		.category
 		.as_ref()
-		.map(|category| category_kind(budget, category));
+		.map(|category| budget.effective_category_kind(category));
 
 	let Some(transfer) = &candidate.transfer else {
 		let decision = if candidate.starting_balance {

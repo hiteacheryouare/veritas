@@ -2,7 +2,7 @@
 //! Sankey within 500 ms, each timed from the loaded budget, classification
 //! included, because any edit makes the session classify again.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::hint::black_box;
 use std::path::Path;
@@ -19,12 +19,15 @@ fn load_perf_100k() -> BudgetData {
 	let scratch =
 		Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("perf-100k-{}", std::process::id()));
 	let _ = std::fs::remove_dir_all(&scratch);
-	let budget = veritas_interop::import_actual_zip(
+	let veritas_interop::ImportOutcome::Imported(budget) = veritas_interop::import_actual_zip(
 		&root.join("fixtures/synthetic/perf-100k.zip"),
 		&scratch,
 	)
-	.unwrap();
-	let mut store = veritas_store::Store::open(&budget.db_path).unwrap();
+	.unwrap() else {
+		panic!("perf-100k imports cleanly");
+	};
+	let mut store =
+		veritas_store::Store::open(&budget.db_path, veritas_store::Access::ReadWrite).unwrap();
 	store.adopt().unwrap();
 	let data = store.load().unwrap().data;
 	drop(store);

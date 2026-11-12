@@ -52,12 +52,15 @@ fn all_features() -> BudgetData {
 		NEXT.fetch_add(1, Ordering::Relaxed)
 	));
 	let _ = std::fs::remove_dir_all(&scratch);
-	let imported = veritas_interop::import_actual_zip(
+	let veritas_interop::ImportOutcome::Imported(imported) = veritas_interop::import_actual_zip(
 		&root().join("fixtures/synthetic/all-features.zip"),
 		&scratch,
 	)
-	.unwrap();
-	let mut store = veritas_store::Store::open(&imported.db_path).unwrap();
+	.unwrap() else {
+		panic!("all-features imports cleanly");
+	};
+	let mut store =
+		veritas_store::Store::open(&imported.db_path, veritas_store::Access::ReadWrite).unwrap();
 	store.adopt().unwrap();
 	let mut budget = store.load().unwrap().data;
 	drop(store);
@@ -66,7 +69,7 @@ fn all_features() -> BudgetData {
 	let mut rows = reports.query([]).unwrap();
 	while let Some(row) = rows.next().unwrap() {
 		let report = CustomReportRow {
-			id: text(row, "id").unwrap(),
+			id: CustomReportId::new(text(row, "id").unwrap()),
 			name: text(row, "name"),
 			start_date: text(row, "start_date"),
 			end_date: text(row, "end_date"),
@@ -86,15 +89,13 @@ fn all_features() -> BudgetData {
 			metadata: text(row, "metadata"),
 			interval: text(row, "interval"),
 			color_scheme: text(row, "color_scheme"),
-			tombstone: int(row, "tombstone"),
+			tombstone: int(row, "tombstone") == Some(1),
 			include_current: int(row, "include_current"),
 			sort_by: text(row, "sort_by"),
 			trim_intervals: int(row, "trim_intervals"),
 			show_trend_lines: int(row, "show_trend_lines"),
 		};
-		budget
-			.custom_reports
-			.insert(CustomReportId::new(report.id.clone()), report);
+		budget.custom_reports.insert(report.id.clone(), report);
 	}
 	let mut pages = conn
 		.prepare("SELECT id, name, tombstone FROM dashboard_pages")
@@ -138,7 +139,7 @@ fn live_reports(budget: &BudgetData) -> Vec<CustomReport> {
 	budget
 		.custom_reports
 		.values()
-		.filter(|row| row.tombstone != Some(1))
+		.filter(|row| !row.tombstone)
 		.map(|row| CustomReport::from_row(row).unwrap())
 		.collect()
 }
@@ -216,7 +217,7 @@ fn r_rep_4_query_rows_match_actuals_query_engine() {
 	.enumerate()
 	{
 		let mut variant = base.clone();
-		variant.id = format!("variant-{index}");
+		variant.id = CustomReportId::new(format!("variant-{index}"));
 		variant.interval = interval;
 		variant.conditions = Json::parse(conditions).unwrap().as_array().unwrap().to_vec();
 		variant.conditions_or = or;
@@ -231,7 +232,7 @@ fn r_rep_4_query_rows_match_actuals_query_engine() {
 		let conditions: Value =
 			serde_json::from_str(report.row.conditions.as_deref().unwrap_or("[]")).unwrap();
 		requests.push(json!({
-			"id": report.id,
+			"id": report.id.to_string(),
 			"startDate": start,
 			"endDate": end,
 			"interval": interval,
@@ -250,7 +251,7 @@ fn r_rep_4_query_rows_match_actuals_query_engine() {
 		return;
 	};
 	for (id, assets, debts) in ours {
-		let expected = &theirs[&id];
+		let expected = &theirs[id.as_str()];
 		for (side, rows) in [("assets", assets), ("debts", debts)] {
 			let actual = sorted(rows.iter().map(row_json).collect());
 			let wanted = sorted(expected[side].as_array().unwrap().clone());
@@ -295,13 +296,45 @@ fn r_rep_4_saved_reports_round_trip_byte_for_byte() {
 	assert_eq!(saved.metadata, row.metadata);
 }
 
+/// A report row with every column unset, as a fresh `custom_reports` row
+/// with SQL defaults left out.
+fn blank_report() -> CustomReportRow {
+	CustomReportRow {
+		id: CustomReportId::new("blank"),
+		name: None,
+		start_date: None,
+		end_date: None,
+		date_static: None,
+		date_range: None,
+		mode: None,
+		group_by: None,
+		balance_type: None,
+		show_empty: None,
+		show_offbudget: None,
+		show_hidden: None,
+		show_uncategorized: None,
+		selected_categories: None,
+		graph_type: None,
+		conditions: None,
+		conditions_op: None,
+		metadata: None,
+		interval: None,
+		color_scheme: None,
+		tombstone: false,
+		include_current: None,
+		sort_by: None,
+		trim_intervals: None,
+		show_trend_lines: None,
+	}
+}
+
 fn live_report(range: &str, include_current: bool) -> CustomReport {
 	CustomReport::from_row(&CustomReportRow {
-		id: "r".to_owned(),
+		id: CustomReportId::new("r"),
 		date_static: Some(0),
 		date_range: Some(range.to_owned()),
 		include_current: Some(i64::from(include_current)),
-		..CustomReportRow::default()
+		..blank_report()
 	})
 	.unwrap()
 }
@@ -344,7 +377,7 @@ fn r_rep_4_live_ranges_follow_get_live_range() {
 
 fn spending_report(group_by: &str, balance: &str, sort: &str) -> CustomReportRow {
 	CustomReportRow {
-		id: "spend".to_owned(),
+		id: CustomReportId::new("spend"),
 		start_date: Some("2027-01-01".to_owned()),
 		end_date: Some("2027-02-28".to_owned()),
 		date_static: Some(1),
@@ -356,7 +389,7 @@ fn spending_report(group_by: &str, balance: &str, sort: &str) -> CustomReportRow
 		show_hidden: Some(0),
 		show_offbudget: Some(0),
 		show_uncategorized: Some(1),
-		..CustomReportRow::default()
+		..blank_report()
 	}
 }
 
