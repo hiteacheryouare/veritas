@@ -169,6 +169,9 @@ Ops run in order. The first failure stops the run and names the op's index. Amou
 | `createRule` | `id`, `stage?`, `conditionsOp?`, `conditions`, `actions` | `api.createRule`, which keeps the supplied id |
 | `createSchedule` | `id`, `name`, `date` (`YYYY-MM-DD` or a RecurConfig), `postsTransaction?`, `payee?`, `account?`, `amount?`, `amountOp?` | `api.createSchedule` |
 | `runSchedules` | | `internal.send('schedule/force-run-service')`, which auto-posts due schedules that post transactions |
+| `skipSchedule` | `id` | `internal.send('schedule/skip-next-date')`, which moves the next date past one occurrence |
+| `postSchedule` | `id`, `today?` | `internal.send('schedule/post-transaction')`, dated `next_date`, or the current day when `today` is true |
+| `updateSchedule` | `id`, `fields?` (`schedules` columns such as `completed` or `posts_transaction`), `conditions?`, `resetNextDate?` | `internal.send('schedule/update')`, which merges the conditions with `updateConditions` and may reset the next date |
 | `setNote` | `id` (an entity id, `account-<id>`, `budget-<month>`, …), `note` | `api.updateNote` |
 | `createTag` | `id`, `tag`, `color?`, `description?` | `api.createTag` |
 | `createCustomReport` | `id`, `report` (a `CustomReportEntity` without `id`) | `internal.send('report/create')` |
