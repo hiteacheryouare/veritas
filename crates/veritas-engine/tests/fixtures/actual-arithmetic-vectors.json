@@ -1,5 +1,5 @@
 {
-	"source": "Actual v26.11.0 loot-core/src/shared/arithmetic.ts and util.ts (getNumberFormat, currencyToAmount, amountToInteger), copied verbatim and run under Node v26.12.1, ICU 78.3, Unicode 17.0",
+	"source": "Actual v26.11.0 (1766241e3f4b3c578e424c4fa15f1eb83c0da17d) packages/loot-core/src/shared/arithmetic.ts and util.ts, unmodified, under Node v26.12.1, ICU 78.3, Unicode 17.0",
 	"evalArithmetic": [
 		{"format":"comma-dot","expression":"","result":null},
 		{"format":"comma-dot","expression":" ","result":null},

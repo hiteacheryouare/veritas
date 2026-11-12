@@ -6,7 +6,7 @@ use veritas_domain::{
 use veritas_reports::{Classification, Period, classify, net_worth};
 
 use crate::band::{Band, band};
-use crate::baseline::{Baseline, WINDOW, complete_months};
+use crate::baseline::{Baseline, SEASON_MIN, WINDOW, complete_months};
 use crate::flows::{FlowKind, KnownFlow};
 use crate::history::{History, Series, Side, asset_purchase, balances, bill_linked};
 use crate::math::{median, round_half_away, to_money};
@@ -100,6 +100,7 @@ pub struct Forecaster<'a> {
 	pub(crate) budget: &'a BudgetData,
 	pub(crate) classification: Classification,
 	pub(crate) history: History,
+	pub(crate) season_min: i32,
 }
 
 impl<'a> Forecaster<'a> {
@@ -110,7 +111,17 @@ impl<'a> Forecaster<'a> {
 			budget,
 			classification,
 			history,
+			season_min: SEASON_MIN,
 		})
+	}
+
+	/// The same forecaster with seasonality never turning on, for FC-7's
+	/// seasonality-off backtest. Not for projections a user sees.
+	pub fn without_seasonality(self) -> Forecaster<'a> {
+		Forecaster {
+			season_min: i32::MAX,
+			..self
+		}
 	}
 
 	pub fn classification(&self) -> &Classification {
@@ -168,7 +179,15 @@ impl<'a> Forecaster<'a> {
 	) -> Result<Vec<Baseline>, CoreError> {
 		self.baselined_series(known)
 			.into_iter()
-			.map(|series| Baseline::new(self.budget, series, today.year_month(), Some(today)))
+			.map(|series| {
+				Baseline::new(
+					self.budget,
+					series,
+					today.year_month(),
+					Some(today),
+					self.season_min,
+				)
+			})
 			.collect()
 	}
 
@@ -182,7 +201,7 @@ impl<'a> Forecaster<'a> {
 		let current = today.year_month();
 		let series = self.baselined_series(known);
 		let baselines = self.baselines(today, known)?;
-		let band = band(self.budget, &series, current)?;
+		let band = band(self.budget, &series, current, self.season_min)?;
 		let start = balances(self.budget, &self.classification, today)?;
 		let mut running = start.clone();
 		let mut worth = net_worth(&self.classification, today)?.minor();
