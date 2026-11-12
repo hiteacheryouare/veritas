@@ -192,7 +192,8 @@ pub fn target_writes(
 	let existing = budget
 		.notes
 		.get(category.as_str())
-		.map_or("", String::as_str);
+		.and_then(|n| n.as_deref())
+		.unwrap_or("");
 	let mut replaced = false;
 	let mut lines: Vec<&str> = Vec::new();
 	for current in existing.lines() {

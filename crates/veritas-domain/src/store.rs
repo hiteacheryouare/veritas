@@ -10,6 +10,7 @@ pub trait Store {
 }
 
 /// If `apply` or `commit` fails, nothing from this transaction may persist.
+/// Dropping a transaction without committing it rolls it back.
 pub trait StoreTransaction {
 	fn apply(&mut self, change: &Change) -> Result<(), CoreError>;
 	fn commit(self) -> Result<(), CoreError>;

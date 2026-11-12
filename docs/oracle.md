@@ -1,6 +1,6 @@
 # The Actual oracle
 
-`tools/actual-oracle/` drives Actual's own engine (`@actual-app/api`, pinned to exactly `26.11.0`) so Veritas can be checked against it. It is a dev tool and never ships. It has six commands:
+`tools/actual-oracle/` drives Actual's own engine (`@actual-app/api`, pinned to exactly `26.11.0`) so Veritas can be checked against it. It is a dev tool and never ships. Its commands:
 
 | Command | Does |
 |---|---|

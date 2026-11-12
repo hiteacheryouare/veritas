@@ -131,18 +131,18 @@ fn compare_rows(budget: &BudgetData, actual: &Value) -> Vec<String> {
 			"zero_budget_months: ours {ours:?}, Actual's {theirs:?}"
 		));
 	}
-	let theirs: BTreeMap<String, String> = actual["budgetNotes"]
+	let theirs: BTreeMap<String, Option<String>> = actual["budgetNotes"]
 		.as_array()
 		.unwrap()
 		.iter()
 		.map(|row| {
 			(
 				row["id"].as_str().unwrap().to_owned(),
-				row["note"].as_str().unwrap_or("").to_owned(),
+				row["note"].as_str().map(str::to_owned),
 			)
 		})
 		.collect();
-	let ours: BTreeMap<String, String> = budget
+	let ours: BTreeMap<String, Option<String>> = budget
 		.notes
 		.iter()
 		.filter(|(id, _)| id.starts_with("budget-"))

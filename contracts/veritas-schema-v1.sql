@@ -49,7 +49,8 @@ CREATE TABLE IF NOT EXISTS veritas_goal (
 -- docs/finance/classification.md CLS-5: reconciliation adjustments Veritas made.
 CREATE TABLE IF NOT EXISTS veritas_transaction_meta (
 	transaction_id TEXT PRIMARY KEY,
-	adjustment INTEGER NOT NULL DEFAULT 0 CHECK (adjustment IN (0, 1))
+	adjustment INTEGER NOT NULL DEFAULT 0 CHECK (adjustment IN (0, 1)),
+	needs_actual TEXT
 );
 
 -- docs/finance/tax-buckets.md TAX-1: which Actual tags mean which bucket.

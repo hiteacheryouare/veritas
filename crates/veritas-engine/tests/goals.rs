@@ -172,6 +172,8 @@ fn r1_a_positive_leftover_moves_to_the_chosen_envelope() {
 	);
 	assert!(
 		budget.0.notes["budget-2026-11"]
+			.as_deref()
+			.unwrap()
 			.contains("Reassigned 20.00 from New laptop \u{2192} savings")
 	);
 }
@@ -235,7 +237,12 @@ fn an_overspent_goal_released_against_to_budget_is_funded_from_it() {
 		(laptop.budgeted, laptop.balance),
 		(cents(3_000), Money::ZERO)
 	);
-	assert!(budget.0.notes["budget-2026-11"].contains("from To Budget \u{2192} New laptop"));
+	assert!(
+		budget.0.notes["budget-2026-11"]
+			.as_deref()
+			.unwrap()
+			.contains("from To Budget \u{2192} New laptop")
+	);
 }
 
 #[test]
@@ -279,7 +286,7 @@ fn d36_the_target_is_written_as_a_goal_line_and_monthly_goal_rows() {
 
 	budget.0.notes.insert(
 		"laptop".to_owned(),
-		"Saving for the M5\n  #goal 1000\n#goal 99".to_owned(),
+		Some("Saving for the M5\n  #goal 1000\n#goal 99".to_owned()),
 	);
 	let writes =
 		goals::target_writes(&budget.0, &sheet, &cat("laptop"), cents(123_456), ym(M)).unwrap();

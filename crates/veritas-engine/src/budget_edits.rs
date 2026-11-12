@@ -79,7 +79,7 @@ impl BudgetWrites {
 			budget.holds.insert(*month, Some(*amount));
 		}
 		for (id, text) in &self.notes {
-			budget.notes.insert(id.clone(), text.clone());
+			budget.notes.insert(id.clone(), Some(text.clone()));
 		}
 	}
 
@@ -603,7 +603,8 @@ impl<'a> BudgetEditor<'a> {
 		};
 		let day = note_day(self.sheet.today());
 		let line = format!("- Reassigned {display} from {from} \u{2192} {to} on {day}");
-		let text = match self.budget.notes.get(&id).filter(|n| !n.is_empty()) {
+		let existing = self.budget.notes.get(&id).and_then(|n| n.as_deref());
+		let text = match existing.filter(|n| !n.is_empty()) {
 			Some(existing) => format!("{existing}\n{line}"),
 			None => line,
 		};

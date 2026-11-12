@@ -30,6 +30,7 @@ fn note(budget: &Budget, month: &str) -> String {
 		.notes
 		.get(&format!("budget-{month}"))
 		.cloned()
+		.flatten()
 		.unwrap_or_default()
 }
 
