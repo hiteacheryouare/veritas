@@ -40,7 +40,9 @@ fn with_goal() -> Budget {
 }
 
 fn suggest(budget: &Budget, goal: &Goal) -> Suggestion {
-	goals::suggestion(&budget.sheet(TODAY), goal, ym(M)).unwrap()
+	goals::suggestion(&budget.sheet(TODAY), goal, ym(M))
+		.unwrap()
+		.unwrap()
 }
 
 #[test]
@@ -63,7 +65,9 @@ fn g1b_this_months_budget_doesnt_change_the_suggestion() {
 	let target = goal(150_000, Some("2027-04-15"));
 	assert_eq!(suggest(&budget, &target).monthly, cents(25_000));
 	budget.budget("2026-12", "laptop", 25_000);
-	let december = goals::suggestion(&budget.sheet(TODAY), &target, ym("2026-12")).unwrap();
+	let december = goals::suggestion(&budget.sheet(TODAY), &target, ym("2026-12"))
+		.unwrap()
+		.unwrap();
 	assert_eq!(
 		(december.remaining, december.months_left, december.monthly),
 		(cents(125_000), 5, cents(25_000))
@@ -90,7 +94,11 @@ fn g4_g5_funded_goals_suggest_nothing_and_past_dates_mean_one_month() {
 	);
 	let late = suggest(&budget, &goal(110_000, Some("2026-06-01")));
 	assert_eq!((late.months_left, late.monthly), (1, cents(50_000)));
-	assert!(goals::suggestion(&budget.sheet(TODAY), &goal(1, None), ym(M)).is_none());
+	assert!(
+		goals::suggestion(&budget.sheet(TODAY), &goal(1, None), ym(M))
+			.unwrap()
+			.is_none()
+	);
 }
 
 #[test]
@@ -112,7 +120,7 @@ fn reaching_the_target_is_recorded_once_and_spending_never_undoes_it() {
 	budget.txn("laptop", "checking", "2026-10-02", -148_000, Some("laptop"));
 	let sheet = budget.sheet(TODAY);
 	assert_eq!(
-		goals::progress(&sheet, &reached, ym(M)).available,
+		goals::progress(&sheet, &reached, ym(M)).unwrap().available,
 		cents(2_000)
 	);
 	assert_eq!(goals::check_reached(&sheet, &reached, ym(M)), None);

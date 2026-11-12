@@ -43,29 +43,42 @@ impl Suggestion {
 	}
 }
 
-pub fn progress(sheet: &EnvelopeSheet, goal: &Goal, month: YearMonth) -> GoalProgress {
+pub fn progress(
+	sheet: &EnvelopeSheet,
+	goal: &Goal,
+	month: YearMonth,
+) -> Result<GoalProgress, CoreError> {
 	let available = available(sheet, &goal.category, month);
-	GoalProgress {
+	let remaining = goal.target.checked_sub(available)?.minor().max(0);
+	Ok(GoalProgress {
 		available,
 		target: goal.target,
-		remaining: Money::from_minor((goal.target.minor() - available.minor()).max(0)),
-	}
+		remaining: Money::from_minor(remaining),
+	})
 }
 
-/// `None` without a target date: no suggestion (DEBT-8 "Months left").
-pub fn suggestion(sheet: &EnvelopeSheet, goal: &Goal, month: YearMonth) -> Option<Suggestion> {
-	let target_month = goal.target_date?.year_month();
-	let cell = sheet.category(month, &goal.category);
-	let carry = cell.map_or(0, |c| c.balance.minor() - c.budgeted.minor());
-	let months_left = months_between(month, target_month).max(0) + 1;
+/// `Ok(None)` without a target date: no suggestion (DEBT-8 "Months left").
+pub fn suggestion(
+	sheet: &EnvelopeSheet,
+	goal: &Goal,
+	month: YearMonth,
+) -> Result<Option<Suggestion>, CoreError> {
+	let Some(target_date) = goal.target_date else {
+		return Ok(None);
+	};
+	let carry = match sheet.category(month, &goal.category) {
+		Some(cell) => cell.balance.checked_sub(cell.budgeted)?,
+		None => Money::ZERO,
+	};
+	let months_left = months_between(month, target_date.year_month()).max(0) + 1;
 	let months_left = u32::try_from(months_left).unwrap_or(u32::MAX);
-	let remaining = (goal.target.minor() - carry).max(0);
+	let remaining = goal.target.checked_sub(carry)?.minor().max(0);
 	let monthly = remaining.unsigned_abs().div_ceil(u64::from(months_left)) as i64;
-	Some(Suggestion {
+	Ok(Some(Suggestion {
 		months_left,
 		remaining: Money::from_minor(remaining),
 		monthly: Money::from_minor(monthly),
-	})
+	}))
 }
 
 /// DEBT-8.2: an active goal whose available reaches its target in month M

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use veritas_domain::{
 	BudgetData, CategoryId, CoreError, SplitRole, Transaction, TransactionId, YearMonth,
@@ -104,13 +104,35 @@ impl Activity {
 				affected.extend(children.iter().cloned());
 			}
 		}
+		// Children added since the sheet last saw this parent aren't in
+		// `children` yet, so a listed parent means one scan for its children.
+		let parents: HashSet<&TransactionId> = ids
+			.iter()
+			.filter(|id| {
+				matches!(
+					budget.transactions.get(*id).map(|t| &t.split),
+					Some(SplitRole::Parent)
+				)
+			})
+			.collect();
+		if !parents.is_empty() {
+			affected.extend(
+				budget
+					.transactions
+					.values()
+					.filter(
+						|t| matches!(&t.split, SplitRole::Child { parent } if parents.contains(parent)),
+					)
+					.map(|t| t.id.clone()),
+			);
+		}
 		let mut earliest: Option<usize> = None;
 		let mut note = |cell: Option<Cell>| {
 			if let Some((month, _, _)) = cell {
 				earliest = Some(earliest.map_or(month, |e| e.min(month)));
 			}
 		};
-		let mut seen = std::collections::HashSet::new();
+		let mut seen = HashSet::new();
 		let mut index = 0;
 		while index < affected.len() {
 			let id = affected[index].clone();

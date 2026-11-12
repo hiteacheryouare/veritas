@@ -82,7 +82,7 @@ pub enum SheetChange<'a> {
 	/// A budget cell (amount or carryover flag) or the hold of this month.
 	Month(YearMonth),
 	/// Transactions added, edited, deleted or tombstoned. Split children of a
-	/// listed parent are re-read automatically.
+	/// listed parent are re-read automatically, new ones included.
 	Transactions(&'a [TransactionId]),
 	/// Categories, groups, accounts or the category mapping: rebuild.
 	Structure,

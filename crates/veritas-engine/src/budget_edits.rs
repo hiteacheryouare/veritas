@@ -227,7 +227,7 @@ impl<'a> BudgetEditor<'a> {
 				continue;
 			}
 			let average = self.category_average(month, &category.id, span)?;
-			writes.amount(month, &category.id, -average)?;
+			writes.amount(month, &category.id, neg(average)?)?;
 		}
 		Ok(writes)
 	}
@@ -247,7 +247,11 @@ impl<'a> BudgetEditor<'a> {
 			.get(category)
 			.is_some_and(|c| c.is_income);
 		let mut writes = BudgetWrites::default();
-		writes.amount(month, category, if is_income { average } else { -average })?;
+		writes.amount(
+			month,
+			category,
+			if is_income { average } else { neg(average)? },
+		)?;
 		Ok(writes)
 	}
 
@@ -322,7 +326,7 @@ impl<'a> BudgetEditor<'a> {
 			.copied()
 			.flatten()
 			.map_or(0, Money::minor);
-		let change = amount.minor().max(-held).min(to_budget.max(0));
+		let change = amount.minor().max(neg(held)?).min(to_budget.max(0));
 		let mut writes = BudgetWrites::default();
 		writes
 			.holds
@@ -412,7 +416,7 @@ impl<'a> BudgetEditor<'a> {
 		amount: Option<Money>,
 	) -> Result<BudgetWrites, CoreError> {
 		let need = match amount.filter(|a| *a != Money::ZERO) {
-			Some(amount) => -amount.minor(),
+			Some(amount) => neg(amount.minor())?,
 			None => self.balance(month, to),
 		};
 		let available = match from {
@@ -443,7 +447,7 @@ impl<'a> BudgetEditor<'a> {
 		amount: Option<Money>,
 	) -> Result<BudgetWrites, CoreError> {
 		let need = match amount.filter(|a| *a != Money::ZERO) {
-			Some(amount) => -amount.minor(),
+			Some(amount) => neg(amount.minor())?,
 			None => self.available_to_budget(month),
 		};
 		let available = self.balance(month, category);
@@ -652,6 +656,10 @@ fn note_day(today: CivilDate) -> String {
 
 fn add(a: i64, b: i64) -> Result<i64, CoreError> {
 	a.checked_add(b).ok_or(CoreError::Overflow)
+}
+
+fn neg(a: i64) -> Result<i64, CoreError> {
+	a.checked_neg().ok_or(CoreError::Overflow)
 }
 
 fn sub(a: i64, b: i64) -> Result<i64, CoreError> {

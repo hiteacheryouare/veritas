@@ -615,6 +615,57 @@ mod incremental {
 		}
 	}
 
+	/// PR #36 review: listing only the parent picks up a child the sheet has
+	/// never seen, and a child removed from it.
+	#[test]
+	fn listing_a_split_parent_rereads_its_new_children() {
+		let mut budget = small_fixture();
+		let mut sheet = budget.sheet(TODAY);
+		let parent = TransactionId::new("shop");
+		budget
+			.txn("shop", "checking", "2026-10-05", -9_000, None)
+			.split = SplitRole::Parent;
+		sheet
+			.apply(
+				&budget.0,
+				SheetChange::Transactions(std::slice::from_ref(&parent)),
+			)
+			.unwrap();
+		for (id, amount, category) in [
+			("shop-food", -6_000, "groceries"),
+			("shop-meal", -3_000, "dining"),
+		] {
+			budget
+				.txn(id, "checking", "2026-10-05", amount, Some(category))
+				.split = SplitRole::Child {
+				parent: parent.clone(),
+			};
+		}
+		sheet
+			.apply(
+				&budget.0,
+				SheetChange::Transactions(std::slice::from_ref(&parent)),
+			)
+			.unwrap();
+		assert_eq!(
+			sheet
+				.category(ym("2026-10"), &cat("groceries"))
+				.unwrap()
+				.spent,
+			cents(-12_657 - 6_000)
+		);
+		assert_matches_a_fresh_sheet(&sheet, &budget);
+
+		budget
+			.0
+			.transactions
+			.remove(&TransactionId::new("shop-meal"));
+		sheet
+			.apply(&budget.0, SheetChange::Transactions(&[parent]))
+			.unwrap();
+		assert_matches_a_fresh_sheet(&sheet, &budget);
+	}
+
 	#[test]
 	fn months_before_the_change_keep_their_memoized_values() {
 		let mut budget = small_fixture();
