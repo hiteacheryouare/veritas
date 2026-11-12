@@ -28,7 +28,7 @@ struct NewBudgetSheet: View {
 		.padding(Spacing.s5)
 		.frame(width: 540)
 		.task { await setup.loadCurrencies() }
-		.accessibilityIdentifier("newBudget.\(stepName)")
+		.containerIdentifier("newBudget.\(stepName)")
 	}
 
 	private var title: String {

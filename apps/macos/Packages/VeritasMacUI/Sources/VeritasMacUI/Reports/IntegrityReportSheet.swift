@@ -21,7 +21,7 @@ struct IntegrityReportSheet: View {
 		}
 		.padding(Spacing.s5)
 		.frame(width: 540)
-		.accessibilityIdentifier("sheet.integrityReport")
+		.containerIdentifier("sheet.integrityReport")
 	}
 
 	@ViewBuilder private var content: some View {

@@ -69,7 +69,11 @@ final class SettingsAndReportJourneyTests: XCTestCase {
 		let show = app.buttons["Show report"]
 		XCTAssertTrue(show.waitForExistence(timeout: 10))
 		show.click()
-		XCTAssertTrue(app.staticTexts["Transfer with no other side"].waitForExistence(timeout: 5))
+		let report = app.descendants(matching: .any)["sheet.integrityReport"]
+		XCTAssertTrue(report.waitForExistence(timeout: 5))
+		// Each finding reads as one element: its title, then where it is.
+		let finding = report.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@ OR value BEGINSWITH %@", "Transfer with no other side", "Transfer with no other side")).firstMatch
+		XCTAssertTrue(finding.waitForExistence(timeout: 5))
 		attachScreenshot(of: app, named: "integrity-report")
 		app.typeKey(.escape, modifierFlags: [])
 		XCTAssertTrue(app.descendants(matching: .any)["sheet.integrityReport"].waitForDisappearance())

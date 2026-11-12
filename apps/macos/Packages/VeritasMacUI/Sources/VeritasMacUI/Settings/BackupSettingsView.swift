@@ -167,7 +167,7 @@ private struct SnapshotRows: View {
 				}
 			}
 		}
-		.accessibilityIdentifier("settings.snapshots")
+		.containerIdentifier("settings.snapshots")
 	}
 }
 

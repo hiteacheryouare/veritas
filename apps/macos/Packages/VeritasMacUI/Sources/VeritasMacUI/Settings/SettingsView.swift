@@ -58,7 +58,7 @@ struct SettingsView: View {
 				.accessibilityIdentifier("settings.section")
 			}
 		}
-		.accessibilityIdentifier("screen.settings")
+		.containerIdentifier("screen.settings")
 	}
 }
 

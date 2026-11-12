@@ -56,7 +56,7 @@ struct OpenBudgetSheet: View {
 		.frame(width: 480)
 		.onAppear { selection = budgets?.first?.id }
 		.onChange(of: budgets) { selection = budgets?.first?.id }
-		.accessibilityIdentifier("sheet.openBudget")
+		.containerIdentifier("sheet.openBudget")
 	}
 
 	private func chosen(_ id: BudgetListingItem.ID?) -> BudgetListingItem? {
