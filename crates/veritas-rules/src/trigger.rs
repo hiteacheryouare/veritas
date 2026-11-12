@@ -114,9 +114,9 @@ pub fn merge_manual_entry(
 	merged
 }
 
-/// The note the UI shows on a transaction when rules Actual would have run
-/// couldn't run in Veritas (Architect decision: apply the rest, never drop
-/// silently).
+/// What the UI says when rules Actual would have run couldn't run here.
+/// Under D60 Veritas saves nothing from such a run, so the note says so and
+/// sends Ryan to Actual to add the transaction there.
 pub fn may_need_actual(outcome: &RunOutcome) -> Option<String> {
 	let reasons: Vec<&str> = outcome
 		.undetermined
@@ -128,15 +128,14 @@ pub fn may_need_actual(outcome: &RunOutcome) -> Option<String> {
 	} else {
 		format!(" ({})", reasons.join("; "))
 	};
-	match outcome.undetermined.len() {
-		0 => None,
-		1 => Some(format!(
-			"1 rule couldn't run in Veritas{why}. Open this transaction in Actual to apply it."
-		)),
-		n => Some(format!(
-			"{n} rules couldn't run in Veritas{why}. Open this transaction in Actual to apply them."
-		)),
-	}
+	let rules = match outcome.undetermined.len() {
+		0 => return None,
+		1 => "1 rule".to_owned(),
+		n => format!("{n} rules"),
+	};
+	Some(format!(
+		"Veritas didn't save this: {rules} couldn't run here{why}. Add it in Actual."
+	))
 }
 
 #[cfg(test)]
@@ -252,10 +251,9 @@ mod tests {
 		};
 		assert_eq!(may_need_actual(&outcome), None);
 		outcome.undetermined = vec![RuleId::new("a"), RuleId::new("b")];
-		assert!(
-			may_need_actual(&outcome)
-				.unwrap()
-				.starts_with("2 rules couldn't run in Veritas. ")
+		assert_eq!(
+			may_need_actual(&outcome).unwrap(),
+			"Veritas didn't save this: 2 rules couldn't run here. Add it in Actual."
 		);
 		outcome.undetermined = vec![RuleId::new("a")];
 		outcome
@@ -263,7 +261,7 @@ mod tests {
 			.insert(RuleId::new("a"), "a template action".into());
 		assert_eq!(
 			may_need_actual(&outcome).unwrap(),
-			"1 rule couldn't run in Veritas (a template action). Open this transaction in Actual to apply it."
+			"Veritas didn't save this: 1 rule couldn't run here (a template action). Add it in Actual."
 		);
 	}
 }
