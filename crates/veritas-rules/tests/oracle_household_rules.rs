@@ -19,7 +19,7 @@ use veritas_domain::{
 	Account, AccountId, BudgetData, BudgetType, Category, CategoryGroupId, CategoryId, Payee,
 	PayeeId, RuleId,
 };
-use veritas_rules::{ParsedRule, RuleBook, RuleSupport};
+use veritas_rules::{BudgetPayees, ParsedRule, RuleBook, RuleSupport};
 
 const TODAY: &str = "2026-12-15";
 
@@ -805,12 +805,16 @@ fn a_households_rules_categorize_two_months_of_statements_like_actual() {
 	for (n, purchase) in purchases.iter().enumerate() {
 		let input = as_input(purchase, n);
 		let account_id = account(purchase.account);
-		let outcome = book.run(&rule_transaction(&input, &account_id), &budget);
+		let outcome = book.run(
+			&rule_transaction(&input, &account_id),
+			&budget,
+			&mut BudgetPayees::new(&budget, || PayeeId::new("made")),
+		);
 		assert!(outcome.undetermined.is_empty(), "{}", purchase.label);
 		for id in &outcome.applied {
 			*fired.entry(rule_name(id)).or_default() += 1;
 		}
-		let expected = expected_row(&outcome.transaction, &account_id);
+		let expected = expected_row(&outcome.partial, &account_id);
 		let row = rows
 			.get(uuid(9, n).as_str())
 			.unwrap_or_else(|| panic!("{} wasn't added", purchase.label));
@@ -1127,7 +1131,6 @@ fn rules_veritas_cannot_run_are_read_only_untouched_and_never_half_applied() {
 			"venmo template",
 			"rent increase formula",
 			"costco split",
-			"square regex",
 			"amazon with order note"
 		]
 		.into_iter()
@@ -1140,7 +1143,11 @@ fn rules_veritas_cannot_run_are_read_only_untouched_and_never_half_applied() {
 	for (n, purchase) in purchases.iter().enumerate() {
 		let input = as_input(purchase, n);
 		let account_id = account(purchase.account);
-		let outcome = book.run(&rule_transaction(&input, &account_id), &budget);
+		let outcome = book.run(
+			&rule_transaction(&input, &account_id),
+			&budget,
+			&mut BudgetPayees::new(&budget, || PayeeId::new("made")),
+		);
 		let names: Vec<&str> = outcome.undetermined.iter().map(rule_name).collect();
 		for name in &names {
 			assert!(read_only.contains(name), "{}: {name}", purchase.label);
@@ -1152,14 +1159,12 @@ fn rules_veritas_cannot_run_are_read_only_untouched_and_never_half_applied() {
 				purchase.label
 			);
 		}
-		// Actual's regex matched only the Square charge, so wherever it's the
-		// one unknown, everything else Veritas did must still agree with Actual.
-		let regex_missed =
-			names.iter().all(|name| *name == "square regex") && purchase.label != "square coffee";
-		if regex_missed {
+		// Where no read-only rule is in play, everything Veritas did must
+		// agree with Actual, the Square regex included (D47).
+		if names.is_empty() {
 			let row = rows[uuid(9, n).as_str()];
 			if let Some((actual, veritas)) =
-				compare(&expected_row(&outcome.transaction, &account_id), row)
+				compare(&expected_row(&outcome.partial, &account_id), row)
 			{
 				panic!(
 					"{}\n  actual:  {actual}\n  veritas: {veritas}",
@@ -1167,15 +1172,13 @@ fn rules_veritas_cannot_run_are_read_only_untouched_and_never_half_applied() {
 				);
 			}
 		}
-		undetermined.insert(purchase.label, (names, outcome.transaction));
+		undetermined.insert(purchase.label, (names, outcome.partial));
 	}
 
 	for (label, rule) in [
 		("venmo", "venmo template"),
 		("rent", "rent increase formula"),
 		("costco run", "costco split"),
-		("square coffee", "square regex"),
-		("not square", "square regex"),
 		("amazon", "amazon with order note"),
 	] {
 		assert!(
@@ -1184,6 +1187,12 @@ fn rules_veritas_cannot_run_are_read_only_untouched_and_never_half_applied() {
 			undetermined[label].0
 		);
 	}
+	assert_eq!(
+		undetermined["square coffee"].1.category,
+		Some(CategoryId::new(category("Dining"))),
+		"the regex rule runs in Veritas now"
+	);
+	assert_eq!(undetermined["not square"].1.category, None);
 	assert_eq!(
 		undetermined["amazon"].1.category, None,
 		"the plain half of a rule with a template must not be applied on its own"
