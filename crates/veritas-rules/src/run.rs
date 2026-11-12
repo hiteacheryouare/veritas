@@ -48,6 +48,11 @@ pub struct RunOutcome {
 /// reported as undetermined rather than guessed.
 pub trait PayeeDirectory {
 	fn find_or_create(&mut self, name: &str) -> Option<PayeeId>;
+	/// How many payees the directory has made so far.
+	fn made(&self) -> usize;
+	/// Forgets the payees made after the first `count`. A run that ends
+	/// undetermined writes nothing, its payees included (D60).
+	fn forget_made_after(&mut self, count: usize);
 }
 
 /// Finds payees in the budget the way `getPayeeByName` does (a live payee
@@ -95,6 +100,14 @@ impl PayeeDirectory for BudgetPayees<'_> {
 				Some(id)
 			}
 		}
+	}
+
+	fn made(&self) -> usize {
+		self.created.len()
+	}
+
+	fn forget_made_after(&mut self, count: usize) {
+		self.created.truncate(count);
 	}
 }
 
@@ -201,6 +214,7 @@ impl RuleBook {
 		budget: &BudgetData,
 		payees: &mut dyn PayeeDirectory,
 	) -> RunOutcome {
+		let made_before = payees.made();
 		let mut payee_name = transaction
 			.payee
 			.as_ref()
@@ -302,6 +316,9 @@ impl RuleBook {
 			}
 		}
 		outcome.transaction = outcome.undetermined.is_empty().then(|| working.clone());
+		if outcome.transaction.is_none() {
+			payees.forget_made_after(made_before);
+		}
 		outcome.partial = working;
 		outcome
 	}
@@ -532,6 +549,44 @@ mod tests {
 		);
 		book.run(&transaction("corner again"), &budget, &mut payees);
 		assert_eq!(payees.created.len(), 1);
+	}
+
+	#[test]
+	fn an_undetermined_run_makes_no_payees() {
+		// D60: the run writes nothing, so the payee its rename made goes too.
+		let mut budget = budget();
+		add_rule(
+			&mut budget,
+			"rename",
+			RuleStage::Pre,
+			ConditionsOp::And,
+			json!([{"op": "contains", "field": "imported_payee", "value": "corner"}]),
+			json!([{"op": "set", "field": "payee_name", "value": "Corner Store"}]),
+		);
+		add_rule(
+			&mut budget,
+			"template",
+			RuleStage::Post,
+			ConditionsOp::And,
+			json!([{"op": "contains", "field": "imported_payee", "value": "late"}]),
+			json!([{"op": "set", "field": "notes", "value": "", "options": {"template": "{{date}}"}}]),
+		);
+		let book = RuleBook::new(&budget);
+		let mut payees = BudgetPayees::new(&budget, || PayeeId::new("made"));
+		let kept = book.run(&transaction("Corner shop"), &budget, &mut payees);
+		assert!(kept.transaction.is_some());
+		assert_eq!(payees.created.len(), 1);
+		let dropped = book.run(&transaction("Corner shop, late"), &budget, &mut payees);
+		assert_eq!(dropped.undetermined, [RuleId::new("template")]);
+		assert_eq!(dropped.transaction, None);
+		assert_eq!(payees.created.len(), 1, "the first run's payee stays");
+
+		let mut fresh = BudgetPayees::new(&budget, || PayeeId::new("made"));
+		book.run(&transaction("Corner shop, late"), &budget, &mut fresh);
+		assert!(
+			fresh.created.is_empty(),
+			"nothing from an undetermined run is made"
+		);
 	}
 
 	#[test]
