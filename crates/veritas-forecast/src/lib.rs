@@ -6,6 +6,7 @@
 //!
 //! [`BudgetData`]: veritas_domain::BudgetData
 
+mod backtest;
 mod band;
 mod baseline;
 mod flows;
@@ -15,7 +16,9 @@ mod math;
 mod projection;
 mod scenario;
 mod suggest;
+mod wrapped;
 
+pub use backtest::{BACKTEST_HORIZONS, Backtest, Metrics};
 pub use band::{BAND_MIN_RESIDUALS, Band, BandMethod};
 pub use baseline::{Baseline, INDEX_ACTIVE_MIN, INDEX_MAX, INDEX_MIN, SEASON_MIN, WINDOW};
 pub use flows::{Certainty, FlowKind, KnownFlow, LoanPayment, ScheduleAmount};
@@ -26,3 +29,7 @@ pub use projection::{
 };
 pub use scenario::{Cadence, IncomeDelta, MAX_COMPARED, Scenario, ScenarioEvent};
 pub use suggest::{Basis, Envelope, Suggestion, Suggestions};
+pub use wrapped::{
+	CategoryRank, Change, GroupRank, NoSpend, PayeeRank, PriorYear, Redacted, Streak, Wrapped,
+	wrapped,
+};

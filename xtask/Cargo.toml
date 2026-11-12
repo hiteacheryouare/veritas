@@ -9,6 +9,7 @@ default-run = "xtask"
 
 [dependencies]
 serde_json.workspace = true
+zip.workspace = true
 uniffi = { workspace = true, features = ["cli"] }
 
 [lints]

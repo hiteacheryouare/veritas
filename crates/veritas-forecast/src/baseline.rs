@@ -37,6 +37,7 @@ impl Baseline {
 		series: &Series,
 		current: YearMonth,
 		today: Option<CivilDate>,
+		season_min: i32,
 	) -> Result<Baseline, CoreError> {
 		let history_months = series
 			.first_month()
@@ -50,7 +51,7 @@ impl Baseline {
 			.map(|month| series.month(*month))
 			.collect::<Result<Vec<i64>, _>>()?;
 		let level = median(&values).unwrap_or(0);
-		let seasonal_index = if history_months >= SEASON_MIN {
+		let seasonal_index = if history_months >= season_min {
 			seasonal_index(series, current, history_months)?
 		} else {
 			None
