@@ -15,8 +15,9 @@ use veritas_domain::{
 	TransactionId, TransactionKind, YearMonth,
 };
 use veritas_reports::{
-	Classification, Leg, NetProfit, NodeKind, Period, Sankey, Section, balance_sheet, cash_flow,
-	cash_flow_by_month, net_profit, net_worth_by_month, owners_equity, sankey, tax_summary,
+	Bucket, Classification, Leg, NetProfit, NodeKind, Period, Sankey, Section, balance_sheet,
+	cash_flow, cash_flow_by_month, extract_tags, net_profit, net_worth_by_month, owners_equity,
+	sankey, tax_summary,
 };
 
 // Index ACCOUNTS names an account that is never created, so rows there are
@@ -687,6 +688,43 @@ proptest! {
 				.map(|row| row.counted.unwrap().minor())
 				.sum();
 			prop_assert_eq!(total.total.minor(), detail, "TAX-6 invariant 1");
+		}
+
+		// Completeness, by TAX-3's precedence: every eligible row that a tag
+		// or its category puts in a bucket is in the detail, and no other.
+		let year = Period::new(in_2027(1, 1), CivilDate::new(2027, 12, 31).unwrap()).unwrap();
+		for row in classification.within(year) {
+			let eligible = row.is_primary()
+				&& matches!(
+					row.kind(),
+					TransactionKind::Income
+						| TransactionKind::Expense
+						| TransactionKind::DebtPrincipal
+						| TransactionKind::SavingsContribution
+				);
+			let notes = book.budget.transactions[&row.id].notes.clone().unwrap_or_default();
+			let mapped: Vec<&str> = extract_tags(&notes)
+				.iter()
+				.filter_map(|tag| book.budget.tax_tags.get(tag))
+				.map(String::as_str)
+				.filter(|id| *id == "none" || Bucket::parse(id).is_some())
+				.collect();
+			let by_category = row
+				.category
+				.as_ref()
+				.and_then(|category| book.budget.category_meta.get(category))
+				.and_then(|meta| meta.tax_bucket.as_deref())
+				.and_then(Bucket::parse)
+				.is_some();
+			let expected = eligible
+				&& !mapped.contains(&"none")
+				&& (!mapped.is_empty() || by_category);
+			let listed = summary.detail.iter().find(|detail| detail.row == row.id);
+			prop_assert_eq!(listed.is_some(), expected, "completeness for {}", row.id);
+			if let Some(listed) = listed {
+				prop_assert_eq!(&listed.category, &row.category);
+				prop_assert_eq!(&listed.parent, &row.parent);
+			}
 		}
 	}
 }

@@ -1347,6 +1347,8 @@ dependencies = [
 name = "veritas-forecast"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "proptest",
  "veritas-domain",
  "veritas-engine",
  "veritas-reports",
@@ -1368,7 +1370,11 @@ dependencies = [
 name = "veritas-reports"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "criterion",
  "proptest",
+ "rusqlite",
+ "serde_json",
  "veritas-domain",
  "veritas-engine",
  "veritas-interop",
@@ -1380,6 +1386,7 @@ name = "veritas-rules"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "regex",
  "serde_json",
  "thiserror",
  "veritas-domain",

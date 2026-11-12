@@ -6,8 +6,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use veritas_domain::{BudgetData, CategoryId, ConditionsOp, PayeeId, RuleId, ScheduleId};
 
-use crate::action::{Action, RuleTransaction};
-use crate::condition::{Field, FieldValue};
+use crate::action::{Action, RuleTransaction, SetField};
+use crate::condition::{EvalError, Field, FieldValue, Gap};
 use crate::rule::{IndexKey, ParsedRule, RuleSupport, rank};
 
 /// The budget's live rules, parsed once, with merged ids mapped to their
@@ -22,21 +22,106 @@ pub struct RuleBook {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RunOutcome {
-	pub transaction: RuleTransaction,
+	/// The transaction with every rule applied, ready to write. `None` when
+	/// any rule is undetermined: Veritas then doesn't know what Actual would
+	/// write, so nothing from this run may be written. Leave the transaction
+	/// for Actual and show the "may need Actual" note instead.
+	pub transaction: Option<RuleTransaction>,
+	/// What the rules Veritas could run make of the transaction. It is for
+	/// showing, never for writing: with an undetermined rule it is only part
+	/// of Actual's result.
+	pub partial: RuleTransaction,
 	/// Rules whose actions were applied, in the order they ran.
 	pub applied: Vec<RuleId>,
 	/// Rules Actual would have evaluated or applied here but Veritas can't
-	/// (a regex condition, a template action). Their effect is missing.
+	/// (a template action, a regex it can't read the JS way). Their effect
+	/// is missing.
 	pub undetermined: Vec<RuleId>,
+	/// Why each undetermined rule couldn't run, in words for the person
+	/// looking at the transaction.
+	pub reasons: BTreeMap<RuleId, String>,
+}
+
+/// Where `set payee_name` finds or makes its payee. `None` when more than
+/// one live payee has the name: Actual's `getPayeeByName` has no `ORDER BY`,
+/// so which one it takes depends on SQLite's row order, and the rule is
+/// reported as undetermined rather than guessed.
+pub trait PayeeDirectory {
+	fn find_or_create(&mut self, name: &str) -> Option<PayeeId>;
+}
+
+/// Finds payees in the budget the way `getPayeeByName` does (a live payee
+/// whose lowercased name matches, `db/index.ts:723-728`) and records the ones
+/// a rule creates. The store inserts each like `insertPayee` (`:576-586`): a
+/// `payees` row with just the name, plus its identity `payee_mapping` row.
+/// Names are compared as stored: a transfer payee's stored name is empty.
+pub struct BudgetPayees<'a> {
+	budget: &'a BudgetData,
+	new_id: Box<dyn FnMut() -> PayeeId + 'a>,
+	pub created: Vec<(PayeeId, String)>,
+}
+
+impl<'a> BudgetPayees<'a> {
+	pub fn new(budget: &'a BudgetData, new_id: impl FnMut() -> PayeeId + 'a) -> Self {
+		BudgetPayees {
+			budget,
+			new_id: Box::new(new_id),
+			created: Vec::new(),
+		}
+	}
+}
+
+impl PayeeDirectory for BudgetPayees<'_> {
+	fn find_or_create(&mut self, name: &str) -> Option<PayeeId> {
+		let wanted = name.to_lowercase();
+		let mut matches = self
+			.budget
+			.payees
+			.values()
+			.filter(|payee| !payee.tombstone && payee.name.to_lowercase() == wanted)
+			.map(|payee| payee.id.clone())
+			.chain(
+				self.created
+					.iter()
+					.filter(|(_, created)| created.to_lowercase() == wanted)
+					.map(|(id, _)| id.clone()),
+			);
+		match (matches.next(), matches.next()) {
+			(Some(id), None) => Some(id),
+			(Some(_), Some(_)) => None,
+			(None, _) => {
+				let id = (self.new_id)();
+				self.created.push((id.clone(), name.to_owned()));
+				Some(id)
+			}
+		}
+	}
 }
 
 /// Three-valued outcome of a rule's conditions: a condition Veritas can't
 /// evaluate only matters when the others don't settle the answer.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum Verdict {
 	Match,
 	NoMatch,
-	Unknown,
+	Unknown(String),
+}
+
+/// A gap's text is already a noun phrase ("a template action"), which the
+/// "may need Actual" note lists as is.
+fn gap_reason(gap: &Gap) -> String {
+	match gap {
+		Gap::Unsupported(what) | Gap::RejectedByActual(what) => what.clone(),
+	}
+}
+
+fn eval_reason(error: &EvalError) -> String {
+	match error {
+		EvalError::Recurrence(_) => {
+			"a repeating date Veritas can't expand the way Actual does".into()
+		}
+		other => other.to_string(),
+	}
 }
 
 impl RuleBook {
@@ -110,8 +195,13 @@ impl RuleBook {
 			.collect()
 	}
 
-	pub fn run(&self, transaction: &RuleTransaction, budget: &BudgetData) -> RunOutcome {
-		let payee_name = transaction
+	pub fn run(
+		&self,
+		transaction: &RuleTransaction,
+		budget: &BudgetData,
+		payees: &mut dyn PayeeDirectory,
+	) -> RunOutcome {
+		let mut payee_name = transaction
 			.payee
 			.as_ref()
 			.and_then(|payee| budget.payees.get(payee))
@@ -135,9 +225,11 @@ impl RuleBook {
 
 		let mut working = transaction.clone();
 		let mut outcome = RunOutcome {
-			transaction: transaction.clone(),
+			transaction: None,
+			partial: transaction.clone(),
 			applied: Vec::new(),
 			undetermined: Vec::new(),
+			reasons: BTreeMap::new(),
 		};
 		for rule in rank(self.candidates(transaction)) {
 			let verdict = if schedule_rule == Some(&rule.id) {
@@ -155,26 +247,62 @@ impl RuleBook {
 			};
 			match verdict {
 				Verdict::NoMatch => {}
-				Verdict::Unknown => outcome.undetermined.push(rule.id.clone()),
+				Verdict::Unknown(reason) => {
+					outcome.undetermined.push(rule.id.clone());
+					outcome.reasons.insert(rule.id.clone(), reason);
+				}
 				Verdict::Match => {
-					let actions: Option<Vec<&Action>> = rule
+					let actions: Result<Vec<&Action>, String> = rule
 						.actions
 						.iter()
-						.map(|item| item.parsed.as_ref().ok())
+						.map(|item| item.parsed.as_ref().map_err(gap_reason))
 						.collect();
-					match actions {
-						Some(actions) => {
-							for action in actions {
-								action.apply(&mut working);
+					let result = actions.and_then(|actions| {
+						let mut next = working.clone();
+						let mut next_name = payee_name.clone();
+						let mut new_payee = false;
+						for action in actions {
+							match action {
+								Action::SetPayeeName(name) => {
+									next_name = name.clone();
+									new_payee = true;
+								}
+								Action::Set(SetField::Payee(_)) => {
+									action.apply(&mut next);
+									new_payee = false;
+								}
+								other => other.apply(&mut next),
 							}
+						}
+						if new_payee {
+							next.payee = match next_name.as_deref().filter(|name| !name.is_empty())
+							{
+								Some(name) => Some(payees.find_or_create(name).ok_or_else(|| {
+									format!(
+										"a payee name, {name}, that more than one payee shares, so Actual's pick depends on how its database orders them"
+									)
+								})?),
+								None => None,
+							};
+						}
+						Ok((next, next_name))
+					});
+					match result {
+						Ok((next, name)) => {
+							working = next;
+							payee_name = name;
 							outcome.applied.push(rule.id.clone());
 						}
-						None => outcome.undetermined.push(rule.id.clone()),
+						Err(reason) => {
+							outcome.undetermined.push(rule.id.clone());
+							outcome.reasons.insert(rule.id.clone(), reason);
+						}
 					}
 				}
 			}
 		}
-		outcome.transaction = working;
+		outcome.transaction = outcome.undetermined.is_empty().then(|| working.clone());
+		outcome.partial = working;
 		outcome
 	}
 }
@@ -236,7 +364,7 @@ fn evaluate(
 		return Verdict::NoMatch;
 	}
 	let any = rule.conditions_op == ConditionsOp::Or;
-	let mut unknown = false;
+	let mut unknown: Option<String> = None;
 	for item in &rule.conditions {
 		let result = match &item.parsed {
 			Ok(condition) => condition
@@ -244,20 +372,22 @@ fn evaluate(
 					field_value(condition.field, transaction, payee_name, budget),
 					account_off_budget,
 				)
-				.ok(),
-			Err(_) => None,
+				.map_err(|error| eval_reason(&error)),
+			Err(gap) => Err(gap_reason(gap)),
 		};
 		match result {
-			Some(true) if any => return Verdict::Match,
-			Some(false) if !any => return Verdict::NoMatch,
-			None => unknown = true,
+			Ok(true) if any => return Verdict::Match,
+			Ok(false) if !any => return Verdict::NoMatch,
+			Err(reason) => {
+				unknown.get_or_insert(reason);
+			}
 			_ => {}
 		}
 	}
 	match (unknown, any) {
-		(true, _) => Verdict::Unknown,
-		(false, true) => Verdict::NoMatch,
-		(false, false) => Verdict::Match,
+		(Some(reason), _) => Verdict::Unknown(reason),
+		(None, true) => Verdict::NoMatch,
+		(None, false) => Verdict::Match,
 	}
 }
 
@@ -353,7 +483,123 @@ mod tests {
 	}
 
 	fn run(budget: &BudgetData, txn: &RuleTransaction) -> RunOutcome {
-		RuleBook::new(budget).run(txn, budget)
+		RuleBook::new(budget).run(
+			txn,
+			budget,
+			&mut BudgetPayees::new(budget, || PayeeId::new("made")),
+		)
+	}
+
+	#[test]
+	fn set_payee_name_finds_or_makes_the_payee_after_each_rule() {
+		// transaction-rules.ts:1210-1227: `payee` becomes the payee by that
+		// name once the rule finishes, so the next rule sees the id.
+		let mut budget = budget();
+		add_rule(
+			&mut budget,
+			"rename",
+			RuleStage::Pre,
+			ConditionsOp::And,
+			json!([{"op": "contains", "field": "imported_payee", "value": "amzn"}]),
+			json!([{"op": "set", "field": "payee_name", "value": "AMAZON"}]),
+		);
+		add_rule(
+			&mut budget,
+			"after",
+			RuleStage::Default,
+			ConditionsOp::And,
+			json!([{"op": "is", "field": "payee", "value": "amazon"}, {"op": "is", "field": "payee_name", "value": "amazon"}]),
+			json!([{"op": "set", "field": "category", "value": "groceries"}]),
+		);
+		add_rule(
+			&mut budget,
+			"new",
+			RuleStage::Default,
+			ConditionsOp::And,
+			json!([{"op": "contains", "field": "imported_payee", "value": "corner"}]),
+			json!([{"op": "set", "field": "payee_name", "value": "Corner Store"}]),
+		);
+		let book = RuleBook::new(&budget);
+		let mut payees = BudgetPayees::new(&budget, || PayeeId::new("made"));
+		let outcome = book.run(&transaction("AMZN Mktp"), &budget, &mut payees);
+		assert_eq!(outcome.partial.payee, Some(PayeeId::new("amazon")));
+		assert_eq!(outcome.partial.category, Some(CategoryId::new("groceries")));
+		let outcome = book.run(&transaction("Corner shop"), &budget, &mut payees);
+		assert_eq!(outcome.partial.payee, Some(PayeeId::new("made")));
+		assert_eq!(
+			payees.created,
+			[(PayeeId::new("made"), "Corner Store".to_owned())]
+		);
+		book.run(&transaction("corner again"), &budget, &mut payees);
+		assert_eq!(payees.created.len(), 1);
+	}
+
+	#[test]
+	fn a_name_two_payees_share_is_undetermined() {
+		// getPayeeByName has no ORDER BY, so Actual's pick depends on row order.
+		let mut budget = budget();
+		let mut twin = budget.payees[&PayeeId::new("amazon")].clone();
+		twin.id = PayeeId::new("amazon-2");
+		twin.name = "AMAZON".into();
+		budget.payees.insert(twin.id.clone(), twin);
+		add_rule(
+			&mut budget,
+			"rename",
+			RuleStage::Pre,
+			ConditionsOp::And,
+			json!([{"op": "contains", "field": "imported_payee", "value": "amzn"}]),
+			json!([{"op": "set", "field": "payee_name", "value": "amazon"}, {"op": "set", "field": "notes", "value": "renamed"}]),
+		);
+		let outcome = run(&budget, &transaction("AMZN Mktp"));
+		assert_eq!(outcome.undetermined, [RuleId::new("rename")]);
+		assert_eq!(
+			outcome.transaction, None,
+			"nothing from an undetermined run may be written"
+		);
+		assert_eq!(outcome.partial.payee, None);
+		assert_eq!(
+			outcome.partial.notes, None,
+			"nothing from the rule is applied"
+		);
+		assert!(
+			outcome.reasons[&RuleId::new("rename")]
+				.starts_with("a payee name, amazon, that more than one payee shares")
+		);
+	}
+
+	#[test]
+	fn an_emoji_in_the_text_a_regex_reads_says_so() {
+		let mut budget = budget();
+		add_rule(
+			&mut budget,
+			"regex",
+			RuleStage::Default,
+			ConditionsOp::And,
+			json!([{"op": "matches", "field": "imported_payee", "value": "^coffee"}]),
+			json!([{"op": "set", "field": "notes", "value": "coffee"}]),
+		);
+		let outcome = run(&budget, &transaction("☕️ Coffee 🍩"));
+		assert_eq!(outcome.undetermined, [RuleId::new("regex")]);
+		assert!(
+			outcome.reasons[&RuleId::new("regex")].contains("emoji"),
+			"{:?}",
+			outcome.reasons
+		);
+
+		let mut budget = self::budget();
+		add_rule(
+			&mut budget,
+			"template",
+			RuleStage::Default,
+			ConditionsOp::And,
+			json!([{"op": "contains", "field": "imported_payee", "value": "x"}]),
+			json!([{"op": "set", "field": "notes", "value": "", "options": {"template": "{{date}}"}}]),
+		);
+		let templated = run(&budget, &transaction("x"));
+		assert_eq!(
+			templated.reasons[&RuleId::new("template")],
+			"a template action"
+		);
 	}
 
 	#[test]
@@ -402,12 +648,14 @@ mod tests {
 				.collect::<Vec<_>>(),
 			["rename", "broad", "narrow", "tag"]
 		);
-		assert_eq!(outcome.transaction.payee, Some(PayeeId::new("amazon")));
+		assert_eq!(outcome.partial.payee, Some(PayeeId::new("amazon")));
+		assert_eq!(outcome.partial.category, Some(CategoryId::new("groceries")));
+		assert_eq!(outcome.partial.notes.as_deref(), Some(" #food"));
 		assert_eq!(
-			outcome.transaction.category,
-			Some(CategoryId::new("groceries"))
+			outcome.transaction.as_ref(),
+			Some(&outcome.partial),
+			"a fully run outcome is ready to write"
 		);
-		assert_eq!(outcome.transaction.notes.as_deref(), Some(" #food"));
 	}
 
 	#[test]
@@ -467,7 +715,7 @@ mod tests {
 			"regex-and",
 			RuleStage::Default,
 			ConditionsOp::And,
-			json!([{"op": "matches", "field": "notes", "value": "^a"}, {"op": "is", "field": "amount", "value": 1}]),
+			json!([{"op": "matches", "field": "notes", "value": "(?=a)"}, {"op": "is", "field": "amount", "value": 1}]),
 			json!([{"op": "set", "field": "notes", "value": "x"}]),
 		);
 		add_rule(
@@ -475,7 +723,7 @@ mod tests {
 			"regex-or",
 			RuleStage::Default,
 			ConditionsOp::Or,
-			json!([{"op": "matches", "field": "notes", "value": "^a"}, {"op": "is", "field": "amount", "value": -4210}]),
+			json!([{"op": "matches", "field": "notes", "value": "(?=a)"}, {"op": "is", "field": "amount", "value": -4210}]),
 			json!([{"op": "set", "field": "cleared", "value": true}]),
 		);
 		add_rule(
@@ -491,7 +739,7 @@ mod tests {
 			"unknown",
 			RuleStage::Default,
 			ConditionsOp::And,
-			json!([{"op": "matches", "field": "notes", "value": "^a"}]),
+			json!([{"op": "matches", "field": "notes", "value": "(?=a)"}]),
 			json!([{"op": "set", "field": "cleared", "value": true}]),
 		);
 		let outcome = run(&budget, &transaction("Shop"));
@@ -506,7 +754,7 @@ mod tests {
 		let mut undetermined: Vec<&str> = outcome.undetermined.iter().map(RuleId::as_str).collect();
 		undetermined.sort();
 		assert_eq!(undetermined, ["template", "unknown"]);
-		assert_eq!(outcome.transaction.cleared, Some(true));
+		assert_eq!(outcome.partial.cleared, Some(true));
 	}
 
 	#[test]
@@ -563,7 +811,7 @@ mod tests {
 		let mut applied: Vec<&str> = outcome.applied.iter().map(RuleId::as_str).collect();
 		applied.sort();
 		assert_eq!(applied, ["everyone", "rent-rule"]);
-		assert_eq!(outcome.transaction.notes.as_deref(), Some("rent-rule"));
+		assert_eq!(outcome.partial.notes.as_deref(), Some("rent-rule"));
 	}
 
 	#[test]
@@ -586,10 +834,7 @@ mod tests {
 		let mut txn = transaction("");
 		txn.payee = Some(PayeeId::new("amazon"));
 		let outcome = run(&budget, &txn);
-		assert_eq!(
-			outcome.transaction.category,
-			Some(CategoryId::new("groceries"))
-		);
+		assert_eq!(outcome.partial.category, Some(CategoryId::new("groceries")));
 	}
 
 	#[test]
@@ -624,11 +869,8 @@ mod tests {
 		let mut txn = transaction("");
 		txn.payee = Some(PayeeId::new("amazon"));
 		let outcome = run(&budget, &txn);
-		assert_eq!(outcome.transaction.account, AccountId::new("brokerage"));
-		assert_eq!(
-			outcome.transaction.notes.as_deref(),
-			Some("still on budget")
-		);
-		assert_eq!(outcome.transaction.cleared, Some(false));
+		assert_eq!(outcome.partial.account, AccountId::new("brokerage"));
+		assert_eq!(outcome.partial.notes.as_deref(), Some("still on budget"));
+		assert_eq!(outcome.partial.cleared, Some(false));
 	}
 }

@@ -18,10 +18,19 @@ pub fn repo_root() -> PathBuf {
 	Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// `None` when `cargo xtask oracle setup` hasn't been run, so the caller skips.
+/// `None` when `cargo xtask oracle setup` hasn't been run, so the caller
+/// skips. With `VERITAS_REQUIRE_ORACLE` set (CI), a missing oracle fails the
+/// test instead, so differential tests can't pass by not running.
 pub fn oracle_dir() -> Option<PathBuf> {
 	let dir = repo_root().join("tools/actual-oracle");
-	dir.join("node_modules").exists().then_some(dir)
+	if dir.join("node_modules").exists() {
+		return Some(dir);
+	}
+	assert!(
+		std::env::var_os("VERITAS_REQUIRE_ORACLE").is_none(),
+		"VERITAS_REQUIRE_ORACLE is set but tools/actual-oracle/node_modules is missing: run `cargo xtask oracle setup`"
+	);
+	None
 }
 
 pub fn scratch_dir(name: &str) -> PathBuf {
