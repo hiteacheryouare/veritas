@@ -4,7 +4,7 @@ Status: draft for Gate 0. Owner: Fred. Every report, screen and export cites thi
 
 Conventions used in all finance specs:
 
-- Amounts are integers in minor units (cents). Examples write `-5000` for -$50.00.
+- Amounts are integers in minor units (cents). Examples write `-5000` for -$50.00. The minor unit and its decimal places come from the budget's currency (CLS-12). Examples use two places.
 - Sign is Actual's: positive = money into the account, negative = money out of it (`transactions.amount`).
 - A "period" is a set of civil dates. A row belongs to the period containing its `date`. No time zones.
 - Report magnitudes are positive numbers defined by the formulas in CLS-6. Raw row amounts keep Actual's sign.
@@ -249,3 +249,14 @@ Check: 400000 - 50000 - 20000 - 30600 - 40000 - 10000 - 15000 = 234400. `income_
 | FIN-3 | Escrow is an expense when paid to the servicer. Alternative: an off-budget escrow asset account | Resolved by Ryan (Gate 0, 2026-11-09): default accepted |
 | FIN-4 | Paychecks recorded gross with splits (CLS-10) | Resolved by Ryan (Gate 0, 2026-11-09) |
 | FIN-5 | No-spend days ignore bill-linked rows and loan-payment parts (FC-8) | Resolved by Ryan (Gate 0, 2026-11-09): default accepted |
+
+## CLS-12 Currency and decimal places
+
+Actual stores amounts as integers in the smallest unit it shows for the budget's `defaultCurrencyCode`: its currency table gives `decimalPlaces` (`reference/actual/packages/loot-core/src/shared/currencies.ts`), and its conversions divide by `10^decimalPlaces` (`shared/util.ts`, `integerToAmount`). Most currencies have 2 places. JPY, KRW and IRR have 0, so a stored `5000` is 5000 yen, not 50.00. The "None" currency has 2.
+
+- **CLS-12.1** Every place a spec says "cents", "two places" or "whole dollars" means the budget currency's minor unit, its decimal places and its major unit. Code never hard-codes 2. The stored integer is never rescaled.
+- **CLS-12.2** Amounts shown or exported as decimal text use the currency's decimal places: 2 places for USD (`-5000` is `-50.00`), 0 for JPY (`-5000` is `-5000`). This covers the tax summary `total` (TAX-5), the `#goal` note line (DEBT-8.2) and every report.
+- **CLS-12.3** Rounding to whole major units (FC-5 suggestions and notices, FC-3 notes) rounds to a multiple of `10^decimalPlaces` minor units: 100 for USD, 1 for JPY. With 0 decimal places a rounding to whole units changes nothing.
+- **CLS-12.4** Integer arithmetic, rounding rules and identities are unchanged by the number of places. Nothing is converted through a float.
+- **CLS-12.5** Example, with made-up amounts: a USD budget's `12345` shows `123.45` and rounds to `12300` to the nearest whole dollar. A JPY budget's `12345` shows `12345` and stays `12345`. An FC-5 suggestion of 7089 rounds to 7100 in USD and stays 7089 in JPY.
+- **CLS-12.6** Open question for Ryan: a budget whose `defaultCurrencyCode` is not in Actual's table. Option A: treat it as 2 places and list it in the audit (R-REL-2). Option B: refuse to open it read-write. Until decided, code must not guess a different number of places.
