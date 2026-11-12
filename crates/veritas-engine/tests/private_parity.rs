@@ -37,14 +37,19 @@ fn quiet_dump(zip: &Path) -> Value {
 		.current_dir(oracle::repo_root().join("tools/actual-oracle"))
 		.args(["src/main.ts", "dump"])
 		.arg(zip)
-		.output()
-		.expect("node runs");
+		.output();
+	let Ok(output) = output else {
+		panic!("starting node failed; details withheld");
+	};
 	assert!(
 		output.status.success(),
 		"Actual could not dump the zip (exit {:?}); stderr withheld because it may quote budget data",
 		output.status.code()
 	);
-	serde_json::from_slice(&output.stdout).expect("Actual's dump is JSON")
+	let Ok(dump) = serde_json::from_slice(&output.stdout) else {
+		panic!("Actual's dump didn't parse; details withheld");
+	};
+	dump
 }
 
 fn quiet_load(zip: &Path, scratch: &oracle::Scratch) -> BudgetData {
