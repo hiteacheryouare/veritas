@@ -23,7 +23,7 @@ use std::time::Duration;
 use support::TempDir;
 use veritas_domain::{
 	AccountId, BudgetCell, BudgetData, CategoryId, CoreError, Money, NewAccount, NewAccountKind,
-	NewBudget, NumberFormat, NumberStyle, Row, YearMonth,
+	NewBudget, NumberFormat, NumberStyle, ReadOnlyReason, Row, YearMonth,
 };
 use veritas_session::{Session, SessionOptions, SnapshotReason};
 
@@ -143,10 +143,12 @@ struct Heard {
 }
 
 fn run_and_kill(dir: &Path, delay: Duration) -> Heard {
-	run_and_kill_with(dir, delay, "edit_until_killed")
+	run_and_kill_with(dir, delay, "edit_until_killed", || {})
 }
 
-fn run_and_kill_with(dir: &Path, delay: Duration, helper: &str) -> Heard {
+/// Starts `helper` on `dir`, runs `meanwhile` once it is ready, then kills it
+/// `delay` later.
+fn run_and_kill_with(dir: &Path, delay: Duration, helper: &str, meanwhile: impl FnOnce()) -> Heard {
 	let mut child = Command::new(std::env::current_exe().unwrap())
 		.args([
 			"--exact",
@@ -194,6 +196,7 @@ fn run_and_kill_with(dir: &Path, delay: Duration, helper: &str) -> Heard {
 		let _ = child.kill();
 		panic!("the editing process never opened the budget");
 	}
+	meanwhile();
 	std::thread::sleep(delay);
 	child.kill().unwrap();
 	child.wait().unwrap();
@@ -310,7 +313,7 @@ fn a_killed_create_never_leaves_a_half_made_budget() {
 	for kill in 0..kills {
 		let batch = budgets.join(format!("run-{kill}"));
 		std::fs::create_dir(&batch).unwrap();
-		let heard = run_and_kill_with(&batch, moments.next_delay(), "create_until_killed");
+		let heard = run_and_kill_with(&batch, moments.next_delay(), "create_until_killed", || {});
 		let visible: Vec<PathBuf> = std::fs::read_dir(&batch)
 			.unwrap()
 			.map(|entry| entry.unwrap().path())
@@ -340,4 +343,100 @@ fn a_killed_create_never_leaves_a_half_made_budget() {
 	eprintln!(
 		"create crash harness: {kills} kills, {created} budgets created, {caught_mid_build} kills mid-build"
 	);
+}
+
+#[test]
+fn a_second_window_never_writes_through_a_writer_crash() {
+	// R-REL-6, R-REL-1: another window opens while the writer is busy,
+	// refuses edits, and stays read-only after the writer is killed. The next
+	// window to open takes over writing even though the read-only one still
+	// has the file open.
+	let rounds: usize = std::env::var("VERITAS_CRASH_KILLS")
+		.ok()
+		.and_then(|kills| kills.parse().ok())
+		.unwrap_or(25);
+	let root = TempDir::new("crash-windows");
+	let dir = root.path().join("budget");
+	veritas_interop::import_actual_zip(&fixture("small"), &dir).unwrap();
+	let mut moments = Moments(0xA076_1D64_78BD_642F);
+
+	for round in 0..rounds {
+		let mut window: Option<CrashSession> = None;
+		let heard = run_and_kill_with(&dir, moments.next_delay(), "edit_until_killed", || {
+			let mut opened = CrashSession::open(&dir, SessionOptions::default()).unwrap();
+			assert_eq!(
+				opened.read_only(),
+				Some(ReadOnlyReason::OpenElsewhere),
+				"round {round}"
+			);
+			assert!(
+				matches!(
+					opened.perform(&set_to(-1)),
+					Err(CoreError::ReadOnly(ReadOnlyReason::OpenElsewhere))
+				),
+				"round {round}"
+			);
+			window = Some(opened);
+		});
+		let mut window = window.unwrap();
+
+		let mut next = CrashSession::open(&dir, SessionOptions::default()).unwrap();
+		assert_eq!(
+			next.read_only(),
+			None,
+			"round {round}: the dead writer's lock held"
+		);
+		let found = value(next.data().unwrap())
+			.unwrap_or_else(|| panic!("round {round}: a transaction landed in half"));
+		assert!(
+			found == heard.committed || found == heard.in_flight,
+			"round {round}: found {found}, but {} was committed and {} in flight",
+			heard.committed,
+			heard.in_flight
+		);
+		next.perform(&set_to(found + 1)).unwrap();
+		assert_eq!(
+			window.read_only(),
+			Some(ReadOnlyReason::OpenElsewhere),
+			"round {round}: the read-only window started writing"
+		);
+		assert!(
+			matches!(
+				window.perform(&set_to(-1)),
+				Err(CoreError::ReadOnly(ReadOnlyReason::OpenElsewhere))
+			),
+			"round {round}"
+		);
+		next.wait_for_open_check();
+		assert!(!next.audit_report().unwrap().is_corrupt(), "round {round}");
+		drop(next);
+		drop(window);
+
+		let reopened = CrashSession::open(&dir, SessionOptions::default()).unwrap();
+		assert_eq!(
+			value(reopened.data().unwrap()),
+			Some(found + 1),
+			"round {round}: the takeover's edit was lost"
+		);
+	}
+}
+
+#[test]
+#[ignore = "bug: the store loads table by table outside one read transaction, so a window opened while another writes can load half of an action"]
+fn a_window_opened_while_another_writes_loads_only_whole_actions() {
+	// R-REL-1, R-REL-6: every action is one transaction, so a second window
+	// must see each one entirely or not at all. It gets no change events from
+	// the other process, so a torn load stays on screen.
+	let root = TempDir::new("crash-torn");
+	let dir = root.path().join("budget");
+	veritas_interop::import_actual_zip(&fixture("small"), &dir).unwrap();
+	let mut torn = 0;
+	run_and_kill_with(&dir, Duration::ZERO, "edit_until_killed", || {
+		for _ in 0..200 {
+			let window = CrashSession::open(&dir, SessionOptions::default()).unwrap();
+			assert_eq!(window.read_only(), Some(ReadOnlyReason::OpenElsewhere));
+			torn += usize::from(value(window.data().unwrap()).is_none());
+		}
+	});
+	assert_eq!(torn, 0, "{torn} of 200 windows loaded half an action");
 }

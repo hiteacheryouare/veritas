@@ -839,4 +839,119 @@ mod tests {
 		}
 		assert_eq!(computed.as_object().unwrap().len(), balances.len());
 	}
+
+	fn entries(dir: &Path) -> Vec<String> {
+		let mut names: Vec<String> = std::fs::read_dir(dir)
+			.unwrap()
+			.map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+			.collect();
+		names.sort();
+		names
+	}
+
+	/// Runs `work` while another thread cancels it after `delay`, the way
+	/// Swift cancels the task when the user closes the setup sheet.
+	fn cancelled_after<T>(
+		delay: std::time::Duration,
+		work: impl FnOnce(&CancelToken) -> Result<T, FfiError>,
+	) -> Result<T, FfiError> {
+		let cancel = CancelToken::default();
+		let canceller = {
+			let cancel = cancel.clone();
+			std::thread::spawn(move || {
+				std::thread::sleep(delay);
+				cancel.cancel();
+			})
+		};
+		let result = work(&cancel);
+		canceller.join().unwrap();
+		result
+	}
+
+	#[test]
+	fn cancelling_a_create_or_import_at_any_moment_leaves_a_whole_budget_or_nothing() {
+		// R-REL-7, PLAN §6.6: a cancel either wins, and the folder is as it was,
+		// or lands after the rename, and the budget is whole and free to open.
+		use crate::{NewAccount, NewAccountKind, NewBudgetOptions, NumberFormat, NumberStyle};
+		let format = NumberFormat {
+			currency: Some("USD".to_owned()),
+			style: NumberStyle::CommaDot,
+			hide_decimals: false,
+		};
+		let options = NewBudgetOptions {
+			retirement_401k: true,
+			hsa: true,
+			accounts: vec![NewAccount {
+				name: "Checking".to_owned(),
+				kind: NewAccountKind::Checking,
+				starting_balance: 120_000,
+			}],
+		};
+		let create = |into: &str, cancel: &CancelToken| {
+			Core::<veritas_store::Store>::create_budget(
+				"Household",
+				into,
+				&format,
+				&options,
+				cancel,
+			)
+		};
+		let import = |into: &str, cancel: &CancelToken| {
+			Core::<veritas_store::Store>::import_actual_zip(&small_zip(), into, cancel)
+		};
+		let mut outcomes = std::collections::BTreeMap::new();
+
+		for (what, start) in [
+			(
+				"create",
+				&create as &dyn Fn(&str, &CancelToken) -> Result<Core<_>, FfiError>,
+			),
+			("import", &import),
+		] {
+			let timing = Scratch::new("cancel-timing");
+			let began = std::time::Instant::now();
+			start(&timing.budget(), &CancelToken::default()).unwrap();
+			let takes = began.elapsed();
+
+			for step in 0..24u32 {
+				let scratch = Scratch::new("cancel");
+				let delay = takes * step / 16;
+				match cancelled_after(delay, |cancel| start(&scratch.budget(), cancel)) {
+					Err(FfiError::Cancelled) => {
+						assert_eq!(
+							entries(&scratch.0),
+							Vec::<String>::new(),
+							"{what} at {delay:?}"
+						);
+						*outcomes.entry((what, "cancelled")).or_insert(0) += 1;
+					}
+					Ok(core) => {
+						assert_eq!(entries(&scratch.0), ["budget"], "{what} at {delay:?}");
+						assert_eq!(core.state().unwrap().read_only, None);
+						core.close().unwrap();
+						let reopened = Core::<veritas_store::Store>::open(
+							&scratch.budget(),
+							&CancelToken::default(),
+						)
+						.unwrap();
+						assert_eq!(
+							reopened.state().unwrap().read_only,
+							None,
+							"{what} at {delay:?}"
+						);
+						reopened
+							.call(|session| {
+								session.wait_for_open_check();
+								Ok(())
+							})
+							.unwrap();
+						assert_eq!(reopened.audit_report().unwrap(), Some(Vec::new()));
+						*outcomes.entry((what, "finished")).or_insert(0) += 1;
+					}
+					Err(other) => panic!("{what} cancelled at {delay:?}: {other:?}"),
+				}
+			}
+		}
+		eprintln!("cancel outcomes: {outcomes:?}");
+	}
 }
