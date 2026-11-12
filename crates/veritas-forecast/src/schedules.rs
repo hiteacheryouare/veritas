@@ -7,7 +7,7 @@ use veritas_rules::{
 	Action, AmountSign, ConditionValue, DateValue, Field, Op, ParsedRule, SetField, schedule_dates,
 };
 
-use crate::flows::{FlowKind, KnownFlow, LoanPayment, ScheduleAmount};
+use crate::flows::{FlowKind, KnownFlow, LoanPayment, ScheduleAmount, Shortfall};
 use crate::history::balances;
 use crate::math::round_half_up;
 use crate::projection::Forecaster;
@@ -28,6 +28,8 @@ pub struct ScheduledFlows {
 	/// dated today or earlier is due or missed and the projection counts it now.
 	pub flows: Vec<KnownFlow>,
 	pub unforecast: Vec<Unforecast>,
+	/// Loan payments below interest plus escrow, for the screen's warning.
+	pub shortfalls: Vec<Shortfall>,
 }
 
 /// What a schedule's rule says the transaction looks like.
@@ -115,6 +117,7 @@ impl Forecaster<'_> {
 		let mut result = ScheduledFlows {
 			flows: Vec::new(),
 			unforecast: Vec::new(),
+			shortfalls: Vec::new(),
 		};
 		for schedule in self.budget.schedules.values() {
 			if schedule.tombstone || schedule.completed {
@@ -324,8 +327,9 @@ impl Forecaster<'_> {
 				escrow_category: escrow.first().and_then(|row| row.category.clone()),
 				principal_category: last.category.clone(),
 			}
-			.flows(&dates)?;
-			result.flows.extend(flows);
+			.split(&dates)?;
+			result.flows.extend(flows.flows);
+			result.shortfalls.extend(flows.shortfalls);
 		}
 		Ok(())
 	}

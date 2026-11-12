@@ -426,3 +426,17 @@ fn fc_2_loan_escrow_repeats_from_the_last_payment() {
 		"FC-2, DEBT-2.1a: interest, then escrow, then principal"
 	);
 }
+
+#[test]
+fn fc_2_a_metadata_loan_below_its_interest_warns() {
+	let mut book = loan_book();
+	book.budget
+		.account_meta
+		.get_mut(&acct("LOAN"))
+		.unwrap()
+		.loan_payment = Some(cents(5000));
+	let result = flows(&book);
+	assert_eq!(result.shortfalls.len(), 12);
+	assert_eq!(result.shortfalls[0].date, date("2027-02-10"));
+	assert_eq!(result.shortfalls[0].uncovered, cents(8003 - 5000));
+}

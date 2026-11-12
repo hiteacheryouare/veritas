@@ -948,3 +948,33 @@ fn fc_3_a_planned_asset_purchase_is_a_one_time_transfer() {
 		));
 	}
 }
+
+#[test]
+fn fc_2_a_payment_below_interest_and_escrow_is_listed_for_a_warning() {
+	let split = mortgage(30_000_000, Some(600), 0, 160000)
+		.split(&[date("2027-02-01"), date("2027-03-01")])
+		.unwrap();
+	let warnings: Vec<_> = split
+		.shortfalls
+		.iter()
+		.map(|shortfall| {
+			(
+				shortfall.date,
+				shortfall.loan.as_str(),
+				shortfall.uncovered.minor(),
+			)
+		})
+		.collect();
+	assert_eq!(
+		warnings,
+		[
+			(date("2027-02-01"), "LOAN", 40000),
+			(date("2027-03-01"), "LOAN", 40000)
+		],
+		"FL-3, DEBT-2.2"
+	);
+	let covered = mortgage(30_000_000, Some(600), 0, 220000)
+		.split(&[date("2027-02-01")])
+		.unwrap();
+	assert!(covered.shortfalls.is_empty());
+}

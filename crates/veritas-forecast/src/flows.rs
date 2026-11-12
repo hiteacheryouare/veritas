@@ -101,6 +101,21 @@ impl ScheduleAmount {
 	}
 }
 
+/// A payment date where the payment is below interest plus escrow. The
+/// uncovered part is not recorded (DEBT-2.6); the screen warns (DEBT-2.2).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Shortfall {
+	pub date: CivilDate,
+	pub loan: AccountId,
+	pub uncovered: Money,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LoanSplit {
+	pub flows: Vec<KnownFlow>,
+	pub shortfalls: Vec<Shortfall>,
+}
+
 /// A loan payment schedule to expand into known flows (FC-2).
 #[derive(Clone, Debug, PartialEq)]
 pub struct LoanPayment {
@@ -129,6 +144,12 @@ impl LoanPayment {
 	/// and escrow are booked up to what the payment covers, and the loan
 	/// balance moves only by principal.
 	pub fn flows(&self, dates: &[CivilDate]) -> Result<Vec<KnownFlow>, CoreError> {
+		Ok(self.split(dates)?.flows)
+	}
+
+	/// The same flows plus the dates where the payment doesn't cover interest
+	/// and escrow, which the screen warns about (FC-2, DEBT-2.2).
+	pub fn split(&self, dates: &[CivilDate]) -> Result<LoanSplit, CoreError> {
 		let payment = self.payment.minor();
 		let escrow = self.escrow.minor();
 		if payment < 0 || escrow < 0 {
@@ -139,6 +160,7 @@ impl LoanPayment {
 		}
 		let mut outstanding = self.outstanding.minor().max(0);
 		let mut flows = Vec::new();
+		let mut shortfalls = Vec::new();
 		for date in dates {
 			if outstanding == 0 {
 				break;
@@ -152,6 +174,14 @@ impl LoanPayment {
 				None => self.last_interest.minor(),
 			}
 			.max(0);
+			let owed = interest.checked_add(escrow).ok_or(CoreError::Overflow)?;
+			if payment < owed {
+				shortfalls.push(Shortfall {
+					date: *date,
+					loan: self.loan.clone(),
+					uncovered: Money::from_minor(owed - payment),
+				});
+			}
 			let paid_interest = interest.min(payment);
 			let paid_escrow = escrow.min(payment - paid_interest);
 			let principal = (payment - paid_interest - paid_escrow).min(outstanding);
@@ -198,6 +228,6 @@ impl LoanPayment {
 				));
 			}
 		}
-		Ok(flows)
+		Ok(LoanSplit { flows, shortfalls })
 	}
 }
