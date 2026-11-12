@@ -565,3 +565,14 @@ fn fc_6_goal_etas_read_available_from_the_sheet() {
 		"E-1"
 	);
 }
+
+#[test]
+fn debt_8_1_a_sheet_without_next_month_is_an_error_not_zero_carry() {
+	let book = laptop_book(&[("2027-01", 25000)]);
+	let sheet = EnvelopeSheet::compute(&book.budget, date("2027-01-20")).unwrap();
+	let far = date("2030-06-01");
+	assert!(matches!(
+		next_month_envelopes(&sheet, far),
+		Err(veritas_domain::CoreError::Invalid(_))
+	));
+}

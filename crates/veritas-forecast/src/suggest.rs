@@ -30,7 +30,9 @@ pub fn next_month_envelopes(
 ) -> Result<BTreeMap<CategoryId, Envelope>, CoreError> {
 	let month = today.year_month().offset(1)?;
 	let Some(sheet) = sheet.month(month) else {
-		return Ok(BTreeMap::new());
+		return Err(CoreError::Invalid(format!(
+			"the envelope sheet has no {month}, so goal suggestions can't know what carries in"
+		)));
 	};
 	sheet
 		.categories

@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use veritas_domain::{
 	AccountId, AccountKind, CategoryId, CategoryKind, CivilDate, ConditionsOp, CoreError, Money,
 	PayeeId, Schedule, ScheduleId, TransactionKind,
@@ -114,6 +116,7 @@ impl Forecaster<'_> {
 		today: CivilDate,
 		through: CivilDate,
 	) -> Result<ScheduledFlows, CoreError> {
+		let mut scheduled_loans = BTreeSet::new();
 		let mut result = ScheduledFlows {
 			flows: Vec::new(),
 			unforecast: Vec::new(),
@@ -123,7 +126,9 @@ impl Forecaster<'_> {
 			if schedule.tombstone || schedule.completed {
 				continue;
 			}
-			if let Err(reason) = self.schedule_flows(schedule, today, through, &mut result)? {
+			if let Err(reason) =
+				self.schedule_flows(schedule, today, through, &mut scheduled_loans, &mut result)?
+			{
 				result.unforecast.push(Unforecast {
 					schedule: Some(schedule.id.clone()),
 					loan: None,
@@ -131,7 +136,7 @@ impl Forecaster<'_> {
 				});
 			}
 		}
-		self.loan_flows(today, through, &mut result)?;
+		self.loan_flows(today, through, &scheduled_loans, &mut result)?;
 		result
 			.flows
 			.sort_by(|a, b| a.date.cmp(&b.date).then_with(|| a.name.cmp(&b.name)));
@@ -143,6 +148,7 @@ impl Forecaster<'_> {
 		schedule: &Schedule,
 		today: CivilDate,
 		through: CivilDate,
+		scheduled_loans: &mut BTreeSet<AccountId>,
 		result: &mut ScheduledFlows,
 	) -> Result<Result<(), String>, CoreError> {
 		let Some(rule) = self
@@ -193,6 +199,32 @@ impl Forecaster<'_> {
 			.clone()
 			.or_else(|| resolved.map(|payee| payee.name.clone()))
 			.unwrap_or_default();
+		if let FlowKind::Transfer { counterpart } = &kind
+			&& amount.is_negative()
+			&& self.is_loan(counterpart, today)?
+		{
+			// FC-2: a bill paying a loan is that loan's payment, split into
+			// interest, escrow and principal, never one transfer.
+			scheduled_loans.insert(counterpart.clone());
+			let loan_payment =
+				match self.loan_payment(counterpart, name, amount.checked_neg()?, today)? {
+					Ok(loan_payment) => LoanPayment {
+						from: bill.account.clone(),
+						..loan_payment
+					},
+					Err(reason) => return Ok(Err(reason)),
+				};
+			let split = loan_payment.split(&dates)?;
+			result
+				.flows
+				.extend(split.flows.into_iter().map(|flow| KnownFlow {
+					schedule: Some(schedule.id.clone()),
+					certainty,
+					..flow
+				}));
+			result.shortfalls.extend(split.shortfalls);
+			return Ok(Ok(()));
+		}
 		for date in dates {
 			result.flows.push(KnownFlow {
 				date,
@@ -208,23 +240,131 @@ impl Forecaster<'_> {
 		Ok(Ok(()))
 	}
 
+	/// An off-budget liability: a loan a payment can go to (FC-2).
+	fn is_loan(&self, account: &AccountId, today: CivilDate) -> Result<bool, CoreError> {
+		let Some(found) = self.budget.accounts.get(account) else {
+			return Ok(false);
+		};
+		if !found.off_budget {
+			return Ok(false);
+		}
+		Ok(
+			match self
+				.budget
+				.account_meta
+				.get(account)
+				.and_then(|meta| meta.kind)
+			{
+				Some(kind) => kind == AccountKind::Liability,
+				None => balances(self.budget, &self.classification, today)?
+					.get(account)
+					.is_some_and(|balance| *balance < 0),
+			},
+		)
+	}
+
+	/// FC-2's payment split inferred from the last payment to `loan`: its
+	/// paying account, interest, escrow and categories (DEBT-3). `Err` says
+	/// why it can't be inferred.
+	fn loan_payment(
+		&self,
+		loan: &AccountId,
+		name: String,
+		payment: Money,
+		today: CivilDate,
+	) -> Result<Result<LoanPayment, String>, CoreError> {
+		let rate = self
+			.budget
+			.account_meta
+			.get(loan)
+			.and_then(|meta| meta.loan_rate_bps);
+		let Some(last) = self.classification.rows().iter().rev().find(|row| {
+			row.date <= today
+				&& row.is_primary()
+				&& row.kind() == TransactionKind::DebtPrincipal
+				&& row.transfer_account.as_ref() == Some(loan)
+		}) else {
+			return Ok(Err(
+				"no payment to this loan is recorded yet, so its split is unknown".to_owned(),
+			));
+		};
+		let parts: Vec<&ClassifiedRow> = match &last.parent {
+			Some(parent) => self
+				.classification
+				.rows()
+				.iter()
+				.filter(|row| {
+					row.parent.as_ref() == Some(parent)
+						&& row.kind() == TransactionKind::Expense
+						&& row.id != last.id
+				})
+				.collect(),
+			None => Vec::new(),
+		};
+		let (interest, escrow) = match (parts.as_slice(), rate) {
+			([], _) => (None, Vec::new()),
+			([only], _) => (Some(*only), Vec::new()),
+			(_, Some(rate)) => {
+				let before = last
+					.date
+					.naive()
+					.pred_opt()
+					.map_or(last.date, CivilDate::from);
+				let owed_then = balances(self.budget, &self.classification, before)?
+					.get(loan)
+					.copied()
+					.unwrap_or(0);
+				let estimate =
+					round_half_up(i128::from(owed_then).abs() * i128::from(rate), 120_000);
+				let closest = parts
+					.iter()
+					.min_by_key(|row| (i128::from(row.amount.minor()).abs() - estimate).abs())
+					.copied();
+				let rest = parts
+					.iter()
+					.filter(|row| Some(row.id.clone()) != closest.map(|row| row.id.clone()))
+					.copied()
+					.collect();
+				(closest, rest)
+			}
+			(_, None) => {
+				return Ok(Err(
+					"the last payment has several expense parts and no rate tells interest from escrow"
+						.to_owned(),
+				));
+			}
+		};
+		let magnitude = |rows: &[&ClassifiedRow]| -> Result<Money, CoreError> {
+			Money::checked_sum(rows.iter().map(|row| row.amount))?.checked_neg()
+		};
+		let owed = balances(self.budget, &self.classification, today)?
+			.get(loan)
+			.copied()
+			.unwrap_or(0);
+		Ok(Ok(LoanPayment {
+			from: last.account.clone(),
+			loan: loan.clone(),
+			name,
+			payment,
+			rate_bps: rate,
+			last_interest: magnitude(interest.as_slice())?,
+			escrow: magnitude(&escrow)?,
+			outstanding: Money::from_minor(owed).checked_neg()?,
+			interest_category: interest.and_then(|row| row.category.clone()),
+			escrow_category: escrow.first().and_then(|row| row.category.clone()),
+			principal_category: last.category.clone(),
+		}))
+	}
+
 	/// FC-2 loan payments for loans with a payment amount and day in their
-	/// metadata, paid from the account and categories of the last payment.
+	/// metadata and no schedule paying them, from the last payment's account.
 	fn loan_flows(
 		&self,
 		today: CivilDate,
 		through: CivilDate,
+		scheduled: &BTreeSet<AccountId>,
 		result: &mut ScheduledFlows,
 	) -> Result<(), CoreError> {
-		let scheduled: Vec<AccountId> = result
-			.flows
-			.iter()
-			.filter_map(|flow| match &flow.kind {
-				FlowKind::Transfer { counterpart } => Some(counterpart.clone()),
-				_ => None,
-			})
-			.collect();
-		let owed = balances(self.budget, &self.classification, today)?;
 		for (loan, meta) in &self.budget.account_meta {
 			let (Some(payment), Some(day)) = (meta.loan_payment, meta.loan_payment_day) else {
 				continue;
@@ -232,70 +372,22 @@ impl Forecaster<'_> {
 			if meta.kind != Some(AccountKind::Liability) || scheduled.contains(loan) {
 				continue;
 			}
-			let unforecast = |reason: &str| Unforecast {
-				schedule: None,
-				loan: Some(loan.clone()),
-				reason: reason.to_owned(),
-			};
-			let Some(last) = self.classification.rows().iter().rev().find(|row| {
-				row.date <= today
-					&& row.is_primary()
-					&& row.kind() == TransactionKind::DebtPrincipal
-					&& row.transfer_account.as_ref() == Some(loan)
-			}) else {
-				result.unforecast.push(unforecast(
-					"no payment to this loan is recorded yet, so the paying account is unknown",
-				));
-				continue;
-			};
-			let parts: Vec<&ClassifiedRow> = match &last.parent {
-				Some(parent) => self
-					.classification
-					.rows()
-					.iter()
-					.filter(|row| {
-						row.parent.as_ref() == Some(parent)
-							&& row.kind() == TransactionKind::Expense
-							&& row.id != last.id
-					})
-					.collect(),
-				None => Vec::new(),
-			};
-			let (interest, escrow) = match (parts.as_slice(), meta.loan_rate_bps) {
-				([], _) => (None, Vec::new()),
-				([only], _) => (Some(*only), Vec::new()),
-				(_, Some(rate)) => {
-					let before = last
-						.date
-						.naive()
-						.pred_opt()
-						.map_or(last.date, CivilDate::from);
-					let owed_then = balances(self.budget, &self.classification, before)?
-						.get(loan)
-						.copied()
-						.unwrap_or(0);
-					let estimate =
-						round_half_up(i128::from(owed_then).abs() * i128::from(rate), 120_000);
-					let closest = parts
-						.iter()
-						.min_by_key(|row| (i128::from(row.amount.minor()).abs() - estimate).abs())
-						.copied();
-					let rest = parts
-						.iter()
-						.filter(|row| Some(row.id.clone()) != closest.map(|row| row.id.clone()))
-						.copied()
-						.collect();
-					(closest, rest)
-				}
-				(_, None) => {
-					result.unforecast.push(unforecast(
-						"the last payment has several expense parts and no rate tells interest from escrow",
-					));
+			let name = self
+				.budget
+				.accounts
+				.get(loan)
+				.map(|account| account.name.clone())
+				.unwrap_or_default();
+			let loan_payment = match self.loan_payment(loan, name, payment, today)? {
+				Ok(loan_payment) => loan_payment,
+				Err(reason) => {
+					result.unforecast.push(Unforecast {
+						schedule: None,
+						loan: Some(loan.clone()),
+						reason,
+					});
 					continue;
 				}
-			};
-			let magnitude = |rows: &[&ClassifiedRow]| -> Result<Money, CoreError> {
-				Money::checked_sum(rows.iter().map(|row| row.amount))?.checked_neg()
 			};
 			let mut dates = Vec::new();
 			let mut month = today.year_month();
@@ -308,28 +400,9 @@ impl Forecaster<'_> {
 				}
 				month = month.offset(1)?;
 			}
-			let flows = LoanPayment {
-				from: last.account.clone(),
-				loan: loan.clone(),
-				name: self
-					.budget
-					.accounts
-					.get(loan)
-					.map(|account| account.name.clone())
-					.unwrap_or_default(),
-				payment,
-				rate_bps: meta.loan_rate_bps,
-				last_interest: magnitude(interest.as_slice())?,
-				escrow: magnitude(&escrow)?,
-				outstanding: Money::from_minor(owed.get(loan).copied().unwrap_or(0))
-					.checked_neg()?,
-				interest_category: interest.and_then(|row| row.category.clone()),
-				escrow_category: escrow.first().and_then(|row| row.category.clone()),
-				principal_category: last.category.clone(),
-			}
-			.split(&dates)?;
-			result.flows.extend(flows.flows);
-			result.shortfalls.extend(flows.shortfalls);
+			let split = loan_payment.split(&dates)?;
+			result.flows.extend(split.flows);
+			result.shortfalls.extend(split.shortfalls);
 		}
 		Ok(())
 	}

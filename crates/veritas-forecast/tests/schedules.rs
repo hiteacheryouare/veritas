@@ -440,3 +440,112 @@ fn fc_2_a_metadata_loan_below_its_interest_warns() {
 	assert_eq!(result.shortfalls[0].date, date("2027-02-10"));
 	assert_eq!(result.shortfalls[0].uncovered, cents(8003 - 5000));
 }
+
+#[test]
+fn fc_2_a_mortgage_bill_is_split_not_one_transfer() {
+	let mut book = Book::household();
+	book.opening("CHK", "2026-12-31", 1_000_000);
+	book.opening("LOAN", "2026-12-31", -30_019_900);
+	book.row_with_id("jan", "CHK", "2027-01-01", -220000).split = SplitRole::Parent;
+	book.transfer("CHK", "LOAN", "2027-01-01", -19900)
+		.in_category("Loan principal")
+		.child_of("jan");
+	book.spend("Loan interest", "2027-01-01", -150100)
+		.child_of("jan");
+	book.spend("Electric", "2027-01-01", -50000).child_of("jan");
+	book.budget.account_meta.insert(
+		acct("LOAN"),
+		AccountMeta {
+			kind: Some(AccountKind::Liability),
+			loan_rate_bps: Some(600),
+			loan_payment: None,
+			loan_payment_day: None,
+			lender: None,
+		},
+	);
+	let rule = schedule(
+		&mut book,
+		"Mortgage",
+		monthly_on("2026-12-01"),
+		condition("amount", "is", json!(-220000)),
+		None,
+		"2027-02-01",
+	)
+	.rule
+	.clone();
+	let rule = book.budget.rules.get_mut(&rule).unwrap();
+	let mut conditions: Value = serde_json::from_str(&rule.conditions_json).unwrap();
+	conditions
+		.as_array_mut()
+		.unwrap()
+		.push(condition("payee", "is", json!("payee-LOAN")));
+	rule.conditions_json = conditions.to_string();
+
+	let result = flows(&book);
+	let february: Vec<_> = of(&result, "Mortgage")
+		.into_iter()
+		.filter(|flow| flow.date == date("2027-02-01"))
+		.map(|flow| {
+			(
+				flow.amount.minor(),
+				flow.kind.clone(),
+				flow.category.clone(),
+			)
+		})
+		.collect();
+	let principal = FlowKind::Transfer {
+		counterpart: acct("LOAN"),
+	};
+	assert_eq!(
+		february,
+		[
+			(-150000, FlowKind::Expense, Some(cat("Loan interest"))),
+			(-50000, FlowKind::Expense, Some(cat("Electric"))),
+			(-20000, principal, Some(cat("Loan principal"))),
+		],
+		"FC-2, DEBT-2.1a: a bill paying a loan is interest, escrow, then principal"
+	);
+	let projection = Forecaster::new(&book.budget)
+		.unwrap()
+		.project(date(TODAY), &result.flows, None)
+		.unwrap();
+	let feb = &projection.months[1];
+	assert_eq!(feb.net_income, cents(-200000));
+	assert_eq!(
+		feb.net_worth.minor(),
+		projection.months[0].net_worth.minor() - 200000
+	);
+	assert_eq!(feb.balances[&acct("LOAN")], cents(-29_980_000));
+}
+
+#[test]
+fn fc_2_a_loan_bill_with_no_recorded_payment_is_not_forecast() {
+	let mut book = Book::household();
+	book.opening("LOAN", "2026-12-31", -1_000_000);
+	let rule = schedule(
+		&mut book,
+		"Car loan",
+		monthly_on("2026-12-10"),
+		condition("amount", "is", json!(-40000)),
+		None,
+		"2027-02-10",
+	)
+	.rule
+	.clone();
+	let rule = book.budget.rules.get_mut(&rule).unwrap();
+	let mut conditions: Value = serde_json::from_str(&rule.conditions_json).unwrap();
+	conditions
+		.as_array_mut()
+		.unwrap()
+		.push(condition("payee", "is", json!("payee-LOAN")));
+	rule.conditions_json = conditions.to_string();
+	let result = flows(&book);
+	assert!(
+		of(&result, "Car loan").is_empty(),
+		"never one transfer for the whole payment"
+	);
+	assert_eq!(
+		result.unforecast[0].schedule,
+		Some(ScheduleId::new("Car loan"))
+	);
+}
