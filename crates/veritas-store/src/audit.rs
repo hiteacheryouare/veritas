@@ -151,7 +151,7 @@ pub fn audit(loaded: &Loaded) -> AuditReport {
 }
 
 /// The known tax buckets. `none` is only a tag override, never a category bucket.
-const TAX_BUCKETS: [&str; 10] = [
+pub(crate) const TAX_BUCKETS: [&str; 10] = [
 	"w2_income",
 	"interest_income",
 	"business_income",

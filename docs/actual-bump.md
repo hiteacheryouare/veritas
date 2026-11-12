@@ -35,7 +35,7 @@ Also diff `server/budget/`, `server/transactions/`, `server/rules/`, `server/sch
 1. `veritas-store` mappings and insert defaults, for every default, semantic or destructive change from step 1.
 2. `docs/actual-format.md`: re-verify every claim whose cited file changed, and update its citations.
 3. Ported logic (engine, rules, arithmetic): port the change, and add the new upstream test vectors.
-4. Regenerate the fixtures with `cargo xtask fixtures`, then commit them.
+4. Regenerate the fixtures with `cargo xtask fixtures`, then commit them. Regenerate the new-budget template the same way: rename `crates/veritas-store/template/actual-OLDVER.sqlite` and `TEMPLATE_DB` in `xtask/src/main.rs` and `crates/veritas-store/src/create.rs` to the new version, run `cargo xtask template`, and commit the file.
 
 ## 4. Prove it
 

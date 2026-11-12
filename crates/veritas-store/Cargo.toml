@@ -8,6 +8,7 @@ publish.workspace = true
 
 [dependencies]
 rusqlite.workspace = true
+uuid.workspace = true
 veritas-domain = { path = "../veritas-domain" }
 
 [lints]
