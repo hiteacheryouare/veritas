@@ -99,6 +99,17 @@ struct NewBudgetSetupTests {
 		#expect(budget.accounts.isEmpty)
 	}
 
+	@Test func onlyACardOrLineOfCreditBringsUpTheToBudgetNote() async {
+		let setup = await atAccounts()
+		#expect(!setup.hasOnBudgetDebt)
+		setup.accounts[0].type = .loan
+		#expect(!setup.hasOnBudgetDebt)
+		setup.accounts[0].type = .creditCard
+		#expect(setup.hasOnBudgetDebt)
+		setup.accounts[0].type = .lineOfCredit
+		#expect(setup.hasOnBudgetDebt)
+	}
+
 	@Test func backReturnsToTheStepBefore() async {
 		let setup = await atAccounts()
 		setup.back()

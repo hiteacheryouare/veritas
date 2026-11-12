@@ -18,7 +18,8 @@ struct AccountTypePicker: View {
 			}
 		}
 		.labelsHidden()
-		.fixedSize()
+		// Sized for the longest type, not the menu's longest section heading.
+		.frame(width: 140)
 		.accessibilityIdentifier("newBudget.account.type")
 	}
 }

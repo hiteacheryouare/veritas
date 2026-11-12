@@ -71,6 +71,11 @@ public final class NewBudgetSetup: Identifiable {
 		numberStyle = currency.numberStyle
 	}
 
+	/// An on-budget card or line of credit starts with a balance that lowers To Budget.
+	public var hasOnBudgetDebt: Bool {
+		accounts.contains { $0.type.group == .credit }
+	}
+
 	public func addAccount() {
 		accounts.append(AccountDraft())
 	}

@@ -25,6 +25,13 @@ struct AccountsStep: View {
 				Label("Add account", systemImage: "plus")
 			}
 			.accessibilityIdentifier("newBudget.addAccount")
+			if setup.hasOnBudgetDebt {
+				Text("A card's starting balance lowers To Budget, as it does in Actual, but reports don't count it as income or spending.")
+					.font(.text(.body))
+					.foregroundStyle(.textSecondary)
+					.frame(maxWidth: .infinity, alignment: .leading)
+					.accessibilityIdentifier("newBudget.cardNote")
+			}
 		}
 	}
 }
