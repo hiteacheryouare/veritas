@@ -358,12 +358,12 @@ fn a_cleared_note_is_written_as_null_and_can_be_set_again() {
 	let mut store = Store::open(&db, Access::ReadWrite).unwrap();
 	let mut writer = store.writer().unwrap();
 	writer
-		.put_note("budget-2026-10", None, Some("Rent went up"))
+		.put_note("budget-2026-10", None, Some(Some("Rent went up")))
 		.unwrap();
 	writer.commit().unwrap();
 	let mut writer = store.writer().unwrap();
 	writer
-		.put_note("budget-2026-10", Some("Rent went up"), None)
+		.put_note("budget-2026-10", Some(Some("Rent went up")), Some(None))
 		.unwrap();
 	writer.commit().unwrap();
 	let raw = Connection::open(&db).unwrap();
@@ -375,13 +375,23 @@ fn a_cleared_note_is_written_as_null_and_can_be_set_again() {
 		)
 		.unwrap();
 	assert_eq!(note, None);
-	assert!(!loaded(&db).notes.contains_key("budget-2026-10"));
+	assert_eq!(loaded(&db).notes["budget-2026-10"], None);
+	assert!(matches!(
+		store
+			.writer()
+			.unwrap()
+			.put_note("budget-2026-10", Some(None), None),
+		Err(CoreError::Invalid(_))
+	));
 	let mut writer = store.writer().unwrap();
 	writer
-		.put_note("budget-2026-10", None, Some("Back to normal"))
+		.put_note("budget-2026-10", Some(None), Some(Some("Back to normal")))
 		.unwrap();
 	writer.commit().unwrap();
-	assert_eq!(loaded(&db).notes["budget-2026-10"], "Back to normal");
+	assert_eq!(
+		loaded(&db).notes["budget-2026-10"].as_deref(),
+		Some("Back to normal")
+	);
 }
 
 #[test]
@@ -471,4 +481,177 @@ fn a_write_protected_file_is_never_opened_for_writing() {
 	assert!(store.load().is_ok());
 	drop(store);
 	std::fs::set_permissions(&db, writable).unwrap();
+}
+
+#[test]
+fn an_edit_to_a_duplicated_budget_cell_lands_in_the_row_the_loader_reads() {
+	let scratch = Scratch::new("write-duplicate-cell");
+	let db = fixture_db("small", &scratch);
+	let category = loaded(&db)
+		.categories
+		.values()
+		.find(|c| !c.is_income)
+		.unwrap()
+		.id
+		.clone();
+	Connection::open(&db)
+		.unwrap()
+		.execute_batch(&format!(
+			"INSERT INTO zero_budgets (id, month, category, amount) VALUES
+			   ('2019-05-{category}', 201905, '{category}', 100),
+			   ('201905-{category}', 201905, '{category}', 200);"
+		))
+		.unwrap();
+	let may = YearMonth::parse("2019-05").unwrap();
+	let before = loaded(&db).budget_cells[&(may, category.clone())].clone();
+	assert_eq!(
+		before.budgeted,
+		Money::from_minor(200),
+		"the later row is the one Actual's sheet shows"
+	);
+	let after = BudgetCell {
+		budgeted: Money::from_minor(300),
+		..before.clone()
+	};
+	let mut store = Store::open(&db, Access::ReadWrite).unwrap();
+	let mut writer = store.writer().unwrap();
+	writer.put_budget_cell(Some(&before), Some(&after)).unwrap();
+	writer.commit().unwrap();
+	assert_eq!(loaded(&db).budget_cells[&(may, category)], after);
+}
+
+#[test]
+fn a_schedule_date_edit_lands_in_the_next_date_row_the_loader_reads() {
+	let scratch = Scratch::new("write-duplicate-next-date");
+	let db = fixture_db("all-features", &scratch);
+	let data = loaded(&db);
+	let before = data
+		.schedules
+		.values()
+		.find(|s| s.next_date.is_some())
+		.unwrap()
+		.clone();
+	// A tombstoned row ahead of the live one, as a sync can leave behind.
+	Connection::open(&db)
+		.unwrap()
+		.execute_batch(&format!(
+			"CREATE TEMP TABLE live AS SELECT * FROM schedules_next_date WHERE schedule_id = '{id}';
+			 DELETE FROM schedules_next_date WHERE schedule_id = '{id}';
+			 INSERT INTO schedules_next_date (id, schedule_id, local_next_date, local_next_date_ts, base_next_date, base_next_date_ts, tombstone)
+			   VALUES ('dead-row', '{id}', 20200101, 1, 20200101, 1, 1);
+			 INSERT INTO schedules_next_date SELECT * FROM live;",
+			id = before.id
+		))
+		.unwrap();
+	assert_eq!(loaded(&db).schedules[&before.id], before);
+	let after = veritas_domain::Schedule {
+		next_date: Some(CivilDate::new(2027, 2, 1).unwrap()),
+		..before.clone()
+	};
+	let mut store = Store::open(&db, Access::ReadWrite).unwrap();
+	let mut writer = store.writer().unwrap();
+	writer.put_schedule(Some(&before), Some(&after)).unwrap();
+	writer.commit().unwrap();
+	assert_eq!(loaded(&db).schedules[&before.id], after);
+}
+
+#[test]
+fn a_new_budget_row_leaves_goal_columns_null_like_actuals_set_budget() {
+	let scratch = Scratch::new("write-cell-defaults");
+	let db = fixture_db("small", &scratch);
+	let category = loaded(&db)
+		.categories
+		.values()
+		.find(|c| !c.is_income)
+		.unwrap()
+		.id
+		.clone();
+	let cell = BudgetCell {
+		month: YearMonth::parse("2019-06").unwrap(),
+		category: category.clone(),
+		budgeted: Money::from_minor(1_000),
+		carryover: false,
+		goal: None,
+		long_goal: false,
+	};
+	let mut store = Store::open(&db, Access::ReadWrite).unwrap();
+	let mut writer = store.writer().unwrap();
+	writer.put_budget_cell(None, Some(&cell)).unwrap();
+	writer.commit().unwrap();
+	let stored = row(
+		&Connection::open(&db).unwrap(),
+		"zero_budgets",
+		&format!("201906-{category}"),
+	);
+	let value = |name: &str| {
+		stored
+			.iter()
+			.find(|(column, _)| column == name)
+			.unwrap()
+			.1
+			.clone()
+	};
+	assert_eq!(value("goal"), Value::Null);
+	assert_eq!(value("long_goal"), Value::Null);
+	assert_eq!(value("carryover"), Value::Integer(0));
+	assert_eq!(loaded(&db).budget_cells[&(cell.month, category)], cell);
+}
+
+#[test]
+fn tax_tags_are_added_changed_and_removed() {
+	let scratch = Scratch::new("write-tax-tags");
+	let db = fixture_db("small", &scratch);
+	let mut store = Store::open(&db, Access::ReadWrite).unwrap();
+	store.adopt().unwrap();
+	let mut writer = store.writer().unwrap();
+	writer.put_tax_tag("rx", None, Some("medical")).unwrap();
+	writer.put_tax_tag("notax", None, Some("none")).unwrap();
+	writer.commit().unwrap();
+	let mut writer = store.writer().unwrap();
+	writer
+		.put_tax_tag("rx", Some("medical"), Some("hsa"))
+		.unwrap();
+	writer.put_tax_tag("notax", Some("none"), None).unwrap();
+	writer.commit().unwrap();
+	let tags = loaded(&db).tax_tags;
+	assert_eq!(tags.len(), 1);
+	assert_eq!(tags["rx"], "hsa");
+}
+
+#[test]
+fn a_journal_left_by_a_dead_writer_is_replayed_by_recover_after_crash() {
+	let scratch = Scratch::new("hot-journal");
+	let db = fixture_db("small", &scratch);
+	let live = Connection::open(&db).unwrap();
+	live.execute_batch(
+		"PRAGMA journal_mode = DELETE; PRAGMA cache_size = 2; PRAGMA cache_spill = ON;
+		 CREATE TABLE ballast (a); BEGIN;
+		 INSERT INTO ballast SELECT zeroblob(3000) FROM (WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 600) SELECT i FROM n);
+		 UPDATE transactions SET amount = 0;",
+	)
+	.unwrap();
+	// Copying mid-transaction is what a killed writer leaves on disk.
+	let crashed = scratch.0.join("crashed");
+	std::fs::create_dir(&crashed).unwrap();
+	for name in ["db.sqlite", "db.sqlite-journal"] {
+		std::fs::copy(scratch.0.join(name), crashed.join(name)).unwrap();
+	}
+	drop(live);
+	let copy = crashed.join("db.sqlite");
+
+	let read_only = Access::ReadOnly(veritas_domain::ReadOnlyReason::OpenElsewhere);
+	let refused = Store::open(&copy, read_only).and_then(|store| store.load());
+	assert!(
+		matches!(&refused, Err(CoreError::Storage(message)) if message.contains("recover_after_crash")),
+		"{refused:?}"
+	);
+	veritas_store::recover_after_crash(&copy).unwrap();
+	assert!(!crashed.join("db.sqlite-journal").exists());
+	let store = Store::open(&copy, read_only).unwrap();
+	assert_eq!(store.pragma_text("journal_mode").unwrap(), "delete");
+	let data = store.load().unwrap().data;
+	assert!(
+		data.transactions.values().any(|t| t.amount != Money::ZERO),
+		"the dead writer's change rolled back"
+	);
 }

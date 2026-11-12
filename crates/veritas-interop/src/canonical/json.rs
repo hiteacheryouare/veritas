@@ -247,7 +247,23 @@ pub(crate) fn write_pretty(out: &mut impl Write, value: &Value, depth: usize) ->
 	}
 }
 
-/// `JSON.stringify` with no indentation: keys in insertion order, and a
+/// An ECMAScript array index: the canonical decimal form of 0 to 2^32 - 2.
+fn array_index(key: &Str) -> Option<u32> {
+	let text = match key {
+		Str::Utf8(text) => text.clone(),
+		Str::Utf16(units) => String::from_utf16(units).ok()?,
+	};
+	if text.is_empty()
+		|| (text.len() > 1 && text.starts_with('0'))
+		|| !text.bytes().all(|b| b.is_ascii_digit())
+	{
+		return None;
+	}
+	text.parse::<u32>().ok().filter(|&n| n != u32::MAX)
+}
+
+/// `JSON.stringify` with no indentation: array-index keys first, then the
+/// rest in insertion order, and a
 /// number JSON can't hold written as `null`.
 pub(crate) fn stringify(out: &mut impl Write, value: &Value) -> io::Result<()> {
 	match value {
@@ -263,9 +279,15 @@ pub(crate) fn stringify(out: &mut impl Write, value: &Value) -> io::Result<()> {
 			out.write_all(b"]")
 		}
 		Value::Object(entries) => {
+			// A JavaScript object lists array-index keys first, ascending.
+			let mut ordered: Vec<(Option<u32>, &(Str, Value))> = entries
+				.iter()
+				.map(|entry| (array_index(&entry.0), entry))
+				.collect();
+			ordered.sort_by_key(|(index, _)| index.map_or((1, 0), |n| (0, n)));
 			out.write_all(b"{")?;
-			for (index, (key, item)) in entries.iter().enumerate() {
-				if index > 0 {
+			for (position, (_, (key, item))) in ordered.into_iter().enumerate() {
+				if position > 0 {
 					out.write_all(b",")?;
 				}
 				write_string(out, key)?;
@@ -621,6 +643,21 @@ mod tests {
 		] {
 			assert_eq!(js_number(value), expected, "{value:e}");
 		}
+	}
+
+	#[test]
+	fn stringify_puts_array_index_keys_first_like_json_stringify() {
+		// Node: JSON.stringify(JSON.parse(this input)).
+		let parsed = parse(
+			r#"{"b":1,"10":2,"2":3,"a":4,"01":5,"4294967294":6,"4294967295":7,"-1":8,"b":9}"#,
+		)
+		.unwrap();
+		let mut out = Vec::new();
+		stringify(&mut out, &parsed).unwrap();
+		assert_eq!(
+			String::from_utf8(out).unwrap(),
+			r#"{"2":3,"10":2,"4294967294":6,"b":9,"a":4,"01":5,"4294967295":7,"-1":8}"#
+		);
 	}
 
 	#[test]

@@ -4,236 +4,11 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use veritas_domain::{
-	Account, AccountId, BudgetCell, BudgetData, BudgetType, Category, CategoryGroup,
-	CategoryGroupId, CategoryId, CivilDate, CoreError, Money, SplitRole, Transaction,
-	TransactionId, YearMonth,
-};
+mod common;
+
+use common::*;
+use veritas_domain::{CategoryGroupId, CoreError, Money, SplitRole, TransactionId};
 use veritas_engine::EnvelopeSheet;
-
-fn ym(text: &str) -> YearMonth {
-	YearMonth::parse(text).unwrap()
-}
-
-fn day(text: &str) -> CivilDate {
-	let (year, rest) = text.split_once('-').unwrap();
-	let (month, day) = rest.split_once('-').unwrap();
-	CivilDate::new(
-		year.parse().unwrap(),
-		month.parse().unwrap(),
-		day.parse().unwrap(),
-	)
-	.unwrap()
-}
-
-fn cat(id: &str) -> CategoryId {
-	CategoryId::new(id)
-}
-
-fn cents(minor: i64) -> Money {
-	Money::from_minor(minor)
-}
-
-struct Budget(BudgetData);
-
-impl Budget {
-	/// The groups and categories every new Actual budget starts with.
-	fn actual_seed() -> Self {
-		let mut budget = Budget(BudgetData::empty(BudgetType::Envelope));
-		budget.group("usual", false, 16384.0);
-		budget.group("income", true, 32768.0);
-		budget.group("savings-group", false, 32768.0);
-		for (id, group) in [
-			("food", "usual"),
-			("general", "usual"),
-			("bills", "usual"),
-			("flexible", "usual"),
-			("savings", "savings-group"),
-		] {
-			budget.category(id, group, false);
-		}
-		budget.category("income", "income", true);
-		budget.category("starting-balances", "income", true);
-		budget
-	}
-
-	fn group(&mut self, id: &str, is_income: bool, sort_order: f64) -> &mut CategoryGroup {
-		let id = CategoryGroupId::new(id);
-		self.0
-			.category_groups
-			.entry(id.clone())
-			.or_insert(CategoryGroup {
-				id,
-				name: String::new(),
-				is_income,
-				hidden: false,
-				sort_order,
-				tombstone: false,
-			})
-	}
-
-	/// Also writes the self-mapping row Actual writes on every category create.
-	fn category(&mut self, id: &str, group: &str, is_income: bool) -> &mut Category {
-		self.0.category_mapping.insert(cat(id), cat(id));
-		self.0.categories.entry(cat(id)).or_insert(Category {
-			id: cat(id),
-			name: id.to_owned(),
-			group: CategoryGroupId::new(group),
-			is_income,
-			hidden: false,
-			sort_order: 0.0,
-			tombstone: false,
-		})
-	}
-
-	fn account(&mut self, id: &str, off_budget: bool) -> &mut Account {
-		let id = AccountId::new(id);
-		self.0.accounts.entry(id.clone()).or_insert(Account {
-			id,
-			name: String::new(),
-			off_budget,
-			closed: false,
-			group: None,
-			sort_order: 0.0,
-			tombstone: false,
-		})
-	}
-
-	fn txn(
-		&mut self,
-		id: &str,
-		account: &str,
-		date: &str,
-		amount: i64,
-		category: Option<&str>,
-	) -> &mut Transaction {
-		let id = TransactionId::new(id);
-		self.0.transactions.insert(
-			id.clone(),
-			Transaction {
-				id: id.clone(),
-				account: AccountId::new(account),
-				date: day(date),
-				amount: cents(amount),
-				payee: None,
-				imported_payee: None,
-				category: category.map(cat),
-				notes: None,
-				cleared: true,
-				reconciled: false,
-				split: SplitRole::None,
-				transfer: None,
-				schedule: None,
-				starting_balance: false,
-				sort_order: 0.0,
-				tombstone: false,
-			},
-		);
-		self.0.transactions.get_mut(&id).unwrap()
-	}
-
-	fn cell(&mut self, month: &str, category: &str) -> &mut BudgetCell {
-		self.0
-			.budget_cells
-			.entry((ym(month), cat(category)))
-			.or_insert(BudgetCell {
-				month: ym(month),
-				category: cat(category),
-				budgeted: Money::ZERO,
-				carryover: false,
-				goal: None,
-				long_goal: false,
-			})
-	}
-
-	fn budget(&mut self, month: &str, category: &str, amount: i64) {
-		self.cell(month, category).budgeted = cents(amount);
-	}
-
-	/// Actual's set-carryover: every month from `from` to the last created one.
-	fn roll_over(&mut self, from: &str, through: &str, category: &str) {
-		let mut month = ym(from);
-		while month <= ym(through) {
-			self.cell(&month.to_string(), category).carryover = true;
-			month = month.offset(1).unwrap();
-		}
-	}
-
-	fn hold(&mut self, month: &str, amount: i64) {
-		self.0.holds.insert(ym(month), Some(cents(amount)));
-	}
-
-	fn sheet(&self, today: &str) -> EnvelopeSheet {
-		EnvelopeSheet::compute(&self.0, day(today)).unwrap()
-	}
-}
-
-/// `fixtures/synthetic/small.zip` as its spec builds it
-/// (tools/actual-oracle/src/specs/small.ts).
-fn small_fixture() -> Budget {
-	let mut budget = Budget::actual_seed();
-	budget.account("checking", false);
-	budget.account("savings-account", false);
-	budget.group("bills-group", false, 49152.0);
-	budget.group("everyday", false, 65536.0);
-	budget.category("rent", "bills-group", false);
-	budget.category("utilities", "bills-group", false);
-	budget.category("groceries", "everyday", false);
-	budget.category("dining", "everyday", false);
-	for month in ["2026-08", "2026-09", "2026-10"] {
-		let on = |d: u32| format!("{month}-{d:02}");
-		budget.txn(
-			&format!("{month}-pay"),
-			"checking",
-			&on(1),
-			400_000,
-			Some("income"),
-		);
-		budget.txn(
-			&format!("{month}-rent"),
-			"checking",
-			&on(2),
-			-150_000,
-			Some("rent"),
-		);
-		budget.txn(
-			&format!("{month}-power"),
-			"checking",
-			&on(12),
-			-8_423,
-			Some("utilities"),
-		);
-		budget.txn(
-			&format!("{month}-groceries"),
-			"checking",
-			&on(9),
-			-12_657,
-			Some("groceries"),
-		);
-		budget.txn(
-			&format!("{month}-dinner"),
-			"checking",
-			&on(20),
-			-4_810,
-			Some("dining"),
-		);
-		budget.budget(month, "rent", 150_000);
-		budget.budget(month, "utilities", 9_000);
-		budget.budget(month, "groceries", 12_000);
-		budget.budget(month, "dining", 5_000);
-	}
-	budget.txn("to-savings", "checking", "2026-09-15", -50_000, None);
-	budget.txn(
-		"from-checking",
-		"savings-account",
-		"2026-09-15",
-		50_000,
-		None,
-	);
-	budget
-}
-
-const TODAY: &str = "2026-11-09";
 
 #[test]
 fn reproduces_the_oracle_apply_test() {
@@ -464,7 +239,7 @@ fn which_transactions_count_as_activity() {
 		)
 		.starting_balance = true;
 
-	let november = budget.sheet(TODAY).month(ym("2026-11")).cloned().unwrap();
+	let november = budget.sheet(TODAY).month(ym("2026-11")).unwrap();
 	assert_eq!(
 		november.categories[&cat("food")].spent,
 		cents(-1_000 - 8_000 - 16_000)
@@ -519,7 +294,7 @@ fn mapped_categories_land_on_their_target() {
 		Some("unmapped"),
 	);
 
-	let november = budget.sheet(TODAY).month(ym("2026-11")).cloned().unwrap();
+	let november = budget.sheet(TODAY).month(ym("2026-11")).unwrap();
 	assert_eq!(november.categories[&cat("food")].spent, cents(-1_500));
 	assert!(!november.categories.contains_key(&cat("dining")));
 	assert_eq!(november.categories[&cat("unmapped")].spent, Money::ZERO);
@@ -534,7 +309,7 @@ fn categories_in_a_tombstoned_group_get_no_cells() {
 	budget.category("orphaned", "gone", false);
 	budget.txn("t", "a", "2026-11-02", -900, Some("orphaned"));
 	budget.budget("2026-11", "orphaned", 5_000);
-	let november = budget.sheet(TODAY).month(ym("2026-11")).cloned().unwrap();
+	let november = budget.sheet(TODAY).month(ym("2026-11")).unwrap();
 	assert!(!november.categories.contains_key(&cat("orphaned")));
 	assert_eq!(november.summary.total_budgeted, Money::ZERO);
 	assert_eq!(november.summary.to_budget, Money::ZERO);
@@ -579,7 +354,7 @@ fn only_the_first_income_group_feeds_to_budget() {
 	budget.account("a", false);
 	budget.txn("salary", "a", "2026-11-01", 300_000, Some("income"));
 	budget.txn("gig", "a", "2026-11-02", 20_000, Some("gigs"));
-	let november = budget.sheet(TODAY).month(ym("2026-11")).cloned().unwrap();
+	let november = budget.sheet(TODAY).month(ym("2026-11")).unwrap();
 	assert_eq!(november.summary.total_income, cents(300_000));
 	assert_eq!(
 		november.groups[&CategoryGroupId::new("side-income")].spent,
@@ -667,7 +442,7 @@ fn an_income_budget_row_in_an_expense_group_counts_toward_the_group_like_actual(
 	let mut budget = Budget::actual_seed();
 	budget.category("odd", "usual", true);
 	budget.budget("2026-11", "odd", 700);
-	let november = budget.sheet(TODAY).month(ym("2026-11")).cloned().unwrap();
+	let november = budget.sheet(TODAY).month(ym("2026-11")).unwrap();
 	assert_eq!(november.categories[&cat("odd")].balance, Money::ZERO);
 	assert_eq!(
 		november.groups[&CategoryGroupId::new("usual")].budgeted,
@@ -690,7 +465,7 @@ fn a_budget_without_an_income_group_opens_with_no_income() {
 	budget.account("a", false);
 	budget.txn("pay", "a", "2026-11-01", 50_000, Some("income"));
 	budget.budget("2026-11", "food", 2_000);
-	let november = budget.sheet(TODAY).month(ym("2026-11")).cloned().unwrap();
+	let november = budget.sheet(TODAY).month(ym("2026-11")).unwrap();
 	assert_eq!(november.summary.total_income, Money::ZERO);
 	assert_eq!(november.summary.to_budget, cents(-2_000));
 }
@@ -729,7 +504,7 @@ fn budget_rows_of_deleted_or_unknown_categories_are_ignored() {
 	budget.category("deleted", "usual", false).tombstone = true;
 	budget.budget("2026-11", "deleted", 9_000);
 	budget.budget("2026-11", "never-existed", 4_000);
-	let november = budget.sheet(TODAY).month(ym("2026-11")).cloned().unwrap();
+	let november = budget.sheet(TODAY).month(ym("2026-11")).unwrap();
 	assert_eq!(november.summary.total_budgeted, Money::ZERO);
 	assert!(!november.categories.contains_key(&cat("deleted")));
 }
@@ -762,6 +537,7 @@ fn results_beyond_actuals_safe_range_are_an_overflow_error_not_a_panic() {
 
 mod incremental {
 	use super::*;
+	use veritas_engine::SheetChange;
 
 	fn assert_matches_a_fresh_sheet(sheet: &EnvelopeSheet, budget: &Budget) {
 		let fresh = budget.sheet(TODAY);
@@ -772,81 +548,160 @@ mod incremental {
 	}
 
 	/// §6.5: an edit in month M recomputes M through the last month. Each step
-	/// edits a month, updates from that month, and must equal a full rebuild.
+	/// edits the budget, tells the sheet what changed, and must equal a rebuild.
 	#[test]
-	fn updating_from_the_edited_month_equals_a_full_rebuild() {
+	fn applying_each_change_equals_a_full_rebuild() {
 		let mut budget = small_fixture();
 		let mut sheet = budget.sheet(TODAY);
 		let months = sheet.months().to_vec();
 		let categories = ["rent", "utilities", "groceries", "dining", "food", "income"];
-		for step in 0..120usize {
+		for step in 0..150usize {
 			let month = months[(step * 7) % months.len()];
 			let category = categories[step % categories.len()];
 			let label = month.to_string();
-			match step % 5 {
-				0 => budget.budget(&label, category, (step as i64 * 1_337) % 40_000 - 10_000),
-				1 => budget.cell(&label, category).carryover ^= true,
-				2 => budget.hold(&label, (step as i64 % 3) * 2_500),
-				3 => {
+			let id = TransactionId::new(format!("step-{step}"));
+			let previous = TransactionId::new(format!("step-{}", step - step % 6));
+			match step % 6 {
+				0 => {
 					let date = format!("{label}-{:02}", 1 + step % 28);
 					budget.txn(
-						&format!("step-{step}"),
+						id.as_str(),
 						"checking",
 						&date,
 						-(step as i64) * 101,
 						Some(category),
 					);
+					sheet
+						.apply(&budget.0, SheetChange::Transactions(&[id]))
+						.unwrap();
+				}
+				1 => {
+					budget.budget(&label, category, (step as i64 * 1_337) % 40_000 - 10_000);
+					sheet.apply(&budget.0, SheetChange::Month(month)).unwrap();
+				}
+				2 => {
+					budget.cell(&label, category).carryover ^= true;
+					budget.hold(&label, (step as i64 % 3) * 2_500);
+					sheet.apply(&budget.0, SheetChange::Month(month)).unwrap();
+				}
+				3 => {
+					let moved = month.offset(-2).unwrap().first_day();
+					budget.0.transactions.get_mut(&previous).unwrap().date = moved;
+					sheet
+						.apply(&budget.0, SheetChange::Transactions(&[previous]))
+						.unwrap();
+				}
+				4 => {
+					budget.0.transactions.get_mut(&previous).unwrap().split = SplitRole::Parent;
+					let date = budget.0.transactions[&previous].date.to_string();
+					budget
+						.txn(id.as_str(), "checking", &date, -77, Some("dining"))
+						.split = SplitRole::Child {
+						parent: previous.clone(),
+					};
+					sheet
+						.apply(&budget.0, SheetChange::Transactions(&[previous, id]))
+						.unwrap();
 				}
 				_ => {
-					let id = TransactionId::new(format!("step-{}", step - 1));
-					let moved_to = month.offset(-2).unwrap();
-					let old = budget.0.transactions[&id].date.year_month();
-					budget.0.transactions.get_mut(&id).unwrap().date = moved_to.first_day();
-					sheet.update(&budget.0, old.min(moved_to)).unwrap();
-					assert_matches_a_fresh_sheet(&sheet, &budget);
-					continue;
+					let parent = budget.0.transactions.get_mut(&previous).unwrap();
+					parent.tombstone = !parent.tombstone;
+					sheet
+						.apply(&budget.0, SheetChange::Transactions(&[previous]))
+						.unwrap();
 				}
 			}
-			sheet.update(&budget.0, month).unwrap();
 			assert_matches_a_fresh_sheet(&sheet, &budget);
 		}
 	}
 
+	/// PR #36 review: listing only the parent picks up a child the sheet has
+	/// never seen, and a child removed from it.
 	#[test]
-	fn months_before_the_edit_keep_their_memoized_values() {
+	fn listing_a_split_parent_rereads_its_new_children() {
+		let mut budget = small_fixture();
+		let mut sheet = budget.sheet(TODAY);
+		let parent = TransactionId::new("shop");
+		budget
+			.txn("shop", "checking", "2026-10-05", -9_000, None)
+			.split = SplitRole::Parent;
+		sheet
+			.apply(
+				&budget.0,
+				SheetChange::Transactions(std::slice::from_ref(&parent)),
+			)
+			.unwrap();
+		for (id, amount, category) in [
+			("shop-food", -6_000, "groceries"),
+			("shop-meal", -3_000, "dining"),
+		] {
+			budget
+				.txn(id, "checking", "2026-10-05", amount, Some(category))
+				.split = SplitRole::Child {
+				parent: parent.clone(),
+			};
+		}
+		sheet
+			.apply(
+				&budget.0,
+				SheetChange::Transactions(std::slice::from_ref(&parent)),
+			)
+			.unwrap();
+		assert_eq!(
+			sheet
+				.category(ym("2026-10"), &cat("groceries"))
+				.unwrap()
+				.spent,
+			cents(-12_657 - 6_000)
+		);
+		assert_matches_a_fresh_sheet(&sheet, &budget);
+
+		budget
+			.0
+			.transactions
+			.remove(&TransactionId::new("shop-meal"));
+		sheet
+			.apply(&budget.0, SheetChange::Transactions(&[parent]))
+			.unwrap();
+		assert_matches_a_fresh_sheet(&sheet, &budget);
+	}
+
+	#[test]
+	fn months_before_the_change_keep_their_memoized_values() {
 		let mut budget = small_fixture();
 		let mut sheet = budget.sheet(TODAY);
 		budget.budget("2026-08", "rent", 1);
 		budget.budget("2026-10", "rent", 2);
-		sheet.update(&budget.0, ym("2026-10")).unwrap();
-		assert_eq!(
-			sheet
-				.category(ym("2026-08"), &cat("rent"))
-				.unwrap()
-				.budgeted,
-			cents(150_000)
-		);
-		assert_eq!(
-			sheet
-				.category(ym("2026-10"), &cat("rent"))
-				.unwrap()
-				.budgeted,
-			cents(2)
-		);
+		sheet
+			.apply(&budget.0, SheetChange::Month(ym("2026-10")))
+			.unwrap();
+		let rent = |m: &str| sheet.category(ym(m), &cat("rent")).unwrap().budgeted;
+		assert_eq!(rent("2026-08"), cents(150_000));
+		assert_eq!(rent("2026-10"), cents(2));
 	}
 
 	#[test]
-	fn a_change_to_the_categories_or_month_range_rebuilds_everything() {
+	fn structure_changes_and_a_new_first_month_rebuild_everything() {
 		let mut budget = small_fixture();
 		let mut sheet = budget.sheet(TODAY);
 		budget.category("new", "everyday", false);
 		budget.budget("2026-06", "new", 4_000);
-		sheet.update(&budget.0, ym("2027-11")).unwrap();
+		sheet.apply(&budget.0, SheetChange::Structure).unwrap();
 		assert_matches_a_fresh_sheet(&sheet, &budget);
 
 		budget.txn("ancient", "checking", "2024-02-02", -1, Some("new"));
-		sheet.update(&budget.0, ym("2027-11")).unwrap();
+		let ancient = [TransactionId::new("ancient")];
+		sheet
+			.apply(&budget.0, SheetChange::Transactions(&ancient))
+			.unwrap();
 		assert_eq!(sheet.months().first(), Some(&ym("2023-11")));
+		assert_matches_a_fresh_sheet(&sheet, &budget);
+
+		budget.0.transactions.remove(&ancient[0]);
+		sheet
+			.apply(&budget.0, SheetChange::Transactions(&ancient))
+			.unwrap();
+		assert_eq!(sheet.months().first(), Some(&ym("2026-05")));
 		assert_matches_a_fresh_sheet(&sheet, &budget);
 	}
 }
