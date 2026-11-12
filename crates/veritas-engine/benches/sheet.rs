@@ -11,7 +11,7 @@ use veritas_domain::{
 	Account, AccountId, BudgetData, BudgetType, Category, CategoryGroup, CategoryGroupId,
 	CategoryId, CivilDate, Money, SplitRole, Transaction, TransactionId, YearMonth,
 };
-use veritas_engine::{BudgetEditor, EnvelopeSheet, NumberFormat, SheetChange};
+use veritas_engine::{AverageSpan, BudgetEditor, EnvelopeSheet, NumberFormat, SheetChange};
 
 const CATEGORIES: usize = 500;
 const GROUPS: usize = 25;
@@ -163,6 +163,31 @@ fn benches(c: &mut Criterion) {
 			black_box(sheet.month(current).unwrap());
 		})
 	});
+
+	let mut average = |all: bool| {
+		let editor = BudgetEditor::new(&budget, &sheet, NumberFormat::CommaDot, false);
+		let writes = if all {
+			editor.set_average(current, AverageSpan::Three).unwrap()
+		} else {
+			editor
+				.set_category_average(current, &CategoryId::new("category-7"), AverageSpan::Three)
+				.unwrap()
+		};
+		writes.apply_to(&mut budget);
+		sheet.apply(&budget, SheetChange::Month(current)).unwrap();
+		black_box(sheet.month(current).unwrap());
+	};
+	c.bench_function(
+		"R-PERF-2 set one envelope to its 3-month average, recompute, screen model",
+		|b| b.iter(|| average(false)),
+	);
+	let mut slow = c.benchmark_group("bulk");
+	slow.sample_size(10);
+	slow.bench_function(
+		"set every envelope to its 3-month average, recompute, screen model",
+		|b| b.iter(|| average(true)),
+	);
+	slow.finish();
 }
 
 criterion_group!(sheet, benches);

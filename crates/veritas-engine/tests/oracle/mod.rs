@@ -4,6 +4,7 @@
 
 #![allow(dead_code, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -290,4 +291,96 @@ pub fn today(dump: &Value) -> veritas_domain::CivilDate {
 	let text = dump["computed"]["today"].as_str().unwrap();
 	let parts: Vec<u32> = text.split('-').map(|p| p.parse().unwrap()).collect();
 	veritas_domain::CivilDate::new(parts[0] as i32, parts[1], parts[2]).unwrap()
+}
+
+/// Every difference between Actual's rows after replay and the engine's
+/// budget, keyed the way Actual looks rows up.
+pub fn compare_rows(budget: &BudgetData, actual: &Value) -> Vec<String> {
+	let mut differences = Vec::new();
+	let theirs: BTreeMap<(i64, String), (i64, i64)> = actual["zeroBudgets"]
+		.as_array()
+		.unwrap()
+		.iter()
+		.map(|row| {
+			let key = (
+				row["month"].as_i64().unwrap(),
+				row["category"].as_str().unwrap().to_owned(),
+			);
+			(
+				key,
+				(
+					row["amount"].as_i64().unwrap_or(0),
+					row["carryover"].as_i64().unwrap_or(0),
+				),
+			)
+		})
+		.collect();
+	let ours: BTreeMap<(i64, String), (i64, i64)> = budget
+		.budget_cells
+		.values()
+		.map(|cell| {
+			let month = i64::from(cell.month.year()) * 100 + i64::from(cell.month.month());
+			(
+				(month, cell.category.as_str().to_owned()),
+				(cell.budgeted.minor(), i64::from(cell.carryover)),
+			)
+		})
+		.collect();
+	if theirs != ours {
+		for key in theirs
+			.keys()
+			.chain(ours.keys())
+			.collect::<std::collections::BTreeSet<_>>()
+		{
+			if theirs.get(key) != ours.get(key) {
+				differences.push(format!(
+					"zero_budgets {key:?}: ours {:?}, Actual's {:?}",
+					ours.get(key),
+					theirs.get(key)
+				));
+			}
+		}
+	}
+	let theirs: BTreeMap<String, Option<i64>> = actual["zeroBudgetMonths"]
+		.as_array()
+		.unwrap()
+		.iter()
+		.map(|row| {
+			(
+				row["id"].as_str().unwrap().to_owned(),
+				row["buffered"].as_i64(),
+			)
+		})
+		.collect();
+	let ours: BTreeMap<String, Option<i64>> = budget
+		.holds
+		.iter()
+		.map(|(month, hold)| (month.to_string(), hold.map(|h| h.minor())))
+		.collect();
+	if theirs != ours {
+		differences.push(format!(
+			"zero_budget_months: ours {ours:?}, Actual's {theirs:?}"
+		));
+	}
+	let theirs: BTreeMap<String, Option<String>> = actual["budgetNotes"]
+		.as_array()
+		.unwrap()
+		.iter()
+		.map(|row| {
+			(
+				row["id"].as_str().unwrap().to_owned(),
+				row["note"].as_str().map(str::to_owned),
+			)
+		})
+		.collect();
+	let ours: BTreeMap<String, Option<String>> = budget
+		.notes
+		.iter()
+		.filter(|(id, _)| id.starts_with("budget-"))
+		.map(|(id, n)| (id.clone(), n.clone()))
+		.collect();
+	if theirs != ours {
+		differences.push(format!("budget notes: ours {ours:?}, Actual's {theirs:?}"));
+	}
+	differences
 }
