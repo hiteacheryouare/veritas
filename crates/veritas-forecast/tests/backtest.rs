@@ -115,11 +115,17 @@ fn bp(value: i64) -> String {
 	format!("{sign}{}.{:02}%", value.abs() / 100, value.abs() % 100)
 }
 
-/// The median of whole numbers, the lower middle for an even count, which
-/// is a reported value rather than a computed one.
+/// FC-0's median: the middle value, or for an even count the two middle
+/// values averaged and rounded half away from zero, in integers.
 fn middle(values: &mut [i64]) -> i64 {
 	values.sort_unstable();
-	values[(values.len() - 1) / 2]
+	let upper = values.len() / 2;
+	if values.len() % 2 == 1 {
+		return values[upper];
+	}
+	let sum = i128::from(values[upper - 1]) + i128::from(values[upper]);
+	let half = (sum.abs() + 1) / 2;
+	i64::try_from(if sum < 0 { -half } else { half }).unwrap()
 }
 
 /// "median (min to max)" over seeds, or "n/a" when no seed had a value.
@@ -251,4 +257,13 @@ fn fc_7_every_horizon_is_scored_on_24_months_or_more() {
 	assert_eq!(backtest.uncertain_flow[0].n, MONTHS as usize - 3 - 1);
 	assert_eq!(backtest.net_worth[0].n, MONTHS as usize - 6 - 1);
 	assert!(backtest.net_worth.iter().all(|row| row.n > 0));
+}
+
+#[test]
+fn fc_0_seed_medians_average_the_two_middle_values() {
+	assert_eq!(middle(&mut [10, 20]), 15);
+	assert_eq!(middle(&mut [4, 1, 3, 2]), 3, "2.5 rounds half away to 3");
+	assert_eq!(middle(&mut [-3, -2]), -3, "-2.5 rounds half away to -3");
+	assert_eq!(middle(&mut [7, 1, 4]), 4);
+	assert_eq!(middle(&mut [i64::MAX, i64::MAX]), i64::MAX);
 }
