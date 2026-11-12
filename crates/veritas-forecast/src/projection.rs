@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use veritas_domain::{
 	AccountId, BudgetData, CategoryId, CivilDate, CoreError, IncomeDelta, Money, Scenario,
-	ScenarioId, TransactionKind, YearMonth,
+	ScenarioId, ScheduleId, TransactionKind, YearMonth,
 };
 use veritas_reports::{Classification, Decision, Period, classify, net_worth};
 
@@ -95,6 +95,39 @@ impl Projection {
 	}
 }
 
+/// Each schedule's most common category over the classified rows it posted
+/// (a split child counts through its linked parent), ties to the lower id.
+fn schedule_categories(
+	budget: &BudgetData,
+	classification: &Classification,
+) -> BTreeMap<ScheduleId, CategoryId> {
+	let mut counts: BTreeMap<(&ScheduleId, &CategoryId), usize> = BTreeMap::new();
+	for row in classification.rows() {
+		let Some(category) = row.category.as_ref().filter(|_| row.is_primary()) else {
+			continue;
+		};
+		let schedule = [Some(&row.id), row.parent.as_ref()]
+			.into_iter()
+			.flatten()
+			.find_map(|id| budget.transactions.get(id)?.schedule.as_ref());
+		if let Some(schedule) = schedule {
+			*counts.entry((schedule, category)).or_default() += 1;
+		}
+	}
+	let mut best: BTreeMap<ScheduleId, (usize, CategoryId)> = BTreeMap::new();
+	for ((schedule, category), count) in counts {
+		let entry = best
+			.entry(schedule.clone())
+			.or_insert((0, category.clone()));
+		if count > entry.0 {
+			*entry = (count, category.clone());
+		}
+	}
+	best.into_iter()
+		.map(|(schedule, (_, category))| (schedule, category))
+		.collect()
+}
+
 /// Cents to whole dollars, rounded half up (toward +infinity on a tie) in
 /// i128, so no amount overflows.
 fn whole_dollars(amount: Money) -> i128 {
@@ -114,17 +147,21 @@ pub struct Forecaster<'a> {
 	pub(crate) classification: Classification,
 	pub(crate) history: History,
 	pub(crate) season_min: i32,
+	/// FC-2: the most common category of each schedule's posted rows.
+	schedule_categories: BTreeMap<ScheduleId, CategoryId>,
 }
 
 impl<'a> Forecaster<'a> {
 	pub fn new(budget: &'a BudgetData) -> Result<Forecaster<'a>, CoreError> {
 		let classification = classify(budget);
 		let history = History::new(budget, &classification)?;
+		let schedule_categories = schedule_categories(budget, &classification);
 		Ok(Forecaster {
 			budget,
 			classification,
 			history,
 			season_min: SEASON_MIN,
+			schedule_categories,
 		})
 	}
 
@@ -145,27 +182,12 @@ impl<'a> Forecaster<'a> {
 	/// schedule with none, the most common category of the rows it posted
 	/// (ties to the lower id).
 	fn feeding_category(&self, flow: &KnownFlow) -> Option<CategoryId> {
-		if let Some(category) = &flow.category {
-			return Some(category.clone());
-		}
-		let schedule = flow.schedule.as_ref()?;
-		let mut counts: BTreeMap<&CategoryId, usize> = BTreeMap::new();
-		for row in self.budget.transactions.values() {
-			if row.tombstone || row.schedule.as_ref() != Some(schedule) {
-				continue;
-			}
-			if let Some(category) = row
-				.category
+		flow.category.clone().or_else(|| {
+			flow.schedule
 				.as_ref()
-				.and_then(|category| self.budget.resolve_category(category))
-			{
-				*counts.entry(category).or_default() += 1;
-			}
-		}
-		counts
-			.into_iter()
-			.max_by(|(a, x), (b, y)| x.cmp(y).then_with(|| b.cmp(a)))
-			.map(|(category, _)| category.clone())
+				.and_then(|schedule| self.schedule_categories.get(schedule))
+				.cloned()
+		})
 	}
 
 	/// The series that get a baseline: income categories fed by an income
@@ -240,7 +262,7 @@ impl<'a> Forecaster<'a> {
 				}
 			};
 			let mut known_net = 0i64;
-			let mut known_income: BTreeMap<Option<&CategoryId>, i64> = BTreeMap::new();
+			let mut known_income: BTreeMap<Option<CategoryId>, i64> = BTreeMap::new();
 			for flow in known.iter().filter(|flow| in_month(flow.date)) {
 				post(&mut running, &flow.account, flow.amount.minor())?;
 				if let FlowKind::Transfer { counterpart } = &flow.kind {
@@ -252,7 +274,7 @@ impl<'a> Forecaster<'a> {
 				}
 				known_net = add(known_net, flow.net_income().minor())?;
 				if flow.kind == FlowKind::Income {
-					let total = known_income.entry(flow.category.as_ref()).or_default();
+					let total = known_income.entry(self.feeding_category(flow)).or_default();
 					*total = add(*total, flow.amount.minor())?;
 				}
 			}
@@ -297,7 +319,7 @@ impl<'a> Forecaster<'a> {
 					IncomeDelta::Percent(bp) => {
 						let base = known_income
 							.iter()
-							.filter(|(flow, _)| category.is_none() || **flow == category)
+							.filter(|(fed, _)| category.is_none() || fed.as_ref() == category)
 							.map(|(_, amount)| *amount)
 							.chain(
 								baseline_income

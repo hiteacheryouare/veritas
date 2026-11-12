@@ -838,3 +838,63 @@ fn fc_3_notes_round_half_up_without_overflow() {
 		Some("2 asset purchases excluded: $3")
 	);
 }
+
+#[test]
+fn fc_2_a_split_paycheck_feeds_the_category_of_its_children() {
+	let mut book = Book::household();
+	let months = [
+		"2026-07", "2026-08", "2026-09", "2026-10", "2026-11", "2026-12",
+	];
+	for (step, month) in months.into_iter().enumerate() {
+		let parent = format!("pay-{month}");
+		let dues = if step < 2 { -20000 } else { 0 };
+		book.row_with_id(&parent, "CHK", &format!("{month}-01"), 300000 + dues)
+			.bill("pay")
+			.split = veritas_domain::SplitRole::Parent;
+		book.spend("Paycheck", &format!("{month}-01"), 300000)
+			.child_of(&parent);
+		if dues != 0 {
+			book.spend("Fun", &format!("{month}-01"), dues)
+				.child_of(&parent);
+		}
+	}
+	let mut flow = known("2027-02-01", "Paycheck", 300000, FlowKind::Income);
+	flow.category = None;
+	flow.schedule = Some(ScheduleId::new("pay"));
+	let projection = project(&book, &[flow], None);
+	assert!(
+		projection
+			.baselines
+			.iter()
+			.all(|baseline| baseline.category != cat("Paycheck")),
+		"FC-2: the schedule feeds Paycheck through its split children"
+	);
+}
+
+#[test]
+fn fc_3_a_percent_income_change_reaches_an_uncategorized_schedule() {
+	let mut book = Book::household();
+	for month in ["2026-11", "2026-12"] {
+		book.spend("Paycheck", &format!("{month}-01"), 300000)
+			.bill("pay");
+	}
+	let mut flow = known("2027-02-01", "Paycheck", 300000, FlowKind::Income);
+	flow.category = None;
+	flow.schedule = Some(ScheduleId::new("pay"));
+	let raise = scenario(
+		"Raise",
+		vec![ScenarioChange::IncomeChange {
+			account: acct("CHK"),
+			category: Some(cat("Paycheck")),
+			change: IncomeDelta::Percent(1000),
+			start_month: ym("2027-02"),
+			end_month: Some(ym("2027-02")),
+		}],
+	);
+	let projection = project(&book, &[flow], Some(&raise));
+	assert_eq!(
+		projection.months[1].scenario_net_income,
+		cents(30000),
+		"FC-3 income change"
+	);
+}
