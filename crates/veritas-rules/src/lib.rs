@@ -23,7 +23,7 @@ pub use condition::{
 	Op, parse_date_value,
 };
 pub use posting::{
-	NextDateWrite, Posting, SchedulePlan, ScheduleWrite, advance_schedules, complete,
+	LeftBill, NextDateWrite, Posting, SchedulePlan, ScheduleWrite, advance_schedules, complete,
 	counts_as_paid, pay, post_now, restart, skip,
 };
 pub use recur::{Frequency, RecurError, Recurrence, WeekendSolveMode};

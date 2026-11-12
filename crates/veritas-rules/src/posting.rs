@@ -38,47 +38,70 @@ pub enum ScheduleWrite {
 	Complete(ScheduleId),
 	/// `completed = 0`, always followed by a reset next date when it changes.
 	Restart(ScheduleId),
+	/// `metadata.json` `lastScheduleRun = today`: today's run is done
+	/// (`app.ts:860-881`). A plan leaves it out when it leaves a bill to
+	/// Actual, so Actual runs the service again on its next open.
+	ScheduleRunDone(CivilDate),
+	/// Clears `lastScheduleRun`, as `allowAutoPostingToRunAgainToday` does
+	/// when an auto-post bill is completed or restarted (`app.ts:318-333`),
+	/// so the service runs again today.
+	ClearScheduleRun,
 }
 
-/// A transaction to add for a schedule, after its rules ran. When the payee
-/// is a transfer payee the session also creates the other leg, as
-/// `addTransactions` does with `runTransfers` (see `trigger::counterpart`).
+/// A transaction to add for a schedule, after every one of its rules ran.
+/// When the payee is a transfer payee the session also creates the other
+/// leg, as `addTransactions` does with `runTransfers` (see `trigger::counterpart`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Posting {
 	pub schedule: ScheduleId,
-	/// The transaction to add. `None` when one of its rules is undetermined:
-	/// then Veritas doesn't know what Actual would post, so this bill is
-	/// left to Actual (see `SchedulePlan::left_to_actual`).
-	pub transaction: Option<RuleTransaction>,
-	/// What the rules Veritas could run make of it, for showing and for
-	/// planning the rest of the run, never for writing.
-	pub partial: RuleTransaction,
+	pub transaction: RuleTransaction,
 	pub applied: Vec<RuleId>,
+}
+
+/// A bill Veritas leaves to Actual (D60): one of its occurrences met a rule
+/// Veritas can't run, so the plan holds none of this bill's posts, writes or
+/// new payees from this turn. Actual posts it the next time it opens the
+/// budget, which is why the plan then leaves out `ScheduleRunDone`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LeftBill {
+	pub schedule: ScheduleId,
+	/// The occurrence as far as Veritas's rules got, for showing only.
+	pub partial: RuleTransaction,
 	pub undetermined: Vec<RuleId>,
-	/// Why each undetermined rule couldn't run, for the "may need Actual" note.
+	/// Why each undetermined rule couldn't run, as noun phrases.
 	pub reasons: BTreeMap<RuleId, String>,
 }
 
+impl LeftBill {
+	/// What the bill screen says about it.
+	pub fn note(&self) -> String {
+		let reasons: Vec<&str> = self
+			.undetermined
+			.iter()
+			.filter_map(|rule| self.reasons.get(rule).map(String::as_str))
+			.collect();
+		let rules = match self.undetermined.len() {
+			1 => "1 rule".to_owned(),
+			n => format!("{n} rules"),
+		};
+		let why = if reasons.is_empty() {
+			String::new()
+		} else {
+			format!(" ({})", reasons.join("; "))
+		};
+		format!(
+			"Veritas left this bill for Actual: {rules} couldn't run here{why}. Actual posts it the next time it opens this budget."
+		)
+	}
+}
+
+/// What to apply, in order. Everything in `posts` and `writes` is safe to
+/// apply as it is; `left` only says which bills Actual will post instead.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SchedulePlan {
 	pub posts: Vec<Posting>,
 	pub writes: Vec<ScheduleWrite>,
-}
-
-impl SchedulePlan {
-	/// Bills with a posting Veritas can't finish. The session applies none of
-	/// their posts or writes and leaves them for Actual, which posts them the
-	/// next time it opens the budget.
-	pub fn left_to_actual(&self) -> Vec<&ScheduleId> {
-		let mut bills: Vec<&ScheduleId> = self
-			.posts
-			.iter()
-			.filter(|posting| posting.transaction.is_none())
-			.map(|posting| &posting.schedule)
-			.collect();
-		bills.dedup();
-		bills
-	}
+	pub left: Vec<LeftBill>,
 }
 
 /// What the service reads about one schedule, from its rule the way
@@ -87,7 +110,8 @@ struct Facts<'a> {
 	schedule: &'a Schedule,
 	payee: Option<PayeeId>,
 	account: Option<AccountId>,
-	amount: i64,
+	/// `None` when the amount isn't whole cents.
+	amount: Option<i64>,
 	raw_date: Option<Value>,
 	date: Option<DateValue>,
 	date_op_is: bool,
@@ -109,13 +133,8 @@ fn facts<'a>(schedule: &'a Schedule, budget: &BudgetData) -> Option<Facts<'a>> {
 	let value = |slot: Option<usize>| slot.map(|index| conditions[index]["value"].clone());
 	let payee = value(slots.payee)
 		.and_then(|v| v.as_str().map(PayeeId::new))
-		.and_then(|id| {
-			budget
-				.payee_mapping
-				.get(&id)
-				.cloned()
-				.or_else(|| budget.payees.contains_key(&id).then_some(id))
-		});
+		// `v_schedules._payee` is `payee_mapping.targetId`: no row, no payee.
+		.and_then(|id| budget.payee_mapping.get(&id).cloned());
 	let account = value(slots.account).and_then(|v| v.as_str().map(AccountId::new));
 	let raw_date = value(slots.date).filter(|v| !v.is_null());
 	let date = slots.date.and_then(|index| {
@@ -155,7 +174,9 @@ fn has_transaction(
 		.values()
 		.any(|t| !t.tombstone && t.schedule.as_ref() == Some(id) && t.date >= start)
 		|| posted.iter().any(|p| {
-			!p.partial.deleted && p.partial.schedule.as_ref() == Some(id) && p.partial.date >= start
+			!p.transaction.deleted
+				&& p.transaction.schedule.as_ref() == Some(id)
+				&& p.transaction.date >= start
 		})
 }
 
@@ -191,15 +212,22 @@ struct Planner<'a> {
 }
 
 impl Planner<'_> {
-	/// `postTransactionForSchedule` through `addTransactions`.
-	fn post(&mut self, facts: &Facts, date: CivilDate, amount: Option<Money>) {
+	/// `postTransactionForSchedule` through `addTransactions`. `Err` is a
+	/// bill this run leaves to Actual.
+	fn post(
+		&mut self,
+		facts: &Facts,
+		date: CivilDate,
+		amount: Option<Money>,
+	) -> Result<(), Box<LeftBill>> {
 		let Some(account) = facts.account.clone() else {
-			return;
+			return Ok(());
 		};
+		let scheduled = facts.amount.map(Money::from_minor);
 		let draft = RuleTransaction {
 			account: account.clone(),
 			date,
-			amount: amount.unwrap_or(Money::from_minor(facts.amount)),
+			amount: amount.or(scheduled).unwrap_or(Money::ZERO),
 			payee: facts.payee.clone(),
 			category: None,
 			notes: None,
@@ -211,17 +239,46 @@ impl Planner<'_> {
 			splits: Vec::new(),
 			is_child: false,
 		};
+		if amount.is_none() && scheduled.is_none() {
+			let rule = facts.schedule.rule.clone();
+			return Err(Box::new(LeftBill {
+				schedule: facts.schedule.id.clone(),
+				partial: draft,
+				undetermined: vec![rule.clone()],
+				reasons: BTreeMap::from([(
+					rule,
+					"a bill amount that isn't whole cents".to_owned(),
+				)]),
+			}));
+		}
 		let outcome = self.book.run(&draft, self.budget, self.payees);
+		let mut ruled = match outcome.transaction {
+			Some(ruled) => added_transaction(ruled, &account),
+			None => {
+				let mut partial = added_transaction(outcome.partial, &account);
+				if let Some(amount) = amount {
+					partial.amount = amount;
+					partial.date = date;
+				}
+				return Err(Box::new(LeftBill {
+					schedule: facts.schedule.id.clone(),
+					partial,
+					undetermined: outcome.undetermined,
+					reasons: outcome.reasons,
+				}));
+			}
+		};
+		// Paid: Ryan's amount and date win over any rule action.
+		if let Some(amount) = amount {
+			ruled.amount = amount;
+			ruled.date = date;
+		}
 		self.plan.posts.push(Posting {
 			schedule: facts.schedule.id.clone(),
-			transaction: outcome
-				.transaction
-				.map(|ruled| added_transaction(ruled, &account)),
-			partial: added_transaction(outcome.partial, &account),
+			transaction: ruled,
 			applied: outcome.applied,
-			undetermined: outcome.undetermined,
-			reasons: outcome.reasons,
 		});
+		Ok(())
 	}
 
 	fn write_next(&mut self, schedule: &ScheduleId, write: NextDateWrite) {
@@ -231,8 +288,24 @@ impl Planner<'_> {
 		});
 	}
 
-	/// One schedule's turn in `advanceSchedulesService`.
+	/// One schedule's turn, all or nothing: a bill left to Actual takes back
+	/// its posts, writes and new payees from this turn (D60).
 	fn advance(&mut self, facts: &Facts, today: CivilDate) {
+		let (made, posts, writes) = (
+			self.payees.made(),
+			self.plan.posts.len(),
+			self.plan.writes.len(),
+		);
+		if let Err(left) = self.advance_turn(facts, today) {
+			self.payees.forget_made_after(made);
+			self.plan.posts.truncate(posts);
+			self.plan.writes.truncate(writes);
+			self.plan.left.push(*left);
+		}
+	}
+
+	/// One schedule's turn in `advanceSchedulesService`.
+	fn advance_turn(&mut self, facts: &Facts, today: CivilDate) -> Result<(), Box<LeftBill>> {
 		let schedule = facts.schedule;
 		let first = current_status(facts, schedule.next_date, today, self.budget, &[]);
 		let posts = schedule.posts_transaction && facts.account.is_some();
@@ -252,7 +325,7 @@ impl Planner<'_> {
 					let Some(date) = next else {
 						break;
 					};
-					self.post(facts, date, None);
+					self.post(facts, date, None)?;
 					if state == ScheduleStatus::Due || !facts.recurring() {
 						break;
 					}
@@ -290,6 +363,7 @@ impl Planner<'_> {
 					.push(ScheduleWrite::Complete(schedule.id.clone()));
 			}
 		}
+		Ok(())
 	}
 }
 
@@ -325,6 +399,12 @@ pub fn advance_schedules(
 		if open {
 			planner.advance(&facts, today);
 		}
+	}
+	if planner.plan.left.is_empty() {
+		planner
+			.plan
+			.writes
+			.push(ScheduleWrite::ScheduleRunDone(today));
 	}
 	planner.plan
 }
@@ -364,10 +444,14 @@ pub fn skip(budget: &BudgetData, id: &ScheduleId) -> Result<SchedulePlan, CoreEr
 
 /// End a bill: Actual's Complete only sets `completed`.
 pub fn complete(budget: &BudgetData, id: &ScheduleId) -> Result<SchedulePlan, CoreError> {
-	schedule_facts(budget, id)?;
+	let facts = schedule_facts(budget, id)?;
+	let mut writes = vec![ScheduleWrite::Complete(id.clone())];
+	if facts.schedule.posts_transaction {
+		writes.push(ScheduleWrite::ClearScheduleRun);
+	}
 	Ok(SchedulePlan {
-		posts: Vec::new(),
-		writes: vec![ScheduleWrite::Complete(id.clone())],
+		writes,
+		..SchedulePlan::default()
 	})
 }
 
@@ -389,9 +473,12 @@ pub fn restart(
 			write: NextDateWrite::Reset(next),
 		});
 	}
+	if facts.schedule.posts_transaction {
+		writes.push(ScheduleWrite::ClearScheduleRun);
+	}
 	Ok(SchedulePlan {
-		posts: Vec::new(),
 		writes,
+		..SchedulePlan::default()
 	})
 }
 
@@ -415,7 +502,9 @@ pub fn post_now(
 		payees,
 		plan: SchedulePlan::default(),
 	};
-	planner.post(&facts, date, None);
+	if let Err(left) = planner.post(&facts, date, None) {
+		planner.plan.left.push(*left);
+	}
 	Ok(planner.plan)
 }
 
@@ -445,12 +534,9 @@ pub fn pay(
 		payees,
 		plan: SchedulePlan::default(),
 	};
-	planner.post(&facts, date, Some(amount));
-	if let Some(posting) = planner.plan.posts.last_mut() {
-		for transaction in posting.transaction.iter_mut().chain([&mut posting.partial]) {
-			transaction.amount = amount;
-			transaction.date = date;
-		}
+	if let Err(left) = planner.post(&facts, date, Some(amount)) {
+		planner.plan.left.push(*left);
+		return Ok(planner.plan);
 	}
 	let next = facts.schedule.next_date;
 	let counted = next.is_some_and(|next| {
@@ -584,17 +670,16 @@ mod tests {
 		let budget = budget_with(&bill(monthly(), false), "2026-12-15");
 		let plan = paid(&budget, -149_000, "2026-12-13");
 		assert_eq!(plan.posts.len(), 1);
+		assert!(plan.left.is_empty());
 		assert_eq!(
-			plan.posts[0].transaction.as_ref(),
-			Some(&plan.posts[0].partial)
+			plan.posts[0].transaction.amount,
+			Money::from_minor(-149_000)
 		);
-		assert!(plan.left_to_actual().is_empty());
-		assert_eq!(plan.posts[0].partial.amount, Money::from_minor(-149_000));
 		assert_eq!(
-			plan.posts[0].partial.schedule,
+			plan.posts[0].transaction.schedule,
 			Some(ScheduleId::new("rent"))
 		);
-		assert_eq!(plan.posts[0].partial.cleared, Some(false));
+		assert_eq!(plan.posts[0].transaction.cleared, Some(false));
 		assert!(plan.writes.is_empty());
 	}
 
@@ -627,14 +712,18 @@ mod tests {
 		let dates: Vec<String> = plan
 			.posts
 			.iter()
-			.map(|p| p.partial.date.to_string())
+			.map(|p| p.transaction.date.to_string())
 			.collect();
 		assert_eq!(
 			dates,
 			["2026-08-15", "2026-09-15", "2026-10-15"],
 			"missed ones catch up; due today posts and stops"
 		);
-		assert_eq!(plan.writes.len(), 2);
+		assert_eq!(plan.writes.len(), 3);
+		assert_eq!(
+			plan.writes.last(),
+			Some(&ScheduleWrite::ScheduleRunDone(day("2026-10-15")))
+		);
 
 		let mut paid_budget = budget_with(&bill(monthly(), false), "2026-10-15");
 		paid_budget.transactions.insert(
@@ -664,10 +753,107 @@ mod tests {
 		assert!(plan.posts.is_empty());
 		assert_eq!(
 			plan.writes,
-			[ScheduleWrite::NextDate {
-				schedule: ScheduleId::new("rent"),
-				write: NextDateWrite::Local(day("2026-11-15"))
-			}]
+			[
+				ScheduleWrite::NextDate {
+					schedule: ScheduleId::new("rent"),
+					write: NextDateWrite::Local(day("2026-11-15"))
+				},
+				ScheduleWrite::ScheduleRunDone(day("2026-10-20"))
+			]
+		);
+	}
+
+	fn add_rule(
+		budget: &mut BudgetData,
+		id: &str,
+		conditions: serde_json::Value,
+		actions: serde_json::Value,
+	) {
+		budget.rules.insert(
+			RuleId::new(id),
+			Rule {
+				id: RuleId::new(id),
+				stage: RuleStage::Default,
+				conditions_op: ConditionsOp::And,
+				conditions_json: conditions.to_string(),
+				actions_json: actions.to_string(),
+				tombstone: false,
+			},
+		);
+	}
+
+	#[test]
+	fn a_bill_that_meets_a_rule_veritas_cannot_run_is_left_whole() {
+		// Missed since Aug 15. The Aug 15 post renames to a new payee, and the
+		// Sep 15 post meets a template rule, so the whole bill goes to Actual:
+		// no posts, no next-date writes past occurrences nobody posted, no new
+		// payee, and today's run isn't recorded (D60).
+		let mut budget = budget_with(&bill(monthly(), true), "2026-08-15");
+		add_rule(
+			&mut budget,
+			"rename",
+			serde_json::json!([{"op": "is", "field": "date", "value": "2026-08-15"}]),
+			serde_json::json!([{"op": "set", "field": "payee_name", "value": "New Landlord"}]),
+		);
+		add_rule(
+			&mut budget,
+			"template",
+			serde_json::json!([{"op": "is", "field": "date", "value": "2026-09-15"}]),
+			serde_json::json!([{"op": "set", "field": "notes", "value": "", "options": {"template": "{{date}}"}}]),
+		);
+		let book = RuleBook::new(&budget);
+		let mut payees = BudgetPayees::new(&budget, || PayeeId::new("made"));
+		let plan = advance_schedules(&book, &budget, &mut payees, day("2026-10-15"));
+		assert!(plan.posts.is_empty());
+		assert!(plan.writes.is_empty());
+		assert!(
+			payees.created.is_empty(),
+			"the payee the Aug 15 post made goes too"
+		);
+		assert_eq!(plan.left.len(), 1);
+		let left = &plan.left[0];
+		assert_eq!(left.schedule, ScheduleId::new("rent"));
+		assert_eq!(left.partial.date, day("2026-09-15"));
+		assert_eq!(left.undetermined, [RuleId::new("template")]);
+		assert_eq!(
+			left.note(),
+			"Veritas left this bill for Actual: 1 rule couldn't run here (a template action). Actual posts it the next time it opens this budget."
+		);
+	}
+
+	#[test]
+	fn an_amount_that_is_not_whole_cents_is_left_to_actual() {
+		let mut budget = budget_with(&bill(monthly(), true), "2026-10-15");
+		let rule = budget.rules.get_mut(&RuleId::new("rule")).unwrap();
+		rule.conditions_json = rule.conditions_json.replace("-150000", "-1500.5");
+		let book = RuleBook::new(&budget);
+		let mut payees = BudgetPayees::new(&budget, || PayeeId::new("made"));
+		let plan = advance_schedules(&book, &budget, &mut payees, day("2026-10-15"));
+		assert!(plan.posts.is_empty());
+		assert_eq!(
+			plan.left[0].reasons[&RuleId::new("rule")],
+			"a bill amount that isn't whole cents"
+		);
+	}
+
+	#[test]
+	fn completing_or_restarting_an_auto_post_bill_lets_the_service_run_again() {
+		// allowAutoPostingToRunAgainToday (app.ts:318-333).
+		let budget = budget_with(&bill(monthly(), true), "2026-12-15");
+		let id = ScheduleId::new("rent");
+		assert_eq!(
+			complete(&budget, &id).unwrap().writes,
+			[
+				ScheduleWrite::Complete(id.clone()),
+				ScheduleWrite::ClearScheduleRun
+			]
+		);
+		assert_eq!(
+			restart(&budget, &id, day("2026-12-16"))
+				.unwrap()
+				.writes
+				.last(),
+			Some(&ScheduleWrite::ClearScheduleRun)
 		);
 	}
 
