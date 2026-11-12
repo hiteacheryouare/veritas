@@ -4,7 +4,7 @@ use veritas_domain::{
 	AccountId, BudgetData, CategoryId, CivilDate, CoreError, IncomeDelta, Money, Scenario,
 	ScenarioId, TransactionKind, YearMonth,
 };
-use veritas_reports::{Classification, Period, classify, net_worth};
+use veritas_reports::{Classification, Decision, Period, classify, net_worth};
 
 use crate::band::{Band, band};
 use crate::baseline::{Baseline, SEASON_MIN, WINDOW, complete_months};
@@ -72,22 +72,33 @@ pub struct Projection {
 impl Projection {
 	/// "N asset purchase(s) excluded: $X", omitted when there are none.
 	pub fn asset_purchase_note(&self) -> Option<String> {
-		let dollars = round_half_away(i128::from(self.asset_purchase_total.minor()), 100);
+		let dollars = whole_dollars(self.asset_purchase_total);
+		let total = if dollars < 0 {
+			format!("-${}", -dollars)
+		} else {
+			format!("${dollars}")
+		};
 		match self.asset_purchases {
 			0 => None,
-			1 => Some(format!("1 asset purchase excluded: ${dollars}")),
-			n => Some(format!("{n} asset purchases excluded: ${dollars}")),
+			1 => Some(format!("1 asset purchase excluded: {total}")),
+			n => Some(format!("{n} asset purchases excluded: {total}")),
 		}
 	}
 
 	/// "Not forecast: $X a month in uncategorized or hidden spending", in
 	/// whole dollars rounded half up, omitted when that rounds to $0.
 	pub fn not_forecast_note(&self) -> Option<String> {
-		let dollars = (self.not_forecast.minor().max(0) + 50) / 100;
+		let dollars = whole_dollars(self.not_forecast);
 		(dollars > 0).then(|| {
 			format!("Not forecast: ${dollars} a month in uncategorized or hidden spending")
 		})
 	}
+}
+
+/// Cents to whole dollars, rounded half up (toward +infinity on a tie) in
+/// i128, so no amount overflows.
+fn whole_dollars(amount: Money) -> i128 {
+	(2 * i128::from(amount.minor()) + 100).div_euclid(200)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -404,10 +415,10 @@ impl<'a> Forecaster<'a> {
 					.category
 					.as_ref()
 					.is_some_and(|id| spending.contains(id));
-				if row.is_primary()
-					&& row.kind() == TransactionKind::Expense
-					&& !covered && !bill_linked(self.budget, row)
-				{
+				let spending = row.kind() == TransactionKind::Expense
+					&& !asset_purchase(row)
+					&& row.decision != Decision::MisfiledTransferCategory;
+				if row.is_primary() && spending && !covered && !bill_linked(self.budget, row) {
 					total = total
 						.checked_sub(row.amount.minor())
 						.ok_or(CoreError::Overflow)?;

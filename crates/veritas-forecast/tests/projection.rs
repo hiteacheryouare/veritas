@@ -791,3 +791,50 @@ fn fc_3_spending_no_baseline_covers_is_noted_not_projected() {
 	let clean = project(&groceries_book(43000), &[], None);
 	assert_eq!(clean.not_forecast_note(), None);
 }
+
+#[test]
+fn fc_3_not_forecast_skips_asset_purchases_and_misfiled_rows() {
+	let mut book = groceries_book(43000);
+	book.account("CAR", true)
+		.group("Saving", false)
+		.category("Emergency fund", "Saving")
+		.kind("Emergency fund", veritas_domain::CategoryKind::Savings)
+		.hide("Books");
+	for month in [
+		"2026-07", "2026-08", "2026-09", "2026-10", "2026-11", "2026-12",
+	] {
+		book.spend("Books", &format!("{month}-06"), -1000);
+		book.spend("Emergency fund", &format!("{month}-07"), -5000);
+		book.transfer("CHK", "CAR", &format!("{month}-08"), -9000)
+			.in_category("Books");
+	}
+	let projection = project(&book, &[], None);
+	assert_eq!(
+		projection.not_forecast,
+		cents(1000),
+		"row 8 and row 14 are not spending to note"
+	);
+	assert_eq!(projection.asset_purchases, 6);
+}
+
+#[test]
+fn fc_3_notes_round_half_up_without_overflow() {
+	let mut projection = project(&groceries_book(43000), &[], None);
+	projection.not_forecast = cents(i64::MAX);
+	assert_eq!(
+		projection.not_forecast_note().as_deref(),
+		Some("Not forecast: $92233720368547758 a month in uncategorized or hidden spending")
+	);
+	projection.asset_purchases = 2;
+	projection.asset_purchase_total = cents(-250);
+	assert_eq!(
+		projection.asset_purchase_note().as_deref(),
+		Some("2 asset purchases excluded: -$2"),
+		"half up, not away"
+	);
+	projection.asset_purchase_total = cents(250);
+	assert_eq!(
+		projection.asset_purchase_note().as_deref(),
+		Some("2 asset purchases excluded: $3")
+	);
+}
