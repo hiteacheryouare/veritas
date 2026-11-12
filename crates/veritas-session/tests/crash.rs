@@ -422,7 +422,6 @@ fn a_second_window_never_writes_through_a_writer_crash() {
 }
 
 #[test]
-#[ignore = "bug: the store loads table by table outside one read transaction, so a window opened while another writes can load half of an action"]
 fn a_window_opened_while_another_writes_loads_only_whole_actions() {
 	// R-REL-1, R-REL-6: every action is one transaction, so a second window
 	// must see each one entirely or not at all. It gets no change events from
