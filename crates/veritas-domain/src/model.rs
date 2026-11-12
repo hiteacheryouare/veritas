@@ -164,9 +164,12 @@ pub struct AccountMeta {
 }
 
 /// docs/finance/classification.md CLS-5: a reconciliation adjustment Veritas made.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct TransactionMeta {
 	pub adjustment: bool,
+	/// Why the row may need a look in Actual, such as a rule action Veritas
+	/// can't run. Written by veritas-rules.
+	pub needs_actual: Option<String>,
 }
 
 /// Actual's `custom_reports` row as stored. Its text columns stay as Actual
@@ -224,6 +227,17 @@ pub struct Widget {
 	pub tombstone: bool,
 }
 
+/// Actual's synced number-format preferences, as stored: `numberFormat`
+/// (`comma-dot`, `dot-comma`, `space-comma`, `apostrophe-dot` or another
+/// value a newer Actual writes), `hideFraction` and `defaultCurrencyCode`.
+/// `None` means the preference isn't set, which Actual reads as its default.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct FormatPrefs {
+	pub number_format: Option<String>,
+	pub hide_fraction: bool,
+	pub currency_code: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Goal {
 	pub id: GoalId,
@@ -258,7 +272,8 @@ pub struct BudgetData {
 	pub schedules: BTreeMap<ScheduleId, Schedule>,
 	pub tags: BTreeMap<TagId, Tag>,
 	/// Actual's `notes` table: category, account and budget-month notes by id.
-	pub notes: BTreeMap<String, String>,
+	/// `None` is a row whose note is NULL, which is how Actual clears one.
+	pub notes: BTreeMap<String, Option<String>>,
 	/// Where each category or payee id reads as, including self-mappings. A
 	/// deleted or merged id points at its replacement.
 	pub category_mapping: BTreeMap<CategoryId, CategoryId>,
@@ -268,6 +283,7 @@ pub struct BudgetData {
 	pub transaction_meta: BTreeMap<TransactionId, TransactionMeta>,
 	/// `veritas_tax_tag`: Actual tag name (without `#`) to TAX-2 bucket id.
 	pub tax_tags: BTreeMap<String, String>,
+	pub format: FormatPrefs,
 	pub goals: BTreeMap<GoalId, Goal>,
 	pub custom_reports: BTreeMap<CustomReportId, CustomReportRow>,
 	pub dashboard_pages: BTreeMap<DashboardPageId, DashboardPage>,
@@ -297,6 +313,7 @@ impl BudgetData {
 			account_meta: BTreeMap::new(),
 			transaction_meta: BTreeMap::new(),
 			tax_tags: BTreeMap::new(),
+			format: FormatPrefs::default(),
 			goals: BTreeMap::new(),
 			custom_reports: BTreeMap::new(),
 			dashboard_pages: BTreeMap::new(),

@@ -24,12 +24,14 @@ publish = false
 # between veritas-ffi and the bindings generator. Only Appendix B entries.
 [workspace.dependencies]
 chrono = { version = "0.4.45", default-features = false, features = ["std"] }
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 proptest = "1.12.0"
 # D47: Ryan approved it for rule `matches` conditions.
 regex = "1.13.1"
 rusqlite = { version = "0.41.1", features = ["bundled"] }
 serde_json = "1"
 thiserror = "2.0.21"
+uuid = { version = "1.29.2", default-features = false, features = ["std", "v4"] }
 uniffi = "0.32.2"
 zip = { version = "9.5.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 

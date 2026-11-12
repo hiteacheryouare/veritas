@@ -1,6 +1,8 @@
 use std::collections::BTreeSet;
 
-use veritas_domain::{BudgetData, CivilDate, CoreError, Money, TransactionId, TransactionKind};
+use veritas_domain::{
+	BudgetData, CategoryId, CivilDate, CoreError, Money, TransactionId, TransactionKind,
+};
 
 use crate::net_profit::labels;
 use crate::{CategoryLabels, Classification, ClassifiedRow, Period};
@@ -94,6 +96,9 @@ pub struct TaxRow {
 	pub source: Source,
 	pub amount: Money,
 	pub counted: Option<Money>,
+	/// The classified row's category, after `category_mapping`.
+	pub category: Option<CategoryId>,
+	pub parent: Option<TransactionId>,
 }
 
 impl TaxRow {
@@ -259,6 +264,8 @@ pub fn tax_summary(
 			counted: bucket
 				.map(|bucket| bucket.counted(row.amount))
 				.transpose()?,
+			category: row.category.clone(),
+			parent: row.parent.clone(),
 		});
 	}
 	detail.sort_by(|a, b| {
@@ -348,18 +355,16 @@ pub fn detail_csv(budget: &BudgetData, summary: &TaxSummary) -> String {
 					.and_then(|account| budget.accounts.get(account))
 					.map_or_else(|| payee.name.clone(), |account| account.name.clone())
 			});
-		let category_id = transaction
-			.and_then(|transaction| transaction.category.as_ref())
-			.and_then(|category| budget.resolve_category(category))
-			.filter(|category| budget.categories.contains_key(*category));
-		let category = category_id
+		let category = row
+			.category
+			.as_ref()
 			.and_then(|category| budget.categories.get(category))
 			.map(|category| category.name.clone());
-		let status = category_id.map_or("", |category| category_status(labels(budget, category)));
-		let parent = transaction.and_then(|transaction| match &transaction.split {
-			veritas_domain::SplitRole::Child { parent } => Some(parent.to_string()),
-			_ => None,
-		});
+		let status = row
+			.category
+			.as_ref()
+			.map_or("", |category| category_status(labels(budget, category)));
+		let parent = row.parent.as_ref().map(ToString::to_string);
 		csv.row([
 			Cell::Number(summary.year.to_string()),
 			Cell::Text(row.bucket_id().to_owned()),

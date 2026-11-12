@@ -5,9 +5,10 @@ use rusqlite::{Connection, OptionalExtension, Row};
 use veritas_domain::{
 	Account, AccountGroup, AccountGroupId, AccountId, AccountKind, AccountMeta, BudgetCell,
 	BudgetData, BudgetType, Category, CategoryGroup, CategoryGroupId, CategoryId, CategoryKind,
-	CategoryMeta, CivilDate, ConditionsOp, CoreError, Goal, GoalId, GoalStatus, Money, Payee,
-	PayeeId, Rule, RuleId, RuleStage, Schedule, ScheduleId, SplitRole, Tag, TagId, Transaction,
-	TransactionId, TransactionMeta,
+	CategoryMeta, CivilDate, ConditionsOp, CoreError, CustomReportId, CustomReportRow,
+	DashboardPage, DashboardPageId, FormatPrefs, Goal, GoalId, GoalStatus, Money, Payee, PayeeId,
+	Rule, RuleId, RuleStage, Schedule, ScheduleId, SplitRole, Tag, TagId, Transaction,
+	TransactionId, TransactionMeta, Widget, WidgetId,
 };
 
 use crate::cells::{
@@ -37,7 +38,17 @@ pub struct Loaded {
 }
 
 pub(crate) const DUPLICATE_BUDGET_CELL: &str =
-	"repeats an earlier row's month and category, and replaces it";
+	"a later row for the same month and category replaces it";
+
+/// Budget rows are matched by (month, category), never by id, because Actual
+/// wrote two id formats over the years. When a corrupt file repeats a pair,
+/// the last row counts, as in Actual's sheet. The loader and the writer both
+/// pick with this ordering, so an edit lands in the row that is read back.
+pub(crate) const BUDGET_CELL_PICK: &str = "rowid DESC";
+
+/// Of several `schedules_next_date` rows for one schedule, the first live one
+/// counts. Shared by the loader and the writer, like [`BUDGET_CELL_PICK`].
+pub(crate) const NEXT_DATE_PICK: &str = "CASE WHEN tombstone = 0 THEN 0 ELSE 1 END, rowid";
 
 fn at<'r>(row: &'r Row<'_>, index: usize) -> Cell<ValueRef<'r>> {
 	row.get_ref(index).map_err(|_| "a column is missing")
@@ -93,12 +104,56 @@ pub(crate) fn budget_type(conn: &Connection) -> Result<BudgetType, CoreError> {
 	})
 }
 
+/// The column, or `NULL` when a table from an earlier build lacks it. A
+/// read-only open can't add the column, so it reads the default instead.
+fn column_or_null(conn: &Connection, table: &str, column: &str) -> Result<String, CoreError> {
+	let present: bool = conn
+		.query_row(
+			&format!("SELECT EXISTS (SELECT 1 FROM pragma_table_info('{table}') WHERE name = ?1)"),
+			[column],
+			|row| row.get(0),
+		)
+		.map_err(storage)?;
+	Ok(if present {
+		column.to_owned()
+	} else {
+		"NULL".to_owned()
+	})
+}
+
+/// Actual's number-format preferences. `hideFraction` is on only when it is
+/// the text `true`, as Actual's useFormat reads it.
+fn format_prefs(conn: &Connection) -> Result<FormatPrefs, CoreError> {
+	let mut prefs = FormatPrefs::default();
+	if !table_exists(conn, "preferences")? {
+		return Ok(prefs);
+	}
+	let mut statement = conn
+		.prepare(
+			"SELECT id, CAST(value AS TEXT) FROM preferences \
+			 WHERE id IN ('numberFormat', 'hideFraction', 'defaultCurrencyCode')",
+		)
+		.map_err(storage)?;
+	let mut rows = statement.query([]).map_err(storage)?;
+	while let Some(row) = rows.next().map_err(storage)? {
+		let id: String = row.get(0).map_err(storage)?;
+		let value: Option<String> = row.get(1).map_err(storage)?;
+		match id.as_str() {
+			"numberFormat" => prefs.number_format = value,
+			"hideFraction" => prefs.hide_fraction = value.as_deref() == Some("true"),
+			_ => prefs.currency_code = value,
+		}
+	}
+	Ok(prefs)
+}
+
 fn id(row: &Row<'_>, index: usize) -> Cell<String> {
 	required_text(at(row, index)?, "the row has no id")
 }
 
 pub fn load(conn: &Connection) -> Result<Loaded, CoreError> {
 	let mut data = BudgetData::empty(budget_type(conn)?);
+	data.format = format_prefs(conn)?;
 	let mut skipped = Vec::new();
 
 	each_row(
@@ -209,7 +264,9 @@ pub fn load(conn: &Connection) -> Result<Loaded, CoreError> {
 		"transactions",
 		"SELECT id, acct, date, amount, description, category, notes, cleared, reconciled, \
 		 isParent, isChild, parent_id, transferred_id, schedule, starting_balance_flag, \
-		 sort_order, tombstone, imported_description FROM transactions",
+		 sort_order, tombstone, imported_description, \
+		 CASE WHEN isChild = 1 THEN (SELECT p.tombstone IS NULL FROM transactions p \
+		 WHERE p.id = t.parent_id) END FROM transactions t",
 		&mut skipped,
 		|row| {
 			let transaction = transaction(row)?;
@@ -227,7 +284,9 @@ pub fn load(conn: &Connection) -> Result<Loaded, CoreError> {
 		conn,
 		budget_table,
 		&format!(
-			"SELECT id, month, category, amount, carryover, goal, long_goal FROM {budget_table} ORDER BY rowid"
+			"SELECT id, month, category, amount, carryover, goal, long_goal, \
+			 row_number() OVER (PARTITION BY month, category ORDER BY {BUDGET_CELL_PICK}) \
+			 FROM {budget_table} ORDER BY rowid"
 		),
 		&mut skipped,
 		|row| {
@@ -242,17 +301,12 @@ pub fn load(conn: &Connection) -> Result<Loaded, CoreError> {
 				goal: money(at(row, 5)?)?,
 				long_goal: flag(at(row, 6)?),
 			};
-			// Rows are matched by (month, category) and never by id, because
-			// Actual wrote two id formats over the years. A repeated pair is
-			// corrupt; the later row wins, as in Actual's sheet, and is the
-			// one reported.
-			let shadowed = data
-				.budget_cells
-				.insert((cell.month, cell.category.clone()), cell);
-			match shadowed {
-				Some(_) => Err(DUPLICATE_BUDGET_CELL),
-				None => Ok(()),
+			if integer(at(row, 7)?)? != Some(1) {
+				return Err(DUPLICATE_BUDGET_CELL);
 			}
+			data.budget_cells
+				.insert((cell.month, cell.category.clone()), cell);
+			Ok(())
 		},
 	)?;
 
@@ -283,7 +337,8 @@ pub fn load(conn: &Connection) -> Result<Loaded, CoreError> {
 			let rule = Rule {
 				id: id.clone(),
 				stage: match text(at(row, 1)?)?.as_deref() {
-					Some("pre") => RuleStage::Pre,
+					// Actual's loadRules still reads two retired stage names as pre.
+					Some("pre" | "cleanup" | "modify") => RuleStage::Pre,
 					Some("post") => RuleStage::Post,
 					_ => RuleStage::Default,
 				},
@@ -309,7 +364,7 @@ pub fn load(conn: &Connection) -> Result<Loaded, CoreError> {
 		|row| {
 			let id = ScheduleId::new(id(row, 0)?);
 			let schedule = Schedule {
-				next_date: next_dates.get(&id).and_then(|next| next.date),
+				next_date: next_dates.get(&id).copied().flatten(),
 				id: id.clone(),
 				name: text(at(row, 1)?)?,
 				rule: RuleId::new(required_text(at(row, 2)?, "the schedule has no rule")?),
@@ -349,10 +404,7 @@ pub fn load(conn: &Connection) -> Result<Loaded, CoreError> {
 		&mut skipped,
 		|row| {
 			let id = id(row, 0)?;
-			// Actual clears a note by writing NULL, so a NULL note is no note.
-			if let Some(note) = text(at(row, 1)?)? {
-				data.notes.insert(id, note);
-			}
+			data.notes.insert(id, text(at(row, 1)?)?);
 			Ok(())
 		},
 	)?;
@@ -383,6 +435,7 @@ pub fn load(conn: &Connection) -> Result<Loaded, CoreError> {
 		},
 	)?;
 
+	load_reports(conn, &mut data, &mut skipped)?;
 	load_veritas_tables(conn, &mut data, &mut skipped)?;
 
 	Ok(Loaded {
@@ -404,6 +457,11 @@ fn transaction(row: &Row<'_>) -> Cell<Transaction> {
 	};
 	let split = match (is_parent, is_child) {
 		(true, true) => return Err("the row is marked both split parent and split child"),
+		// Actual's alive view keeps a child only when t2.tombstone = 0, so a
+		// NULL parent tombstone, which IFNULL keeps alive, still drops it.
+		(_, true) if flag(at(row, 18)?) => {
+			return Err("the split parent's tombstone is NULL, which drops this child in Actual");
+		}
 		(_, true) => SplitRole::Child {
 			parent: TransactionId::new(required_text(
 				at(row, 11)?,
@@ -441,23 +499,22 @@ fn transaction(row: &Row<'_>) -> Cell<Transaction> {
 	})
 }
 
-struct NextDate {
-	date: Option<CivilDate>,
-	tombstone: bool,
-}
-
 /// `v_schedules.next_date`: the local date when both timestamps are set and
 /// equal, otherwise the base date.
 fn next_dates(
 	conn: &Connection,
 	skipped: &mut Vec<SkippedRow>,
-) -> Result<BTreeMap<ScheduleId, NextDate>, CoreError> {
-	let mut dates: BTreeMap<ScheduleId, NextDate> = BTreeMap::new();
+) -> Result<BTreeMap<ScheduleId, Option<CivilDate>>, CoreError> {
+	let mut dates = BTreeMap::new();
 	each_row(
 		conn,
 		"schedules_next_date",
-		"SELECT id, schedule_id, local_next_date, local_next_date_ts, base_next_date, \
-		 base_next_date_ts, tombstone FROM schedules_next_date ORDER BY rowid",
+		&format!(
+			"SELECT id, schedule_id, local_next_date, local_next_date_ts, base_next_date, \
+			 base_next_date_ts FROM (SELECT *, row_number() OVER \
+			 (PARTITION BY schedule_id ORDER BY {NEXT_DATE_PICK}) AS pick FROM schedules_next_date) \
+			 WHERE pick = 1"
+		),
 		skipped,
 		|row| {
 			let schedule =
@@ -469,21 +526,101 @@ fn next_dates(
 			} else {
 				at(row, 4)?
 			};
-			let next = NextDate {
-				date: integer(chosen)?.map(date_from_int).transpose()?,
-				tombstone: tombstone(at(row, 6)?),
-			};
-			let replace = match dates.get(&schedule) {
-				None => true,
-				Some(existing) => existing.tombstone && !next.tombstone,
-			};
-			if replace {
-				dates.insert(schedule, next);
-			}
+			dates.insert(schedule, integer(chosen)?.map(date_from_int).transpose()?);
 			Ok(())
 		},
 	)?;
 	Ok(dates)
+}
+
+fn load_reports(
+	conn: &Connection,
+	data: &mut BudgetData,
+	skipped: &mut Vec<SkippedRow>,
+) -> Result<(), CoreError> {
+	each_row(
+		conn,
+		"custom_reports",
+		"SELECT id, name, start_date, end_date, date_static, date_range, mode, group_by, \
+		 balance_type, show_empty, show_offbudget, show_hidden, show_uncategorized, \
+		 selected_categories, graph_type, conditions, conditions_op, metadata, interval, \
+		 color_scheme, tombstone, include_current, sort_by, trim_intervals, show_trend_lines \
+		 FROM custom_reports",
+		skipped,
+		|row| {
+			let t = |index| text(at(row, index)?);
+			let n = |index| integer(at(row, index)?);
+			let id = CustomReportId::new(id(row, 0)?);
+			let report = CustomReportRow {
+				id: id.clone(),
+				name: t(1)?,
+				start_date: t(2)?,
+				end_date: t(3)?,
+				date_static: n(4)?,
+				date_range: t(5)?,
+				mode: t(6)?,
+				group_by: t(7)?,
+				balance_type: t(8)?,
+				show_empty: n(9)?,
+				show_offbudget: n(10)?,
+				show_hidden: n(11)?,
+				show_uncategorized: n(12)?,
+				selected_categories: t(13)?,
+				graph_type: t(14)?,
+				conditions: t(15)?,
+				conditions_op: t(16)?,
+				metadata: t(17)?,
+				interval: t(18)?,
+				color_scheme: t(19)?,
+				tombstone: tombstone(at(row, 20)?),
+				include_current: n(21)?,
+				sort_by: t(22)?,
+				trim_intervals: n(23)?,
+				show_trend_lines: n(24)?,
+			};
+			data.custom_reports.insert(id, report);
+			Ok(())
+		},
+	)?;
+	each_row(
+		conn,
+		"dashboard_pages",
+		"SELECT id, name, tombstone FROM dashboard_pages",
+		skipped,
+		|row| {
+			let id = DashboardPageId::new(id(row, 0)?);
+			let page = DashboardPage {
+				id: id.clone(),
+				name: text(at(row, 1)?)?,
+				tombstone: tombstone(at(row, 2)?),
+			};
+			data.dashboard_pages.insert(id, page);
+			Ok(())
+		},
+	)?;
+	each_row(
+		conn,
+		"dashboard",
+		"SELECT id, type, width, height, x, y, meta, tombstone, dashboard_page_id FROM dashboard",
+		skipped,
+		|row| {
+			let id = WidgetId::new(id(row, 0)?);
+			let widget = Widget {
+				id: id.clone(),
+				kind: text(at(row, 1)?)?,
+				width: integer(at(row, 2)?)?,
+				height: integer(at(row, 3)?)?,
+				x: integer(at(row, 4)?)?,
+				y: integer(at(row, 5)?)?,
+				meta: text(at(row, 6)?)?,
+				tombstone: tombstone(at(row, 7)?),
+				page: text(at(row, 8)?)?.map(DashboardPageId::new),
+			};
+			data.widgets.insert(id, widget);
+			Ok(())
+		},
+	)?;
+	Ok(())
 }
 
 fn category_kind(text: &str) -> Cell<CategoryKind> {
@@ -560,12 +697,16 @@ fn load_veritas_tables(
 		each_row(
 			conn,
 			"veritas_transaction_meta",
-			"SELECT transaction_id, adjustment FROM veritas_transaction_meta",
+			&format!(
+				"SELECT transaction_id, adjustment, {} FROM veritas_transaction_meta",
+				column_or_null(conn, "veritas_transaction_meta", "needs_actual")?
+			),
 			skipped,
 			|row| {
 				let transaction = TransactionId::new(id(row, 0)?);
 				let meta = TransactionMeta {
 					adjustment: flag(at(row, 1)?),
+					needs_actual: text(at(row, 2)?)?,
 				};
 				data.transaction_meta.insert(transaction, meta);
 				Ok(())

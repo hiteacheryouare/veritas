@@ -165,7 +165,7 @@ fn every_broken_invariant_is_reported_and_nothing_is_fixed_r_rel_2() {
 		(Check::MappingChain, payees[0].clone(), some(&payees[1])),
 		(
 			Check::DuplicateBudgetCell,
-			format!("2026-10-{category}"),
+			format!("202610-{category}"),
 			None,
 		),
 		(
@@ -229,5 +229,54 @@ fn a_damaged_file_reports_corruption_and_is_not_loaded_r_rel_2() {
 			.violations
 			.iter()
 			.all(|violation| matches!(violation.check, Check::Integrity(_)))
+	);
+}
+
+#[test]
+fn unknown_tax_bucket_ids_are_reported_tax_3() {
+	let scratch = Scratch::new("audit-tax");
+	let db_path = fixture_db("small", &scratch);
+	let mut store = Store::open(&db_path, Access::ReadWrite).unwrap();
+	store.adopt().unwrap();
+	let conn = Connection::open(&db_path).unwrap();
+	let category: String = conn
+		.query_row(
+			"SELECT id FROM categories WHERE tombstone = 0 ORDER BY id LIMIT 1",
+			[],
+			|row| row.get(0),
+		)
+		.unwrap();
+	// Another tool could write these: the schema's CHECKs guard only SQLite
+	// connections that enforce them.
+	conn.execute_batch(&format!(
+		"PRAGMA ignore_check_constraints = ON;
+		 INSERT INTO veritas_category_meta (category_id, tax_bucket) VALUES ('{category}', 'schedule-c');
+		 INSERT INTO veritas_tax_tag VALUES ('rx', 'medical'), ('notax', 'none'), ('crypto', 'capital_gains');"
+	))
+	.unwrap();
+	let found: Vec<(Check, String, Option<String>)> = violations(&db_path)
+		.into_iter()
+		.map(|violation| {
+			(
+				violation.check,
+				violation.id.unwrap_or_default(),
+				violation.related,
+			)
+		})
+		.collect();
+	assert_eq!(
+		found,
+		vec![
+			(
+				Check::UnknownTaxBucket,
+				category,
+				Some("schedule-c".to_owned())
+			),
+			(
+				Check::UnknownTaxBucket,
+				"crypto".to_owned(),
+				Some("capital_gains".to_owned())
+			),
+		]
 	);
 }

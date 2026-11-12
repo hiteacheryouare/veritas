@@ -5,12 +5,13 @@ use rusqlite::types::Value;
 use rusqlite::{OptionalExtension, Transaction as SqlTransaction, params_from_iter};
 use veritas_domain::{
 	Account, AccountGroup, AccountId, AccountKind, AccountMeta, BudgetCell, BudgetType, Category,
-	CategoryGroup, CategoryId, CategoryKind, CategoryMeta, CivilDate, CoreError, Goal, GoalStatus,
-	Money, Payee, PayeeId, Rule, RuleStage, Schedule, SplitRole, Tag, Transaction, TransactionId,
-	TransactionMeta, YearMonth,
+	CategoryGroup, CategoryId, CategoryKind, CategoryMeta, CivilDate, CoreError, CustomReportRow,
+	DashboardPage, Goal, GoalStatus, Money, Payee, PayeeId, Rule, RuleStage, Schedule, SplitRole,
+	Tag, Transaction, TransactionId, TransactionMeta, Widget, YearMonth,
 };
 
 use crate::connection::storage;
+use crate::load::{BUDGET_CELL_PICK, NEXT_DATE_PICK};
 
 /// A row as the columns Veritas models, in a fixed order per table.
 type Columns = Vec<(&'static str, Value)>;
@@ -242,7 +243,10 @@ fn account_meta_columns(row: &AccountMeta) -> Columns {
 }
 
 fn transaction_meta_columns(row: &TransactionMeta) -> Columns {
-	vec![("adjustment", flag(row.adjustment))]
+	vec![
+		("adjustment", flag(row.adjustment)),
+		("needs_actual", text(row.needs_actual.as_deref())),
+	]
 }
 
 fn goal_columns(row: &Goal) -> Columns {
@@ -267,6 +271,65 @@ fn goal_columns(row: &Goal) -> Columns {
 			text(row.released_to.as_ref().map(|id| id.as_str())),
 		),
 		("released_cents", money(row.released)),
+	]
+}
+
+fn number(value: Option<i64>) -> Value {
+	value.map_or(Value::Null, Value::Integer)
+}
+
+fn custom_report_columns(row: &CustomReportRow) -> Columns {
+	vec![
+		("name", text(row.name.as_deref())),
+		("start_date", text(row.start_date.as_deref())),
+		("end_date", text(row.end_date.as_deref())),
+		("date_static", number(row.date_static)),
+		("date_range", text(row.date_range.as_deref())),
+		("mode", text(row.mode.as_deref())),
+		("group_by", text(row.group_by.as_deref())),
+		("balance_type", text(row.balance_type.as_deref())),
+		("show_empty", number(row.show_empty)),
+		("show_offbudget", number(row.show_offbudget)),
+		("show_hidden", number(row.show_hidden)),
+		("show_uncategorized", number(row.show_uncategorized)),
+		(
+			"selected_categories",
+			text(row.selected_categories.as_deref()),
+		),
+		("graph_type", text(row.graph_type.as_deref())),
+		("conditions", text(row.conditions.as_deref())),
+		("conditions_op", text(row.conditions_op.as_deref())),
+		("metadata", text(row.metadata.as_deref())),
+		("interval", text(row.interval.as_deref())),
+		("color_scheme", text(row.color_scheme.as_deref())),
+		("tombstone", flag(row.tombstone)),
+		("include_current", number(row.include_current)),
+		("sort_by", text(row.sort_by.as_deref())),
+		("trim_intervals", number(row.trim_intervals)),
+		("show_trend_lines", number(row.show_trend_lines)),
+	]
+}
+
+fn dashboard_page_columns(row: &DashboardPage) -> Columns {
+	vec![
+		("name", text(row.name.as_deref())),
+		("tombstone", flag(row.tombstone)),
+	]
+}
+
+fn widget_columns(row: &Widget) -> Columns {
+	vec![
+		("type", text(row.kind.as_deref())),
+		("width", number(row.width)),
+		("height", number(row.height)),
+		("x", number(row.x)),
+		("y", number(row.y)),
+		("meta", text(row.meta.as_deref())),
+		("tombstone", flag(row.tombstone)),
+		(
+			"dashboard_page_id",
+			text(row.page.as_ref().map(|id| id.as_str())),
+		),
 	]
 }
 
@@ -413,7 +476,7 @@ impl<'conn> Writer<'conn> {
 	}
 
 	/// For veritas_* rows, which Veritas owns outright and may delete.
-	fn put_veritas<T>(
+	fn put_veritas<T: ?Sized>(
 		&self,
 		table: &str,
 		key_column: &'static str,
@@ -597,7 +660,10 @@ impl<'conn> Writer<'conn> {
 		let existing: Option<(String, Option<i64>)> = self
 			.tx
 			.query_row(
-				"SELECT id, base_next_date_ts FROM schedules_next_date WHERE schedule_id = ?1 ORDER BY rowid LIMIT 1",
+				&format!(
+					"SELECT id, base_next_date_ts FROM schedules_next_date WHERE schedule_id = ?1 \
+					 ORDER BY {NEXT_DATE_PICK} LIMIT 1"
+				),
 				[&id],
 				|row| Ok((row.get(0)?, row.get(1)?)),
 			)
@@ -679,7 +745,8 @@ impl<'conn> Writer<'conn> {
 			.tx
 			.query_row(
 				&format!(
-					"SELECT id FROM {table} WHERE month = ?1 AND category = ?2 ORDER BY rowid LIMIT 1"
+					"SELECT id FROM {table} WHERE month = ?1 AND category = ?2 \
+					 ORDER BY {BUDGET_CELL_PICK} LIMIT 1"
 				),
 				params_from_iter([Value::Integer(month), owned(after.category.as_str())]),
 				|row| row.get(0),
@@ -694,19 +761,25 @@ impl<'conn> Writer<'conn> {
 				&budget_cell_columns(after),
 			),
 			(Some(_), None) => Err(invalid("that budget row already exists")),
-			(None, _) => self.insert(
-				table,
-				&[("id", owned(&format!("{month}-{}", after.category)))],
-				&[
-					vec![
-						("month", Value::Integer(month)),
-						("category", owned(after.category.as_str())),
-					],
-					budget_cell_columns(after),
-				]
-				.concat(),
-				Nulls::Skip,
-			),
+			(None, _) => {
+				// Actual's setBudget writes only the amount, so a goal-less
+				// row keeps long_goal NULL, which reads as false.
+				let mut columns = budget_cell_columns(after);
+				columns.retain(|(name, value)| !(*name == "long_goal" && *value == flag(false)));
+				self.insert(
+					table,
+					&[("id", owned(&format!("{month}-{}", after.category)))],
+					&[
+						vec![
+							("month", Value::Integer(month)),
+							("category", owned(after.category.as_str())),
+						],
+						columns,
+					]
+					.concat(),
+					Nulls::Skip,
+				)
+			}
 		}
 	}
 
@@ -736,34 +809,19 @@ impl<'conn> Writer<'conn> {
 	}
 
 	/// Actual clears a note by writing NULL, so a removed note becomes NULL.
+	/// `None` text is a NULL note, which is how Actual clears one.
 	pub fn put_note(
 		&mut self,
 		id: &str,
-		before: Option<&str>,
-		after: Option<&str>,
+		before: Option<Option<&str>>,
+		after: Option<Option<&str>>,
 	) -> Result<(), CoreError> {
 		let key = [("id", owned(id))];
-		match before {
-			None => match after {
-				None => Ok(()),
-				// A cleared note is a NULL row that memory doesn't hold, so the
-				// insert takes it over instead of failing on its id.
-				Some(text) => self
-					.tx
-					.execute(
-						"INSERT INTO notes (id, note) VALUES (?1, ?2) \
-						 ON CONFLICT (id) DO UPDATE SET note = excluded.note",
-						[id, text],
-					)
-					.map(|_| ())
-					.map_err(storage),
-			},
-			Some(old) => self.update(
-				"notes",
-				&key,
-				&vec![("note", owned(old))],
-				&vec![("note", text(after))],
-			),
+		let columns = |note: Option<&str>| vec![("note", text(note))];
+		match (before, after) {
+			(_, None) => Err(invalid("notes are cleared, never deleted")),
+			(None, Some(note)) => self.insert("notes", &key, &columns(note), Nulls::Write),
+			(Some(old), Some(note)) => self.update("notes", &key, &columns(old), &columns(note)),
 		}
 	}
 
@@ -863,6 +921,83 @@ impl<'conn> Writer<'conn> {
 			before,
 			after,
 			transaction_meta_columns,
+		)
+	}
+
+	pub fn put_custom_report(
+		&mut self,
+		before: Option<&CustomReportRow>,
+		after: Option<&CustomReportRow>,
+	) -> Result<(), CoreError> {
+		let id = before
+			.or(after)
+			.map(|row| row.id.as_str().to_owned())
+			.unwrap_or_default();
+		self.put_actual("custom_reports", &id, before, after, custom_report_columns)
+			.map(|_| ())
+	}
+
+	pub fn put_dashboard_page(
+		&mut self,
+		before: Option<&DashboardPage>,
+		after: Option<&DashboardPage>,
+	) -> Result<(), CoreError> {
+		let id = before
+			.or(after)
+			.map(|row| row.id.as_str().to_owned())
+			.unwrap_or_default();
+		self.put_actual(
+			"dashboard_pages",
+			&id,
+			before,
+			after,
+			dashboard_page_columns,
+		)
+		.map(|_| ())
+	}
+
+	/// A `dashboard` row. Only changed columns are written, so moving or
+	/// resizing a widget touches nothing but its x, y, width and height.
+	pub fn put_widget(
+		&mut self,
+		before: Option<&Widget>,
+		after: Option<&Widget>,
+	) -> Result<(), CoreError> {
+		let id = before
+			.or(after)
+			.map(|row| row.id.as_str().to_owned())
+			.unwrap_or_default();
+		self.put_actual("dashboard", &id, before, after, widget_columns)
+			.map(|_| ())
+	}
+
+	/// A synced preference, such as `defaultCurrencyCode` or `numberFormat`.
+	/// Actual stores every value as text.
+	pub fn put_preference(&mut self, id: &str, value: &str) -> Result<(), CoreError> {
+		self.tx
+			.execute(
+				"INSERT INTO preferences (id, value) VALUES (?1, ?2) \
+				 ON CONFLICT (id) DO UPDATE SET value = excluded.value",
+				[id, value],
+			)
+			.map(|_| ())
+			.map_err(storage)
+	}
+
+	/// A `veritas_tax_tag` row: which tax bucket an Actual tag means.
+	pub fn put_tax_tag(
+		&mut self,
+		tag: &str,
+		before: Option<&str>,
+		after: Option<&str>,
+	) -> Result<(), CoreError> {
+		self.put_veritas(
+			"veritas_tax_tag",
+			"tag",
+			tag,
+			before,
+			after,
+			|bucket: &str| vec![("bucket", owned(bucket))],
 		)
 	}
 
