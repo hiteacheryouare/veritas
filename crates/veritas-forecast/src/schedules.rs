@@ -9,7 +9,7 @@ use veritas_rules::{
 	Action, AmountSign, ConditionValue, DateValue, Field, Op, ParsedRule, SetField, schedule_dates,
 };
 
-use crate::flows::{FlowKind, KnownFlow, LoanPayment, ScheduleAmount, Shortfall};
+use crate::flows::{FlowKind, KnownFlow, LoanPayment, MonthSoFar, ScheduleAmount, Shortfall};
 use crate::history::balances;
 use crate::math::round_half_up;
 use crate::projection::Forecaster;
@@ -32,6 +32,29 @@ pub struct ScheduledFlows {
 	pub unforecast: Vec<Unforecast>,
 	/// Loan payments below interest plus escrow, for the screen's warning.
 	pub shortfalls: Vec<Shortfall>,
+	/// Parts of a loan's last payment the forecast doesn't repeat (fees),
+	/// for "Not repeated: {category} {amount}" (FC-2).
+	pub not_repeated: Vec<NotRepeated>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NotRepeated {
+	pub loan: AccountId,
+	pub category: Option<CategoryId>,
+	pub amount: Money,
+}
+
+/// A loan's payment read from its last payment, the parts not repeated and
+/// what this month has already paid.
+type Inferred = (LoanPayment, Vec<NotRepeated>, Option<MonthSoFar>);
+
+fn compare_order(
+	a: &(f64, f64, Option<CategoryId>),
+	b: &(f64, f64, Option<CategoryId>),
+) -> std::cmp::Ordering {
+	a.0.total_cmp(&b.0)
+		.then_with(|| a.1.total_cmp(&b.1))
+		.then_with(|| a.2.cmp(&b.2))
 }
 
 /// What a schedule's rule says the transaction looks like.
@@ -121,6 +144,7 @@ impl Forecaster<'_> {
 			flows: Vec::new(),
 			unforecast: Vec::new(),
 			shortfalls: Vec::new(),
+			not_repeated: Vec::new(),
 		};
 		for schedule in self.budget.schedules.values() {
 			if schedule.tombstone || schedule.completed {
@@ -206,15 +230,17 @@ impl Forecaster<'_> {
 			// FC-2: a bill paying a loan is that loan's payment, split into
 			// interest, escrow and principal, never one transfer.
 			scheduled_loans.insert(counterpart.clone());
-			let loan_payment =
+			let (loan_payment, not_repeated, so_far) =
 				match self.loan_payment(counterpart, name, amount.checked_neg()?, today)? {
-					Ok(loan_payment) => LoanPayment {
-						from: bill.account.clone(),
-						..loan_payment
-					},
+					Ok(found) => found,
 					Err(reason) => return Ok(Err(reason)),
 				};
-			let split = loan_payment.split(&dates)?;
+			let loan_payment = LoanPayment {
+				from: bill.account.clone(),
+				..loan_payment
+			};
+			let split = loan_payment.split_from(&dates, so_far)?;
+			result.not_repeated.extend(not_repeated);
 			result
 				.flows
 				.extend(split.flows.into_iter().map(|flow| KnownFlow {
@@ -272,7 +298,7 @@ impl Forecaster<'_> {
 		name: String,
 		payment: Money,
 		today: CivilDate,
-	) -> Result<Result<LoanPayment, String>, CoreError> {
+	) -> Result<Result<Inferred, String>, CoreError> {
 		let rate = self
 			.budget
 			.account_meta
@@ -301,9 +327,11 @@ impl Forecaster<'_> {
 				.collect(),
 			None => Vec::new(),
 		};
-		let (interest, escrow) = match (parts.as_slice(), rate) {
-			([], _) => (None, Vec::new()),
-			([only], _) => (Some(*only), Vec::new()),
+		let order = |row: &&ClassifiedRow| self.category_order(row.category.as_ref());
+		let by_order = |a: &&ClassifiedRow, b: &&ClassifiedRow| compare_order(&order(a), &order(b));
+		let interest = match (parts.as_slice(), rate) {
+			([], _) => None,
+			([only], _) => Some(*only),
 			(_, Some(rate)) => {
 				let before = last
 					.date
@@ -316,16 +344,12 @@ impl Forecaster<'_> {
 					.unwrap_or(0);
 				let estimate =
 					round_half_up(i128::from(owed_then).abs() * i128::from(rate), 120_000);
-				let closest = parts
+				let distance =
+					|row: &&ClassifiedRow| (i128::from(row.amount.minor()).abs() - estimate).abs();
+				parts
 					.iter()
-					.min_by_key(|row| (i128::from(row.amount.minor()).abs() - estimate).abs())
-					.copied();
-				let rest = parts
-					.iter()
-					.filter(|row| Some(row.id.clone()) != closest.map(|row| row.id.clone()))
+					.min_by(|a, b| distance(a).cmp(&distance(b)).then_with(|| by_order(a, b)))
 					.copied()
-					.collect();
-				(closest, rest)
 			}
 			(_, None) => {
 				return Ok(Err(
@@ -334,25 +358,111 @@ impl Forecaster<'_> {
 				));
 			}
 		};
-		let magnitude = |rows: &[&ClassifiedRow]| -> Result<Money, CoreError> {
-			Money::checked_sum(rows.iter().map(|row| row.amount))?.checked_neg()
+		// FL-5: a part in the interest's category is a fee; of the rest the
+		// largest is escrow, and every other part is a fee. Fees aren't repeated.
+		let interest_category = interest.and_then(|row| row.category.clone());
+		let (fees, rest): (Vec<&ClassifiedRow>, Vec<&ClassifiedRow>) = parts
+			.iter()
+			.copied()
+			.filter(|row| interest.is_none_or(|interest| interest.id != row.id))
+			.partition(|row| row.category.is_some() && row.category == interest_category);
+		let escrow = rest.iter().copied().min_by(|a, b| {
+			i128::from(b.amount.minor())
+				.abs()
+				.cmp(&i128::from(a.amount.minor()).abs())
+				.then_with(|| by_order(a, b))
+		});
+		let mut not_repeated: Vec<NotRepeated> = fees
+			.into_iter()
+			.chain(
+				rest.into_iter()
+					.filter(|row| escrow.is_none_or(|escrow| escrow.id != row.id)),
+			)
+			.map(|row| {
+				Ok(NotRepeated {
+					loan: loan.clone(),
+					category: row.category.clone(),
+					amount: row.amount.checked_neg()?,
+				})
+			})
+			.collect::<Result<_, CoreError>>()?;
+		not_repeated.sort_by(|a, b| a.amount.cmp(&b.amount).reverse());
+		let magnitude = |row: Option<&ClassifiedRow>| -> Result<Money, CoreError> {
+			row.map_or(Ok(Money::ZERO), |row| row.amount.checked_neg())
 		};
 		let owed = balances(self.budget, &self.classification, today)?
 			.get(loan)
 			.copied()
 			.unwrap_or(0);
-		Ok(Ok(LoanPayment {
-			from: last.account.clone(),
-			loan: loan.clone(),
-			name,
-			payment,
-			rate_bps: rate,
-			last_interest: magnitude(interest.as_slice())?,
-			escrow: magnitude(&escrow)?,
-			outstanding: Money::from_minor(owed).checked_neg()?,
-			interest_category: interest.and_then(|row| row.category.clone()),
-			escrow_category: escrow.first().and_then(|row| row.category.clone()),
-			principal_category: last.category.clone(),
+		let so_far = self.month_so_far(loan, interest_category.as_ref(), today)?;
+		Ok(Ok((
+			LoanPayment {
+				from: last.account.clone(),
+				loan: loan.clone(),
+				name,
+				payment,
+				rate_bps: rate,
+				last_interest: magnitude(interest)?,
+				escrow: magnitude(escrow)?,
+				outstanding: Money::from_minor(owed).checked_neg()?,
+				interest_category,
+				escrow_category: escrow.and_then(|row| row.category.clone()),
+				principal_category: last.category.clone(),
+			},
+			not_repeated,
+			so_far,
+		)))
+	}
+
+	/// The budget screen's order of a category: group, then category, then id.
+	fn category_order(&self, category: Option<&CategoryId>) -> (f64, f64, Option<CategoryId>) {
+		let found = category.and_then(|id| self.budget.categories.get(id));
+		let group = found.and_then(|found| self.budget.category_groups.get(&found.group));
+		(
+			group.map_or(f64::MAX, |group| group.sort_order),
+			found.map_or(f64::MAX, |found| found.sort_order),
+			category.cloned(),
+		)
+	}
+
+	/// FC-2's current month: interest and principal already paid to `loan`
+	/// this month, so the month's interest isn't booked twice.
+	fn month_so_far(
+		&self,
+		loan: &AccountId,
+		interest_category: Option<&CategoryId>,
+		today: CivilDate,
+	) -> Result<Option<MonthSoFar>, CoreError> {
+		let month = today.year_month();
+		let period = Period::new(month.first_day(), today)?;
+		let rows = self.classification.within(period);
+		let payments: Vec<&ClassifiedRow> = rows
+			.iter()
+			.filter(|row| {
+				row.is_primary()
+					&& row.kind() == TransactionKind::DebtPrincipal
+					&& row.transfer_account.as_ref() == Some(loan)
+			})
+			.collect();
+		if payments.is_empty() {
+			return Ok(None);
+		}
+		let principal = Money::checked_sum(payments.iter().map(|row| row.amount))?.checked_neg()?;
+		let interest = Money::checked_sum(
+			rows.iter()
+				.filter(|row| {
+					row.kind() == TransactionKind::Expense
+						&& row.category.as_ref() == interest_category
+						&& row.parent.is_some()
+						&& payments.iter().any(|payment| payment.parent == row.parent)
+				})
+				.map(|row| row.amount),
+		)?
+		.checked_neg()?;
+		Ok(Some(MonthSoFar {
+			month,
+			interest,
+			principal,
 		}))
 	}
 
@@ -378,17 +488,18 @@ impl Forecaster<'_> {
 				.get(loan)
 				.map(|account| account.name.clone())
 				.unwrap_or_default();
-			let loan_payment = match self.loan_payment(loan, name, payment, today)? {
-				Ok(loan_payment) => loan_payment,
-				Err(reason) => {
-					result.unforecast.push(Unforecast {
-						schedule: None,
-						loan: Some(loan.clone()),
-						reason,
-					});
-					continue;
-				}
-			};
+			let (loan_payment, not_repeated, so_far) =
+				match self.loan_payment(loan, name, payment, today)? {
+					Ok(found) => found,
+					Err(reason) => {
+						result.unforecast.push(Unforecast {
+							schedule: None,
+							loan: Some(loan.clone()),
+							reason,
+						});
+						continue;
+					}
+				};
 			let mut dates = Vec::new();
 			let mut month = today.year_month();
 			while month <= through.year_month() {
@@ -400,7 +511,8 @@ impl Forecaster<'_> {
 				}
 				month = month.offset(1)?;
 			}
-			let split = loan_payment.split(&dates)?;
+			let split = loan_payment.split_from(&dates, so_far)?;
+			result.not_repeated.extend(not_repeated);
 			result.flows.extend(split.flows);
 			result.shortfalls.extend(split.shortfalls);
 		}

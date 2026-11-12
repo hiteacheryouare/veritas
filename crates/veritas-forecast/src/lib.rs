@@ -23,7 +23,7 @@ pub use backtest::{BACKTEST_HORIZONS, Backtest, Metrics};
 pub use band::{BAND_MIN_RESIDUALS, Band, BandMethod};
 pub use baseline::{Baseline, INDEX_ACTIVE_MIN, INDEX_MAX, INDEX_MIN, SEASON_MIN, WINDOW};
 pub use flows::{
-	Certainty, FlowKind, KnownFlow, LoanPayment, LoanSplit, ScheduleAmount, Shortfall,
+	Certainty, FlowKind, KnownFlow, LoanPayment, LoanSplit, MonthSoFar, ScheduleAmount, Shortfall,
 };
 pub use goal::{EtaStatus, GoalEta, goal_eta, goal_etas, month_name};
 pub use history::Side;
@@ -31,7 +31,7 @@ pub use projection::{
 	Comparison, Forecaster, HORIZONS, HorizonForecast, MonthForecast, Projection,
 };
 pub use scenario::{MAX_COMPARED, cadence_dates, validate as validate_scenario};
-pub use schedules::{ScheduledFlows, Unforecast};
+pub use schedules::{NotRepeated, ScheduledFlows, Unforecast};
 pub use suggest::{Basis, Envelope, Suggestion, Suggestions, next_month_envelopes};
 pub use wrapped::{
 	CategoryRank, Change, GroupRank, NoSpend, PayeeRank, PriorYear, Redacted, Streak, Wrapped,

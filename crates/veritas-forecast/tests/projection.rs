@@ -978,3 +978,91 @@ fn fc_2_a_payment_below_interest_and_escrow_is_listed_for_a_warning() {
 		.unwrap();
 	assert!(covered.shortfalls.is_empty());
 }
+
+#[test]
+fn fc_2_fl_6_biweekly_payments_share_one_month_of_interest() {
+	let loan = LoanPayment {
+		from: acct("CHK"),
+		loan: acct("LOAN"),
+		name: "Mortgage".to_owned(),
+		payment: cents(110000),
+		rate_bps: Some(600),
+		last_interest: cents(0),
+		escrow: cents(25000),
+		outstanding: cents(30_000_000),
+		interest_category: Some(cat("Loan interest")),
+		escrow_category: Some(cat("Electric")),
+		principal_category: Some(cat("Loan principal")),
+	};
+	let dates = [
+		"2027-02-01",
+		"2027-02-15",
+		"2027-03-01",
+		"2027-03-15",
+		"2027-03-29",
+	]
+	.map(date);
+	let flows = loan.flows(&dates).unwrap();
+	let by_category = |category: &str| -> Vec<i64> {
+		flows
+			.iter()
+			.filter(|flow| flow.category == Some(cat(category)))
+			.map(|flow| -flow.amount.minor())
+			.collect()
+	};
+	assert_eq!(
+		by_category("Loan interest"),
+		[75000, 75000, 49967, 49967, 49966],
+		"FL-6"
+	);
+	assert_eq!(by_category("Electric"), [25000; 5]);
+	assert_eq!(
+		by_category("Loan principal"),
+		[10000, 10000, 35033, 35033, 35034]
+	);
+
+	let mut book = Book::household();
+	book.opening("CHK", "2026-12-31", 2_000_000);
+	book.opening("LOAN", "2026-12-31", -30_000_000);
+	let projection = project(&book, &flows, None);
+	assert_eq!(
+		projection.months[2].balances[&acct("LOAN")],
+		cents(-29_874_900)
+	);
+	assert_eq!(
+		projection.months[2].net_income,
+		cents(-224900),
+		"month B expense"
+	);
+}
+
+#[test]
+fn fc_2_the_current_month_books_only_the_interest_still_to_come() {
+	let loan = LoanPayment {
+		from: acct("CHK"),
+		loan: acct("LOAN"),
+		name: "Mortgage".to_owned(),
+		payment: cents(110000),
+		rate_bps: Some(600),
+		last_interest: cents(0),
+		escrow: cents(25000),
+		outstanding: cents(29_990_000),
+		interest_category: Some(cat("Loan interest")),
+		escrow_category: None,
+		principal_category: Some(cat("Loan principal")),
+	};
+	let so_far = veritas_forecast::MonthSoFar {
+		month: ym("2027-02"),
+		interest: cents(75000),
+		principal: cents(10000),
+	};
+	let flows = loan
+		.split_from(&[date("2027-02-15")], Some(so_far))
+		.unwrap()
+		.flows;
+	assert_eq!(
+		flows[0].amount,
+		cents(-75000),
+		"150000 for the month, 75000 already booked"
+	);
+}

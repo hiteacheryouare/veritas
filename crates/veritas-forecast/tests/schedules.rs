@@ -549,3 +549,118 @@ fn fc_2_a_loan_bill_with_no_recorded_payment_is_not_forecast() {
 		Some(ScheduleId::new("Car loan"))
 	);
 }
+
+fn last_payment(book: &mut Book, owed_before: i64, principal: i64, parts: &[(&str, i64)]) {
+	book.opening("CHK", "2026-11-30", 2_000_000);
+	book.opening("LOAN", "2026-11-30", -owed_before);
+	let total: i64 = principal + parts.iter().map(|(_, amount)| amount).sum::<i64>();
+	book.row_with_id("dec", "CHK", "2026-12-01", -total).split = SplitRole::Parent;
+	book.transfer("CHK", "LOAN", "2026-12-01", -principal)
+		.in_category("Loan principal")
+		.child_of("dec");
+	for (category, amount) in parts {
+		book.spend(category, "2026-12-01", -amount).child_of("dec");
+	}
+	book.budget.account_meta.insert(
+		acct("LOAN"),
+		AccountMeta {
+			kind: Some(AccountKind::Liability),
+			loan_rate_bps: Some(600),
+			loan_payment: Some(cents(total)),
+			loan_payment_day: Some(1),
+			lender: None,
+		},
+	);
+}
+
+fn february(result: &ScheduledFlows) -> Vec<(i64, Option<veritas_domain::CategoryId>)> {
+	of(result, "LOAN")
+		.into_iter()
+		.filter(|flow| flow.date == date("2027-02-01"))
+		.map(|flow| (flow.amount.minor(), flow.category.clone()))
+		.collect()
+}
+
+#[test]
+fn fc_2_fl_4_a_tie_goes_to_the_category_that_sorts_first() {
+	let mut book = Book::household();
+	last_payment(
+		&mut book,
+		30_000_000,
+		20000,
+		&[("Electric", 140000), ("Loan interest", 160000)],
+	);
+	let result = flows(&book);
+	assert_eq!(
+		february(&result),
+		[
+			(-149900, Some(cat("Electric"))),
+			(-160000, Some(cat("Loan interest"))),
+			(-10100, Some(cat("Loan principal"))),
+		],
+		"FL-4: Electric sorts first, so it holds the interest; the rate sets the amount"
+	);
+}
+
+#[test]
+fn fc_2_fl_5_a_fee_in_the_interest_category_is_not_repeated() {
+	let mut book = Book::household();
+	last_payment(
+		&mut book,
+		30_020_000,
+		20000,
+		&[
+			("Loan interest", 150100),
+			("Loan interest", 3500),
+			("Electric", 50000),
+		],
+	);
+	let result = flows(&book);
+	let february = february(&result);
+	assert_eq!(
+		february[1],
+		(-50000, Some(cat("Electric"))),
+		"FL-5: escrow is 50000"
+	);
+	assert_eq!(
+		result
+			.not_repeated
+			.iter()
+			.map(|part| (part.category.clone(), part.amount.minor()))
+			.collect::<Vec<_>>(),
+		[(Some(cat("Loan interest")), 3500)]
+	);
+}
+
+#[test]
+fn fc_2_a_schedule_overrides_the_loan_metadata() {
+	let mut book = Book::household();
+	last_payment(&mut book, 30_000_000, 20000, &[("Loan interest", 150000)]);
+	let rule = schedule(
+		&mut book,
+		"Mortgage",
+		monthly_on("2026-12-15"),
+		condition("amount", "is", json!(-200000)),
+		None,
+		"2027-01-15",
+	)
+	.rule
+	.clone();
+	let rule = book.budget.rules.get_mut(&rule).unwrap();
+	let mut conditions: Value = serde_json::from_str(&rule.conditions_json).unwrap();
+	conditions
+		.as_array_mut()
+		.unwrap()
+		.push(condition("payee", "is", json!("payee-LOAN")));
+	rule.conditions_json = conditions.to_string();
+	let result = flows(&book);
+	assert!(
+		of(&result, "LOAN").is_empty(),
+		"no metadata flows for a scheduled loan"
+	);
+	let dates: Vec<_> = of(&result, "Mortgage")
+		.iter()
+		.map(|flow| flow.date.day())
+		.collect();
+	assert!(dates.iter().all(|day| *day == 15));
+}
