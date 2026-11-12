@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 9392384e94f04d1168c553f2434200672c90736af18909e6ea351908cee85de3 # shrinks to rows = [], flows = [], events = [OneTime { date: CivilDate(2027-01-01), account: AccountId("CHK"), category: None, amount: Money(0) }]
+cc 0644cb3be10d57b930fe2a8a76e0fda0581316cd657b51acafb376fc94a1e7f5 # shrinks to rows = [], flows = [], events = [OneTime { date: CivilDate(2027-01-01), account: AccountId("CHK"), category: None, amount: Money(0) }]
