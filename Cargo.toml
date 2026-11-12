@@ -27,6 +27,8 @@ chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 # Benches only: no plots or thread pool, just measurement and the cargo bench harness.
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 proptest = "1.12.0"
+# D47: Ryan approved it for rule `matches` conditions.
+regex = "1.13.1"
 rusqlite = { version = "0.41.1", features = ["bundled"] }
 serde_json = "1"
 thiserror = "2.0.21"

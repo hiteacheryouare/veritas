@@ -7,6 +7,7 @@ use serde_json::Value;
 use veritas_domain::YearMonth;
 
 use crate::js;
+use crate::jsregex::{JsPattern, Unreadable};
 use crate::recur::{RecurError, Recurrence};
 
 /// Why a stored condition or action isn't one Veritas runs.
@@ -195,6 +196,8 @@ pub enum ConditionValue {
 	Between(f64, f64),
 	Date(DateValue),
 	Bool(bool),
+	/// A `matches` regex, lowercased first on text fields as Actual does.
+	Pattern(JsPattern),
 	/// `onBudget`, `offBudget` and `and` don't look at the value.
 	Ignored,
 }
@@ -230,45 +233,64 @@ fn js_length(text: &str) -> usize {
 	text.encode_utf16().count()
 }
 
-/// `parseDateString` (`rule-utils.ts:239-266`).
+/// `parseDateString` (`rule-utils.ts:239-266`). Only the lengths decide for
+/// sure: Actual turns away any other length, and a plain `YYYY-MM-DD` or
+/// `YYYY-MM` that names no real day or month fails `parseISO`. Any other
+/// string of the right length might be one of `parseISO`'s other forms, so
+/// Actual may well run the rule; Veritas leaves it to Actual.
 fn parse_date_string(text: &str) -> Result<DateValue, Gap> {
 	let digits = |part: &str| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit());
-	let exotic_iso = text.starts_with(['+', '-']) || text.contains('W');
+	let shaped = |parts: &[usize]| {
+		let pieces: Vec<&str> = text.split('-').collect();
+		pieces.len() == parts.len()
+			&& pieces
+				.iter()
+				.zip(parts)
+				.all(|(piece, len)| piece.len() == *len && digits(piece))
+	};
+	let other_form = || {
+		unsupported(format!(
+			"a date written as {text:?}, a form Veritas doesn't read"
+		))
+	};
 	match js_length(text) {
 		10 => match js::strict_date(text) {
 			Some(date) => Ok(DateValue::Day(date)),
-			None if exotic_iso => {
-				unsupported(format!("{text:?} is an ISO date form Veritas doesn't read"))
-			}
-			None => rejected(format!("{text:?} is not a date")),
+			None if shaped(&[4, 2, 2]) => rejected(format!("{text:?} is not a date")),
+			None => other_form(),
 		},
-		7 => {
-			let month = text
-				.split_once('-')
-				.filter(|(year, month)| {
-					year.len() == 4 && month.len() == 2 && digits(year) && digits(month)
-				})
-				.and_then(|_| YearMonth::parse(text).ok());
-			match month {
-				Some(month) => Ok(DateValue::Month(month)),
-				None if exotic_iso => unsupported(format!(
-					"{text:?} is an ISO month form Veritas doesn't read"
-				)),
-				None => rejected(format!("{text:?} is not a month")),
-			}
-		}
-		4 if digits(text) => text
-			.parse()
-			.map(DateValue::Year)
-			.or_else(|_| rejected(format!("{text:?} is not a year"))),
+		7 => match YearMonth::parse(text).ok().filter(|_| shaped(&[4, 2])) {
+			Some(month) => Ok(DateValue::Month(month)),
+			None if shaped(&[4, 2]) => rejected(format!("{text:?} is not a month")),
+			None => other_form(),
+		},
+		4 if digits(text) => text.parse().map(DateValue::Year).or_else(|_| other_form()),
+		4 => other_form(),
 		_ => rejected(format!("{text:?} is not a date")),
 	}
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum EvalError {
+	#[error(transparent)]
+	Recurrence(#[from] RecurError),
+	#[error("text with an emoji or another character Actual's regex reads differently")]
+	AstralText,
+	#[error("a \\B in a regex run on text with accented or other non-ASCII letters")]
+	NonBoundary,
+}
+
+/// `new RegExp(source)`, refused when Veritas can't promise JS's reading.
+fn pattern(source: &str) -> Result<ConditionValue, Gap> {
+	JsPattern::new(source)
+		.map(ConditionValue::Pattern)
+		.map_err(Gap::Unsupported)
 }
 
 pub(crate) fn recur_gap(error: RecurError) -> Gap {
 	match error {
 		RecurError::Rejected(reason) => Gap::RejectedByActual(reason),
-		other => Gap::Unsupported(other.to_string()),
+		_ => Gap::Unsupported("a repeating date Veritas can't read".into()),
 	}
 }
 
@@ -370,13 +392,14 @@ impl Condition {
 		}
 	}
 
-	/// `Condition.eval`. A recurrence that can't be expanded is an error,
-	/// as it would throw out of Actual's `runRules`.
+	/// `Condition.eval`. An error means Veritas can't give Actual's answer:
+	/// a recurrence Actual would throw on, or text a pattern would read
+	/// differently in JS.
 	pub fn eval(
 		&self,
 		field_value: FieldValue,
 		account_off_budget: Option<bool>,
-	) -> Result<bool, RecurError> {
+	) -> Result<bool, EvalError> {
 		let kind = self.field.kind();
 		let mut value = match field_value {
 			FieldValue::Absent | FieldValue::Null if kind == FieldKind::Text => {
@@ -453,6 +476,12 @@ impl Condition {
 			(Op::NotOneOf, F::Text(text), V::IdList(list)) => !list
 				.iter()
 				.any(|entry| entry.as_deref() == Some(text.as_str())),
+			(Op::Matches, F::Text(text), V::Pattern(pattern)) => {
+				pattern.test(text).map_err(|unreadable| match unreadable {
+					Unreadable::Astral => EvalError::AstralText,
+					Unreadable::NonBoundary => EvalError::NonBoundary,
+				})?
+			}
 			(Op::HasTags, F::Text(text), V::Text(tags)) => extract_tags(tags)
 				.iter()
 				.all(|tag| has_tag(text, &tag.to_lowercase())),
@@ -507,7 +536,7 @@ fn parse_text(op: Op, value: Option<&Value>) -> Result<ConditionValue, Gap> {
 		for entry in entries.iter().filter(|entry| js::truthy(Some(entry))) {
 			match entry {
 				Value::String(text) => list.push(text.to_lowercase()),
-				_ => return unsupported("a oneOf entry that isn't text"),
+				_ => return unsupported("a list entry that isn't text"),
 			}
 		}
 		return Ok(ConditionValue::TextList(list));
@@ -523,7 +552,7 @@ fn parse_text(op: Op, value: Option<&Value>) -> Result<ConditionValue, Gap> {
 		return rejected(format!("{op:?} must have non-empty string"));
 	}
 	match op {
-		Op::Matches => unsupported("regular expression conditions"),
+		Op::Matches => pattern(&text.to_lowercase()),
 		Op::HasTags | Op::HasAnyTag => Ok(ConditionValue::Text(text.clone())),
 		_ => Ok(ConditionValue::Text(text.to_lowercase())),
 	}
@@ -548,10 +577,13 @@ fn parse_id(op: Op, value: Option<&Value>) -> Result<ConditionValue, Gap> {
 			))
 		}
 		Op::OnBudget | Op::OffBudget => Ok(ConditionValue::Ignored),
-		Op::Matches => unsupported("regular expression conditions"),
+		Op::Matches => match value {
+			Some(Value::String(source)) => pattern(source),
+			_ => unsupported("a regex that isn't text"),
+		},
 		Op::Contains | Op::DoesNotContain => match value {
 			Some(Value::String(needle)) => Ok(ConditionValue::Id(Some(needle.clone()))),
-			_ => unsupported("contains with a value that isn't text"),
+			_ => unsupported("a “contains” value that isn't text"),
 		},
 		_ => match value {
 			Some(value) => Ok(ConditionValue::Id(id(value)?)),
@@ -696,6 +728,19 @@ mod tests {
 			parse_gap("is", "date", json!("2020-0")),
 			Gap::RejectedByActual(_)
 		));
+		// Odd forms parseISO may accept are Actual's to run, not rejected.
+		for odd in [
+			"2020-W33-1",
+			"+002020-08",
+			"2020/08/10",
+			"2020-8-100",
+			"20-0",
+		] {
+			assert!(
+				matches!(parse_gap("is", "date", json!(odd)), Gap::Unsupported(_)),
+				"{odd}"
+			);
+		}
 
 		let day = condition("is", "date", json!("2020-08-10"));
 		assert!(!eval(&day, text("2020-08-05")));
@@ -781,8 +826,26 @@ mod tests {
 		for miss in ["bfo", "f o o"] {
 			assert!(!eval(&contains, text(miss)), "{miss}");
 		}
+		// The pattern is lowercased too, so `\\D` becomes `\\d`.
+		let matches = condition("matches", "notes", json!("^fo*$"));
+		for (hit, expected) in [
+			("bar foo baz", false),
+			("foo", true),
+			("FOOOO", true),
+			("foob", false),
+		] {
+			assert_eq!(eval(&matches, text(hit)), expected, "{hit}");
+		}
+		assert!(eval(
+			&condition("matches", "notes", json!("^\\D+$")),
+			text("12345")
+		));
+		assert!(!eval(
+			&condition("matches", "notes", json!("^\\D+$")),
+			text("abc")
+		));
 		assert!(matches!(
-			parse_gap("matches", "notes", json!("^fo*$")),
+			parse_gap("matches", "notes", json!("(?=a)")),
 			Gap::Unsupported(_)
 		));
 	}
