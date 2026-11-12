@@ -6,6 +6,7 @@ use veritas_domain::{
 	CategoryGroupId, CategoryId, CategoryKind, CategoryMeta, CivilDate, Goal, GoalId, GoalStatus,
 	Money, Payee, PayeeId, ScheduleId, SplitRole, Transaction, TransactionId, YearMonth,
 };
+use veritas_domain::{Scenario, ScenarioChange, ScenarioEvent, ScenarioEventId, ScenarioId};
 use veritas_forecast::{Certainty, FlowKind, KnownFlow};
 
 pub fn date(text: &str) -> CivilDate {
@@ -360,4 +361,22 @@ pub fn monthly_flows(
 			known(&format!("{month}-01"), category, amount, kind.clone())
 		})
 		.collect()
+}
+
+/// A stored scenario with one event per change, ids in order.
+pub fn scenario(name: &str, changes: Vec<ScenarioChange>) -> Scenario {
+	Scenario {
+		id: ScenarioId::new(name),
+		name: name.to_owned(),
+		sort_order: 0.0,
+		created_at: 0,
+		events: changes
+			.into_iter()
+			.enumerate()
+			.map(|(index, change)| ScenarioEvent {
+				id: ScenarioEventId::new(format!("{name} {index:03}")),
+				change,
+			})
+			.collect(),
+	}
 }
