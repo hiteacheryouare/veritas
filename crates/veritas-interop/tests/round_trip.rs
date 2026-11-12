@@ -152,3 +152,32 @@ fn exporting_replaces_the_old_backup_whole_or_not_at_all_r_rel_4() {
 	));
 	assert!(!scratch.join("no-such-folder").exists());
 }
+
+#[test]
+fn concurrent_exports_to_one_path_each_finish_whole() {
+	let scratch = Scratch::new("export-concurrent");
+	let budget = common::imported(veritas_interop::import_actual_zip(
+		&fixture("small"),
+		&scratch.join("budget"),
+	));
+	let target = scratch.join("backup.zip");
+	std::thread::scope(|threads| {
+		for _ in 0..4 {
+			threads.spawn(|| {
+				let store = veritas_store::Store::open(
+					&budget.db_path,
+					Access::ReadOnly(veritas_domain::ReadOnlyReason::OpenElsewhere),
+				)
+				.unwrap();
+				veritas_interop::export_actual_zip(&store, &budget.metadata_path, &target).unwrap();
+			});
+		}
+	});
+	assert!(zip::ZipArchive::new(std::fs::File::open(&target).unwrap()).is_ok());
+	let leftovers: Vec<_> = std::fs::read_dir(scratch.path())
+		.unwrap()
+		.map(|entry| entry.unwrap().file_name().into_string().unwrap())
+		.filter(|name| name.contains("partial"))
+		.collect();
+	assert!(leftovers.is_empty(), "{leftovers:?}");
+}
