@@ -36,6 +36,9 @@ pub enum Check {
 	MappingCycle,
 	/// Two budget rows for the same month and category.
 	DuplicateBudgetCell,
+	/// A tax bucket id that isn't one of the known buckets, written by
+	/// something other than this build. `related` names the id.
+	UnknownTaxBucket,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -124,6 +127,7 @@ pub fn audit(loaded: &Loaded) -> AuditReport {
 		});
 	}
 	transfers(data, &mut findings);
+	tax_buckets(data, &mut findings);
 	splits(data, &mut findings);
 	references(data, &mut findings);
 	mappings(
@@ -144,6 +148,45 @@ pub fn audit(loaded: &Loaded) -> AuditReport {
 	violations.sort();
 	violations.dedup();
 	AuditReport { violations }
+}
+
+/// The known tax buckets. `none` is only a tag override, never a category bucket.
+const TAX_BUCKETS: [&str; 10] = [
+	"w2_income",
+	"interest_income",
+	"business_income",
+	"business_expense",
+	"charitable",
+	"medical",
+	"education",
+	"hsa",
+	"retirement_contribution",
+	"taxes_withheld",
+];
+
+fn tax_buckets(data: &BudgetData, findings: &mut Findings) {
+	for (category, meta) in &data.category_meta {
+		if let Some(bucket) = &meta.tax_bucket
+			&& !TAX_BUCKETS.contains(&bucket.as_str())
+		{
+			findings.push(
+				Check::UnknownTaxBucket,
+				"veritas_category_meta",
+				category.as_str(),
+				Some(bucket),
+			);
+		}
+	}
+	for (tag, bucket) in &data.tax_tags {
+		if bucket != "none" && !TAX_BUCKETS.contains(&bucket.as_str()) {
+			findings.push(
+				Check::UnknownTaxBucket,
+				"veritas_tax_tag",
+				tag,
+				Some(bucket),
+			);
+		}
+	}
 }
 
 fn transfer_account<'a>(data: &'a BudgetData, transaction: &Transaction) -> Option<&'a str> {
