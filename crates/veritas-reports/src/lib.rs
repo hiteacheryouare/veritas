@@ -5,8 +5,13 @@
 
 mod balances;
 mod classify;
+mod custom_report;
+mod dashboard;
+mod json;
 mod net_profit;
 mod period;
+mod report_eval;
+mod report_query;
 mod sankey;
 mod standard;
 mod statements;
@@ -17,8 +22,18 @@ pub use classify::{
 	AdjustmentSource, Classification, ClassifiedRow, Decision, Flags, Leg, Partner,
 	RECONCILIATION_NOTE, classify,
 };
+pub use custom_report::{BalanceType, CustomReport, GroupBy, Interval, SortBy};
+pub use dashboard::{
+	Dashboard, DashboardWidget, GRID_COLUMNS, WidgetContent, WidgetType, dashboards, place_widget,
+};
+pub use json::Json;
 pub use net_profit::{CategoryLabels, CategoryLine, Line, NetProfit, Section, net_profit};
 pub use period::{Period, months};
+pub use report_eval::{
+	Balances, IntervalBalances, ReportData, ReportGroup, ReportInterval, Uncategorized,
+	evaluate_report,
+};
+pub use report_query::{QueryRow, report_range, report_rows, transaction_date_bounds};
 pub use sankey::{Flow, Node, NodeKind, Sankey, sankey};
 pub use standard::{NetWorthPoint, net_profit_by_month, net_worth_by_month};
 pub use statements::{
