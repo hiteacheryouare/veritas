@@ -129,19 +129,35 @@ final class RealCoreNewBudgetTests: XCTestCase {
 		app.buttons["newBudget.continue"].click()
 
 		XCTAssertTrue(app.screen("budget").waitForExistence(timeout: 15))
+		attachScreenshot(of: app, named: "real-core-3-opened")
 		XCTAssertTrue(app.staticTexts["Cash"].exists)
 		XCTAssertTrue(app.staticTexts["Credit"].exists)
 		XCTAssertTrue(app.staticTexts["Investments & Other assets"].exists, "the 401(k)")
-		let checking = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'sidebar.account.' AND label CONTAINS 'Checking'")).firstMatch
+		let checking = sidebarAccount(named: "Checking", in: app)
 		XCTAssertTrue(checking.exists)
-		XCTAssertTrue(checking.label.contains("2,140.18"), checking.label)
-		let visa = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'sidebar.account.' AND label CONTAINS 'Visa'")).firstMatch
-		XCTAssertTrue(visa.label.contains("612.33"), visa.label)
-		attachScreenshot(of: app, named: "real-core-3-opened")
+		XCTAssertTrue(text(of: checking).contains("2,140.18"), text(of: checking))
+		let visa = sidebarAccount(named: "Visa", in: app)
+		XCTAssertTrue(visa.exists)
+		XCTAssertTrue(text(of: visa).contains("612.33"), text(of: visa))
 	}
 
 	private func waitUntil(_ condition: @escaping () -> Bool) -> Bool {
 		let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: nil)
 		return XCTWaiter().wait(for: [expectation], timeout: 10) == .completed
+	}
+
+	/// A sidebar row reads as one element, and SwiftUI puts a combined row's
+	/// text in its value, not its label. Real accounts have core ids, so the
+	/// row is found by name.
+	@MainActor
+	private func sidebarAccount(named name: String, in app: XCUIApplication) -> XCUIElement {
+		app.descendants(matching: .any)
+			.matching(NSPredicate(format: "identifier BEGINSWITH 'sidebar.account.' AND (label CONTAINS %@ OR value CONTAINS %@)", name, name))
+			.firstMatch
+	}
+
+	@MainActor
+	private func text(of element: XCUIElement) -> String {
+		[element.label, element.value as? String].compactMap(\.self).joined(separator: " ")
 	}
 }
