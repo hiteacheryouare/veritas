@@ -22,6 +22,11 @@
 *.snap text eol=lf
 .nvmrc text eol=lf
 
+# Xcode writes these with LF and rewrites any other ending.
+*.pbxproj text eol=lf
+*.xcscheme text eol=lf
+*.entitlements text eol=lf
+
 # A text rule must never reach these: normalizing CR LF inside a binary corrupts it.
 *.zip binary
 *.sqlite binary

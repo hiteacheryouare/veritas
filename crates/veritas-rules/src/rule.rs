@@ -309,7 +309,7 @@ mod tests {
 		let full =
 			parsed(json!([{"op": "contains", "field": "imported_description", "value": "amzn"}]));
 		assert_eq!(full.support(), RuleSupport::Full);
-		let regex = parsed(json!([{"op": "matches", "field": "notes", "value": "^a"}]));
+		let regex = parsed(json!([{"op": "matches", "field": "notes", "value": "(?=a)"}]));
 		assert!(matches!(regex.support(), RuleSupport::ReadOnly(_)));
 		let broken = parsed(json!([{"op": "oneOf", "field": "notes", "value": ["a"]}]));
 		assert!(matches!(broken.support(), RuleSupport::IgnoredByActual(_)));

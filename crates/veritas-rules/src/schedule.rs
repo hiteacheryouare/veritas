@@ -4,7 +4,7 @@
 
 use chrono::{Datelike, Days, Months, NaiveDate, Weekday};
 use serde_json::Value;
-use veritas_domain::CivilDate;
+use veritas_domain::{CivilDate, CoreError};
 
 use crate::condition::DateValue;
 use crate::js;
@@ -216,47 +216,66 @@ pub fn status(
 }
 
 /// `getUpcomingDays`: how many days ahead count as upcoming for a preset
-/// (`1`, `7`, `14`, `oneMonth`, `currentMonth`) or a custom `N-day|week|month|year`.
-/// `None` is JS `NaN`.
-pub fn upcoming_days(length: &str, today: CivilDate) -> Option<i64> {
-	let first_of_month = today.naive().with_day(1)?;
-	let days_until = |months: u32| {
+/// (`1`, `7`, `14`, `oneMonth`, `currentMonth`) or a custom `N-day|week|month|year`
+/// (`custom_upcoming_length`). Text JS would turn into `NaN` is `Invalid`, and a
+/// length too large to count is `Overflow` (R-REL-7).
+pub fn upcoming_days(length: &str, today: CivilDate) -> Result<i64, CoreError> {
+	let invalid = || CoreError::Invalid(format!("{length:?} isn't an upcoming length"));
+	let first_of_month = today.naive().with_day(1).ok_or_else(invalid)?;
+	let days_until = |months: i64| {
+		let months = u32::try_from(months).map_err(|_| CoreError::Overflow)?;
 		first_of_month
 			.checked_add_months(Months::new(months))
 			.map(|future| (future - first_of_month).num_days())
+			.ok_or(CoreError::Overflow)
 	};
 	match length {
 		"currentMonth" => {
-			let next_month = first_of_month.checked_add_months(Months::new(1))?;
-			let last_day = i64::from(next_month.pred_opt()?.day());
-			Some(last_day - i64::from(today.day()))
+			let next_month = first_of_month
+				.checked_add_months(Months::new(1))
+				.ok_or(CoreError::Overflow)?;
+			let last_day = next_month.pred_opt().ok_or(CoreError::Overflow)?.day();
+			Ok(i64::from(last_day) - i64::from(today.day()))
 		}
 		"oneMonth" => days_until(1),
-		_ => match length.split_once('-') {
-			Some((number, unit)) => {
-				let value = number.trim().parse::<i64>().ok()?.max(1);
-				match unit {
-					"day" => Some(value),
-					"week" => Some(value * 7),
-					"month" => Some(days_until(u32::try_from(value).ok()?)? + 1),
-					"year" => Some(days_until(u32::try_from(value * 12).ok()?)? + 1),
-					_ => Some(7),
-				}
+		_ if length.contains('-') => {
+			// `const [num, unit] = length.split('-')`: only the first two parts count.
+			let mut parts = length.split('-');
+			let number = parts.next().unwrap_or_default();
+			let unit = parts.next().unwrap_or_default();
+			let value = || Ok::<i64, CoreError>(parse_int(number)?.ok_or_else(invalid)?.max(1));
+			match unit {
+				"day" => value(),
+				"week" => value()?.checked_mul(7).ok_or(CoreError::Overflow),
+				"month" => days_until(value()?)?
+					.checked_add(1)
+					.ok_or(CoreError::Overflow),
+				"year" => days_until(value()?.checked_mul(12).ok_or(CoreError::Overflow)?)?
+					.checked_add(1)
+					.ok_or(CoreError::Overflow),
+				_ => Ok(7),
 			}
-			None => {
-				let digits: String = length
-					.trim_start()
-					.chars()
-					.enumerate()
-					.take_while(|(i, c)| {
-						c.is_ascii_digit() || (*i == 0 && (*c == '-' || *c == '+'))
-					})
-					.map(|(_, c)| c)
-					.collect();
-				digits.parse().ok()
-			}
-		},
+		}
+		_ => parse_int(length)?.ok_or_else(invalid),
 	}
+}
+
+/// `parseInt(text, 10)`: an optional sign and the leading digits. `None` is
+/// `NaN`; digits past `i64` are `Overflow` rather than JS's lost precision.
+fn parse_int(text: &str) -> Result<Option<i64>, CoreError> {
+	let text = text.trim_start_matches(js::is_js_whitespace);
+	let unsigned = text.strip_prefix(['+', '-']).unwrap_or(text);
+	let end = unsigned
+		.find(|c: char| !c.is_ascii_digit())
+		.unwrap_or(unsigned.len());
+	if end == 0 {
+		return Ok(None);
+	}
+	let sign = text.len() - unsigned.len();
+	text[..sign + end]
+		.parse()
+		.map(Some)
+		.map_err(|_| CoreError::Overflow)
 }
 
 /// `getScheduleOccurrenceMatchStartDate`: a transaction linked to the
@@ -479,15 +498,41 @@ mod tests {
 	#[test]
 	fn upcoming_lengths() {
 		let today = day("2026-11-09");
-		assert_eq!(upcoming_days("7", today), Some(7));
-		assert_eq!(upcoming_days("currentMonth", today), Some(21));
-		assert_eq!(upcoming_days("oneMonth", today), Some(30));
-		assert_eq!(upcoming_days("2-week", today), Some(14));
-		assert_eq!(upcoming_days("0-day", today), Some(1));
+		assert_eq!(upcoming_days("7", today).unwrap(), 7);
+		assert_eq!(upcoming_days("currentMonth", today).unwrap(), 21);
+		assert_eq!(upcoming_days("oneMonth", today).unwrap(), 30);
+		assert_eq!(upcoming_days("2-week", today).unwrap(), 14);
+		assert_eq!(upcoming_days("0-day", today).unwrap(), 1);
 		// 2027-01-01 minus 2026-11-01, plus one.
-		assert_eq!(upcoming_days("2-month", today), Some(62));
-		assert_eq!(upcoming_days("1-fortnight", today), Some(7));
-		assert_eq!(upcoming_days("soon", today), None);
+		assert_eq!(upcoming_days("2-month", today).unwrap(), 62);
+		assert_eq!(upcoming_days("1-fortnight", today).unwrap(), 7);
+		assert_eq!(
+			upcoming_days("3x-day", today).unwrap(),
+			3,
+			"parseInt reads the leading digits"
+		);
+		assert_eq!(
+			upcoming_days("-3-day", today).unwrap(),
+			7,
+			"split('-') makes the unit \"3\""
+		);
+		assert!(matches!(
+			upcoming_days("soon", today),
+			Err(CoreError::Invalid(_))
+		));
+		// A huge custom length is a typed error, never a panic or a wrap.
+		for huge in [
+			"9223372036854775807-week",
+			"9223372036854775807-year",
+			"4294967296-month",
+			"99999999999999999999-day",
+			"99999999999999999999",
+		] {
+			assert!(
+				matches!(upcoming_days(huge, today), Err(CoreError::Overflow)),
+				"{huge}"
+			);
+		}
 	}
 
 	#[test]
