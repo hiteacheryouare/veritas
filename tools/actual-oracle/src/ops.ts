@@ -281,6 +281,24 @@ export const opHandlers: Record<string, OpHandler> = {
 		);
 	},
 	runSchedules: ({ internal }) => internal.send('schedule/force-run-service'),
+	// The schedule list's Skip, Post transaction (today) and Complete or Restart
+	// menu items (dc/components/schedules/index.tsx:48-75).
+	skipSchedule: ({ internal }, op) => {
+		required(op, 'id');
+		return internal.send('schedule/skip-next-date', { id: op.id });
+	},
+	postSchedule: ({ internal }, op) => {
+		required(op, 'id');
+		return internal.send('schedule/post-transaction', { id: op.id, today: Boolean(op.today) });
+	},
+	updateSchedule: ({ internal }, op) => {
+		required(op, 'id');
+		return internal.send('schedule/update', {
+			schedule: { id: op.id, ...op.fields },
+			conditions: op.conditions,
+			resetNextDate: op.resetNextDate
+		});
+	},
 
 	setNote: ({ api }, op) => {
 		required(op, 'id', 'note');
