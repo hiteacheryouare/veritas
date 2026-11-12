@@ -15,9 +15,17 @@ use std::process::Command;
 
 use common::{Scratch, oracle_dir};
 use veritas_interop::{
-	ExportOutcome, ImportOutcome, canonical_dump_of_actual_tables, canonical_dump_to_vec,
-	export_actual_zip, import_actual_zip,
+	ExportOutcome, ImportOutcome, canonical_dump_of_actual_tables, export_actual_zip,
+	import_actual_zip,
 };
+
+/// Unwraps without printing the error, which may quote the budget's path, ids or rows.
+fn quiet<T, E>(result: Result<T, E>, what: &str) -> T {
+	match result {
+		Ok(value) => value,
+		Err(_) => panic!("{what} failed; details withheld because they may quote budget data"),
+	}
+}
 
 fn private_export() -> Option<std::path::PathBuf> {
 	let path = std::env::var_os("VERITAS_PRIVATE_EXPORT")?;
@@ -38,8 +46,8 @@ fn differing_lines(a: &[u8], b: &[u8]) -> usize {
 /// Where two dumps differ, as key paths with a count of differing array
 /// elements. Only key names (table and column names) appear, never values.
 fn differing_sections(a: &[u8], b: &[u8]) -> Vec<String> {
-	let a = without_veritas_tables(serde_json::from_slice(a).expect("Actual's dump is JSON"));
-	let b = without_veritas_tables(serde_json::from_slice(b).expect("Actual's dump is JSON"));
+	let a = without_veritas_tables(quiet(serde_json::from_slice(a), "parsing Actual's dump"));
+	let b = without_veritas_tables(quiet(serde_json::from_slice(b), "parsing Actual's dump"));
 	let mut out = Vec::new();
 	walk("", &a, &b, &mut out);
 	out
@@ -103,8 +111,8 @@ fn quiet_oracle_dump(zip: &Path) -> Vec<u8> {
 		.args(["src/main.ts", "dump"])
 		.arg(zip)
 		.arg("--raw-only")
-		.output()
-		.expect("node runs");
+		.output();
+	let output = quiet(output, "starting node");
 	assert!(
 		output.status.success(),
 		"Actual could not dump the zip (exit {:?}); stderr withheld because it may quote budget data",
@@ -129,9 +137,11 @@ fn ryans_export_round_trips_unchanged() {
 		),
 		Err(_) => panic!("import failed; error withheld because it may quote budget data"),
 	};
-	let mut store =
-		veritas_store::Store::open(&budget.db_path, veritas_store::Access::ReadWrite).unwrap();
-	store.adopt().unwrap();
+	let mut store = quiet(
+		veritas_store::Store::open(&budget.db_path, veritas_store::Access::ReadWrite),
+		"opening the imported budget",
+	);
+	quiet(store.adopt(), "adopting the imported budget");
 	let exported = scratch.join("exported.zip");
 	match export_actual_zip(&store, &budget.metadata_path, &exported) {
 		Ok(ExportOutcome::Exported(audit)) => assert!(
@@ -143,8 +153,14 @@ fn ryans_export_round_trips_unchanged() {
 		Err(_) => panic!("export failed; error withheld because it may quote budget data"),
 	}
 
-	let ours_before = canonical_dump_to_vec(&source).unwrap();
-	let ours_after = canonical_dump_of_actual_tables(&exported).unwrap();
+	let ours_before = quiet(
+		canonical_dump_of_actual_tables(&source),
+		"dumping the source",
+	);
+	let ours_after = quiet(
+		canonical_dump_of_actual_tables(&exported),
+		"dumping the export",
+	);
 	let ours = differing_lines(&ours_before, &ours_after);
 	assert_eq!(
 		ours, 0,
