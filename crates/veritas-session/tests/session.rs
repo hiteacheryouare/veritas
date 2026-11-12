@@ -1072,18 +1072,30 @@ fn setup_accounts_need_a_name_and_a_balance_that_fits() {
 		TestSession::create_budget(&root.path().join("a"), &with("  ", 45_000), clock.options()),
 		Err(CoreError::Invalid(_))
 	));
-	assert!(matches!(
-		TestSession::create_budget(
-			&root.path().join("b"),
-			&with("Visa", i64::MIN),
-			clock.options()
-		),
-		Err(CoreError::Overflow)
-	));
+	for too_large in [i64::MIN, -(1 << 51), 1 << 51, i64::MAX] {
+		assert!(
+			matches!(
+				TestSession::create_budget(
+					&root.path().join("b"),
+					&with("Visa", too_large),
+					clock.options()
+				),
+				Err(CoreError::Overflow)
+			),
+			"{too_large}"
+		);
+	}
 	assert!(entries(root.path()).is_empty());
 	TestSession::create_budget(
 		&root.path().join("c"),
 		&with(" Visa ", 45_000),
+		clock.options(),
+	)
+	.unwrap();
+	// Actual's limit itself is fine.
+	TestSession::create_budget(
+		&root.path().join("d"),
+		&with("Largest", (1 << 51) - 1),
 		clock.options(),
 	)
 	.unwrap();

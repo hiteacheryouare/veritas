@@ -295,7 +295,6 @@ fn setup_refuses_a_bad_name_or_destination_and_builds_nothing() {
 }
 
 #[test]
-#[ignore = "bug: setup accepts a starting balance beyond Actual's 2^51 - 1 limit, so the budget it builds breaks Actual's budget math after export"]
 fn setup_refuses_a_starting_balance_actual_cannot_hold() {
 	let scratch = Scratch::new("create-overflow");
 	for (kind, typed) in [

@@ -9,6 +9,8 @@ use veritas_domain::{
 use veritas_interop::{ExportOutcome, ImportOutcome, Manifest, import_actual_zip};
 use veritas_store::{Access as StoreAccess, AuditReport, LoadReport, Loaded};
 
+use veritas_engine::MAX_SAFE_MINOR;
+
 use crate::background::{OpenCheck, Pending};
 use crate::backup::write_backup;
 use crate::bus::{ChangeListener, ChangeSet, Command, CommandBus, Listeners, Permit, Subscription};
@@ -189,6 +191,11 @@ impl<B: Backend> Session<B> {
 			account.name = account.name.trim().to_owned();
 			if account.name.is_empty() {
 				return Err(CoreError::Invalid("Give each account a name.".to_owned()));
+			}
+			// Actual can't load an amount past its MAX_SAFE_NUMBER, 2^51 - 1
+			// minor units (loot-core/src/shared/util.ts:426), and hangs on it.
+			if account.starting_balance.minor().unsigned_abs() > MAX_SAFE_MINOR.unsigned_abs() {
+				return Err(CoreError::Overflow);
 			}
 			account.opening_balance()?;
 		}
