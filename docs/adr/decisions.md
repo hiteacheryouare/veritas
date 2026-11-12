@@ -295,3 +295,8 @@ Every decision behind Veritas, so no question gets asked twice. D1–D24 are PLA
 - **Options:** count them, with a note / add them back / ask per category
 - **Decision:** Add them back. The forecast's monthly series leaves out on- and off-budget capitalizing transfers (CLS-4 rows 8 and 9), the way ST-4 E2 does, and shows "N asset purchase(s) excluded". Spec: forecasting.md FC-1 and FC-3 (AP-1).
 - **Date:** 2026-11-11
+
+### D60. What does the session write when a rule can't run in Veritas?
+- **Options:** apply the rest and record the note / write nothing from that run and show the note
+- **Decision:** When any rule in a run is undetermined, the session writes nothing from that run and shows the note; this replaces "apply the rest and record the note". The transaction, and any payee a rule would have made, is left for Actual. `RunOutcome.transaction` is `None` for such a run, and `SchedulePlan::left_to_actual` lists the bills it affects.
+- **Date:** 2026-11-11
