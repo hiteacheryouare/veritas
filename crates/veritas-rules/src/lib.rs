@@ -33,4 +33,6 @@ pub use schedule::{
 	ScheduleStatus, next_date, next_date_after, next_date_from, paid_window_start, schedule_dates,
 	status, upcoming_days, validate_schedule_date,
 };
-pub use trigger::{added_transaction, counterpart, may_need_actual, merge_manual_entry};
+pub use trigger::{
+	ManualEntry, added_transaction, counterpart, manual_entry, may_need_actual, merge_manual_entry,
+};

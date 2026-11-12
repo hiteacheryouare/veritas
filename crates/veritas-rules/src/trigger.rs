@@ -118,6 +118,15 @@ pub fn merge_manual_entry(
 /// Under D60 Veritas saves nothing from such a run, so the note says so and
 /// sends Ryan to Actual to add the transaction there.
 pub fn may_need_actual(outcome: &RunOutcome) -> Option<String> {
+	let (rules, why) = missing_rules(outcome)?;
+	Some(format!(
+		"Veritas didn't save this: {rules} couldn't run here{why}. Add it in Actual."
+	))
+}
+
+/// "1 rule" or "N rules", and the reasons in parentheses; `None` when every
+/// rule ran.
+fn missing_rules(outcome: &RunOutcome) -> Option<(String, String)> {
 	let reasons: Vec<&str> = outcome
 		.undetermined
 		.iter()
@@ -133,9 +142,47 @@ pub fn may_need_actual(outcome: &RunOutcome) -> Option<String> {
 		1 => "1 rule".to_owned(),
 		n => format!("{n} rules"),
 	};
-	Some(format!(
-		"Veritas didn't save this: {rules} couldn't run here{why}. Add it in Actual."
-	))
+	Some((rules, why))
+}
+
+/// A transaction Ryan typed in, ready to save, and the note to show on it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ManualEntry {
+	pub transaction: RuleTransaction,
+	pub note: Option<String>,
+}
+
+/// Saving a row typed by hand (D64). When every rule ran, the rules fill
+/// what he left empty (`merge_manual_entry`). When one couldn't run, the row
+/// is saved exactly as typed with no rule effects and marked "may need
+/// Actual": D60's "write nothing" covers what rules would have written, never
+/// what he typed. Actual never runs rules on an existing transaction by
+/// itself, so the note points to its "Run rules" action.
+pub fn manual_entry(
+	entered: &RuleTransaction,
+	outcome: &RunOutcome,
+	cleared_by_user: &[Field],
+) -> ManualEntry {
+	match (&outcome.transaction, missing_rules(outcome)) {
+		(Some(ruled), _) => ManualEntry {
+			transaction: merge_manual_entry(entered, ruled, cleared_by_user),
+			note: None,
+		},
+		(None, missing) => {
+			let (rules, why) = missing.unwrap_or_else(|| ("A rule".to_owned(), String::new()));
+			let them = if outcome.undetermined.len() == 1 {
+				"it"
+			} else {
+				"them"
+			};
+			ManualEntry {
+				transaction: entered.clone(),
+				note: Some(format!(
+					"Saved as you typed it. {rules} couldn't run here{why}. To apply {them}, select this transaction in Actual and choose Run rules."
+				)),
+			}
+		}
+	}
 }
 
 #[cfg(test)]
@@ -238,6 +285,44 @@ mod tests {
 		assert_eq!(leg.category, None);
 		assert_eq!(leg.cleared, Some(true));
 		assert_eq!(leg.schedule, Some(ScheduleId::new("rent")));
+	}
+
+	#[test]
+	fn a_typed_row_is_saved_as_typed_when_a_rule_cannot_run() {
+		// D64: no rule effects, the row as typed, and a note that it was saved.
+		let mut ruled = entered();
+		ruled.category = Some(CategoryId::new("dining"));
+		let mut outcome = RunOutcome {
+			transaction: None,
+			partial: ruled.clone(),
+			applied: vec![RuleId::new("category")],
+			undetermined: vec![RuleId::new("template")],
+			reasons: Default::default(),
+		};
+		outcome
+			.reasons
+			.insert(RuleId::new("template"), "a template action".into());
+		let saved = manual_entry(&entered(), &outcome, &[]);
+		assert_eq!(
+			saved.transaction,
+			entered(),
+			"the rule that did run isn't applied either"
+		);
+		assert_eq!(
+			saved.note.as_deref(),
+			Some(
+				"Saved as you typed it. 1 rule couldn't run here (a template action). To apply it, select this transaction in Actual and choose Run rules."
+			)
+		);
+
+		outcome.transaction = Some(ruled);
+		outcome.undetermined.clear();
+		let ruled_entry = manual_entry(&entered(), &outcome, &[]);
+		assert_eq!(
+			ruled_entry.transaction.category,
+			Some(CategoryId::new("dining"))
+		);
+		assert_eq!(ruled_entry.note, None);
 	}
 
 	#[test]
