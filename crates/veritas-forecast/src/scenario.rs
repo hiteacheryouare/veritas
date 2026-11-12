@@ -62,6 +62,23 @@ pub fn validate(scenario: &Scenario, today: CivilDate) -> Result<(), CoreError> 
 				}
 				continue;
 			}
+			ScenarioChange::OneTimeTransfer {
+				date,
+				from,
+				to,
+				amount,
+			} => {
+				if *date < today {
+					return invalid("a one-time change can't be dated before today");
+				}
+				if from == to {
+					return invalid("a transfer needs two different accounts");
+				}
+				if *amount <= Money::ZERO {
+					return invalid("a transfer moves a positive amount");
+				}
+				continue;
+			}
 			ScenarioChange::Recurring {
 				start,
 				end_month,
@@ -102,6 +119,8 @@ pub(crate) struct ScenarioFlow {
 	pub date: CivilDate,
 	pub account: AccountId,
 	pub amount: Money,
+	/// Set for a transfer: it moves by `-amount`, and net worth doesn't move.
+	pub counterpart: Option<AccountId>,
 }
 
 fn active(month: YearMonth, start: YearMonth, end: Option<YearMonth>) -> bool {
@@ -142,6 +161,22 @@ impl<'a> Overlay<'a> {
 							date: *date,
 							account: account.clone(),
 							amount: *amount,
+							counterpart: None,
+						});
+					}
+				}
+				ScenarioChange::OneTimeTransfer {
+					date,
+					from,
+					to,
+					amount,
+				} => {
+					if today <= *date && *date <= last {
+						flows.push(ScenarioFlow {
+							date: *date,
+							account: from.clone(),
+							amount: amount.checked_neg()?,
+							counterpart: Some(to.clone()),
 						});
 					}
 				}
@@ -159,6 +194,7 @@ impl<'a> Overlay<'a> {
 								date,
 								account: account.clone(),
 								amount: *amount,
+								counterpart: None,
 							});
 						}
 					}

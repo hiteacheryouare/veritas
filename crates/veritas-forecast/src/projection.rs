@@ -311,7 +311,16 @@ impl<'a> Forecaster<'a> {
 			let mut scenario_net = 0i64;
 			for flow in scenario_flows.iter().filter(|flow| in_month(flow.date)) {
 				post(&mut running, &flow.account, flow.amount.minor())?;
-				scenario_net = add(scenario_net, flow.amount.minor())?;
+				match &flow.counterpart {
+					Some(counterpart) => {
+						post(
+							&mut running,
+							counterpart,
+							flow.amount.checked_neg()?.minor(),
+						)?;
+					}
+					None => scenario_net = add(scenario_net, flow.amount.minor())?,
+				}
 			}
 			for (account, category, change) in overlay.income_changes(month) {
 				let delta = match change {

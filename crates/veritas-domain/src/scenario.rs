@@ -47,6 +47,15 @@ pub enum ScenarioChange {
 		category: Option<CategoryId>,
 		amount: Money,
 	},
+	/// Money moved between two of the user's accounts on one date, such as a
+	/// planned purchase of an off-budget asset (FC-3): `from` falls by
+	/// `amount`, `to` rises by it, and net worth doesn't move.
+	OneTimeTransfer {
+		date: CivilDate,
+		from: AccountId,
+		to: AccountId,
+		amount: Money,
+	},
 	Recurring {
 		start: CivilDate,
 		/// The last month with an occurrence; open-ended when `None`.
@@ -86,7 +95,7 @@ impl ScenarioChange {
 	/// The `kind` column value.
 	pub fn kind(&self) -> &'static str {
 		match self {
-			ScenarioChange::OneTime { .. } => "one_time",
+			ScenarioChange::OneTime { .. } | ScenarioChange::OneTimeTransfer { .. } => "one_time",
 			ScenarioChange::Recurring { .. } => "recurring",
 			ScenarioChange::CategoryPercent { .. } => "category_percent",
 			ScenarioChange::IncomeChange { .. } => "income_change",
@@ -112,6 +121,12 @@ mod tests {
 				date: month.first_day(),
 				account: AccountId::new("a"),
 				category: None,
+				amount: Money::ZERO,
+			},
+			ScenarioChange::OneTimeTransfer {
+				date: month.first_day(),
+				from: AccountId::new("a"),
+				to: AccountId::new("b"),
 				amount: Money::ZERO,
 			},
 			ScenarioChange::Recurring {

@@ -898,3 +898,53 @@ fn fc_3_a_percent_income_change_reaches_an_uncategorized_schedule() {
 		"FC-3 income change"
 	);
 }
+
+#[test]
+fn fc_3_a_planned_asset_purchase_is_a_one_time_transfer() {
+	let mut book = fc_3_book();
+	book.account("CAR", true);
+	let flows = fc_3_flows();
+	let baseline = project(&book, &flows, None);
+	let buy = scenario(
+		"Buy a car",
+		vec![ScenarioChange::OneTimeTransfer {
+			date: date("2027-03-10"),
+			from: acct("CHK"),
+			to: acct("CAR"),
+			amount: cents(2_000_000),
+		}],
+	);
+	let projection = project(&book, &flows, Some(&buy));
+	let march = &projection.months[2];
+	assert_eq!(
+		march.net_worth, baseline.months[2].net_worth,
+		"net worth doesn't move"
+	);
+	assert_eq!(march.scenario_net_income, cents(0));
+	assert_eq!(
+		march.balances[&acct("CHK")].minor(),
+		baseline.months[2].balances[&acct("CHK")].minor() - 2_000_000
+	);
+	assert_eq!(march.balances[&acct("CAR")], cents(2_000_000));
+
+	let forecaster = Forecaster::new(&book.budget).unwrap();
+	for (from, to, on, amount) in [
+		("CHK", "CHK", "2027-03-10", 100),
+		("CHK", "CAR", "2027-03-10", 0),
+		("CHK", "CAR", "2027-01-14", 100),
+	] {
+		let bad = scenario(
+			"Bad",
+			vec![ScenarioChange::OneTimeTransfer {
+				date: date(on),
+				from: acct(from),
+				to: acct(to),
+				amount: cents(amount),
+			}],
+		);
+		assert!(matches!(
+			forecaster.project(date(TODAY), &flows, Some(&bad)),
+			Err(CoreError::Invalid(_))
+		));
+	}
+}
