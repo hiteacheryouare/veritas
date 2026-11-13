@@ -95,6 +95,7 @@ fn plain(id: &str, account: &AccountId, day: u32, amount: i64) -> Transaction {
 		starting_balance: false,
 		sort_order: 1_794_000_000_000.0 + f64::from(day),
 		tombstone: false,
+		split_error: None,
 	}
 }
 

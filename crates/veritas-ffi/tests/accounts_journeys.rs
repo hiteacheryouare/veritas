@@ -972,7 +972,6 @@ fn stored_error(scratch: &Scratch, name: &str, id: &str) -> Option<String> {
 }
 
 #[test]
-#[ignore = "known bug on PR #56: Veritas never writes transactions.error, so a split it rebalances keeps Actual's old SplitTransactionError"]
 fn rebalancing_an_imported_unbalanced_split_clears_the_error_actual_shows() {
 	// Edge case 6: an unbalanced split from Actual is shown with its
 	// difference. Once the user rebalances it, Actual must stop flagging it:
@@ -1019,6 +1018,13 @@ fn rebalancing_an_imported_unbalanced_split_clears_the_error_actual_shows() {
 			.split_difference,
 		None
 	);
+	session.undo().unwrap();
+	assert_eq!(
+		stored_error(&scratch, "budget", "odd").as_deref(),
+		Some(SPLIT_ERROR),
+		"undo puts Actual's error back"
+	);
+	session.redo().unwrap();
 	let zip = scratch.join("fixed.zip");
 	export(&session, &zip);
 	session.close().unwrap();

@@ -1883,6 +1883,7 @@ mod tests {
 			starting_balance: false,
 			sort_order: 1.0,
 			tombstone: false,
+			split_error: None,
 		};
 		core.call(|session| {
 			session.perform(&Rows(vec![veritas_domain::Row::Transaction(bought)]))?;
@@ -2194,6 +2195,7 @@ mod tests {
 				starting_balance: false,
 				sort_order: 1.0,
 				tombstone: false,
+				split_error: None,
 			};
 			core.call(|session| {
 				session.perform(&Rows(vec![veritas_domain::Row::Transaction(spending)]))?;

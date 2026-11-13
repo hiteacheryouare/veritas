@@ -299,6 +299,7 @@ fn write_new(
 		starting_balance: false,
 		sort_order: now_ms,
 		tombstone: transaction.deleted,
+		split_error: None,
 	};
 	let mut lines: Vec<Transaction> = transaction
 		.splits
@@ -321,6 +322,7 @@ fn write_new(
 			starting_balance: false,
 			sort_order: -((n + 1) as f64),
 			tombstone: transaction.deleted,
+			split_error: None,
 		})
 		.collect();
 	let mut extra = Vec::new();
@@ -390,6 +392,7 @@ fn counterpart_row(
 			starting_balance: false,
 			sort_order: now_ms,
 			tombstone: false,
+			split_error: None,
 		},
 		note,
 	)
@@ -498,7 +501,8 @@ fn sync_transfer(
 }
 
 /// Edits a transaction in place, line by line for a split, and runs the
-/// transfer hooks. Editing never runs rules (§6.2).
+/// transfer hooks. Editing never runs rules (§6.2). A split's stored error
+/// is cleared, since the draft must add up (edge case 6).
 pub fn edit(
 	data: &BudgetData,
 	id: &TransactionId,
@@ -534,6 +538,8 @@ pub fn edit(
 		} else {
 			now_ms
 		},
+		// `recalculateSplit`: the draft adds up, so Actual stops flagging it.
+		split_error: None,
 		..existing.clone()
 	};
 	let old_lines = children(data, id);
@@ -576,6 +582,7 @@ pub fn edit(
 			category: if off { None } else { line.category.clone() },
 			notes: line.notes.clone().filter(|notes| !notes.is_empty()),
 			split: SplitRole::Child { parent: id.clone() },
+			split_error: None,
 			..base
 		});
 	}
