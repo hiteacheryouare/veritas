@@ -163,7 +163,8 @@ fn ruled(draft: &Draft) -> RuleTransaction {
 			.iter()
 			.map(|line| SplitLine {
 				amount: line.amount,
-				payee: line.payee.clone(),
+				// `makeChild`: a line without a payee takes the parent's.
+				payee: line.payee.clone().or_else(|| draft.payee.clone()),
 				category: line.category.clone(),
 				notes: line.notes.clone(),
 			})
@@ -571,7 +572,7 @@ pub fn edit(
 			cleared: top.cleared,
 			reconciled: top.reconciled,
 			amount: line.amount,
-			payee: line.payee.clone(),
+			payee: line.payee.clone().or_else(|| draft.payee.clone()),
 			category: if off { None } else { line.category.clone() },
 			notes: line.notes.clone().filter(|notes| !notes.is_empty()),
 			split: SplitRole::Child { parent: id.clone() },

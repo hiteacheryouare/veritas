@@ -2595,6 +2595,14 @@ mod tests {
 		assert_eq!(shown.category_id, None);
 		assert_eq!(shown.lines.len(), 2);
 		assert_eq!(shown.split_difference, None);
+		assert!(shown.payee_id.is_some());
+		assert!(
+			shown
+				.lines
+				.iter()
+				.all(|line| line.payee_id == shown.payee_id),
+			"makeChild: lines without a payee take the parent's"
+		);
 		let first = shown.lines[0].id.clone();
 
 		draft.splits = vec![
@@ -3053,21 +3061,16 @@ mod tests {
 		})
 		.unwrap();
 		let set_kind = |kind| {
-			let meta = veritas_domain::CategoryMeta {
-				kind: Some(kind),
-				..data(&core).category_meta.get(&category).cloned().unwrap_or(
-					veritas_domain::CategoryMeta {
-						kind: None,
-						tax_bucket: None,
-						archived_on: None,
-					},
-				)
-			};
 			core.call(|session| {
+				let write = veritas_engine::category_kinds::set_category_kind(
+					session.data()?,
+					&category,
+					kind,
+				)?;
 				session.perform(&Rows(vec![veritas_domain::Row::CategoryMeta(
 					veritas_domain::CategoryMetaRow {
-						category: category.clone(),
-						meta,
+						category: write.category,
+						meta: write.meta,
 					},
 				)]))?;
 				Ok(())
@@ -3094,5 +3097,228 @@ mod tests {
 		})
 		.unwrap();
 		assert_eq!(goal_of(&core, &id).state, crate::GoalState::Active);
+	}
+
+	/// Runs Actual's own ops on `zip` (tools/actual-oracle `apply`) into `out`.
+	/// `false` without the oracle, unless CI requires it.
+	fn actual_apply(zip: &Path, ops: serde_json::Value, out: &Path, today: &str) -> bool {
+		let oracle = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/actual-oracle");
+		if !oracle.join("node_modules").exists() {
+			assert!(
+				std::env::var_os("VERITAS_REQUIRE_ORACLE").is_none(),
+				"VERITAS_REQUIRE_ORACLE is set but tools/actual-oracle/node_modules is missing"
+			);
+			return false;
+		}
+		let file = out.with_extension("ops.json");
+		std::fs::write(
+			&file,
+			serde_json::json!({"version": 1, "ops": ops}).to_string(),
+		)
+		.unwrap();
+		let output = std::process::Command::new("node")
+			.current_dir(&oracle)
+			.arg("src/main.ts")
+			.arg("apply")
+			.arg(zip)
+			.arg(&file)
+			.arg("--out")
+			.arg(out)
+			.args(["--today", today])
+			.output()
+			.expect("node runs");
+		assert!(
+			output.status.success(),
+			"Actual couldn't apply the ops: {}",
+			String::from_utf8_lossy(&output.stderr)
+		);
+		true
+	}
+
+	fn table<'a>(dump: &'a serde_json::Value, name: &str) -> &'a Vec<serde_json::Value> {
+		dump["tables"][name]["rows"].as_array().unwrap()
+	}
+
+	/// A Veritas budget with two open accounts, exported as the base both
+	/// sides start from.
+	fn two_account_base(label: &str) -> (Scratch, std::path::PathBuf, String, String, String) {
+		use crate::NewAccountKind::{Checking, Savings};
+		let (scratch, core) = imported(label);
+		let checking = new_account(&core, "Everyday", Checking, 0);
+		let savings = new_account(&core, "Rainy day", Savings, 0);
+		let category = an_expense(&core);
+		let base = scratch.0.join("base.zip");
+		core.export_actual_zip(&base.display().to_string(), &CancelToken::default())
+			.unwrap();
+		core.close().unwrap();
+		(scratch, base, checking, savings, category)
+	}
+
+	fn imported_from(scratch: &Scratch, zip: &Path, name: &str) -> Core<veritas_store::Store> {
+		Core::<veritas_store::Store>::import_actual_zip(
+			&zip.display().to_string(),
+			&scratch.0.join(name).display().to_string(),
+			&CancelToken::default(),
+		)
+		.unwrap()
+	}
+
+	#[test]
+	fn a_learned_category_rule_is_stored_as_actual_stores_it() {
+		// §4.5 learn_categories, against Actual's own addTransactions with
+		// learnCategories on the same base.
+		let (_, today) = this_month();
+		let (scratch, base, checking, _, category) = two_account_base("learn-oracle");
+		let core = imported_from(&scratch, &base, "veritas");
+		core.call(|session| {
+			let id = veritas_domain::PayeeId::new("cafe");
+			session.perform(&Rows(vec![
+				veritas_domain::Row::Payee(veritas_domain::Payee {
+					id: id.clone(),
+					name: "Corner Cafe".to_owned(),
+					transfer_account: None,
+					favorite: false,
+					learn_categories: true,
+					tombstone: false,
+				}),
+				veritas_domain::Row::PayeeMapping(veritas_domain::PayeeMapping {
+					from: id.clone(),
+					to: id,
+				}),
+			]))?;
+			Ok(())
+		})
+		.unwrap();
+		core.goals(&today).unwrap();
+		for amount in [-450, -500, -475] {
+			let mut draft = typed(&checking, amount);
+			draft.payee_id = Some("cafe".to_owned());
+			draft.category_id = Some(category.clone());
+			draft.cleared = true;
+			add(&core, draft);
+		}
+		let ours = data(&core);
+		let ours: Vec<_> = ours
+			.rules
+			.values()
+			.filter(|r| r.conditions_json.contains("cafe"))
+			.collect();
+		assert_eq!(ours.len(), 1);
+
+		let out = scratch.0.join("actual.zip");
+		let transactions: Vec<serde_json::Value> = [-450, -500, -475]
+			.iter()
+			.map(|amount| {
+				serde_json::json!({"date": "2026-11-12", "amount": amount, "payee": "cafe", "category": category})
+			})
+			.collect();
+		let ops = serde_json::json!([
+			{"op": "createPayee", "id": "cafe", "name": "Corner Cafe"},
+			{"op": "addTransactions", "account": checking, "learnCategories": true, "transactions": transactions},
+		]);
+		if !actual_apply(&base, ops, &out, &today) {
+			return;
+		}
+		let actual = actual_reads(&out, &today).unwrap();
+		let theirs: Vec<&serde_json::Value> = table(&actual, "rules")
+			.iter()
+			.filter(|r| r["conditions"].as_str().is_some_and(|c| c.contains("cafe")))
+			.collect();
+		assert_eq!(theirs.len(), 1, "Actual learned one rule too");
+		let parse = |text: &str| serde_json::from_str::<serde_json::Value>(text).unwrap();
+		assert_eq!(
+			parse(&ours[0].conditions_json),
+			parse(theirs[0]["conditions"].as_str().unwrap())
+		);
+		assert_eq!(
+			parse(&ours[0].actions_json),
+			parse(theirs[0]["actions"].as_str().unwrap())
+		);
+		assert_eq!(theirs[0]["stage"], serde_json::Value::Null);
+		assert_eq!(theirs[0]["conditions_op"], "and");
+	}
+
+	#[test]
+	fn a_transfer_pair_is_written_as_actual_writes_it_on_add_and_edit() {
+		// §4.2 addTransfer and updateTransfer, against Actual's own
+		// addTransactions and updateTransaction on the same base.
+		let (_, today) = this_month();
+		let (scratch, base, checking, savings, _) = two_account_base("transfer-oracle");
+		let core = imported_from(&scratch, &base, "veritas");
+		core.goals(&today).unwrap();
+		let mut draft = typed(&checking, -10_000);
+		draft.payee_id = Some(transfer_payee_of(&core, &savings));
+		draft.notes = Some("to savings".to_owned());
+		draft.cleared = true;
+		let id = add(&core, draft.clone());
+		let pair = |core: &Core<veritas_store::Store>| {
+			let source = row(core, &id);
+			let other = row(core, source.transfer.as_ref().unwrap().as_str());
+			let view = |t: &veritas_domain::Transaction| {
+				serde_json::json!({
+					"acct": t.account.as_str(),
+					"amount": t.amount.minor(),
+					"description": t.payee.as_ref().map(|p| p.as_str()),
+					"notes": t.notes,
+					"cleared": i64::from(t.cleared),
+					"reconciled": i64::from(t.reconciled),
+					"category": t.category.as_ref().map(|c| c.as_str()),
+				})
+			};
+			(view(&source), view(&other))
+		};
+		let added = pair(&core);
+		draft.amount = -12_000;
+		draft.notes = Some("more".to_owned());
+		core.perform(Command::EditTransaction {
+			transaction_id: id.clone(),
+			transaction: draft,
+		})
+		.unwrap();
+		let edited = pair(&core);
+
+		let theirs = |dump: &serde_json::Value| {
+			let rows = table(dump, "transactions");
+			let source = rows
+				.iter()
+				.find(|r| {
+					r["acct"] == checking.as_str()
+						&& r["transferred_id"].is_string()
+						&& r["tombstone"] == 0
+				})
+				.unwrap()
+				.clone();
+			let other = rows
+				.iter()
+				.find(|r| r["id"] == source["transferred_id"])
+				.unwrap()
+				.clone();
+			let view = |r: &serde_json::Value| {
+				serde_json::json!({
+					"acct": r["acct"], "amount": r["amount"], "description": r["description"],
+					"notes": r["notes"], "cleared": r["cleared"], "reconciled": r["reconciled"],
+					"category": r["category"],
+				})
+			};
+			(
+				source["id"].as_str().unwrap().to_owned(),
+				view(&source),
+				view(&other),
+			)
+		};
+		let first = scratch.0.join("actual-added.zip");
+		let ops = serde_json::json!([{"op": "addTransactions", "account": checking, "transactions": [
+			{"date": "2026-11-12", "amount": -10_000, "payee": {"transferTo": savings}, "notes": "to savings"}
+		]}]);
+		if !actual_apply(&base, ops, &first, &today) {
+			return;
+		}
+		let (source_id, source, other) = theirs(&actual_reads(&first, &today).unwrap());
+		assert_eq!((source, other), added, "after the add");
+		let second = scratch.0.join("actual-edited.zip");
+		let ops = serde_json::json!([{"op": "updateTransaction", "id": source_id, "fields": {"amount": -12_000, "notes": "more"}}]);
+		assert!(actual_apply(&first, ops, &second, &today));
+		let (_, source, other) = theirs(&actual_reads(&second, &today).unwrap());
+		assert_eq!((source, other), edited, "after the edit");
 	}
 }
