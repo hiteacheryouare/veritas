@@ -316,6 +316,9 @@ impl<B: Backend> Session<B> {
 
 	pub fn perform<C: Command + ?Sized>(&mut self, command: &C) -> Result<ChangeSet, CoreError> {
 		self.poll();
+		// A read-only budget refuses before planning, so the banner's reason
+		// wins over whatever the plan would have said.
+		self.bus_mut()?.ensure_writable()?;
 		if let Some(reason) = command.snapshot_first() {
 			self.snapshot(reason)?;
 		}

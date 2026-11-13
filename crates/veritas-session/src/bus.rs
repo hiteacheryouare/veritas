@@ -305,7 +305,7 @@ impl<S: Store> CommandBus<S> {
 		self.listeners.unsubscribe(subscription);
 	}
 
-	fn ensure_writable(&self) -> Result<(), CoreError> {
+	pub(crate) fn ensure_writable(&self) -> Result<(), CoreError> {
 		match self.read_only {
 			Some(reason) => Err(CoreError::ReadOnly(reason)),
 			None => Ok(()),

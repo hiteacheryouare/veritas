@@ -323,6 +323,13 @@ fn a_second_session_on_the_same_budget_is_read_only_and_takes_no_snapshots() {
 		)
 	};
 	assert!(refused(second.perform(&rename("Nope"))));
+	let unplannable = |_: &BudgetData| -> Result<Vec<Row>, CoreError> {
+		Err(CoreError::Invalid("no".to_owned()))
+	};
+	assert!(
+		refused(second.perform(&unplannable)),
+		"the read-only reason comes before the plan's own error"
+	);
 	assert!(refused(second.restore("anything.sqlite")));
 	assert!(matches!(
 		second.snapshot(SnapshotReason::Hourly),
