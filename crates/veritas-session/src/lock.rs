@@ -1,5 +1,6 @@
 use std::fs::{File, OpenOptions, TryLockError};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use veritas_domain::{CoreError, ReadOnlyReason};
 
@@ -12,6 +13,29 @@ pub const LOCK_FILE: &str = "veritas.lock";
 #[derive(Debug)]
 pub struct WriterLock {
 	_file: File,
+	dir: PathBuf,
+}
+
+impl WriterLock {
+	/// The budget directory this lock is for, with symlinks resolved.
+	pub fn dir(&self) -> &Path {
+		&self.dir
+	}
+
+	/// Fails unless `file` lives in the directory this lock is for.
+	pub(crate) fn covers(&self, file: &Path) -> Result<(), CoreError> {
+		let parent = file.parent().unwrap_or(Path::new("."));
+		let parent = parent.canonicalize().map_err(io_error("open", parent))?;
+		if parent == self.dir {
+			Ok(())
+		} else {
+			Err(CoreError::Internal(format!(
+				"the writer lock is for {}, not {}",
+				self.dir.display(),
+				parent.display()
+			)))
+		}
+	}
 }
 
 #[derive(Debug)]
@@ -32,7 +56,10 @@ impl Access {
 /// Takes the single-writer lock on a budget directory, or reports that
 /// another window or process already has it.
 pub fn acquire(budget_dir: &Path) -> Result<Access, CoreError> {
-	let path = budget_dir.join(LOCK_FILE);
+	let dir = budget_dir
+		.canonicalize()
+		.map_err(io_error("open", budget_dir))?;
+	let path = dir.join(LOCK_FILE);
 	let file = OpenOptions::new()
 		.read(true)
 		.write(true)
@@ -41,7 +68,12 @@ pub fn acquire(budget_dir: &Path) -> Result<Access, CoreError> {
 		.open(&path)
 		.map_err(io_error("open", &path))?;
 	match file.try_lock() {
-		Ok(()) => Ok(Access::Writer(WriterLock { _file: file })),
+		Ok(()) => {
+			// The lock file's modified time is when a writer last opened the
+			// budget, which the budget list shows. Missing it costs nothing.
+			let _ = file.set_modified(SystemTime::now());
+			Ok(Access::Writer(WriterLock { _file: file, dir }))
+		}
 		Err(TryLockError::WouldBlock) => Ok(Access::ReadOnly(ReadOnlyReason::OpenElsewhere)),
 		Err(TryLockError::Error(error)) => Err(io_error("lock", &path)(error)),
 	}

@@ -333,6 +333,15 @@ fn the_schedule_service_matches_the_oracle() {
 	let book = RuleBook::new(&budget);
 	let mut payees = BudgetPayees::new(&budget, || PayeeId::new("made"));
 	let plan = advance_schedules(&book, &budget, &mut payees, day(today));
+	assert!(
+		plan.left.is_empty(),
+		"every rule in this budget runs in Veritas: {:?}",
+		plan.left
+	);
+	assert_eq!(
+		plan.writes.last(),
+		Some(&ScheduleWrite::ScheduleRunDone(day(today)))
+	);
 
 	let key = |schedule: &str,
 	           date: CivilDate,
@@ -358,10 +367,7 @@ fn the_schedule_service_matches_the_oracle() {
 		.posts
 		.iter()
 		.map(|p| {
-			let t = p
-				.transaction
-				.as_ref()
-				.expect("every rule in this budget runs in Veritas");
+			let t = &p.transaction;
 			key(
 				p.schedule.as_str(),
 				t.date,
@@ -431,6 +437,7 @@ fn the_schedule_service_matches_the_oracle() {
 			ScheduleWrite::Restart(schedule) => {
 				completed.insert(schedule.to_string(), false);
 			}
+			ScheduleWrite::ScheduleRunDone(_) | ScheduleWrite::ClearScheduleRun => {}
 		}
 	}
 	let mut differ = Vec::new();

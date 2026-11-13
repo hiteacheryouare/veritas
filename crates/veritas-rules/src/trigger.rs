@@ -106,13 +106,27 @@ pub fn merge_manual_entry(
 	if ruled.deleted && !entered.deleted {
 		merged.deleted = true;
 	}
+	// A split rule's lines fill a row that had none; the user's own payee
+	// stays on the parent, since a split only empties it on the rule's copy.
+	if entered.splits.is_empty() && !ruled.splits.is_empty() {
+		merged.splits = ruled.splits.clone();
+	}
 	merged
 }
 
-/// The note the UI shows on a transaction when rules Actual would have run
-/// couldn't run in Veritas (Architect decision: apply the rest, never drop
-/// silently).
+/// What the UI says when rules Actual would have run couldn't run here.
+/// Under D60 Veritas saves nothing from such a run, so the note says so and
+/// sends Ryan to Actual to add the transaction there.
 pub fn may_need_actual(outcome: &RunOutcome) -> Option<String> {
+	let (rules, why) = missing_rules(outcome)?;
+	Some(format!(
+		"Veritas didn't save this: {rules} couldn't run here{why}. Add it in Actual."
+	))
+}
+
+/// "1 rule" or "N rules", and the reasons in parentheses; `None` when every
+/// rule ran.
+fn missing_rules(outcome: &RunOutcome) -> Option<(String, String)> {
 	let reasons: Vec<&str> = outcome
 		.undetermined
 		.iter()
@@ -123,14 +137,51 @@ pub fn may_need_actual(outcome: &RunOutcome) -> Option<String> {
 	} else {
 		format!(" ({})", reasons.join("; "))
 	};
-	match outcome.undetermined.len() {
-		0 => None,
-		1 => Some(format!(
-			"1 rule couldn't run in Veritas{why}. Open this transaction in Actual to apply it."
-		)),
-		n => Some(format!(
-			"{n} rules couldn't run in Veritas{why}. Open this transaction in Actual to apply them."
-		)),
+	let rules = match outcome.undetermined.len() {
+		0 => return None,
+		1 => "1 rule".to_owned(),
+		n => format!("{n} rules"),
+	};
+	Some((rules, why))
+}
+
+/// A transaction Ryan typed in, ready to save, and the note to show on it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ManualEntry {
+	pub transaction: RuleTransaction,
+	pub note: Option<String>,
+}
+
+/// Saving a row typed by hand (D64). When every rule ran, the rules fill
+/// what he left empty (`merge_manual_entry`). When one couldn't run, the row
+/// is saved exactly as typed with no rule effects and marked "may need
+/// Actual": D60's "write nothing" covers what rules would have written, never
+/// what he typed. Actual never runs rules on an existing transaction by
+/// itself, so the note points to its "Run rules" action.
+pub fn manual_entry(
+	entered: &RuleTransaction,
+	outcome: &RunOutcome,
+	cleared_by_user: &[Field],
+) -> ManualEntry {
+	match (&outcome.transaction, missing_rules(outcome)) {
+		(Some(ruled), _) => ManualEntry {
+			transaction: merge_manual_entry(entered, ruled, cleared_by_user),
+			note: None,
+		},
+		(None, missing) => {
+			let (rules, why) = missing.unwrap_or_else(|| ("A rule".to_owned(), String::new()));
+			let them = if outcome.undetermined.len() == 1 {
+				"it"
+			} else {
+				"them"
+			};
+			ManualEntry {
+				transaction: entered.clone(),
+				note: Some(format!(
+					"Saved as you typed it. {rules} couldn't run here{why}. To apply {them}, select this transaction in Actual and choose Run rules."
+				)),
+			}
+		}
 	}
 }
 
@@ -153,6 +204,8 @@ mod tests {
 			reconciled: None,
 			schedule: None,
 			deleted: false,
+			splits: Vec::new(),
+			is_child: false,
 		}
 	}
 
@@ -175,6 +228,21 @@ mod tests {
 			merged.category, None,
 			"a field the user cleared stays empty"
 		);
+	}
+
+	#[test]
+	fn a_split_from_rules_fills_a_new_row_but_keeps_its_payee() {
+		let mut ruled = entered();
+		ruled.payee = None;
+		ruled.splits = vec![crate::action::SplitLine {
+			amount: Money::from_minor(-1250),
+			payee: Some(PayeeId::new("cafe")),
+			category: Some(CategoryId::new("dining")),
+			notes: None,
+		}];
+		let merged = merge_manual_entry(&entered(), &ruled, &[]);
+		assert_eq!(merged.splits, ruled.splits);
+		assert_eq!(merged.payee, Some(PayeeId::new("cafe")));
 	}
 
 	#[test]
@@ -220,6 +288,44 @@ mod tests {
 	}
 
 	#[test]
+	fn a_typed_row_is_saved_as_typed_when_a_rule_cannot_run() {
+		// D64: no rule effects, the row as typed, and a note that it was saved.
+		let mut ruled = entered();
+		ruled.category = Some(CategoryId::new("dining"));
+		let mut outcome = RunOutcome {
+			transaction: None,
+			partial: ruled.clone(),
+			applied: vec![RuleId::new("category")],
+			undetermined: vec![RuleId::new("template")],
+			reasons: Default::default(),
+		};
+		outcome
+			.reasons
+			.insert(RuleId::new("template"), "a template action".into());
+		let saved = manual_entry(&entered(), &outcome, &[]);
+		assert_eq!(
+			saved.transaction,
+			entered(),
+			"the rule that did run isn't applied either"
+		);
+		assert_eq!(
+			saved.note.as_deref(),
+			Some(
+				"Saved as you typed it. 1 rule couldn't run here (a template action). To apply it, select this transaction in Actual and choose Run rules."
+			)
+		);
+
+		outcome.transaction = Some(ruled);
+		outcome.undetermined.clear();
+		let ruled_entry = manual_entry(&entered(), &outcome, &[]);
+		assert_eq!(
+			ruled_entry.transaction.category,
+			Some(CategoryId::new("dining"))
+		);
+		assert_eq!(ruled_entry.note, None);
+	}
+
+	#[test]
 	fn the_note_names_how_many_rules_are_missing() {
 		let mut outcome = RunOutcome {
 			transaction: Some(entered()),
@@ -230,10 +336,9 @@ mod tests {
 		};
 		assert_eq!(may_need_actual(&outcome), None);
 		outcome.undetermined = vec![RuleId::new("a"), RuleId::new("b")];
-		assert!(
-			may_need_actual(&outcome)
-				.unwrap()
-				.starts_with("2 rules couldn't run in Veritas. ")
+		assert_eq!(
+			may_need_actual(&outcome).unwrap(),
+			"Veritas didn't save this: 2 rules couldn't run here. Add it in Actual."
 		);
 		outcome.undetermined = vec![RuleId::new("a")];
 		outcome
@@ -241,7 +346,7 @@ mod tests {
 			.insert(RuleId::new("a"), "a template action".into());
 		assert_eq!(
 			may_need_actual(&outcome).unwrap(),
-			"1 rule couldn't run in Veritas (a template action). Open this transaction in Actual to apply it."
+			"Veritas didn't save this: 1 rule couldn't run here (a template action). Add it in Actual."
 		);
 	}
 }

@@ -14,7 +14,7 @@ mod store;
 
 pub use change::{
 	AccountMetaRow, CategoryMapping, CategoryMetaRow, Change, Delta, EntityRef, Hold, Note,
-	PayeeMapping, Record, Retired, Row, TransactionMetaRow,
+	PayeeMapping, Record, Retired, Row, TaxTag, TransactionMetaRow,
 };
 pub use currency::{CURRENCIES, Currency, currency};
 pub use date::{CivilDate, YearMonth};
