@@ -1,8 +1,4 @@
-use std::collections::BTreeSet;
-
-use veritas_domain::{
-	BudgetCell, BudgetData, CategoryId, CivilDate, CoreError, Hold, Money, Note, Row, YearMonth,
-};
+use veritas_domain::{BudgetData, CategoryId, CivilDate, CoreError, Money, Row, YearMonth};
 use veritas_engine::{
 	BudgetEditor, BudgetWrites, CategoryMonth, Envelope, EnvelopeSheet,
 	NumberFormat as EngineFormat,
@@ -215,40 +211,7 @@ pub(crate) fn edit(
 		EngineFormat::from_preference(data.format.number_format.as_deref().unwrap_or("comma-dot"));
 	let editor = BudgetEditor::new(data, sheet, format, data.format.hide_fraction);
 	let writes = write(&editor, month)?;
-	Ok(rows(data, &writes))
-}
-
-/// The rows that hold `writes` once applied: each touched budget cell, hold
-/// and note as it ends up.
-fn rows(data: &BudgetData, writes: &BudgetWrites) -> Vec<Row> {
-	let mut after = data.clone();
-	writes.apply_to(&mut after);
-	let cells: BTreeSet<(YearMonth, CategoryId)> = writes
-		.cells
-		.iter()
-		.map(|cell| (cell.month, cell.category.clone()))
-		.collect();
-	let holds: BTreeSet<YearMonth> = writes.holds.iter().map(|(month, _)| *month).collect();
-	let notes: BTreeSet<&String> = writes.notes.iter().map(|(id, _)| id).collect();
-	let mut rows = Vec::new();
-	for key in cells {
-		if let Some(cell) = after.budget_cells.get(&key) {
-			rows.push(Row::BudgetCell(BudgetCell::clone(cell)));
-		}
-	}
-	for month in holds {
-		rows.push(Row::Hold(Hold {
-			month,
-			amount: after.holds.get(&month).copied().flatten(),
-		}));
-	}
-	for id in notes {
-		rows.push(Row::Note(Note {
-			id: id.clone(),
-			text: after.notes.get(id).cloned().flatten(),
-		}));
-	}
-	rows
+	Ok(veritas_session::writes::rows(data, &writes))
 }
 
 pub(crate) fn money(minor: i64) -> Money {

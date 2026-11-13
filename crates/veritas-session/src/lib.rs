@@ -7,6 +7,7 @@ mod bus;
 mod cancel;
 pub mod categories;
 mod fsio;
+pub mod goals;
 mod lock;
 mod overview;
 mod retention;
@@ -15,6 +16,7 @@ mod shared;
 mod sheet;
 mod snapshot;
 mod store;
+pub mod writes;
 
 pub use backup::write_backup;
 pub use budgets::{BudgetEntry, list_budgets};

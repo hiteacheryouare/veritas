@@ -329,8 +329,33 @@ impl<B: Backend> Session<B> {
 		} else {
 			command.plan(self.data()?)?
 		};
-		let changed = self.bus_mut()?.perform_rows(rows)?;
-		self.after_change(&changed);
+		let today = self.today;
+		let State::Open(bus) = &mut self.state else {
+			return Err(closed());
+		};
+		let sheet = &mut self.sheet;
+		let mut refreshed = false;
+		let performed = bus.perform_rows_then(rows, |data, changed| {
+			if !crate::goals::has_active_goals(data) {
+				return Ok(Vec::new());
+			}
+			sheet.refresh(data, changed);
+			refreshed = true;
+			Ok(crate::goals::newly_reached(data, sheet.get(data, today)?))
+		});
+		let changed = match performed {
+			Ok(changed) => changed,
+			Err(error) => {
+				if refreshed {
+					self.sheet.clear();
+				}
+				return Err(error);
+			}
+		};
+		self.dirty |= !changed.is_empty();
+		if !refreshed {
+			self.after_change(&changed);
+		}
 		Ok(changed)
 	}
 

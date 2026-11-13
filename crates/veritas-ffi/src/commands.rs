@@ -1,12 +1,13 @@
 use veritas_domain::{
-	Account, AccountId, BudgetData, CategoryGroupId, CategoryId, CoreError, Note, Row,
+	Account, AccountId, BudgetData, CategoryGroupId, CategoryId, CivilDate, CoreError, GoalId,
+	Note, Row,
 };
-use veritas_session::categories;
+use veritas_session::{categories, goals};
 
 use veritas_engine::EnvelopeSheet;
 
 use crate::Month;
-use crate::budget::{edit, envelope, money};
+use crate::budget::{civil_date, edit, envelope, money};
 
 /// A user action. Each one is a single transaction and a single undo step.
 /// Workstreams add commands through `contract` PRs.
@@ -113,6 +114,35 @@ pub enum Command {
 		group_id: String,
 		hidden: bool,
 	},
+	/// A goal as a new envelope at the top of the Goals group, created if the
+	/// budget has none. `target_date` is `YYYY-MM-DD`. The goal's id comes back
+	/// in the `Change` (R-GOAL-1, D36).
+	CreateGoal {
+		name: String,
+		target: i64,
+		target_date: Option<String>,
+		icon: Option<String>,
+		color: Option<String>,
+	},
+	/// Releases this month's leftover to `release_to_category_id`, or To
+	/// Budget when `None`, then closes and hides the goal. `also_move_later`
+	/// moves budget in later months to the same place (DEBT-8.3, GOAL-10).
+	CloseGoal {
+		goal_id: String,
+		release_to_category_id: Option<String>,
+		also_move_later: bool,
+	},
+	/// Back to reached if it ever was, else active, and shown again.
+	ReopenGoal {
+		goal_id: String,
+	},
+	/// A new target on the same goal: back to active, shown again, last
+	/// reached month kept (D71).
+	RetargetGoal {
+		goal_id: String,
+		target: i64,
+		target_date: Option<String>,
+	},
 }
 
 impl veritas_session::Command for Command {
@@ -135,6 +165,9 @@ impl veritas_session::Command for Command {
 				| Command::SetCarryover { .. }
 				| Command::ArchiveCategory { .. }
 				| Command::DeleteCategoryMovingHistory { .. }
+				| Command::CreateGoal { .. }
+				| Command::CloseGoal { .. }
+				| Command::RetargetGoal { .. }
 		)
 	}
 
@@ -225,9 +258,53 @@ impl veritas_session::Command for Command {
 				&CategoryId::new(category_id.as_str()),
 				&CategoryId::new(to_category_id.as_str()),
 			),
+			Command::CreateGoal {
+				name,
+				target,
+				target_date,
+				icon,
+				color,
+			} => goals::create_goal(
+				data,
+				sheet,
+				goals::NewGoal {
+					name,
+					target: money(*target),
+					target_date: date(target_date)?,
+					icon: icon.clone(),
+					color: color.clone(),
+				},
+			)
+			.map(|(rows, _)| rows),
+			Command::CloseGoal {
+				goal_id,
+				release_to_category_id,
+				also_move_later,
+			} => goals::close_goal(
+				data,
+				sheet,
+				&GoalId::new(goal_id.as_str()),
+				&envelope(release_to_category_id),
+				*also_move_later,
+			),
+			Command::RetargetGoal {
+				goal_id,
+				target,
+				target_date,
+			} => goals::retarget_goal(
+				data,
+				sheet,
+				&GoalId::new(goal_id.as_str()),
+				money(*target),
+				date(target_date)?,
+			),
 			_ => self.plan_plain(data),
 		}
 	}
+}
+
+fn date(text: &Option<String>) -> Result<Option<CivilDate>, CoreError> {
+	text.as_deref().map(civil_date).transpose()
 }
 
 impl Command {
@@ -284,6 +361,9 @@ impl Command {
 			),
 			Command::SetCategoryGroupHidden { group_id, hidden } => {
 				categories::set_group_hidden(data, &group(group_id), *hidden)
+			}
+			Command::ReopenGoal { goal_id } => {
+				goals::reopen_goal(data, &GoalId::new(goal_id.as_str()))
 			}
 			_ => Err(CoreError::Internal(
 				"a budget command was planned without the envelope sheet".to_owned(),

@@ -3,6 +3,7 @@
 mod blocking;
 mod budget;
 mod commands;
+mod goals;
 mod records;
 mod session;
 
@@ -13,6 +14,7 @@ use veritas_domain::{CoreError, YearMonth};
 pub use blocking::CancelToken;
 pub use budget::{BudgetMonth, EnvelopeGroup, EnvelopeRow, MoneyTone};
 pub use commands::Command;
+pub use goals::{GoalClosePreview, GoalState, GoalSummary, MonthAmount};
 pub use records::{
 	AccountGroup, AccountGroupSummary, AccountSummary, AuditCheck, AuditFinding, BackupInfo,
 	BudgetListing, CategoryHistory, Change, Currency, EntityKind, EntityRef, NewAccount,

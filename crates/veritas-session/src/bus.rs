@@ -220,11 +220,26 @@ impl<S: Store> CommandBus<S> {
 	/// Writes rows a command already planned, as one transaction and one undo
 	/// step.
 	pub fn perform_rows(&mut self, rows: Vec<Row>) -> Result<ChangeSet, CoreError> {
+		self.perform_rows_then(rows, |_, _| Ok(Vec::new()))
+	}
+
+	/// Like `perform_rows`, then asks `follow` for more rows given the budget
+	/// with `rows` applied, and writes those in the same transaction and undo
+	/// step. Goals use it to record being reached by the edit that reached them.
+	pub fn perform_rows_then(
+		&mut self,
+		rows: Vec<Row>,
+		follow: impl FnOnce(&BudgetData, &ChangeSet) -> Result<Vec<Row>, CoreError>,
+	) -> Result<ChangeSet, CoreError> {
 		self.ensure_writable()?;
-		let changes = transact(
+		let changes = transact_then(
 			&mut self.data,
 			&mut self.store,
 			rows.into_iter().map(Intent::Put),
+			|data, changes| {
+				let follow_rows = follow(data, &ChangeSet::of(changes))?;
+				Ok(follow_rows.into_iter().map(Intent::Put).collect())
+			},
 		)?;
 		if changes.is_empty() {
 			return Ok(ChangeSet::default());
@@ -309,23 +324,42 @@ fn transact<'a, S: Store>(
 	store: &mut S,
 	intents: impl IntoIterator<Item = Intent<'a>>,
 ) -> Result<Vec<Change>, CoreError> {
+	transact_then(data, store, intents, |_, _| Ok(Vec::new()))
+}
+
+fn transact_then<'a, S: Store>(
+	data: &mut BudgetData,
+	store: &mut S,
+	intents: impl IntoIterator<Item = Intent<'a>>,
+	follow: impl FnOnce(&BudgetData, &[Change]) -> Result<Vec<Intent<'a>>, CoreError>,
+) -> Result<Vec<Change>, CoreError> {
 	let mut transaction = store.begin()?;
 	let mut applied: Vec<Change> = Vec::new();
-	for intent in intents {
-		let Some(change) = intent.against(data) else {
-			continue;
-		};
-		if change.is_noop() {
-			continue;
+	let mut write = |data: &mut BudgetData,
+	                 applied: &mut Vec<Change>,
+	                 intents: Vec<Intent<'a>>|
+	 -> Result<(), CoreError> {
+		for intent in intents {
+			let Some(change) = intent.against(data) else {
+				continue;
+			};
+			if change.is_noop() {
+				continue;
+			}
+			transaction.apply(&change)?;
+			change.apply(data);
+			applied.push(change);
 		}
-		if let Err(error) = transaction.apply(&change) {
-			revert(data, &applied);
-			// The write already failed; that error is the one worth reporting.
-			let _ = transaction.rollback();
-			return Err(error);
-		}
-		change.apply(data);
-		applied.push(change);
+		Ok(())
+	};
+	let written = write(data, &mut applied, intents.into_iter().collect())
+		.and_then(|()| follow(data, &applied))
+		.and_then(|more| write(data, &mut applied, more));
+	if let Err(error) = written {
+		revert(data, &applied);
+		// The write already failed; that error is the one worth reporting.
+		let _ = transaction.rollback();
+		return Err(error);
 	}
 	if let Err(error) = transaction.commit() {
 		revert(data, &applied);
