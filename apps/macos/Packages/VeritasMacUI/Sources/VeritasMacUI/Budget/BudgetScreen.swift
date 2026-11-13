@@ -63,9 +63,11 @@ struct BudgetScreen: View {
 			return .handled
 		}
 		// ⌘← and ⌘→ are handled here, not as menu or button shortcuts, so a text
-		// field that has focus keeps them for moving its caret.
+		// field that has focus keeps them for moving its caret. Arrow keys also
+		// carry the numeric-pad and function flags, so only the chord keys count.
 		.onKeyPress(keys: [.leftArrow, .rightArrow]) { press in
-			guard press.modifiers == .command, screen.editing == nil else { return .ignored }
+			let chord = press.modifiers.intersection([.command, .option, .shift, .control])
+			guard chord == .command, screen.editing == nil else { return .ignored }
 			Task { press.key == .leftArrow ? await screen.previousMonth() : await screen.nextMonth() }
 			return .handled
 		}
