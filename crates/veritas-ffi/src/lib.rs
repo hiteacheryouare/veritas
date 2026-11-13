@@ -1,6 +1,7 @@
 //! The only surface the apps see: commands, queries and the change-event stream, exported through UniFFI.
 
 mod blocking;
+mod budget;
 mod commands;
 mod records;
 mod session;
@@ -10,6 +11,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use veritas_domain::{CoreError, YearMonth};
 
 pub use blocking::CancelToken;
+pub use budget::{BudgetMonth, EnvelopeGroup, EnvelopeRow, MoneyTone};
 pub use commands::Command;
 pub use records::{
 	AccountGroup, AccountGroupSummary, AccountSummary, AuditCheck, AuditFinding, BackupInfo,
@@ -138,6 +140,31 @@ pub fn currencies() -> Result<Vec<Currency>, FfiError> {
 /// separator is the decimal point. Text that isn't a storable amount comes
 /// back as `Invalid` with a message to show beside the field, and the field
 /// keeps its old value (D37).
+/// The text an amount field shows when it opens (R-BUD-3): grouping
+/// separators, no currency symbol, a hyphen for negatives, so typing `+12.34`
+/// after it adds to the value.
+#[uniffi::export]
+pub fn amount_edit_text(amount: i64, style: NumberStyle) -> Result<String, FfiError> {
+	use veritas_engine::{NumberFormat as EngineFormat, edit_text};
+	guard(|| {
+		let format =
+			EngineFormat::from_preference(veritas_domain::NumberStyle::from(style).actual_value());
+		Ok(edit_text(
+			veritas_domain::Money::from_minor(amount),
+			format,
+			false,
+		))
+	})
+}
+
+/// Actual's single-operator rule, for every keystroke in an amount field: when
+/// the whole text is one operator typed over the selected value, it becomes
+/// `original` followed by that operator, so `+40` adds 40.
+#[uniffi::export]
+pub fn amount_field_text(original: String, typed: String) -> Result<String, FfiError> {
+	guard(|| Ok(veritas_engine::single_operator_rule(&original, &typed)))
+}
+
 #[uniffi::export]
 pub fn evaluate_amount(text: String, style: NumberStyle) -> Result<i64, FfiError> {
 	use veritas_engine::{NumberFormat as EngineFormat, Rejection, commit_amount};

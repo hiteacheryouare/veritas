@@ -7,12 +7,13 @@ use veritas_session::{
 };
 
 use crate::blocking::{CancelToken as CancelHandle, run};
+use crate::budget::BudgetMonth;
 use crate::commands::Command;
 use crate::records::NewBudgetOptions;
 use crate::records::{
 	AuditFinding, BackupInfo, Change, NumberFormat, Overview, Retention, SessionState, SnapshotInfo,
 };
-use crate::{FfiError, guard};
+use crate::{FfiError, Month, guard};
 
 /// Implemented in Swift. Called after every commit, undo, redo, restore or
 /// reload, on the thread that made the call, once the session is free again,
@@ -167,6 +168,10 @@ impl<B: Backend> Core<B> {
 
 	pub(crate) fn overview(&self) -> Result<Overview, FfiError> {
 		self.call(|session| session.overview().map(|overview| Overview::from(&overview)))
+	}
+
+	pub(crate) fn budget_month(&self, month: Month, today: &str) -> Result<BudgetMonth, FfiError> {
+		self.call(|session| crate::budget::budget_month(session.data()?, month, today))
 	}
 
 	pub(crate) fn export_actual_zip(
@@ -351,6 +356,12 @@ impl Session {
 	/// `None` while the background check still runs, or if it couldn't run.
 	pub fn audit_report(&self) -> Result<Option<Vec<AuditFinding>>, FfiError> {
 		self.core.audit_report()
+	}
+
+	/// The Budget screen for `month`, clamped to the months Actual has created.
+	/// `today` is the local civil date, `YYYY-MM-DD`; it decides that range.
+	pub fn budget_month(&self, month: Month, today: String) -> Result<BudgetMonth, FfiError> {
+		self.core.budget_month(month, &today)
 	}
 
 	/// The budget's name and its accounts in the sidebar groups, balances as
@@ -1016,5 +1027,213 @@ mod tests {
 			imported.err().map(|e| e.to_string())
 		);
 		assert_eq!(std::fs::read_dir(&scratch.0).unwrap().count(), 0);
+	}
+
+	/// A fixed today keeps the month range stable.
+	fn this_month() -> (Month, String) {
+		(
+			Month {
+				year: 2026,
+				month: 11,
+			},
+			"2026-11-15".to_owned(),
+		)
+	}
+
+	fn envelopes(sheet: &crate::BudgetMonth) -> Vec<&crate::EnvelopeRow> {
+		sheet
+			.groups
+			.iter()
+			.filter(|group| !group.is_income)
+			.flat_map(|group| &group.envelopes)
+			.collect()
+	}
+
+	#[test]
+	fn the_budget_month_lists_every_group_with_income_last() {
+		// R-BUD-1
+		let (_scratch, core) = imported("budget-month");
+		let (month, today) = this_month();
+		let sheet = core.budget_month(month, &today).unwrap();
+		assert!(!sheet.groups.is_empty());
+		assert!(sheet.groups.last().unwrap().is_income);
+		assert!(
+			sheet.groups[..sheet.groups.len() - 1]
+				.iter()
+				.all(|g| !g.is_income)
+		);
+		let budgeted: i64 = sheet
+			.groups
+			.iter()
+			.filter(|g| !g.is_income)
+			.map(|g| g.budgeted)
+			.sum();
+		assert_eq!(budgeted, sheet.budgeted);
+		let far = Month {
+			year: 2999,
+			month: 1,
+		};
+		assert_eq!(
+			core.budget_month(far, &today).unwrap().month,
+			sheet.last_month
+		);
+	}
+
+	#[test]
+	fn setting_a_budget_is_one_undo_step() {
+		// R-BUD-1, R-REL-5
+		let (_scratch, core) = imported("set-budget");
+		let (month, today) = this_month();
+		let envelope = envelopes(&core.budget_month(month, &today).unwrap())[0].clone();
+		core.perform(Command::SetBudget {
+			month,
+			category_id: envelope.id.clone(),
+			amount: envelope.budgeted + 1234,
+		})
+		.unwrap();
+		let after = core.budget_month(month, &today).unwrap();
+		let changed = envelopes(&after)
+			.into_iter()
+			.find(|e| e.id == envelope.id)
+			.unwrap()
+			.clone();
+		assert_eq!(changed.budgeted, envelope.budgeted + 1234);
+		assert_eq!(changed.available, envelope.available + 1234);
+		assert_eq!(
+			after.to_budget,
+			core.budget_month(month, &today).unwrap().to_budget
+		);
+		core.undo().unwrap();
+		let undone = core.budget_month(month, &today).unwrap();
+		assert_eq!(
+			envelopes(&undone)
+				.into_iter()
+				.find(|e| e.id == envelope.id)
+				.unwrap()
+				.budgeted,
+			envelope.budgeted
+		);
+	}
+
+	#[test]
+	fn moving_budget_takes_from_one_envelope_and_gives_to_another() {
+		// R-BUD-4
+		let (_scratch, core) = imported("move-budget");
+		let (month, today) = this_month();
+		let before = core.budget_month(month, &today).unwrap();
+		let rows = envelopes(&before);
+		let (from, to) = (rows[0].clone(), rows[1].clone());
+		core.perform(Command::MoveBudget {
+			month,
+			amount: 500,
+			from_category_id: Some(from.id.clone()),
+			to_category_id: Some(to.id.clone()),
+		})
+		.unwrap();
+		let after = core.budget_month(month, &today).unwrap();
+		let find = |id: &str| {
+			envelopes(&after)
+				.into_iter()
+				.find(|e| e.id == id)
+				.unwrap()
+				.clone()
+		};
+		assert_eq!(find(&from.id).budgeted, from.budgeted - 500);
+		assert_eq!(find(&to.id).budgeted, to.budgeted + 500);
+		assert_eq!(after.to_budget, before.to_budget);
+	}
+
+	#[test]
+	fn covering_overspending_brings_the_envelope_back_to_zero() {
+		// R-BUD-4
+		let (_scratch, core) = imported("cover");
+		let (month, today) = this_month();
+		let before = core.budget_month(month, &today).unwrap();
+		let rows = envelopes(&before);
+		let (target, source) = (rows[0].clone(), rows[1].clone());
+		core.perform(Command::SetBudget {
+			month,
+			category_id: target.id.clone(),
+			amount: target.budgeted - target.available - 700,
+		})
+		.unwrap();
+		core.perform(Command::SetBudget {
+			month,
+			category_id: source.id.clone(),
+			amount: source.budgeted - source.available + 1_000,
+		})
+		.unwrap();
+		let overspent = core.budget_month(month, &today).unwrap();
+		let row = envelopes(&overspent)
+			.into_iter()
+			.find(|e| e.id == target.id)
+			.unwrap()
+			.clone();
+		assert_eq!(row.available, -700);
+		assert_eq!(row.tone, crate::MoneyTone::Overspent);
+		core.perform(Command::CoverOverspending {
+			month,
+			category_id: target.id.clone(),
+			from_category_id: Some(source.id.clone()),
+			amount: None,
+		})
+		.unwrap();
+		let covered = core.budget_month(month, &today).unwrap();
+		let source_after = envelopes(&covered)
+			.into_iter()
+			.find(|e| e.id == source.id)
+			.unwrap()
+			.available;
+		assert_eq!(source_after, 300);
+		assert_eq!(
+			envelopes(&covered)
+				.into_iter()
+				.find(|e| e.id == target.id)
+				.unwrap()
+				.available,
+			0
+		);
+	}
+
+	#[test]
+	fn a_note_is_saved_and_a_blank_one_removed() {
+		// R-BUD-6
+		let (_scratch, core) = imported("note");
+		let (month, today) = this_month();
+		let id = envelopes(&core.budget_month(month, &today).unwrap())[0]
+			.id
+			.clone();
+		let note = |text: &str| {
+			core.perform(Command::SetCategoryNote {
+				category_id: id.clone(),
+				text: text.to_owned(),
+			})
+			.unwrap();
+			envelopes(&core.budget_month(month, &today).unwrap())
+				.into_iter()
+				.find(|e| e.id == id)
+				.unwrap()
+				.note
+				.clone()
+		};
+		assert_eq!(
+			note("  Annual renewal in March  "),
+			Some("Annual renewal in March".to_owned())
+		);
+		assert_eq!(note("  "), None);
+	}
+
+	#[test]
+	fn commands_name_missing_envelopes() {
+		let (_scratch, core) = imported("missing");
+		let (month, _) = this_month();
+		assert!(matches!(
+			core.perform(Command::SetBudget {
+				month,
+				category_id: "nope".to_owned(),
+				amount: 1
+			}),
+			Err(FfiError::NotFound { .. })
+		));
 	}
 }
