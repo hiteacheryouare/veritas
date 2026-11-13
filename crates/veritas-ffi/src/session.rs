@@ -9,9 +9,11 @@ use veritas_session::{
 use crate::blocking::{CancelToken as CancelHandle, run};
 use crate::budget::BudgetMonth;
 use crate::commands::Command;
+use crate::goals::{GoalClosePreview, GoalSummary};
 use crate::records::NewBudgetOptions;
 use crate::records::{
-	AuditFinding, BackupInfo, Change, NumberFormat, Overview, Retention, SessionState, SnapshotInfo,
+	AuditFinding, BackupInfo, CategoryHistory, Change, NumberFormat, Overview, Retention,
+	SessionState, SnapshotInfo,
 };
 use crate::{FfiError, Month, guard};
 
@@ -170,8 +172,45 @@ impl<B: Backend> Core<B> {
 		self.call(|session| session.overview().map(|overview| Overview::from(&overview)))
 	}
 
+	pub(crate) fn category_history(&self, category_id: &str) -> Result<CategoryHistory, FfiError> {
+		self.call(|session| {
+			let history = veritas_session::categories::category_history(
+				session.data()?,
+				&veritas_domain::CategoryId::new(category_id),
+			)?;
+			Ok(CategoryHistory {
+				transactions: history.transactions as u64,
+				budgeted_months: history.budgeted_months as u64,
+			})
+		})
+	}
+
+	pub(crate) fn goals(&self, today: &str) -> Result<Vec<GoalSummary>, FfiError> {
+		self.call(|session| {
+			session.with_sheet(crate::budget::civil_date(today)?, crate::goals::summaries)
+		})
+	}
+
+	pub(crate) fn goal_close_preview(
+		&self,
+		goal_id: &str,
+		release_to_category_id: &Option<String>,
+		today: &str,
+	) -> Result<GoalClosePreview, FfiError> {
+		self.call(|session| {
+			session.with_sheet(crate::budget::civil_date(today)?, |data, sheet| {
+				crate::goals::close_preview(data, sheet, goal_id, release_to_category_id)
+			})
+		})
+	}
+
 	pub(crate) fn budget_month(&self, month: Month, today: &str) -> Result<BudgetMonth, FfiError> {
-		self.call(|session| crate::budget::budget_month(session.data()?, month, today))
+		self.call(|session| {
+			let today = crate::budget::civil_date(today)?;
+			session.with_sheet(today, |data, sheet| {
+				crate::budget::budget_month(data, sheet, month)
+			})
+		})
 	}
 
 	pub(crate) fn export_actual_zip(
@@ -360,6 +399,29 @@ impl Session {
 
 	/// The Budget screen for `month`, clamped to the months Actual has created.
 	/// `today` is the local civil date, `YYYY-MM-DD`; it decides that range.
+	/// Whether a category can simply be deleted, or has history to archive or
+	/// move first.
+	pub fn category_history(&self, category_id: String) -> Result<CategoryHistory, FfiError> {
+		self.core.category_history(&category_id)
+	}
+
+	/// Every goal, in budget order, as of `today` (`YYYY-MM-DD`).
+	pub fn goals(&self, today: String) -> Result<Vec<GoalSummary>, FfiError> {
+		self.core.goals(&today)
+	}
+
+	/// What `Command::CloseGoal` would move, before the user confirms. `None`
+	/// releases to To Budget.
+	pub fn goal_close_preview(
+		&self,
+		goal_id: String,
+		release_to_category_id: Option<String>,
+		today: String,
+	) -> Result<GoalClosePreview, FfiError> {
+		self.core
+			.goal_close_preview(&goal_id, &release_to_category_id, &today)
+	}
+
 	pub fn budget_month(&self, month: Month, today: String) -> Result<BudgetMonth, FfiError> {
 		self.core.budget_month(month, &today)
 	}
@@ -863,6 +925,172 @@ mod tests {
 		}
 		assert_eq!(computed.as_object().unwrap().len(), balances.len());
 	}
+
+	fn entries(dir: &Path) -> Vec<String> {
+		let mut names: Vec<String> = std::fs::read_dir(dir)
+			.unwrap()
+			.map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+			.collect();
+		names.sort();
+		names
+	}
+
+	/// Runs `work` while another thread cancels it after `delay`, the way
+	/// Swift cancels the task when the user closes the setup sheet.
+	fn cancelled_after<T>(
+		delay: std::time::Duration,
+		work: impl FnOnce(&CancelToken) -> Result<T, FfiError>,
+	) -> Result<T, FfiError> {
+		let cancel = CancelToken::default();
+		let canceller = {
+			let cancel = cancel.clone();
+			std::thread::spawn(move || {
+				std::thread::sleep(delay);
+				cancel.cancel();
+			})
+		};
+		let result = work(&cancel);
+		canceller.join().unwrap();
+		result
+	}
+
+	#[test]
+	fn cancelling_a_create_or_import_at_any_moment_leaves_a_whole_budget_or_nothing() {
+		// R-REL-7, PLAN §6.6: a cancel either wins, and the folder is as it was,
+		// or lands after the rename, and the budget is whole and free to open.
+		use crate::{NewAccount, NewAccountKind, NewBudgetOptions, NumberFormat, NumberStyle};
+		let format = NumberFormat {
+			currency: Some("USD".to_owned()),
+			style: NumberStyle::CommaDot,
+			hide_decimals: false,
+		};
+		let options = NewBudgetOptions {
+			retirement_401k: true,
+			hsa: true,
+			accounts: vec![NewAccount {
+				name: "Checking".to_owned(),
+				kind: NewAccountKind::Checking,
+				starting_balance: 120_000,
+			}],
+		};
+		let create = |into: &str, cancel: &CancelToken| {
+			Core::<veritas_store::Store>::create_budget(
+				"Household",
+				into,
+				&format,
+				&options,
+				cancel,
+			)
+		};
+		let import = |into: &str, cancel: &CancelToken| {
+			Core::<veritas_store::Store>::import_actual_zip(&small_zip(), into, cancel)
+		};
+		let mut outcomes = std::collections::BTreeMap::new();
+
+		for (what, start) in [
+			(
+				"create",
+				&create as &dyn Fn(&str, &CancelToken) -> Result<Core<_>, FfiError>,
+			),
+			("import", &import),
+		] {
+			let timing = Scratch::new("cancel-timing");
+			let began = std::time::Instant::now();
+			start(&timing.budget(), &CancelToken::default()).unwrap();
+			let takes = began.elapsed();
+
+			for step in 0..24u32 {
+				let scratch = Scratch::new("cancel");
+				let delay = takes * step / 16;
+				match cancelled_after(delay, |cancel| start(&scratch.budget(), cancel)) {
+					Err(FfiError::Cancelled) => {
+						assert_eq!(
+							entries(&scratch.0),
+							Vec::<String>::new(),
+							"{what} at {delay:?}"
+						);
+						*outcomes.entry((what, "cancelled")).or_insert(0) += 1;
+					}
+					Ok(core) => {
+						assert_eq!(entries(&scratch.0), ["budget"], "{what} at {delay:?}");
+						assert_eq!(core.state().unwrap().read_only, None);
+						core.close().unwrap();
+						let reopened = Core::<veritas_store::Store>::open(
+							&scratch.budget(),
+							&CancelToken::default(),
+						)
+						.unwrap();
+						assert_eq!(
+							reopened.state().unwrap().read_only,
+							None,
+							"{what} at {delay:?}"
+						);
+						reopened
+							.call(|session| {
+								session.wait_for_open_check();
+								Ok(())
+							})
+							.unwrap();
+						assert_eq!(reopened.audit_report().unwrap(), Some(Vec::new()));
+						*outcomes.entry((what, "finished")).or_insert(0) += 1;
+					}
+					Err(other) => panic!("{what} cancelled at {delay:?}: {other:?}"),
+				}
+			}
+		}
+		eprintln!("cancel outcomes: {outcomes:?}");
+	}
+
+	#[test]
+	fn a_cancel_that_lands_after_open_finished_closes_the_budget_again() {
+		// The token is checked once the budget is open, so a late cancel still
+		// leaves no window holding the budget's lock.
+		let (scratch, core) = imported("cancel-after-open");
+		core.close().unwrap();
+		let cancel = CancelToken::default();
+		cancel.cancel();
+
+		let opened = Core::<veritas_store::Store>::open(&scratch.budget(), &cancel);
+
+		assert!(
+			matches!(opened, Err(FfiError::Cancelled)),
+			"{:?}",
+			opened.err()
+		);
+		let reopened =
+			Core::<veritas_store::Store>::open(&scratch.budget(), &CancelToken::default()).unwrap();
+		assert_eq!(reopened.state().unwrap().read_only, None);
+	}
+
+	#[test]
+	fn an_import_cancelled_mid_flight_leaves_nothing_behind() {
+		// The 100k-transaction fixture takes long enough to cancel mid-copy.
+		let scratch = Scratch::new("cancel-import");
+		let zip = Path::new(env!("CARGO_MANIFEST_DIR"))
+			.join("../../fixtures/synthetic/perf-100k.zip")
+			.display()
+			.to_string();
+		let cancel = CancelToken::default();
+		let canceller = {
+			let cancel = cancel.clone();
+			std::thread::spawn(move || {
+				std::thread::sleep(std::time::Duration::from_millis(30));
+				cancel.cancel();
+			})
+		};
+
+		let imported =
+			Core::<veritas_store::Store>::import_actual_zip(&zip, &scratch.budget(), &cancel);
+
+		canceller.join().unwrap();
+		assert!(
+			matches!(imported, Err(FfiError::Cancelled)),
+			"{:?}",
+			imported.err().map(|e| e.to_string())
+		);
+		assert_eq!(std::fs::read_dir(&scratch.0).unwrap().count(), 0);
+	}
+
 	/// A fixed today keeps the month range stable.
 	fn this_month() -> (Month, String) {
 		(
@@ -1071,168 +1299,713 @@ mod tests {
 		));
 	}
 
-	fn entries(dir: &Path) -> Vec<String> {
-		let mut names: Vec<String> = std::fs::read_dir(dir)
-			.unwrap()
-			.map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-			.collect();
-		names.sort();
-		names
+	fn data(core: &Core<veritas_store::Store>) -> veritas_domain::BudgetData {
+		core.call(|session| Ok(session.data()?.clone())).unwrap()
 	}
 
-	/// Runs `work` while another thread cancels it after `delay`, the way
-	/// Swift cancels the task when the user closes the setup sheet.
-	fn cancelled_after<T>(
-		delay: std::time::Duration,
-		work: impl FnOnce(&CancelToken) -> Result<T, FfiError>,
-	) -> Result<T, FfiError> {
-		let cancel = CancelToken::default();
-		let canceller = {
-			let cancel = cancel.clone();
-			std::thread::spawn(move || {
-				std::thread::sleep(delay);
-				cancel.cancel();
-			})
-		};
-		let result = work(&cancel);
-		canceller.join().unwrap();
-		result
-	}
-
-	#[test]
-	fn cancelling_a_create_or_import_at_any_moment_leaves_a_whole_budget_or_nothing() {
-		// R-REL-7, PLAN §6.6: a cancel either wins, and the folder is as it was,
-		// or lands after the rename, and the budget is whole and free to open.
-		use crate::{NewAccount, NewAccountKind, NewBudgetOptions, NumberFormat, NumberStyle};
-		let format = NumberFormat {
-			currency: Some("USD".to_owned()),
-			style: NumberStyle::CommaDot,
-			hide_decimals: false,
-		};
-		let options = NewBudgetOptions {
-			retirement_401k: true,
-			hsa: true,
-			accounts: vec![NewAccount {
-				name: "Checking".to_owned(),
-				kind: NewAccountKind::Checking,
-				starting_balance: 120_000,
-			}],
-		};
-		let create = |into: &str, cancel: &CancelToken| {
-			Core::<veritas_store::Store>::create_budget(
-				"Household",
-				into,
-				&format,
-				&options,
-				cancel,
-			)
-		};
-		let import = |into: &str, cancel: &CancelToken| {
-			Core::<veritas_store::Store>::import_actual_zip(&small_zip(), into, cancel)
-		};
-		let mut outcomes = std::collections::BTreeMap::new();
-
-		for (what, start) in [
-			(
-				"create",
-				&create as &dyn Fn(&str, &CancelToken) -> Result<Core<_>, FfiError>,
-			),
-			("import", &import),
-		] {
-			let timing = Scratch::new("cancel-timing");
-			let began = std::time::Instant::now();
-			start(&timing.budget(), &CancelToken::default()).unwrap();
-			let takes = began.elapsed();
-
-			for step in 0..24u32 {
-				let scratch = Scratch::new("cancel");
-				let delay = takes * step / 16;
-				match cancelled_after(delay, |cancel| start(&scratch.budget(), cancel)) {
-					Err(FfiError::Cancelled) => {
-						assert_eq!(
-							entries(&scratch.0),
-							Vec::<String>::new(),
-							"{what} at {delay:?}"
-						);
-						*outcomes.entry((what, "cancelled")).or_insert(0) += 1;
-					}
-					Ok(core) => {
-						assert_eq!(entries(&scratch.0), ["budget"], "{what} at {delay:?}");
-						assert_eq!(core.state().unwrap().read_only, None);
-						core.close().unwrap();
-						let reopened = Core::<veritas_store::Store>::open(
-							&scratch.budget(),
-							&CancelToken::default(),
-						)
-						.unwrap();
-						assert_eq!(
-							reopened.state().unwrap().read_only,
-							None,
-							"{what} at {delay:?}"
-						);
-						reopened
-							.call(|session| {
-								session.wait_for_open_check();
-								Ok(())
-							})
-							.unwrap();
-						assert_eq!(reopened.audit_report().unwrap(), Some(Vec::new()));
-						*outcomes.entry((what, "finished")).or_insert(0) += 1;
-					}
-					Err(other) => panic!("{what} cancelled at {delay:?}: {other:?}"),
-				}
-			}
+	/// An expense group of the small fixture with at least two live categories.
+	fn busy_group(data: &veritas_domain::BudgetData) -> (String, Vec<String>) {
+		let mut groups: std::collections::BTreeMap<String, Vec<(f64, String)>> = Default::default();
+		for category in data
+			.categories
+			.values()
+			.filter(|c| !c.tombstone && !c.is_income)
+		{
+			groups
+				.entry(category.group.to_string())
+				.or_default()
+				.push((category.sort_order, category.id.to_string()));
 		}
-		eprintln!("cancel outcomes: {outcomes:?}");
+		let (group, mut members) = groups.into_iter().find(|(_, m)| m.len() >= 2).unwrap();
+		members.sort_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+		(group, members.into_iter().map(|(_, id)| id).collect())
+	}
+
+	fn created_category(change: &Change) -> String {
+		change
+			.entities
+			.iter()
+			.find(|e| e.kind == crate::EntityKind::Category && e.id.is_some())
+			.and_then(|e| e.id.clone())
+			.unwrap()
 	}
 
 	#[test]
-	fn a_cancel_that_lands_after_open_finished_closes_the_budget_again() {
-		// The token is checked once the budget is open, so a late cancel still
-		// leaves no window holding the budget's lock.
-		let (scratch, core) = imported("cancel-after-open");
-		core.close().unwrap();
-		let cancel = CancelToken::default();
-		cancel.cancel();
-
-		let opened = Core::<veritas_store::Store>::open(&scratch.budget(), &cancel);
-
-		assert!(
-			matches!(opened, Err(FfiError::Cancelled)),
-			"{:?}",
-			opened.err()
+	fn a_new_category_lands_at_the_top_of_its_group_and_undo_takes_it_away() {
+		// R-BUD-5, Actual's insertCategory (db/index.ts:470-499).
+		let (_scratch, core) = imported("category-create");
+		let (group, members) = busy_group(&data(&core));
+		let change = core
+			.perform(Command::CreateCategory {
+				group_id: group.clone(),
+				name: "  Coffee  ".to_owned(),
+			})
+			.unwrap();
+		let id = created_category(&change);
+		let after = data(&core);
+		let created = &after.categories[&veritas_domain::CategoryId::new(id.as_str())];
+		assert_eq!(created.name, "Coffee");
+		let first = &after.categories[&veritas_domain::CategoryId::new(members[0].as_str())];
+		assert!(created.sort_order < first.sort_order);
+		assert_eq!(
+			after.category_mapping.get(&created.id),
+			Some(&created.id),
+			"every new category maps to itself"
 		);
+		let (month, today) = this_month();
+		let sheet = core.budget_month(month, &today).unwrap();
+		assert!(envelopes(&sheet).iter().any(|e| e.id == id));
+
+		assert!(matches!(
+			core.perform(Command::CreateCategory {
+				group_id: group,
+				name: "COFFEE".to_owned(),
+			}),
+			Err(FfiError::Invalid { .. })
+		));
+		core.undo().unwrap();
+		assert!(data(&core).categories[&created.id].tombstone);
+	}
+
+	#[test]
+	fn categories_reorder_move_between_groups_and_hide() {
+		// R-BUD-5, Actual's moveCategory (db/index.ts:517-536).
+		let (_scratch, core) = imported("category-move");
+		let before = data(&core);
+		let (group, members) = busy_group(&before);
+		let last = members.last().unwrap().clone();
+
+		core.perform(Command::MoveCategory {
+			category_id: last.clone(),
+			group_id: group.clone(),
+			before_category_id: Some(members[0].clone()),
+		})
+		.unwrap();
+		let (_, order) = busy_group(&data(&core));
+		assert_eq!(order.first(), Some(&last));
+
+		let change = core
+			.perform(Command::CreateCategoryGroup {
+				name: "Somewhere else".to_owned(),
+			})
+			.unwrap();
+		let new_group = change.entities[0].id.clone().unwrap();
+		core.perform(Command::MoveCategory {
+			category_id: last.clone(),
+			group_id: new_group.clone(),
+			before_category_id: None,
+		})
+		.unwrap();
+		let moved = &data(&core).categories[&veritas_domain::CategoryId::new(last.as_str())];
+		assert_eq!(moved.group.to_string(), new_group);
+
+		let income_group = before
+			.category_groups
+			.values()
+			.find(|g| g.is_income && !g.tombstone)
+			.unwrap();
+		assert!(matches!(
+			core.perform(Command::MoveCategory {
+				category_id: last.clone(),
+				group_id: income_group.id.to_string(),
+				before_category_id: None,
+			}),
+			Err(FfiError::Invalid { .. })
+		));
+
+		core.perform(Command::SetCategoryHidden {
+			category_id: last.clone(),
+			hidden: true,
+		})
+		.unwrap();
+		assert!(data(&core).categories[&moved.id].hidden);
+	}
+
+	#[test]
+	fn a_category_with_history_is_archived_or_deleted_with_its_history_moved() {
+		// R-BUD-5, Actual's category-delete with transferId (budget/app.ts:378-422,
+		// db/index.ts:538-562).
+		let (scratch, core) = imported("category-delete");
+		let before = data(&core);
+		let with_history = before
+			.categories
+			.values()
+			.find(|c| {
+				!c.tombstone
+					&& !c.is_income && core.category_history(c.id.as_str()).unwrap().transactions > 0
+			})
+			.unwrap()
+			.clone();
+		let target = before
+			.categories
+			.values()
+			.find(|c| !c.tombstone && !c.is_income && c.id != with_history.id)
+			.unwrap()
+			.clone();
+
+		assert!(matches!(
+			core.perform(Command::DeleteCategory {
+				category_id: with_history.id.to_string()
+			}),
+			Err(FfiError::Invalid { .. })
+		));
+		let (month, today) = this_month();
+		core.budget_month(month, &today).unwrap();
+		core.perform(Command::ArchiveCategory {
+			category_id: with_history.id.to_string(),
+		})
+		.unwrap();
+		let archived = data(&core);
+		assert!(archived.categories[&with_history.id].hidden);
+		assert!(
+			archived.category_meta[&with_history.id]
+				.archived_on
+				.is_some()
+		);
+		core.undo().unwrap();
+		assert!(!data(&core).categories[&with_history.id].hidden);
+
+		let moved_transactions = core
+			.category_history(with_history.id.as_str())
+			.unwrap()
+			.transactions;
+		let target_before = core
+			.category_history(target.id.as_str())
+			.unwrap()
+			.transactions;
+		core.perform(Command::DeleteCategoryMovingHistory {
+			category_id: with_history.id.to_string(),
+			to_category_id: target.id.to_string(),
+		})
+		.unwrap();
+		let after = data(&core);
+		assert!(after.categories[&with_history.id].tombstone);
+		assert_eq!(
+			after.category_mapping.get(&with_history.id),
+			Some(&target.id)
+		);
+		assert_eq!(
+			core.category_history(target.id.as_str())
+				.unwrap()
+				.transactions,
+			target_before + moved_transactions
+		);
+
+		core.close().unwrap();
 		let reopened =
 			Core::<veritas_store::Store>::open(&scratch.budget(), &CancelToken::default()).unwrap();
-		assert_eq!(reopened.state().unwrap().read_only, None);
+		let reloaded = data(&reopened);
+		assert!(reloaded.categories[&with_history.id].tombstone);
+		assert_eq!(
+			reloaded.category_mapping.get(&with_history.id),
+			Some(&target.id)
+		);
 	}
 
 	#[test]
-	fn an_import_cancelled_mid_flight_leaves_nothing_behind() {
-		// The 100k-transaction fixture takes long enough to cancel mid-copy.
-		let scratch = Scratch::new("cancel-import");
-		let zip = Path::new(env!("CARGO_MANIFEST_DIR"))
-			.join("../../fixtures/synthetic/perf-100k.zip")
-			.display()
-			.to_string();
-		let cancel = CancelToken::default();
-		let canceller = {
-			let cancel = cancel.clone();
-			std::thread::spawn(move || {
-				std::thread::sleep(std::time::Duration::from_millis(30));
-				cancel.cancel();
-			})
-		};
-
-		let imported =
-			Core::<veritas_store::Store>::import_actual_zip(&zip, &scratch.budget(), &cancel);
-
-		canceller.join().unwrap();
-		assert!(
-			matches!(imported, Err(FfiError::Cancelled)),
-			"{:?}",
-			imported.err().map(|e| e.to_string())
+	fn a_category_with_no_history_simply_deletes() {
+		let (_scratch, core) = imported("category-delete-empty");
+		let (group, _) = busy_group(&data(&core));
+		let id = created_category(
+			&core
+				.perform(Command::CreateCategory {
+					group_id: group,
+					name: "Nothing yet".to_owned(),
+				})
+				.unwrap(),
 		);
-		assert_eq!(std::fs::read_dir(&scratch.0).unwrap().count(), 0);
+		assert_eq!(
+			core.category_history(&id).unwrap(),
+			crate::CategoryHistory {
+				transactions: 0,
+				budgeted_months: 0
+			}
+		);
+		core.perform(Command::DeleteCategory {
+			category_id: id.clone(),
+		})
+		.unwrap();
+		assert!(data(&core).categories[&veritas_domain::CategoryId::new(id.as_str())].tombstone);
+	}
+
+	#[test]
+	fn groups_are_created_renamed_reordered_and_hidden() {
+		// R-BUD-5, Actual's group rules (db/index.ts:364-434).
+		let (_scratch, core) = imported("group-edits");
+		let change = core
+			.perform(Command::CreateCategoryGroup {
+				name: "Travel".to_owned(),
+			})
+			.unwrap();
+		let travel = change.entities[0].id.clone().unwrap();
+		let after = data(&core);
+		let created =
+			&after.category_groups[&veritas_domain::CategoryGroupId::new(travel.as_str())];
+		let highest = after
+			.category_groups
+			.values()
+			.filter(|g| !g.tombstone && g.id != created.id)
+			.map(|g| g.sort_order)
+			.fold(0.0, f64::max);
+		assert_eq!(created.sort_order, highest + 16384.0);
+		assert!(matches!(
+			core.perform(Command::CreateCategoryGroup {
+				name: "travel".to_owned()
+			}),
+			Err(FfiError::Invalid { .. })
+		));
+
+		core.perform(Command::RenameCategoryGroup {
+			group_id: travel.clone(),
+			name: "Trips".to_owned(),
+		})
+		.unwrap();
+		let first = after
+			.category_groups
+			.values()
+			.filter(|g| !g.tombstone)
+			.min_by(|a, b| a.sort_order.total_cmp(&b.sort_order))
+			.unwrap()
+			.id
+			.to_string();
+		core.perform(Command::MoveCategoryGroup {
+			group_id: travel.clone(),
+			before_group_id: Some(first.clone()),
+		})
+		.unwrap();
+		core.perform(Command::SetCategoryGroupHidden {
+			group_id: travel.clone(),
+			hidden: true,
+		})
+		.unwrap();
+		let done = data(&core);
+		let trips = &done.category_groups[&veritas_domain::CategoryGroupId::new(travel.as_str())];
+		assert_eq!(trips.name, "Trips");
+		assert!(trips.hidden);
+		let first_order =
+			done.category_groups[&veritas_domain::CategoryGroupId::new(first.as_str())].sort_order;
+		assert!(trips.sort_order < first_order);
+	}
+
+	const NOVEMBER: Month = Month {
+		year: 2026,
+		month: 11,
+	};
+	const DECEMBER: Month = Month {
+		year: 2026,
+		month: 12,
+	};
+
+	fn goal_of(core: &Core<veritas_store::Store>, id: &str) -> crate::GoalSummary {
+		let (_, today) = this_month();
+		core.goals(&today)
+			.unwrap()
+			.into_iter()
+			.find(|goal| goal.id == id)
+			.unwrap()
+	}
+
+	fn new_goal(
+		core: &Core<veritas_store::Store>,
+		name: &str,
+		target: i64,
+		due: Option<&str>,
+	) -> String {
+		let (_, today) = this_month();
+		core.goals(&today).unwrap();
+		let change = core
+			.perform(Command::CreateGoal {
+				name: name.to_owned(),
+				target,
+				target_date: due.map(str::to_owned),
+				icon: Some("laptopcomputer".to_owned()),
+				color: None,
+			})
+			.unwrap();
+		change
+			.entities
+			.iter()
+			.find(|e| e.kind == crate::EntityKind::Goal)
+			.and_then(|e| e.id.clone())
+			.unwrap()
+	}
+
+	fn budget(core: &Core<veritas_store::Store>, month: Month, category: &str, amount: i64) {
+		core.perform(Command::SetBudget {
+			month,
+			category_id: category.to_owned(),
+			amount,
+		})
+		.unwrap();
+	}
+
+	fn budgeted(core: &Core<veritas_store::Store>, month: Month, category: &str) -> i64 {
+		let data = data(core);
+		let month = veritas_domain::YearMonth::new(month.year, month.month).unwrap();
+		data.budget_cells
+			.get(&(month, veritas_domain::CategoryId::new(category)))
+			.map_or(0, |cell| cell.budgeted.minor())
+	}
+
+	/// An expense category of the fixture that isn't a goal.
+	fn other_envelope(core: &Core<veritas_store::Store>, not: &str) -> String {
+		let data = data(core);
+		data.categories
+			.values()
+			.find(|c| !c.tombstone && !c.is_income && !c.hidden && c.id.as_str() != not)
+			.unwrap()
+			.id
+			.to_string()
+	}
+
+	#[test]
+	fn a_new_goal_is_an_envelope_in_the_goals_group_with_actuals_long_term_goal() {
+		// R-GOAL-1, DEBT-8 Definitions, D36, G-1.
+		let (_scratch, core) = imported("goal-create");
+		let id = new_goal(&core, "New laptop", 150_000, Some("2027-04-15"));
+		let goal = goal_of(&core, &id);
+		assert_eq!(goal.state, crate::GoalState::Active);
+		assert_eq!(goal.name, "New laptop");
+		assert_eq!(
+			(goal.months_left, goal.suggested_monthly),
+			(Some(6), Some(25_000))
+		);
+		assert_eq!(goal.target_date.as_deref(), Some("2027-04-15"));
+
+		let after = data(&core);
+		let category =
+			&after.categories[&veritas_domain::CategoryId::new(goal.category_id.as_str())];
+		assert_eq!(after.category_groups[&category.group].name, "Goals");
+		assert_eq!(
+			after.notes[goal.category_id.as_str()].as_deref(),
+			Some("#goal 1500.00")
+		);
+		let november = veritas_domain::YearMonth::new(2026, 11).unwrap();
+		let cell = &after.budget_cells[&(november, category.id.clone())];
+		assert_eq!(
+			(cell.goal, cell.long_goal),
+			(Some(veritas_domain::Money::from_minor(150_000)), true)
+		);
+
+		let second = new_goal(&core, "Vacation", 10_000, None);
+		let groups = data(&core)
+			.category_groups
+			.values()
+			.filter(|g| !g.tombstone && g.name == "Goals")
+			.count();
+		assert_eq!(groups, 1, "the second goal reuses the Goals group");
+		assert_eq!(goal_of(&core, &second).suggested_monthly, None);
+
+		core.undo().unwrap();
+		core.undo().unwrap();
+		let (_, today) = this_month();
+		assert!(core.goals(&today).unwrap().is_empty());
+	}
+
+	#[test]
+	fn budgeting_the_target_reaches_the_goal_in_the_same_undo_step() {
+		// DEBT-8.2 active → reached, R-REL-1.
+		let (_scratch, core) = imported("goal-reach");
+		let id = new_goal(&core, "New laptop", 100_000, Some("2027-01-31"));
+		let category = goal_of(&core, &id).category_id;
+		budget(&core, NOVEMBER, &category, 60_000);
+		assert_eq!(goal_of(&core, &id).state, crate::GoalState::Active);
+		budget(&core, DECEMBER, &category, 40_000);
+		assert_eq!(
+			goal_of(&core, &id).state,
+			crate::GoalState::Active,
+			"future budget never reaches a goal (GOAL-9)"
+		);
+		budget(&core, NOVEMBER, &category, 100_000);
+		let reached = goal_of(&core, &id);
+		assert_eq!(reached.state, crate::GoalState::Reached);
+		assert_eq!(reached.reached_month, Some(NOVEMBER));
+
+		budget(&core, NOVEMBER, &category, 10_000);
+		assert_eq!(
+			goal_of(&core, &id).state,
+			crate::GoalState::Reached,
+			"it only moves forward"
+		);
+		core.undo().unwrap();
+		core.undo().unwrap();
+		let undone = goal_of(&core, &id);
+		assert_eq!(
+			(undone.state, undone.reached_month),
+			(crate::GoalState::Active, None)
+		);
+	}
+
+	struct Rows(Vec<veritas_domain::Row>);
+
+	impl veritas_session::Command for Rows {
+		fn plan(
+			&self,
+			_: &veritas_domain::BudgetData,
+		) -> Result<Vec<veritas_domain::Row>, CoreError> {
+			Ok(self.0.clone())
+		}
+	}
+
+	#[test]
+	fn a_reached_goal_that_was_spent_reads_reached_then_spent_with_no_suggestion() {
+		// D66, DEBT-8 Status. The fixture's categories with spending stand in
+		// for a laptop bought from the goal.
+		let (_scratch, core) = imported("goal-spent");
+		let before = data(&core);
+		let spent_from = before
+			.categories
+			.values()
+			.find(|c| {
+				!c.tombstone
+					&& !c.is_income && core.category_history(c.id.as_str()).unwrap().transactions > 0
+			})
+			.unwrap()
+			.id
+			.clone();
+		let goal = veritas_domain::Goal {
+			id: veritas_domain::GoalId::new("spent"),
+			category: spent_from,
+			target: veritas_domain::Money::from_minor(1),
+			target_date: Some(veritas_domain::CivilDate::new(2027, 6, 1).unwrap()),
+			icon: None,
+			color: None,
+			status: veritas_domain::GoalStatus::Reached,
+			reached_month: veritas_domain::YearMonth::new(2026, 1).ok(),
+			closed_month: None,
+			released_to: None,
+			released: None,
+		};
+		core.call(|session| {
+			session.perform(&Rows(vec![veritas_domain::Row::Goal(goal)]))?;
+			Ok(())
+		})
+		.unwrap();
+		let spent = goal_of(&core, "spent");
+		assert_eq!(spent.state, crate::GoalState::ReachedSpent);
+		assert!(spent.spent > 0);
+		assert_eq!((spent.suggested_monthly, spent.months_left), (None, None));
+	}
+
+	#[test]
+	fn closing_a_goal_releases_this_months_leftover_and_flags_later_budget() {
+		// DEBT-8.3 R-1/R-4/R-5, GOAL-1, GOAL-4, D66, GOAL-10.
+		let (_scratch, core) = imported("goal-close");
+		let id = new_goal(&core, "New laptop", 100_000, Some("2027-06-30"));
+		let category = goal_of(&core, &id).category_id;
+		let destination = other_envelope(&core, &category);
+		budget(&core, NOVEMBER, &category, 50_000);
+		budget(&core, DECEMBER, &category, 30_000);
+		let (_, today) = this_month();
+		let destination_available = |core: &Core<veritas_store::Store>| {
+			envelopes(&core.budget_month(NOVEMBER, &today).unwrap())
+				.iter()
+				.find(|e| e.id == destination)
+				.unwrap()
+				.available
+		};
+		let dest_before = destination_available(&core);
+		let dest_budget = budgeted(&core, NOVEMBER, &destination);
+		let dest_december = budgeted(&core, DECEMBER, &destination);
+
+		let preview = core
+			.goal_close_preview(&id, &Some(destination.clone()), &today)
+			.unwrap();
+		assert_eq!(preview.leftover, 50_000);
+		assert_eq!(
+			preview.later_budget,
+			vec![crate::MonthAmount {
+				month: DECEMBER,
+				amount: 30_000
+			}]
+		);
+		assert_eq!(preview.destination_available_after, dest_before + 50_000);
+
+		let transactions = data(&core).transactions;
+		core.perform(Command::CloseGoal {
+			goal_id: id.clone(),
+			release_to_category_id: Some(destination.clone()),
+			also_move_later: false,
+		})
+		.unwrap();
+		let closed = goal_of(&core, &id);
+		assert_eq!(closed.state, crate::GoalState::Closed);
+		assert_eq!(closed.closed_month, Some(NOVEMBER));
+		assert_eq!(closed.available, 0);
+		assert!(!closed.new_activity);
+		assert_eq!(closed.later_budget, preview.later_budget);
+		assert_eq!(budgeted(&core, NOVEMBER, &category), 0);
+		assert_eq!(
+			budgeted(&core, NOVEMBER, &destination),
+			dest_budget + 50_000
+		);
+		assert_eq!(destination_available(&core), dest_before + 50_000);
+		let after = data(&core);
+		assert!(after.categories[&veritas_domain::CategoryId::new(category.as_str())].hidden);
+		assert_eq!(after.transactions, transactions, "GOAL-1");
+		assert!(matches!(
+			core.perform(Command::CloseGoal {
+				goal_id: id.clone(),
+				release_to_category_id: None,
+				also_move_later: false,
+			}),
+			Err(FfiError::Invalid { .. })
+		));
+
+		core.undo().unwrap();
+		assert_eq!(goal_of(&core, &id).state, crate::GoalState::Active);
+		assert_eq!(budgeted(&core, NOVEMBER, &category), 50_000);
+
+		core.perform(Command::CloseGoal {
+			goal_id: id.clone(),
+			release_to_category_id: Some(destination.clone()),
+			also_move_later: true,
+		})
+		.unwrap();
+		assert!(goal_of(&core, &id).later_budget.is_empty());
+		assert_eq!(budgeted(&core, DECEMBER, &category), 0);
+		assert_eq!(
+			budgeted(&core, DECEMBER, &destination),
+			dest_december + 30_000
+		);
+	}
+
+	#[test]
+	fn an_overspent_goal_released_to_to_budget_ends_at_zero() {
+		// GOAL-8, R-5 with L < 0. The goal is overspent by moving its budget away.
+		let (_scratch, core) = imported("goal-close-to-budget");
+		let id = new_goal(&core, "New laptop", 100_000, None);
+		let category = goal_of(&core, &id).category_id;
+		budget(&core, NOVEMBER, &category, -2_000);
+		let (_, today) = this_month();
+		let to_budget = core.budget_month(NOVEMBER, &today).unwrap().to_budget;
+		let preview = core.goal_close_preview(&id, &None, &today).unwrap();
+		assert_eq!(preview.leftover, -2_000);
+		assert_eq!(preview.destination_available_after, to_budget - 2_000);
+		core.perform(Command::CloseGoal {
+			goal_id: id.clone(),
+			release_to_category_id: None,
+			also_move_later: false,
+		})
+		.unwrap();
+		assert_eq!(goal_of(&core, &id).available, 0);
+		assert_eq!(
+			core.budget_month(NOVEMBER, &today).unwrap().to_budget,
+			to_budget - 2_000
+		);
+	}
+
+	#[test]
+	fn reopening_and_retargeting_keep_the_same_goal() {
+		// DEBT-8.2 Reopen, D71.
+		let (scratch, core) = imported("goal-reopen");
+		let id = new_goal(&core, "New laptop", 50_000, None);
+		let category = goal_of(&core, &id).category_id;
+		assert!(matches!(
+			core.perform(Command::ReopenGoal {
+				goal_id: id.clone()
+			}),
+			Err(FfiError::Invalid { .. })
+		));
+		budget(&core, NOVEMBER, &category, 50_000);
+		assert_eq!(goal_of(&core, &id).state, crate::GoalState::Reached);
+		core.perform(Command::CloseGoal {
+			goal_id: id.clone(),
+			release_to_category_id: None,
+			also_move_later: false,
+		})
+		.unwrap();
+		core.perform(Command::ReopenGoal {
+			goal_id: id.clone(),
+		})
+		.unwrap();
+		let reopened = goal_of(&core, &id);
+		assert_eq!(reopened.state, crate::GoalState::Reached);
+		let category_id = veritas_domain::CategoryId::new(category.as_str());
+		assert!(!data(&core).categories[&category_id].hidden);
+
+		core.perform(Command::CloseGoal {
+			goal_id: id.clone(),
+			release_to_category_id: None,
+			also_move_later: false,
+		})
+		.unwrap();
+		core.perform(Command::RetargetGoal {
+			goal_id: id.clone(),
+			target: 80_000,
+			target_date: Some("2027-02-28".to_owned()),
+		})
+		.unwrap();
+		let retargeted = goal_of(&core, &id);
+		assert_eq!(retargeted.state, crate::GoalState::Active);
+		assert_eq!(retargeted.target, 80_000);
+		assert_eq!(retargeted.reached_month, Some(NOVEMBER), "kept as history");
+		assert_eq!(retargeted.closed_month, None);
+		assert_eq!(
+			(retargeted.months_left, retargeted.suggested_monthly),
+			(Some(4), Some(20_000))
+		);
+		let after = data(&core);
+		assert!(!after.categories[&category_id].hidden);
+		assert_eq!(
+			after.notes[category.as_str()].as_deref(),
+			Some("#goal 800.00")
+		);
+		assert_eq!(after.goals.len(), 1, "D71 updates the same row");
+
+		core.close().unwrap();
+		let reopened =
+			Core::<veritas_store::Store>::open(&scratch.budget(), &CancelToken::default()).unwrap();
+		assert_eq!(goal_of(&reopened, &id), retargeted);
+	}
+
+	#[test]
+	fn actual_reads_a_closed_goal_and_its_long_term_goal_as_veritas_wrote_them() {
+		// R-IO-2, D36, DEBT-8.3 parity with Actual's own sheet.
+		let (scratch, core) = imported("goal-oracle");
+		let id = new_goal(&core, "New laptop", 100_000, Some("2027-06-30"));
+		let category = goal_of(&core, &id).category_id;
+		let destination = other_envelope(&core, &category);
+		budget(&core, NOVEMBER, &category, 50_000);
+		core.perform(Command::CloseGoal {
+			goal_id: id,
+			release_to_category_id: Some(destination.clone()),
+			also_move_later: false,
+		})
+		.unwrap();
+		let (_, today) = this_month();
+		let ours = core.budget_month(NOVEMBER, &today).unwrap();
+		let zip = scratch.0.join("Goals.zip");
+		core.export_actual_zip(&zip.display().to_string(), &CancelToken::default())
+			.unwrap();
+		let Some(actual) = actual_reads(&zip, &today) else {
+			return;
+		};
+		let november = &actual["computed"]["months"]["2026-11"]["categories"];
+		assert_eq!(november[&category]["balance"].as_i64(), Some(0));
+		assert_eq!(november[&category]["budgeted"].as_i64(), Some(0));
+		let available = envelopes(&ours)
+			.iter()
+			.find(|e| e.id == destination)
+			.unwrap()
+			.available;
+		assert_eq!(november[&destination]["balance"].as_i64(), Some(available));
+		assert_eq!(
+			actual["computed"]["months"]["2026-11"]["toBudget"].as_i64(),
+			Some(ours.to_budget)
+		);
+		let notes = actual["tables"]["notes"]["rows"].as_array().unwrap();
+		assert!(
+			notes
+				.iter()
+				.any(|row| row["id"] == category.as_str() && row["note"] == "#goal 1000.00")
+		);
+		let cells = actual["tables"]["zero_budgets"]["rows"].as_array().unwrap();
+		let goal_cell = cells
+			.iter()
+			.find(|row| row["category"] == category.as_str() && row["month"] == 202611)
+			.unwrap();
+		assert_eq!(goal_cell["goal"].as_i64(), Some(100_000));
+		assert_eq!(goal_cell["long_goal"].as_i64(), Some(1));
 	}
 }

@@ -405,12 +405,14 @@ fn new_rows<'a>(before: &BudgetData, after: &'a Value) -> Vec<&'a Value> {
 /// payee the other leg, which Actual builds and runs the rules on
 /// (`transfer.ts:61-79`).
 fn planned_rows(plan: &SchedulePlan, book: &RuleBook, budget: &BudgetData) -> Vec<Row> {
+	assert!(
+		plan.left.is_empty(),
+		"every rule here runs in Veritas: {:?}",
+		plan.left
+	);
 	let mut rows = Vec::new();
 	for posting in &plan.posts {
-		let t = posting
-			.transaction
-			.as_ref()
-			.unwrap_or_else(|| panic!("every rule here runs in Veritas: {:?}", posting.reasons));
+		let t = &posting.transaction;
 		rows.push(row_key(t));
 		let transfer = t
 			.payee
@@ -467,6 +469,7 @@ fn apply_writes(state: &mut BTreeMap<String, (Option<String>, bool)>, plan: &Sch
 			} => state.get_mut(schedule.as_str()).unwrap().0 = Some(date.to_string()),
 			ScheduleWrite::Complete(schedule) => state.get_mut(schedule.as_str()).unwrap().1 = true,
 			ScheduleWrite::Restart(schedule) => state.get_mut(schedule.as_str()).unwrap().1 = false,
+			ScheduleWrite::ScheduleRunDone(_) | ScheduleWrite::ClearScheduleRun => {}
 		}
 	}
 }

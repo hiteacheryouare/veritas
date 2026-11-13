@@ -155,6 +155,8 @@ pub fn rule_transaction(input: &Value, account: &str) -> RuleTransaction {
 		reconciled: None,
 		schedule: None,
 		deleted: false,
+		splits: Vec::new(),
+		is_child: false,
 	}
 }
 

@@ -13,7 +13,7 @@ mod run;
 mod schedule;
 mod trigger;
 
-pub use action::{Action, RuleTransaction, SetField};
+pub use action::{Action, RuleTransaction, SetField, SplitLine, SplitMethod};
 pub use bill::{
 	Bill, BillAmount, BillDate, BillView, EditedRule, JsonPaths, Repeat, RepeatEnd, RepeatPattern,
 	ScheduleRule, WeekendMove, bill_from_schedule, json_paths, schedule_name, scheduled_amount,
@@ -23,8 +23,8 @@ pub use condition::{
 	Op, parse_date_value,
 };
 pub use posting::{
-	NextDateWrite, Posting, SchedulePlan, ScheduleWrite, advance_schedules, complete,
-	counts_as_paid, pay, post_now, restart, skip,
+	LeftBill, LeftBy, NextDateWrite, Posting, SchedulePlan, ScheduleWrite, advance_schedules,
+	complete, counts_as_paid, pay, post_now, restart, skip,
 };
 pub use recur::{Frequency, RecurError, Recurrence, WeekendSolveMode};
 pub use rule::{Item, ParsedRule, RuleSupport};
@@ -33,4 +33,7 @@ pub use schedule::{
 	ScheduleStatus, next_date, next_date_after, next_date_from, paid_window_start, schedule_dates,
 	status, upcoming_days, validate_schedule_date,
 };
-pub use trigger::{added_transaction, counterpart, may_need_actual, merge_manual_entry};
+pub use trigger::{
+	ManualEntry, TransferLeg, Transfers, added_transaction, counterpart, manual_entry,
+	may_need_actual, merge_manual_entry, transfers,
+};

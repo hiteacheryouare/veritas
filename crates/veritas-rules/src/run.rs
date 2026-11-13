@@ -4,10 +4,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use veritas_domain::{BudgetData, CategoryId, ConditionsOp, PayeeId, RuleId, ScheduleId};
+use veritas_domain::{BudgetData, CategoryId, ConditionsOp, Money, PayeeId, RuleId, ScheduleId};
 
-use crate::action::{Action, RuleTransaction, SetField};
+use crate::action::{Action, RuleTransaction, SetField, SplitLine, SplitMethod};
 use crate::condition::{EvalError, Field, FieldValue, Gap};
+use crate::js;
 use crate::rule::{IndexKey, ParsedRule, RuleSupport, rank};
 
 /// The budget's live rules, parsed once, with merged ids mapped to their
@@ -275,7 +276,7 @@ impl RuleBook {
 						let mut next = working.clone();
 						let mut next_name = payee_name.clone();
 						let mut new_payee = false;
-						for action in actions {
+						for action in actions.iter().filter(|action| action.split() == 0) {
 							match action {
 								Action::SetPayeeName(name) => {
 									next_name = name.clone();
@@ -287,6 +288,19 @@ impl RuleBook {
 								}
 								other => other.apply(&mut next),
 							}
+						}
+						let lines: Vec<&Action> = actions
+							.iter()
+							.copied()
+							.filter(|action| action.split() > 0)
+							.collect();
+						if !lines.is_empty() && !next.is_child {
+							// A payee still waiting on its name would be copied into
+							// the new lines unresolved, which Actual then stores.
+							if new_payee {
+								return Err("a split while naming a new payee, which Actual stores wrongly".into());
+							}
+							split(&mut next, &lines).map_err(str::to_owned)?;
 						}
 						if new_payee {
 							next.payee = match next_name.as_deref().filter(|name| !name.is_empty())
@@ -322,6 +336,99 @@ impl RuleBook {
 		outcome.partial = working;
 		outcome
 	}
+}
+
+/// `execSplitActions` (`rule.ts:26-101`). A transaction that isn't split yet
+/// becomes a parent with no payee and one line copying its payee and
+/// category; each action adds at most one line (copying the last line's
+/// payee) when its number is past the end. Fixed amounts apply first, then
+/// percentages of what they leave, then equal remainders, with the last
+/// remainder line taking the rounding. The first line is a scratch row that
+/// is dropped at the end, even on a transaction that was already split, as
+/// in Actual. `None` is a rule Actual would crash on (a line number that
+/// skips ahead).
+fn split(parent: &mut RuleTransaction, actions: &[&Action]) -> Result<(), &'static str> {
+	const PAST_THE_END: &str =
+		"split lines numbered past the end, which make Actual stop with an error";
+	const TOO_LARGE: &str = "split amounts too large to work out exactly";
+	let line = |payee: Option<PayeeId>, category: Option<CategoryId>| SplitLine {
+		amount: Money::ZERO,
+		payee,
+		category,
+		notes: None,
+	};
+	let mut lines = if parent.splits.is_empty() {
+		let first = line(parent.payee.take(), parent.category.clone());
+		vec![first]
+	} else {
+		parent.splits.clone()
+	};
+	for action in actions {
+		let index = usize::try_from(action.split()).map_err(|_| PAST_THE_END)?;
+		if index >= lines.len() {
+			let payee = lines
+				.last()
+				.and_then(|last| last.payee.clone())
+				.or_else(|| parent.payee.clone());
+			lines.push(line(payee, parent.category.clone()));
+		}
+		action.apply_to_line(lines.get_mut(index).ok_or(PAST_THE_END)?);
+	}
+	// Actual works in JS numbers, exact only up to 2^53, so anything past
+	// that is left to Actual rather than rounded or wrapped.
+	let left = |lines: &[SplitLine]| {
+		let total = Money::checked_sum(lines.iter().map(|l| l.amount)).ok()?;
+		parent
+			.amount
+			.checked_sub(total)
+			.ok()
+			.filter(|left| safe(*left))
+	};
+	let to_money = |x: f64| {
+		let rounded = js::math_round(x);
+		(rounded.abs() <= MAX_SAFE_INTEGER as f64).then(|| Money::from_minor(rounded as i64))
+	};
+	let after_fixed = left(&lines).ok_or(TOO_LARGE)?.minor() as f64;
+	let mut remainders = Vec::new();
+	for action in actions {
+		let index = usize::try_from(action.split()).map_err(|_| PAST_THE_END)?;
+		match action {
+			Action::SplitAmount {
+				method: SplitMethod::FixedPercent(percent),
+				..
+			} => lines[index].amount = to_money(after_fixed * (percent / 100.0)).ok_or(TOO_LARGE)?,
+			Action::SplitAmount {
+				method: SplitMethod::Remainder,
+				..
+			} => remainders.push(index),
+			_ => {}
+		}
+	}
+	if let Some(last) = remainders.iter().copied().max() {
+		let rest = left(&lines).ok_or(TOO_LARGE)?;
+		let share = to_money(rest.minor() as f64 / remainders.len() as f64).ok_or(TOO_LARGE)?;
+		for index in &remainders {
+			lines[*index].amount = share;
+		}
+		let rounding = left(&lines).ok_or(TOO_LARGE)?;
+		lines[last].amount = lines[last]
+			.amount
+			.checked_add(rounding)
+			.map_err(|_| TOO_LARGE)?;
+	}
+	if lines.iter().any(|line| !safe(line.amount)) {
+		return Err(TOO_LARGE);
+	}
+	lines.remove(0);
+	parent.splits = lines;
+	Ok(())
+}
+
+/// `Number.MAX_SAFE_INTEGER`.
+const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
+
+fn safe(amount: Money) -> bool {
+	amount.minor().abs() <= MAX_SAFE_INTEGER
 }
 
 /// What `Condition.eval` reads for `field` on the object `runRules` builds:
@@ -412,7 +519,7 @@ fn evaluate(
 mod tests {
 	use serde_json::{Value, json};
 	use veritas_domain::{
-		Account, AccountId, BudgetType, Category, CategoryGroupId, CivilDate, Money, Payee, Rule,
+		Account, AccountId, BudgetType, Category, CategoryGroupId, CivilDate, Payee, Rule,
 		RuleStage, Schedule,
 	};
 
@@ -496,6 +603,8 @@ mod tests {
 			reconciled: Some(false),
 			schedule: None,
 			deleted: false,
+			splits: Vec::new(),
+			is_child: false,
 		}
 	}
 
@@ -505,6 +614,173 @@ mod tests {
 			budget,
 			&mut BudgetPayees::new(budget, || PayeeId::new("made")),
 		)
+	}
+
+	fn split_rule(budget: &mut BudgetData, id: &str, stage: RuleStage, actions: Value) {
+		add_rule(
+			budget,
+			id,
+			stage,
+			ConditionsOp::And,
+			json!([{"op": "contains", "field": "imported_payee", "value": "split"}]),
+			actions,
+		);
+	}
+
+	fn line(split: u32, method: &str, value: Value) -> Value {
+		json!({"op": "set-split-amount", "value": value, "options": {"splitIndex": split, "method": method}})
+	}
+
+	fn amounts(outcome: &RunOutcome) -> Vec<i64> {
+		outcome
+			.partial
+			.splits
+			.iter()
+			.map(|l| l.amount.minor())
+			.collect()
+	}
+
+	#[test]
+	fn splits_apply_fixed_then_percent_then_remainder() {
+		// rule.ts:26-101 on -4210: 1000 fixed, 10% of the -5210 left, then two
+		// equal remainders with the last one taking the odd cent.
+		let mut budget = budget();
+		split_rule(
+			&mut budget,
+			"split",
+			RuleStage::Default,
+			json!([
+				line(1, "fixed-amount", json!(1000)),
+				line(2, "fixed-percent", json!(10)),
+				line(3, "remainder", Value::Null),
+				{"op": "set", "field": "category", "value": "rent", "options": {"splitIndex": 3}},
+				line(4, "remainder", Value::Null),
+			]),
+		);
+		let mut txn = transaction("split me");
+		txn.payee = Some(PayeeId::new("amazon"));
+		let outcome = run(&budget, &txn);
+		assert_eq!(amounts(&outcome), [1000, -521, -2344, -2345]);
+		assert_eq!(outcome.partial.split_difference().unwrap(), None);
+		assert_eq!(
+			outcome.partial.payee, None,
+			"the parent loses its payee to the lines"
+		);
+		assert_eq!(
+			outcome.partial.splits[0].payee,
+			Some(PayeeId::new("amazon"))
+		);
+		assert_eq!(
+			outcome.partial.splits[2].category,
+			Some(CategoryId::new("rent"))
+		);
+	}
+
+	#[test]
+	fn a_second_split_rule_drops_the_first_line_as_actual_does() {
+		let mut budget = budget();
+		split_rule(
+			&mut budget,
+			"a",
+			RuleStage::Default,
+			json!([
+				line(1, "fixed-percent", json!(50)),
+				line(2, "remainder", Value::Null)
+			]),
+		);
+		split_rule(
+			&mut budget,
+			"b",
+			RuleStage::Post,
+			json!([line(1, "fixed-amount", json!(-100))]),
+		);
+		let outcome = run(&budget, &transaction("split me"));
+		assert_eq!(amounts(&outcome), [-100]);
+		assert_eq!(
+			outcome
+				.partial
+				.split_difference()
+				.unwrap()
+				.map(Money::minor),
+			Some(-4110)
+		);
+	}
+
+	#[test]
+	fn splits_actual_would_crash_on_or_store_wrong_are_undetermined() {
+		let mut budget = budget();
+		// Line 2 before line 1 exists: Actual throws out of runRules.
+		split_rule(
+			&mut budget,
+			"skips",
+			RuleStage::Default,
+			json!([line(2, "remainder", Value::Null)]),
+		);
+		let outcome = run(&budget, &transaction("split me"));
+		assert_eq!(
+			outcome
+				.undetermined
+				.iter()
+				.map(RuleId::as_str)
+				.collect::<Vec<_>>(),
+			["skips"]
+		);
+		assert!(outcome.partial.splits.is_empty());
+		assert!(outcome.reasons[&RuleId::new("skips")].contains("past the end"));
+
+		let mut budget = self::budget();
+		split_rule(
+			&mut budget,
+			"named",
+			RuleStage::Default,
+			json!([
+				{"op": "set", "field": "payee_name", "value": "Corner"},
+				line(1, "remainder", Value::Null),
+			]),
+		);
+		let named = run(&budget, &transaction("split me"));
+		assert_eq!(named.undetermined.len(), 1);
+		assert!(named.reasons[&RuleId::new("named")].contains("new payee"));
+	}
+
+	#[test]
+	fn split_amounts_past_what_actual_can_count_are_undetermined() {
+		// A percentage of an enormous fixed amount would overflow i64 (R-REL-7).
+		let mut budget = budget();
+		split_rule(
+			&mut budget,
+			"huge",
+			RuleStage::Default,
+			json!([
+				line(1, "fixed-amount", json!(9_007_199_254_740_991_i64)),
+				line(2, "fixed-percent", json!(1e20)),
+				line(3, "remainder", Value::Null),
+			]),
+		);
+		let outcome = run(&budget, &transaction("split me"));
+		assert_eq!(outcome.undetermined, [RuleId::new("huge")]);
+		assert_eq!(outcome.transaction, None);
+		assert!(outcome.reasons[&RuleId::new("huge")].contains("too large"));
+		assert!(outcome.partial.splits.is_empty());
+	}
+
+	#[test]
+	fn a_child_run_on_its_own_takes_only_the_plain_actions() {
+		let mut budget = budget();
+		split_rule(
+			&mut budget,
+			"split",
+			RuleStage::Default,
+			json!([
+				{"op": "set", "field": "notes", "value": "seen"},
+				line(1, "remainder", Value::Null),
+			]),
+		);
+		let mut child = transaction("split me");
+		child.is_child = true;
+		let outcome = run(&budget, &child);
+		assert_eq!(outcome.partial.notes.as_deref(), Some("seen"));
+		assert!(outcome.partial.splits.is_empty());
 	}
 
 	#[test]

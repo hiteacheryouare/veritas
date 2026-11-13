@@ -211,7 +211,7 @@ The sidebar is navigation, not a statement. It never feeds a total, and ST-2 sti
   2. Kind unset and any of `loan_rate_bps`, `loan_payment`, `lender` is set: liability.
   3. Kind unset and the balance as of today is below zero: liability.
   4. Otherwise: asset.
-- **ST-9.2 Group.** On-budget asset: Cash. On-budget liability: Credit. Off-budget asset: Investments. Off-budget liability: Loans. The on-budget flag is Actual's `offbudget` flag (CLS-1). An on-budget savings account is Cash.
+- **ST-9.2 Group.** On-budget asset: Cash. On-budget liability: Credit. Off-budget asset: Investments & Other assets (D61), which holds investments, retirement accounts, property and every other off-budget asset. Off-budget liability: Loans. The on-budget flag is Actual's `offbudget` flag (CLS-1). An on-budget savings account is Cash.
 - **ST-9.3 Stability.** Placement uses the balance only in rule 3 of ST-9.1. An account with kind set, or with loan fields, never changes group when its balance crosses zero.
 - **ST-9.4 Closed and deleted.** A closed account stays in its group, flagged closed. A tombstoned account with no live rows is omitted. A tombstoned account with live rows follows ST-2 (labeled `deleted`, history kept).
 - **ST-9.5 Overdrawn checking.** A checking account with kind unset and a negative balance is listed under Credit by ST-9.1 rule 3. The UI offers "Set account type" so the user can pin it as Asset, which returns it to Cash and keeps it there.
@@ -226,7 +226,7 @@ Examples (made-up):
 | G-3 Card overpaid | on-budget, kind Liability, +2000 | Credit (stable) |
 | G-4 Overdrawn checking | on-budget, kind unset, -1500 | Credit, "Set account type" offered |
 | G-5 Overdrawn, pinned | on-budget, kind Asset, -1500 | Cash |
-| G-6 Brokerage | off-budget, kind unset, +900000 | Investments |
+| G-6 Brokerage | off-budget, kind unset, +900000 | Investments & Other assets |
 | G-7 Mortgage | off-budget, kind Liability, -25000000, lender set | Loans |
 | G-8 Car loan, on-budget | on-budget, kind unset, loan_rate_bps 600, +0 | Credit (loan fields) |
 | G-9 Closed card | closed, kind Liability, 0 | Credit, flagged closed |

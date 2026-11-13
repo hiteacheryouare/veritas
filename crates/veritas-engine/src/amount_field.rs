@@ -28,25 +28,40 @@ pub struct AmountEdit {
 	pub rejection: Option<Rejection>,
 }
 
-/// Actual's `forEdit`: grouping separators, no currency symbol, two decimals
-/// unless the fraction is hidden, and `-0` shown as `0`.
+/// Actual's `forEdit` at two places, as the register shows amounts:
+/// grouping separators, no currency symbol, two decimals unless the fraction
+/// is hidden, and `-0` shown as `0`.
 pub fn edit_text(amount: Money, format: NumberFormat, hide_fraction: bool) -> String {
+	edit_text_at(amount, format, hide_fraction, 2)
+}
+
+/// `forEdit` at the currency's `places`, as budget cells show amounts
+/// (`useFormat`, CLS-12, D63).
+pub fn edit_text_at(
+	amount: Money,
+	format: NumberFormat,
+	hide_fraction: bool,
+	places: u8,
+) -> String {
+	// No currency has more than 3 places; 10^18 still fits a u64.
+	let places = places.min(18);
+	let scale = 10u64.pow(u32::from(places));
 	let minor = amount.minor();
 	let magnitude = minor.unsigned_abs();
-	let (whole, cents) = if hide_fraction {
+	let (whole, fraction) = if hide_fraction || places == 0 {
 		// Intl rounds half away from zero.
-		((magnitude + 50) / 100, None)
+		((magnitude + scale / 2) / scale, None)
 	} else {
-		(magnitude / 100, Some(magnitude % 100))
+		(magnitude / scale, Some(magnitude % scale))
 	};
 	let mut text = String::new();
-	if minor < 0 && (whole > 0 || cents.is_some_and(|c| c > 0)) {
+	if minor < 0 && (whole > 0 || fraction.is_some_and(|f| f > 0)) {
 		text.push('-');
 	}
 	text.push_str(&group_digits(whole, format));
-	if let Some(cents) = cents {
+	if let Some(fraction) = fraction {
 		text.push(format.decimal_separator());
-		text.push_str(&format!("{cents:02}"));
+		text.push_str(&format!("{fraction:0width$}", width = usize::from(places)));
 	}
 	text
 }
@@ -138,6 +153,27 @@ pub fn js_round(value: f64) -> f64 {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn edit_text_follows_the_currencys_places() {
+		let text = |minor, hide, places| {
+			edit_text_at(
+				Money::from_minor(minor),
+				NumberFormat::CommaDot,
+				hide,
+				places,
+			)
+		};
+		assert_eq!(text(5_000, false, 0), "5,000");
+		assert_eq!(text(-5_000, false, 0), "-5,000");
+		assert_eq!(text(1_234_567, false, 3), "1,234.567");
+		assert_eq!(text(-5, false, 3), "-0.005");
+		assert_eq!(text(1_234_500, true, 3), "1,235");
+		assert_eq!(
+			text(123_456, false, 2),
+			edit_text(Money::from_minor(123_456), NumberFormat::CommaDot, false)
+		);
+	}
 
 	#[test]
 	fn the_single_operator_rule_fires_only_on_a_lone_operator() {

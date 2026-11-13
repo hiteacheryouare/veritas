@@ -73,7 +73,7 @@ Positive counted means "adds to this bucket". A refund in an outflow bucket is n
 | `bucket` | bucket id |
 | `direction` | `inflow` or `outflow` |
 | `total_cents` | integer, signed |
-| `total` | same value as a decimal string with the budget currency's decimal places (CLS-12), formatted from the integer (never from a float), `-` prefix if negative |
+| `total` | same value as a decimal string, formatted from the integer (never from a float), `-` prefix if negative. It has 2 decimal places for every currency, because a transaction amount is on the register scale (CLS-12.3, CLS-12.9) and a CSV never rounds. A 2-place budget: `13000` is `130.00`. A 0-place budget: `50000` is `500.00` (the screen shows `¥500`) |
 | `transaction_count` | number of counted rows |
 
 **Detail file** `veritas-tax-detail-<year>.csv`, one row per counted or conflicting row (split children, not parents), sorted by bucket, then date, then id:

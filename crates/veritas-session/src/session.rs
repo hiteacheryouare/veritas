@@ -9,7 +9,7 @@ use veritas_domain::{
 use veritas_interop::{ExportOutcome, ImportOutcome, Manifest, import_actual_zip};
 use veritas_store::{Access as StoreAccess, AuditReport, LoadReport, Loaded};
 
-use veritas_engine::MAX_SAFE_MINOR;
+use veritas_engine::{EnvelopeSheet, MAX_SAFE_MINOR};
 
 use crate::background::{OpenCheck, Pending};
 use crate::backup::write_backup;
@@ -19,6 +19,7 @@ use crate::fsio::{io_error, reserve_partial, sweep_stale_folders, sync_dir, sync
 use crate::lock::{Access, WriterLock, acquire};
 use crate::overview::{Overview, account_groups};
 use crate::retention::RetentionPolicy;
+use crate::sheet::SheetCache;
 use crate::snapshot::{
 	SNAPSHOTS_DIR, Snapshot, SnapshotReason, list_snapshots, prune_snapshots, restore_snapshot,
 	take_snapshot,
@@ -110,6 +111,10 @@ pub struct Session<B: Backend> {
 	audit: Option<AuditReport>,
 	backup_folder: Option<PathBuf>,
 	last_backup: Option<BackupResult>,
+	sheet: SheetCache,
+	/// The local date the shell last read the budget as of. It decides the
+	/// months the envelope sheet covers.
+	today: CivilDate,
 }
 
 impl<B: Backend> Session<B> {
@@ -130,6 +135,7 @@ impl<B: Backend> Session<B> {
 		let lock = acquire_with_retry(dir)?;
 		let (bus, load_report) =
 			open_bus(&db, lock.as_ref(), Listeners::default()).map_err(|(error, _)| error)?;
+		let today = CivilDate::from((options.clock)().date_naive());
 		let mut session = Session {
 			dir: dir.to_path_buf(),
 			db,
@@ -145,6 +151,8 @@ impl<B: Backend> Session<B> {
 			audit: None,
 			backup_folder: None,
 			last_backup: None,
+			sheet: SheetCache::default(),
+			today,
 		};
 		let take_snapshot = session.read_only().is_none();
 		session.open_check = Some(
@@ -308,26 +316,87 @@ impl<B: Backend> Session<B> {
 
 	pub fn perform<C: Command + ?Sized>(&mut self, command: &C) -> Result<ChangeSet, CoreError> {
 		self.poll();
+		// A read-only budget refuses before planning, so the banner's reason
+		// wins over whatever the plan would have said.
+		self.bus_mut()?.ensure_writable()?;
 		if let Some(reason) = command.snapshot_first() {
 			self.snapshot(reason)?;
 		}
-		let changed = self.bus_mut()?.perform(command)?;
+		let rows = if command.reads_sheet() {
+			let today = self.today;
+			let State::Open(bus) = &self.state else {
+				return Err(closed());
+			};
+			let sheet = self.sheet.get(bus.data(), today)?;
+			command.plan_with_sheet(bus.data(), sheet)?
+		} else {
+			command.plan(self.data()?)?
+		};
+		let today = self.today;
+		let State::Open(bus) = &mut self.state else {
+			return Err(closed());
+		};
+		let sheet = &mut self.sheet;
+		let mut refreshed = false;
+		let performed = bus.perform_rows_then(rows, |data, changed| {
+			if !crate::goals::has_active_goals(data) {
+				return Ok(Vec::new());
+			}
+			sheet.refresh(data, changed);
+			refreshed = true;
+			Ok(crate::goals::newly_reached(data, sheet.get(data, today)?))
+		});
+		let changed = match performed {
+			Ok(changed) => changed,
+			Err(error) => {
+				if refreshed {
+					self.sheet.clear();
+				}
+				return Err(error);
+			}
+		};
 		self.dirty |= !changed.is_empty();
+		if !refreshed {
+			self.after_change(&changed);
+		}
 		Ok(changed)
 	}
 
 	pub fn undo(&mut self) -> Result<ChangeSet, CoreError> {
 		self.poll();
 		let changed = self.bus_mut()?.undo()?;
-		self.dirty |= !changed.is_empty();
+		self.after_change(&changed);
 		Ok(changed)
 	}
 
 	pub fn redo(&mut self) -> Result<ChangeSet, CoreError> {
 		self.poll();
 		let changed = self.bus_mut()?.redo()?;
-		self.dirty |= !changed.is_empty();
+		self.after_change(&changed);
 		Ok(changed)
+	}
+
+	/// Runs `read` against the budget and its envelope sheet as of `today`,
+	/// which the shell passes as its local date. The sheet is cached and kept
+	/// up to date by every commit, so reads don't recompute it.
+	pub fn with_sheet<T>(
+		&mut self,
+		today: CivilDate,
+		read: impl FnOnce(&BudgetData, &EnvelopeSheet) -> Result<T, CoreError>,
+	) -> Result<T, CoreError> {
+		self.today = today;
+		let State::Open(bus) = &self.state else {
+			return Err(closed());
+		};
+		let sheet = self.sheet.get(bus.data(), today)?;
+		read(bus.data(), sheet)
+	}
+
+	fn after_change(&mut self, changed: &ChangeSet) {
+		self.dirty |= !changed.is_empty();
+		if let State::Open(bus) = &self.state {
+			self.sheet.refresh(bus.data(), changed);
+		}
 	}
 
 	pub fn subscribe(&mut self, listener: Arc<dyn ChangeListener>) -> Subscription {
@@ -594,6 +663,7 @@ impl<B: Backend> Session<B> {
 	}
 
 	fn reopen(&mut self, listeners: Listeners) -> Result<(), CoreError> {
+		self.sheet.clear();
 		match open_bus(&self.db, self.lock.as_ref(), listeners) {
 			Ok((bus, report)) => {
 				self.state = State::Open(Box::new(bus));

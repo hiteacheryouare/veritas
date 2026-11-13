@@ -171,8 +171,8 @@ impl From<&BackupResult> for BackupInfo {
 	}
 }
 
-/// docs/finance/statements.md ST-9. The shell picks the words; Fred suggests
-/// showing `Investments` as "Other assets", since a house or car lands there.
+/// docs/finance/statements.md ST-9. The shell labels `Investments` as
+/// "Investments & Other assets" (D61), since property lands there too.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum AccountGroup {
 	Cash,
@@ -569,4 +569,12 @@ impl From<Retention> for RetentionPolicy {
 			operation_days: i64::from(retention.operation_days),
 		}
 	}
+}
+
+/// What deleting a category would lose. Empty means a plain delete is safe;
+/// otherwise the app offers Archive, or delete with the history moved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct CategoryHistory {
+	pub transactions: u64,
+	pub budgeted_months: u64,
 }
