@@ -913,6 +913,79 @@ fn relearning_after_a_merge_updates_the_merged_rule_as_actual_does() {
 	);
 }
 
+const SPLIT_ERROR: &str = r#"{"type":"SplitTransactionError","version":1,"difference":-500}"#;
+
+fn stored_error(scratch: &Scratch, name: &str, id: &str) -> Option<String> {
+	sqlite(scratch, name)
+		.query_row("SELECT error FROM transactions WHERE id = ?1", [id], |r| {
+			r.get(0)
+		})
+		.unwrap()
+}
+
+#[test]
+#[ignore = "known bug on PR #56: Veritas never writes transactions.error, so a split it rebalances keeps Actual's old SplitTransactionError"]
+fn rebalancing_an_imported_unbalanced_split_clears_the_error_actual_shows() {
+	// Edge case 6: an unbalanced split from Actual is shown with its
+	// difference. Once the user rebalances it, Actual must stop flagging it:
+	// its register reads the stored `error` (TransactionsTable.tsx:2782-2792)
+	// and `recalculateSplit` writes null for a split that adds up.
+	let scratch = Scratch::new("rebalance");
+	let session = import(&scratch, &small_zip(), "budget");
+	let everyday = new_account(&session, "Joint checking", NewAccountKind::Checking, 0);
+	let groceries = category(&session, "Groceries");
+	session.close().unwrap();
+	inject(
+		&scratch,
+		"budget",
+		&format!(
+			"INSERT INTO transactions (id, acct, date, amount, isParent, isChild, cleared, sort_order, tombstone, error)
+			 VALUES ('odd', '{everyday}', 20261101, -3000, 1, 0, 1, 3, 0, '{SPLIT_ERROR}');
+			 INSERT INTO transactions (id, acct, date, amount, isParent, isChild, parent_id, category, cleared, sort_order, tombstone)
+			 VALUES ('odd-1', '{everyday}', 20261101, -2500, 0, 1, 'odd', '{groceries}', 1, -1, 0);"
+		),
+	);
+	let session = reopen(&scratch, "budget");
+	assert_eq!(
+		session
+			.register_row("odd".to_owned())
+			.unwrap()
+			.split_difference,
+		Some(-500)
+	);
+
+	let mut fixed = entry("odd", &everyday, "2026-11-01", -3000);
+	fixed.cleared = true;
+	fixed.splits = vec![
+		SplitLineDraft {
+			id: Some("odd-1".to_owned()),
+			..line(-2500, Some(&groceries))
+		},
+		line(-500, Some(&groceries)),
+	];
+	edit(&session, "odd", fixed);
+	assert_eq!(
+		session
+			.register_row("odd".to_owned())
+			.unwrap()
+			.split_difference,
+		None
+	);
+	let zip = scratch.join("fixed.zip");
+	export(&session, &zip);
+	session.close().unwrap();
+	assert_eq!(
+		stored_error(&scratch, "budget", "odd"),
+		None,
+		"the split adds up now, so Actual must not flag it"
+	);
+	let Some(oracle) = oracle() else {
+		return;
+	};
+	let actual = actual_reads(&oracle, &zip);
+	assert_eq!(by_id(&actual, "transactions")["odd"]["error"], Value::Null);
+}
+
 #[test]
 fn an_imported_split_with_a_deleted_line_keeps_that_line_deleted() {
 	// A split Actual wrote after the user removed one of its lines: the
