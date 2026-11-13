@@ -7,6 +7,7 @@ mod balances;
 mod classify;
 mod custom_report;
 mod dashboard;
+mod filter;
 mod json;
 mod net_profit;
 mod period;
@@ -26,6 +27,7 @@ pub use custom_report::{BalanceType, CustomReport, GroupBy, Interval, SortBy};
 pub use dashboard::{
 	Dashboard, DashboardWidget, GRID_COLUMNS, WidgetContent, WidgetType, dashboards, place_widget,
 };
+pub use filter::TransactionFilter;
 pub use json::Json;
 pub use net_profit::{CategoryLabels, CategoryLine, Line, NetProfit, Section, net_profit};
 pub use period::{Period, months};

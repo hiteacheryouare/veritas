@@ -179,8 +179,11 @@ fn oracle_rows(requests: &Value) -> Option<Value> {
 		eprintln!("skipping the custom report oracle comparison: run `cargo xtask oracle setup`");
 		return None;
 	}
-	let file = Path::new(env!("CARGO_TARGET_TMPDIR"))
-		.join(format!("report-rows-{}.json", std::process::id()));
+	let file = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
+		"report-rows-{}-{}.json",
+		std::process::id(),
+		NEXT.fetch_add(1, Ordering::Relaxed)
+	));
 	std::fs::write(&file, requests.to_string()).unwrap();
 	let output = Command::new("node")
 		.current_dir(&oracle)
@@ -256,6 +259,138 @@ fn r_rep_4_query_rows_match_actuals_query_engine() {
 			let actual = sorted(rows.iter().map(row_json).collect());
 			let wanted = sorted(expected[side].as_array().unwrap().clone());
 			assert_eq!(actual, wanted, "{id} {side}");
+		}
+	}
+}
+
+fn named<'a, T>(
+	items: impl Iterator<Item = &'a T>,
+	name: &str,
+	pick: impl Fn(&T) -> (&str, String),
+) -> String
+where
+	T: 'a,
+{
+	items
+		.map(|item| pick(item))
+		.find(|(item, _)| *item == name)
+		.map(|(_, id)| id)
+		.unwrap_or_else(|| panic!("all-features has {name}"))
+}
+
+/// Every condition op Actual's filter bar offers, each run alone through
+/// `conditionsToAQL` and the AQL compiler, against Veritas's filter.
+#[test]
+fn r_rep_4_every_filter_condition_matches_actuals_query() {
+	let budget = all_features();
+	let base = live_reports(&budget)[1].clone();
+	let payee = named(budget.payees.values(), "Corner Grocer", |p| {
+		(p.name.as_str(), p.id.to_string())
+	});
+	let category = named(budget.categories.values(), "Groceries", |c| {
+		(c.name.as_str(), c.id.to_string())
+	});
+	let group = named(budget.category_groups.values(), "Everyday", |g| {
+		(g.name.as_str(), g.id.to_string())
+	});
+	let account = named(budget.accounts.values(), "Checking", |a| {
+		(a.name.as_str(), a.id.to_string())
+	});
+	let cases = vec![
+		json!([{"field": "payee", "op": "contains", "value": "grocer", "type": "id"}]),
+		json!([{"field": "payee", "op": "doesNotContain", "value": "grocer", "type": "id"}]),
+		json!([{"field": "payee", "op": "matches", "value": "^Corner", "type": "id"}]),
+		json!([{"field": "payee", "op": "matches", "value": "grocer", "type": "id"}]),
+		json!([{"field": "payee", "op": "contains", "value": "checking", "type": "id"}]),
+		json!([{"field": "payee", "op": "is", "value": null, "type": "id"}]),
+		json!([{"field": "payee", "op": "isNot", "value": payee, "type": "id"}]),
+		json!([{"field": "payee", "op": "oneOf", "value": [payee, null], "type": "id"}]),
+		json!([{"field": "payee", "op": "notOneOf", "value": [payee], "type": "id"}]),
+		json!([{"field": "category", "op": "contains", "value": "din", "type": "id"}]),
+		json!([{"field": "category", "op": "is", "value": null, "type": "id"}]),
+		json!([{"field": "category", "op": "isNot", "value": null, "type": "id"}]),
+		json!([{"field": "category", "op": "notOneOf", "value": [category], "type": "id"}]),
+		json!([{"field": "category", "op": "oneOf", "value": [], "type": "id"}]),
+		json!([{"field": "category_group", "op": "is", "value": group, "type": "id"}]),
+		json!([{"field": "category_group", "op": "contains", "value": "every", "type": "id"}]),
+		json!([{"field": "account", "op": "onBudget", "value": null, "type": "id"}]),
+		json!([{"field": "account", "op": "offBudget", "value": null, "type": "id"}]),
+		json!([{"field": "account", "op": "contains", "value": "card", "type": "id"}]),
+		json!([{"field": "account", "op": "matches", "value": "^Old", "type": "id"}]),
+		json!([{"field": "account", "op": "is", "value": account, "type": "id"}]),
+		json!([{"field": "notes", "op": "contains", "value": "#REIM", "type": "string"}]),
+		json!([{"field": "notes", "op": "doesNotContain", "value": "payment", "type": "string"}]),
+		json!([{"field": "notes", "op": "is", "value": "", "type": "string"}]),
+		json!([{"field": "notes", "op": "isNot", "value": "Weekly shop", "type": "string"}]),
+		json!([{"field": "notes", "op": "matches", "value": "^card", "type": "string"}]),
+		json!([{"field": "notes", "op": "hasTags", "value": "#reimbursable", "type": "string"}]),
+		json!([{"field": "notes", "op": "hasAnyTag", "value": "#vacation #reimbursable", "type": "string"}]),
+		json!([{"field": "notes", "op": "hasTags", "value": "#Vacation", "type": "string"}]),
+		json!([{"field": "notes", "op": "hasTags", "value": "###", "type": "string"}]),
+		json!([{"field": "notes", "op": "oneOf", "value": ["refund"], "type": "string"}]),
+		json!([{"field": "imported_payee", "op": "is", "value": "", "type": "string"}]),
+		json!([{"field": "imported_payee", "op": "isNot", "value": "skyair", "type": "string"}]),
+		json!([{"field": "imported_payee", "op": "oneOf", "value": ["", "SkyAir"], "type": "string"}]),
+		json!([{"field": "amount", "op": "isapprox", "value": -12000, "type": "number"}]),
+		json!([{"field": "amount", "op": "isbetween", "value": {"num1": -100, "num2": -5000}, "type": "number"}]),
+		json!([{"field": "amount", "op": "is", "value": 1299, "type": "number", "options": {"inflow": true}}]),
+		json!([{"field": "amount", "op": "lt", "value": 5000, "type": "number", "options": {"outflow": true}}]),
+		json!([{"field": "amount", "op": "isapprox", "value": 5000, "type": "number", "options": {"outflow": true}}]),
+		json!([{"field": "date", "op": "isapprox", "value": "2026-03-15", "type": "date"}]),
+		json!([{"field": "date", "op": "is", "value": "2026", "type": "date"}]),
+		json!([{"field": "date", "op": "gt", "value": "2026-06-01", "type": "date"}]),
+		json!([{"field": "date", "op": "lte", "value": "2026-01-31", "type": "date"}]),
+		json!([{"field": "date", "op": "is", "value": {"start": "2026-01-25", "frequency": "monthly", "interval": 1, "endMode": "never"}, "type": "date"}]),
+		json!([{"field": "date", "op": "isapprox", "value": {"start": "2025-12-01", "frequency": "weekly", "interval": 2, "endMode": "never"}, "type": "date"}]),
+		json!([{"field": "cleared", "op": "is", "value": false, "type": "boolean"}]),
+		json!([{"field": "reconciled", "op": "is", "value": true, "type": "boolean"}]),
+		json!([{"field": "transfer", "op": "is", "value": false, "type": "boolean"}]),
+		json!([{"field": "parent", "op": "is", "value": false, "type": "boolean"}]),
+		json!([
+			{"field": "notes", "op": "oneOf", "value": ["x"], "type": "string"},
+			{"field": "saved", "op": "is", "value": "anything", "type": "saved"},
+			{"field": "payee", "op": "is", "value": payee, "type": "id", "customName": "Mine"}
+		]),
+	];
+	let mut requests = Vec::new();
+	let mut ours = Vec::new();
+	for (index, conditions) in cases.iter().enumerate() {
+		for or in [false, true] {
+			let mut variant = base.clone();
+			variant.id = CustomReportId::new(format!("filter-{index}-{or}"));
+			variant.interval = veritas_reports::Interval::Daily;
+			variant.conditions = Json::parse(&conditions.to_string())
+				.unwrap()
+				.as_array()
+				.unwrap()
+				.to_vec();
+			variant.conditions_or = or;
+			let (start, end) = ("2025-01-01", "2026-12-31");
+			requests.push(json!({
+				"id": variant.id.to_string(),
+				"startDate": start,
+				"endDate": end,
+				"interval": "Daily",
+				"conditions": conditions,
+				"conditionsOp": if or { "or" } else { "and" },
+			}));
+			let (assets, debts) = report_rows(&budget, &variant, start, end)
+				.unwrap_or_else(|error| panic!("{conditions}: {error}"));
+			ours.push((variant.id.clone(), conditions.clone(), assets, debts));
+			if conditions.as_array().unwrap().len() == 1 {
+				break;
+			}
+		}
+	}
+	let Some(theirs) = oracle_rows(&Value::Array(requests)) else {
+		return;
+	};
+	for (id, conditions, assets, debts) in ours {
+		let expected = &theirs[id.as_str()];
+		for (side, rows) in [("assets", assets), ("debts", debts)] {
+			let actual = sorted(rows.iter().map(row_json).collect());
+			let wanted = sorted(expected[side].as_array().unwrap().clone());
+			assert_eq!(actual, wanted, "{conditions} {side}");
 		}
 	}
 }
@@ -501,9 +636,9 @@ fn r_rep_4_unsupported_settings_say_so_instead_of_guessing() {
 		CustomReport::from_row(&spending_report("Category", "Budgeted", "desc")).unwrap();
 	assert!(evaluate_report(&book.budget, &budgeted, today(), 0).is_err());
 	let mut row = spending_report("Category", "Payment", "desc");
-	row.conditions = Some(r#"[{"field":"notes","op":"matches","value":"^x"}]"#.to_owned());
-	let regex = CustomReport::from_row(&row).unwrap();
-	assert!(evaluate_report(&book.budget, &regex, today(), 0).is_err());
+	row.conditions = Some(r#"[{"field":"payee_name","op":"is","value":"x"}]"#.to_owned());
+	let payee_name = CustomReport::from_row(&row).unwrap();
+	assert!(evaluate_report(&book.budget, &payee_name, today(), 0).is_err());
 }
 
 #[test]

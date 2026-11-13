@@ -1382,6 +1382,7 @@ dependencies = [
  "veritas-domain",
  "veritas-engine",
  "veritas-interop",
+ "veritas-rules",
  "veritas-store",
 ]
 
