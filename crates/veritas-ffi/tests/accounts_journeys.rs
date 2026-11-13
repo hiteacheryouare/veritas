@@ -694,6 +694,225 @@ fn transfers_across_the_budget_line_are_written_as_actual_writes_them() {
 	);
 }
 
+/// Live rules that mention any of `payees`, with every payee id written as
+/// its name so two budgets that made the same payees compare.
+fn rules_naming(dump: &Value, payees: &[&str]) -> Vec<(Value, Value)> {
+	let names: BTreeMap<String, String> = rows(dump, "payees")
+		.iter()
+		.map(|p| {
+			(
+				p["id"].as_str().unwrap().to_owned(),
+				p["name"].as_str().unwrap_or_default().to_owned(),
+			)
+		})
+		.collect();
+	let mut found: Vec<(Value, Value)> = rows(dump, "rules")
+		.iter()
+		.filter(|r| r["tombstone"] != 1)
+		.filter(|r| {
+			let conditions = r["conditions"].as_str().unwrap_or_default();
+			payees.iter().any(|p| conditions.contains(p))
+		})
+		.map(|r| {
+			let mut conditions: Value =
+				serde_json::from_str(r["conditions"].as_str().unwrap()).unwrap();
+			for condition in conditions.as_array_mut().unwrap() {
+				if let Some(name) = condition["value"].as_str().and_then(|id| names.get(id)) {
+					condition["value"] = Value::String(name.clone());
+				}
+			}
+			let actions: Value = serde_json::from_str(r["actions"].as_str().unwrap()).unwrap();
+			(conditions, actions)
+		})
+		.collect();
+	found.sort_by_key(|rule| rule.0.to_string() + &rule.1.to_string());
+	found
+}
+
+/// A budget with one checking account and two payees Actual made, "Cafe A"
+/// and "Cafe B", exported for both sides to start from.
+fn two_cafes(scratch: &Scratch, oracle: &Path) -> (PathBuf, String, String, String) {
+	let session = import(scratch, &small_zip(), "base");
+	let everyday = new_account(&session, "Joint checking", NewAccountKind::Checking, 0);
+	let groceries = category(&session, "Groceries");
+	let utilities = category(&session, "Utilities");
+	let base = scratch.join("base.zip");
+	export(&session, &base);
+	session.close().unwrap();
+	let with_payees = scratch.join("with-payees.zip");
+	actual_apply(
+		oracle,
+		&base,
+		json!([
+			{"op": "createPayee", "id": "cafe-a", "name": "Cafe A"},
+			{"op": "createPayee", "id": "cafe-b", "name": "Cafe B"},
+		]),
+		&with_payees,
+		11,
+	);
+	(with_payees, everyday, groceries, utilities)
+}
+
+fn visit(day: u32, payee: &str, category: Option<&str>) -> Value {
+	let mut row = json!({"date": format!("2026-11-{day:02}"), "amount": -450 - i64::from(day),
+		"payee": payee});
+	if let Some(category) = category {
+		row["category"] = Value::String(category.to_owned());
+	}
+	row
+}
+
+/// Quick entry for `payee` on day `day` of November, as the app sends it.
+fn typed_visit(session: &Session, account: &str, day: u32, payee: &str, category: Option<&str>) {
+	let mut draft = entry(
+		&format!("visit-{day}"),
+		account,
+		&format!("2026-11-{day:02}"),
+		-450 - i64::from(day),
+	);
+	draft.payee_id = Some(payee.to_owned());
+	draft.category_id = category.map(str::to_owned);
+	draft.cleared = true;
+	add(session, draft);
+}
+
+fn category_on_day(dump: &Value, day: u32) -> Value {
+	let date = 20_261_100 + i64::from(day);
+	rows(dump, "transactions")
+		.iter()
+		.find(|t| t["date"] == date && t["tombstone"] != 1)
+		.unwrap()["category"]
+		.clone()
+}
+
+fn merge_a_into_b() -> Command {
+	Command::MergePayees {
+		target_payee_id: "cafe-b".to_owned(),
+		payee_ids: vec!["cafe-a".to_owned()],
+	}
+}
+
+#[test]
+fn quick_entry_for_a_merged_payee_uses_the_category_its_old_name_learned() {
+	// R-ACC-4 with R-ACC-5: "Cafe A" learns Groceries and is merged into
+	// "Cafe B". Actual remaps rules through payee_mapping (§4.5), so the next
+	// entry for Cafe B with no category gets Groceries.
+	let scratch = Scratch::new("merge-fill");
+	let Some(oracle) = oracle() else {
+		return;
+	};
+	let (base, everyday, groceries, _) = two_cafes(&scratch, &oracle);
+
+	let veritas = import(&scratch, &base, "veritas");
+	for day in [1, 2, 3] {
+		typed_visit(&veritas, &everyday, day, "cafe-a", Some(&groceries));
+	}
+	perform(&veritas, merge_a_into_b());
+	typed_visit(&veritas, &everyday, 8, "cafe-b", None);
+	let memory = veritas.payee_memory("cafe-b".to_owned()).unwrap().unwrap();
+	assert_eq!(
+		memory.category_id.as_deref(),
+		Some(groceries.as_str()),
+		"payee memory reads through the merge"
+	);
+	let ours_zip = scratch.join("veritas.zip");
+	export(&veritas, &ours_zip);
+	let ours = actual_reads(&oracle, &ours_zip);
+
+	let learned = scratch.join("actual.zip");
+	actual_apply(
+		&oracle,
+		&base,
+		json!([
+			{"op": "addTransactions", "account": everyday, "learnCategories": true,
+				"transactions": ([1, 2, 3].map(|day| visit(day, "cafe-a", Some(&groceries))))},
+			{"op": "mergePayees", "target": "cafe-b", "merge": ["cafe-a"]},
+			{"op": "addTransactions", "account": everyday,
+				"transactions": [visit(8, "cafe-b", None)]},
+		]),
+		&learned,
+		12,
+	);
+	let theirs = actual_reads(&oracle, &learned);
+	assert_eq!(category_on_day(&theirs, 8), json!(groceries));
+	assert_eq!(category_on_day(&ours, 8), category_on_day(&theirs, 8));
+}
+
+#[test]
+#[ignore = "known bug on PR #56: learn_categories matches setter rules on the raw payee id, not the merged one, so it adds a second rule and the old category keeps winning"]
+fn relearning_after_a_merge_updates_the_merged_rule_as_actual_does() {
+	// §4.5: learning updates every `payee is <payee>` setter rule, matched on
+	// the mapped payee, the way Actual's in-memory rules are remapped by
+	// `migrateIds`. After Cafe A (Groceries) is merged into Cafe B and Cafe B
+	// is put under Utilities three times, the next entry gets Utilities.
+	let scratch = Scratch::new("merge-relearn");
+	let Some(oracle) = oracle() else {
+		return;
+	};
+	let (base, everyday, groceries, utilities) = two_cafes(&scratch, &oracle);
+
+	let veritas = import(&scratch, &base, "veritas");
+	for day in [1, 2, 3] {
+		typed_visit(&veritas, &everyday, day, "cafe-a", Some(&groceries));
+	}
+	perform(&veritas, merge_a_into_b());
+	for day in [5, 6, 7] {
+		typed_visit(&veritas, &everyday, day, "cafe-b", Some(&utilities));
+	}
+	typed_visit(&veritas, &everyday, 9, "cafe-b", None);
+	let ours_zip = scratch.join("veritas.zip");
+	export(&veritas, &ours_zip);
+	let ours = actual_reads(&oracle, &ours_zip);
+
+	// Actual's API runs the rules over a category it is given, so the three
+	// Utilities rows are added, then set by hand, and the fourth learning
+	// add is the one that sees Utilities as the payee's most common category.
+	let added = scratch.join("actual-added.zip");
+	actual_apply(
+		&oracle,
+		&base,
+		json!([
+			{"op": "addTransactions", "account": everyday, "learnCategories": true,
+				"transactions": ([1, 2, 3].map(|day| visit(day, "cafe-a", Some(&groceries))))},
+			{"op": "mergePayees", "target": "cafe-b", "merge": ["cafe-a"]},
+			{"op": "addTransactions", "account": everyday,
+				"transactions": ([5, 6, 7].map(|day| visit(day, "cafe-b", Some(&utilities))))},
+		]),
+		&added,
+		12,
+	);
+	let after_add = actual_reads(&oracle, &added);
+	let mut ops: Vec<Value> = rows(&after_add, "transactions")
+		.iter()
+		.filter(|t| t["description"] == "cafe-b" && t["tombstone"] != 1)
+		.map(
+			|t| json!({"op": "updateTransaction", "id": t["id"], "fields": {"category": utilities}}),
+		)
+		.collect();
+	assert_eq!(ops.len(), 3);
+	ops.push(
+		json!({"op": "addTransactions", "account": everyday, "learnCategories": true,
+		"transactions": [visit(8, "cafe-b", Some(&utilities))]}),
+	);
+	ops.push(json!({"op": "addTransactions", "account": everyday,
+		"transactions": [visit(9, "cafe-b", None)]}));
+	let learned = scratch.join("actual-learned.zip");
+	actual_apply(&oracle, &added, Value::Array(ops), &learned, 13);
+	let theirs = actual_reads(&oracle, &learned);
+	assert_eq!(category_on_day(&theirs, 9), json!(utilities));
+
+	assert_eq!(
+		category_on_day(&ours, 9),
+		category_on_day(&theirs, 9),
+		"the entry after relearning"
+	);
+	assert_eq!(
+		rules_naming(&ours, &["cafe-a", "cafe-b"]),
+		rules_naming(&theirs, &["cafe-a", "cafe-b"]),
+		"one setter rule, now Utilities"
+	);
+}
+
 #[test]
 fn an_imported_split_with_a_deleted_line_keeps_that_line_deleted() {
 	// A split Actual wrote after the user removed one of its lines: the
