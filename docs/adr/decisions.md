@@ -295,3 +295,63 @@ Every decision behind Veritas, so no question gets asked twice. D1–D24 are PLA
 - **Options:** count them, with a note / add them back / ask per category
 - **Decision:** Add them back. The forecast's monthly series leaves out on- and off-budget capitalizing transfers (CLS-4 rows 8 and 9), the way ST-4 E2 does, and shows "N asset purchase(s) excluded". Spec: forecasting.md FC-1 and FC-3 (AP-1).
 - **Date:** 2026-11-11
+
+### D59. New-budget flow design sign-off (§5.3)
+- **Options:** approve / approve with changes / rework
+- **Decision:** Ryan approved the first-launch screen and the three-step new-budget setup as shown in the 2026-11-11 screenshots. The Accounts step uses an account type picker instead of an off-budget checkbox.
+- **Date:** 2026-11-11
+
+### D60. What does the session write when a rule can't run in Veritas?
+- **Options:** apply the rest and record the note / write nothing from that run and show the note
+- **Decision:** When any rule in a run is undetermined, the session writes nothing from that run and shows the note; this replaces "apply the rest and record the note". The transaction, and any payee a rule would have made, is left for Actual. `RunOutcome.transaction` is `None` for such a run, and a schedule plan moves a bill with such a run into `SchedulePlan.left`, with none of its posts, writes or new payees, and leaves out the `lastScheduleRun` update.
+- **Date:** 2026-11-11
+
+### D61. Sidebar group label and new-budget account types
+- **Options:** "Investments" / "Other assets" / Ryan's own wording
+- **Decision:** The third sidebar group reads "Investments & Other assets". Setup offers ten account types (Checking, Savings, Cash, Credit card, Line of credit, Investment, Retirement, Property, Loan, Mortgage), with debts entered as a positive "Amount owed". A line of credit is on budget like a card (D8), and the setup HSA account is an Investment.
+- **Date:** 2026-11-11
+
+### D62. Currency codes that aren't in Actual's table (CLS-12.7)
+- **Options:** 2 places and an audit finding / refuse read-write
+- **Decision:** Use 2 places and list the code in the audit, as Actual does (`?? 2`, currencies.ts:85). Refusing would break a budget Actual opens fine.
+- **Date:** 2026-11-12
+
+### D63. Zero-decimal currencies (CLS-12.8)
+- **Options:** follow Actual path by path / read everything at 2 places / not in v1
+- **Decision:** Follow Actual path by path. The register enters and shows amounts at 2 places, budget cells use the currency's places, and Veritas never rescales a stored integer. Fred had recommended not supporting them in v1; Ryan chose parity.
+- **Date:** 2026-11-12
+
+### D64. A hand-entered transaction when a rule can't run
+- **Options:** save the typed row, skip rule effects / don't save
+- **Decision:** Save the row exactly as typed, apply no rule effects, and mark it "may need Actual". D60's "write nothing" covers what rules would have written, never what the user typed.
+- **Date:** 2026-11-12
+
+### D65. Editing a bill
+- **Options:** keep Veritas's behavior / match Actual's editor
+- **Decision:** The next date resets only when the bill's date or account changes. Actual's editor resets it on every save (its stored conditions use `acct`/`description` while the server checks `account`), which drops a missed occurrence and undoes a skip; Veritas doesn't copy that. The stored rule is identical either way.
+- **Date:** 2026-11-12
+
+### D66. Spent and closed goals
+- **Options:** Fred's recommendations / keep suggesting refills / always move later budget at close
+- **Decision:** A goal that's reached and then spent reads "Reached → Spent", with no refill suggestion or ETA until it's reopened or re-targeted. Closing a goal shows any budget in later months, with an unchecked "Also move those to {destination}"; if left unchecked, those months carry a "closed goal has budget" flag (GOAL-10).
+- **Date:** 2026-11-12
+
+### D67. What-if events dated in the past
+- **Options:** keep and flag / drop on load / ignore silently
+- **Decision:** Keep them, leave them out of the projection, and show them as "in the past" so the user can delete or re-date them.
+- **Date:** 2026-11-12
+
+### D68. Where the backup schedule lives
+- **Options:** on this Mac / in the budget file
+- **Decision:** On this Mac, per budget, next to the security-scoped bookmark for its backup folder. Another device sets its own.
+- **Date:** 2026-11-12
+
+### D69. Unbuilt Settings sections
+- **Options:** hide until built / keep the placeholders
+- **Decision:** Settings shows only sections that work (Backups, Actual, Appearance). AI and Tags appear once they do something.
+- **Date:** 2026-11-12
+
+### D70. Shell copy and layout
+- **Options:** approve / approve with changes / rework
+- **Decision:** Ryan approved the Settings › Backups, Integrity report (findings, clean, refused import) and Open budget copy and layout as shown in the 2026-11-12 screenshots, along with the plain integrity-finding names.
+- **Date:** 2026-11-12
