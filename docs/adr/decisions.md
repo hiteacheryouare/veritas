@@ -360,3 +360,8 @@ Every decision behind Veritas, so no question gets asked twice. D1–D24 are PLA
 - **Options:** a new goal row / the same goal goes back to active / refuse
 - **Decision:** Re-targeting sets the new target (and date) on the same goal and puts it back to `active`. Its first `reached_month` is kept as history, so Wrapped counts the goal once, in the year it was first reached. This amends R-GOAL-3: a re-target is the one way a reached goal returns to active. The store keeps one `veritas_goal` row per category, which is why a second row was not an option.
 - **Date:** 2026-11-13
+
+### D72. Dismissing a closed goal's new-activity notice
+- **Options:** only reopening clears it / a Dismiss button / clear it automatically when the envelope is covered
+- **Decision:** The "Closed goal has new activity" notice (GOAL-6) gets a Dismiss button. Dismissing records the latest month with activity the user has seen. The notice comes back only when activity appears in a later month, or the close month stops ending at 0 again after it was cleared. Reopening still clears it, as before. Dismissing never moves money.
+- **Date:** 2026-11-13
