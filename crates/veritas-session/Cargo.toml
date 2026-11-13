@@ -16,9 +16,15 @@ veritas-reports = { path = "../veritas-reports" }
 veritas-forecast = { path = "../veritas-forecast" }
 chrono.workspace = true
 rusqlite.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 proptest.workspace = true
+
+[[bench]]
+name = "open_import_export"
+harness = false
 
 [lints]
 workspace = true

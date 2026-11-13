@@ -5,19 +5,22 @@
 	reason = "integration tests fail by panicking"
 )]
 
+mod support;
+
 use std::sync::{Arc, Mutex};
 
 use proptest::prelude::*;
+use support::TempDir;
 use veritas_domain::{
 	Account, AccountGroup, AccountGroupId, AccountId, AccountKind, AccountMeta, AccountMetaRow,
 	BudgetCell, BudgetData, BudgetType, Category, CategoryGroup, CategoryGroupId, CategoryId,
 	CategoryKind, CategoryMapping, CategoryMeta, CategoryMetaRow, Change, CivilDate, ConditionsOp,
 	CoreError, EntityRef, Goal, GoalId, GoalStatus, Hold, Money, Note, Payee, PayeeId,
 	PayeeMapping, ReadOnlyReason, Row, Rule, RuleId, RuleStage, Schedule, ScheduleId, SplitRole,
-	Store, StoreTransaction, Tag, TagId, Transaction, TransactionId, TransactionMeta,
+	Store, StoreTransaction, Tag, TagId, TaxTag, Transaction, TransactionId, TransactionMeta,
 	TransactionMetaRow, YearMonth,
 };
-use veritas_session::{ChangeListener, ChangeSet, CommandBus};
+use veritas_session::{Access, ChangeListener, ChangeSet, CommandBus, Permit, acquire};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Failure {
@@ -214,10 +217,15 @@ fn budget() -> BudgetData {
 	data
 }
 
+/// A bus over `budget()`, built with a writer lock on a throwaway folder.
 fn bus() -> Bus {
+	let folder = TempDir::new("bus");
+	let Access::Writer(lock) = acquire(folder.path()).unwrap() else {
+		panic!("a fresh folder is always free to lock");
+	};
 	let data = budget();
 	let store = MirrorStore::new(&data);
-	CommandBus::new(data, store, None)
+	CommandBus::new(data, store, Permit::Write(&lock))
 }
 
 fn rows(rows: Vec<Row>) -> impl Fn(&BudgetData) -> Result<Vec<Row>, CoreError> {
@@ -480,7 +488,7 @@ fn a_budget_open_elsewhere_refuses_every_write() {
 	// R-REL-6
 	let data = budget();
 	let store = MirrorStore::new(&data);
-	let mut bus = CommandBus::new(data, store, Some(ReadOnlyReason::OpenElsewhere));
+	let mut bus = CommandBus::new(data, store, Permit::ReadOnly(ReadOnlyReason::OpenElsewhere));
 	let read_only = |result: Result<ChangeSet, CoreError>| {
 		matches!(
 			result,
@@ -535,6 +543,7 @@ struct NewRows {
 	category_meta: CategoryMetaRow,
 	account_meta: AccountMetaRow,
 	transaction_meta: TransactionMetaRow,
+	tax_tag: TaxTag,
 	goal: Goal,
 }
 
@@ -640,6 +649,10 @@ impl NewRows {
 					needs_actual: None,
 				},
 			},
+			tax_tag: TaxTag {
+				tag: "charity".to_owned(),
+				bucket: "charitable".to_owned(),
+			},
 			goal: goal("trip"),
 		}
 	}
@@ -664,6 +677,7 @@ impl NewRows {
 		rows.category_meta.meta.tax_bucket = Some("schedule-c".to_owned());
 		rows.account_meta.meta.lender = Some("Ally".to_owned());
 		rows.transaction_meta.meta.adjustment = true;
+		rows.tax_tag.bucket = "medical".to_owned();
 		rows.goal.target = Money::from_minor(450_000);
 		rows
 	}
@@ -687,6 +701,7 @@ impl NewRows {
 			Row::CategoryMeta(self.category_meta.clone()),
 			Row::AccountMeta(self.account_meta.clone()),
 			Row::TransactionMeta(self.transaction_meta.clone()),
+			Row::TaxTag(self.tax_tag.clone()),
 			Row::Goal(self.goal.clone()),
 		]
 	}
@@ -705,10 +720,10 @@ fn every_kind_of_row_undoes_and_redoes_exactly() {
 	let edited = NewRows::edited();
 
 	let changed = bus.perform(&rows(created.rows())).unwrap();
-	assert_eq!(changed.entities.len(), 18);
+	assert_eq!(changed.entities.len(), 19);
 	let after_create = bus.data().clone();
 	let changed = bus.perform(&rows(edited.rows())).unwrap();
-	assert_eq!(changed.entities.len(), 18);
+	assert_eq!(changed.entities.len(), 19);
 	let after_edit = bus.data().clone();
 
 	bus.undo().unwrap();
