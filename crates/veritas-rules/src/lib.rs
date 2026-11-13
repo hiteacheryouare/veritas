@@ -34,5 +34,6 @@ pub use schedule::{
 	status, upcoming_days, validate_schedule_date,
 };
 pub use trigger::{
-	ManualEntry, added_transaction, counterpart, manual_entry, may_need_actual, merge_manual_entry,
+	ManualEntry, TransferLeg, Transfers, added_transaction, counterpart, manual_entry,
+	may_need_actual, merge_manual_entry, transfers,
 };
