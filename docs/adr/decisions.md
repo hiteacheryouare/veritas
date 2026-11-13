@@ -303,7 +303,7 @@ Every decision behind Veritas, so no question gets asked twice. D1–D24 are PLA
 
 ### D60. What does the session write when a rule can't run in Veritas?
 - **Options:** apply the rest and record the note / write nothing from that run and show the note
-- **Decision:** When any rule in a run is undetermined, the session writes nothing from that run and shows the note; this replaces "apply the rest and record the note". The transaction, and any payee a rule would have made, is left for Actual. `RunOutcome.transaction` is `None` for such a run, and a schedule plan moves a bill with such a run into `SchedulePlan.left`, with none of its posts, writes or new payees, and leaves out the `lastScheduleRun` update. (Narrowed by D64: a hand-typed row is saved as typed.)
+- **Decision:** When any rule in a run is undetermined, the session writes nothing from that run and shows the note; this replaces "apply the rest and record the note". The transaction, and any payee a rule would have made, is left for Actual. `RunOutcome.transaction` is `None` for such a run, and a schedule plan moves a bill with such a run into `SchedulePlan.left`, with none of its posts, writes or new payees, and leaves out the `lastScheduleRun` update. (Narrowed by D64: a hand-typed row is saved as typed.) A new transfer's other leg runs the rules too. When that run is undetermined, a hand-typed row and its leg are saved as Actual builds the leg before its rules, with the leg marked "may need Actual" (D64). A schedule post is left to Actual whole, leg included, like any other undetermined run in the post (see `TransferLeg`).
 - **Date:** 2026-11-11
 
 ### D61. Sidebar group label and new-budget account types
