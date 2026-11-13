@@ -146,6 +146,7 @@ private struct ArchivedGoalRow: View {
 		.foregroundStyle(.textSecondary)
 		.padding(.horizontal, Spacing.s4)
 		.frame(height: Size.row)
+		.contentShape(.rect)
 		.accessibilityElement(children: .ignore)
 		.accessibilityLabel([goal.name, words.note, words.detail].compactMap(\.self).joined(separator: ", "))
 		.accessibilityIdentifier("goal.\(goal.id)")

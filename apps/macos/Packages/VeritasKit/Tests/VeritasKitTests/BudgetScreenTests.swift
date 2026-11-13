@@ -144,6 +144,21 @@ struct BudgetScreenTests {
 		#expect(TaxBuckets.mergeWarning(source: "Dining", sourceBucket: nil, target: "Gifts", targetBucket: "charitable") == nil)
 	}
 
+	@Test func moveUpAndDownReorderWithinTheGroup() async {
+		let screen = await openScreen()
+		let order = screen.groups[0].envelopes.map(\.id)
+		#expect(!screen.canMoveEnvelope(order[0], by: -1))
+		#expect(!screen.canMoveEnvelope(order[order.count - 1], by: 1))
+		await screen.moveEnvelope(order[1], by: -1)
+		await screen.moveEnvelope(order[0], by: 1)
+		await screen.moveEnvelope(order[order.count - 2], by: 1)
+		#expect(session.commands == [
+			.moveCategory(categoryId: order[1], groupId: "everyday", beforeCategoryId: order[0]),
+			.moveCategory(categoryId: order[0], groupId: "everyday", beforeCategoryId: order.count > 2 ? order[2] : nil),
+			.moveCategory(categoryId: order[order.count - 2], groupId: "everyday", beforeCategoryId: nil)
+		])
+	}
+
 	@Test func categoryAndGroupEditsSendTheirCommands() async {
 		let screen = await openScreen()
 		#expect(await screen.createEnvelope(in: "housing", named: "Water"))

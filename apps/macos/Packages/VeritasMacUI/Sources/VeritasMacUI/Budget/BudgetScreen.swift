@@ -69,7 +69,7 @@ struct BudgetScreen: View {
 		.focusEffectDisabled()
 		.focused($hasKeyFocus)
 		.defaultFocus($hasKeyFocus, true)
-		.focusedValue(\.budgetMonths, screen.editing == nil ? BudgetMonthActions(
+		.focusedSceneValue(\.budgetMonths, screen.editing == nil ? BudgetMonthActions(
 			canGoBack: screen.canGoBack,
 			canGoForward: screen.canGoForward,
 			previous: { Task { await screen.previousMonth() } },
@@ -117,8 +117,12 @@ struct BudgetScreen: View {
 		}
 		.task(id: workspace.changeCount) { await screen.load() }
 		// Closing the amount field would leave keyboard focus with the sidebar.
+		// The field takes first responder through AppKit, so SwiftUI may still
+		// think the screen has focus: clear it, then set it on the next turn.
 		.onChange(of: screen.editingID) { _, id in
-			if id == nil { hasKeyFocus = true }
+			guard id == nil else { return }
+			hasKeyFocus = false
+			Task { @MainActor in hasKeyFocus = true }
 		}
 		.containerIdentifier("screen.budget")
 	}

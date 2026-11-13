@@ -163,6 +163,11 @@ struct EnvelopeRowView: View {
 		}
 		Button(envelope.note == nil ? "Add Note…" : "Edit Note…") { isEditingNote = true }
 		Divider()
+		Button("Move Up") { Task { await screen.moveEnvelope(envelope.id, by: -1) } }
+			.disabled(!screen.canMoveEnvelope(envelope.id, by: -1))
+		Button("Move Down") { Task { await screen.moveEnvelope(envelope.id, by: 1) } }
+			.disabled(!screen.canMoveEnvelope(envelope.id, by: 1))
+		Divider()
 		Button("Rename…") { isRenaming = true }
 		Button(envelope.hidden ? "Show" : "Hide") { Task { await screen.setHidden(envelope.id, !envelope.hidden) } }
 		Button("Delete…") {
