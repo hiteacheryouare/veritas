@@ -30,6 +30,7 @@ struct AvailableLabel: View {
 					.imageScale(.small)
 					.font(.system(size: 10, weight: .semibold))
 					.opacity(0.8)
+					.accessibilityHidden(true)
 			}
 			Text(format.amount(amount))
 				.font(.figures(.body, weight: .semibold))

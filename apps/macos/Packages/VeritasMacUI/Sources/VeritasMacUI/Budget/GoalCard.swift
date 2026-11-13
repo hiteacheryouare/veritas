@@ -50,8 +50,9 @@ struct GoalCard: View {
 		.fixedSize()
 		.background(.surfaceGrouped, in: .rect(cornerRadius: Radius.section))
 		.overlay(RoundedRectangle(cornerRadius: Radius.section).strokeBorder(Color.edgeGrouped))
-		.accessibilityElement(children: .combine)
-		.containerIdentifier("goal.\(goal.id)")
+		.accessibilityElement(children: .ignore)
+		.accessibilityLabel("\(goal.name), \(format.wholeCurrency(goal.available)) of \(format.wholeCurrency(goal.target)), \(note)")
+		.accessibilityIdentifier("goal.\(goal.id)")
 	}
 
 	private var tone: VeritasDesign.MoneyTone {

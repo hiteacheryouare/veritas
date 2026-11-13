@@ -100,6 +100,10 @@ struct BudgetScreen: View {
 			MoveBudgetSheet(screen: screen, from: screen.selection)
 		}
 		.task(id: workspace.changeCount) { await screen.load() }
+		// Closing the amount field would leave keyboard focus with the sidebar.
+		.onChange(of: screen.editingID) { _, id in
+			if id == nil { hasKeyFocus = true }
+		}
 		.containerIdentifier("screen.budget")
 	}
 

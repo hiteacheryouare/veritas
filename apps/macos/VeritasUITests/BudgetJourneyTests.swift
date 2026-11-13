@@ -130,8 +130,9 @@ final class BudgetJourneyTests: XCTestCase {
 		let app = openBudget()
 		let laptop = app.descendants(matching: .any)["goal.laptop"]
 		XCTAssertTrue(laptop.waitForExistence(timeout: 5))
-		XCTAssertTrue(laptop.staticTexts["On track for March"].exists)
-		XCTAssertTrue(app.descendants(matching: .any)["goal.japan"].staticTexts["Behind, needs $410 a month"].exists)
+		// A goal card reads as one element: name, progress, then where it stands.
+		XCTAssertEqual(laptop.label, "New laptop, $1,120 of $1,500, On track for March")
+		XCTAssertEqual(app.descendants(matching: .any)["goal.japan"].label, "Japan trip, $2,310 of $6,000, Behind, needs $410 a month")
 		XCTAssertFalse(app.buttons["envelope.landline.budgeted"].exists, "hidden until asked")
 		app.menuBars.menuBarItems["View"].click()
 		app.menuItems["Show Hidden Envelopes"].click()
