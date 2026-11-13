@@ -133,12 +133,13 @@ pub enum Command {
 		release_to_category_id: Option<String>,
 		also_move_later: bool,
 	},
-	/// Back to reached if it ever was, else active, and shown again.
+	/// Shown again, and `reached` if the envelope holds the target this
+	/// month, else `active`. `reachedMonth` is kept (DEBT-8.2).
 	ReopenGoal {
 		goal_id: String,
 	},
-	/// A new target on the same goal: back to active, shown again, last
-	/// reached month kept (D71).
+	/// A new target on the same goal: back to active, first reached month kept
+	/// (D71). A closed goal is `Invalid`: reopen it first (DEBT-8.2).
 	RetargetGoal {
 		goal_id: String,
 		target: i64,
@@ -182,6 +183,7 @@ impl veritas_session::Command for Command {
 				| Command::DeleteCategoryMovingHistory { .. }
 				| Command::CreateGoal { .. }
 				| Command::CloseGoal { .. }
+				| Command::ReopenGoal { .. }
 				| Command::RetargetGoal { .. }
 		)
 	}
@@ -302,6 +304,9 @@ impl veritas_session::Command for Command {
 				&envelope(release_to_category_id),
 				*also_move_later,
 			),
+			Command::ReopenGoal { goal_id } => {
+				goals::reopen_goal(data, sheet, &GoalId::new(goal_id.as_str()))
+			}
 			Command::RetargetGoal {
 				goal_id,
 				target,
@@ -376,9 +381,6 @@ impl Command {
 			),
 			Command::SetCategoryGroupHidden { group_id, hidden } => {
 				categories::set_group_hidden(data, &group(group_id), *hidden)
-			}
-			Command::ReopenGoal { goal_id } => {
-				goals::reopen_goal(data, &GoalId::new(goal_id.as_str()))
 			}
 			Command::SaveCustomReport { settings } => {
 				custom_reports::save_custom_report(data, settings)

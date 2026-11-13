@@ -131,12 +131,35 @@ fn reaching_the_target_is_recorded_once_and_spending_never_undoes_it() {
 }
 
 #[test]
-fn reopening_returns_to_reached_only_if_it_ever_was() {
-	let mut closed = goal(1, None);
+fn r13_reopening_follows_what_the_envelope_holds_and_keeps_the_reached_month() {
+	// DEBT-8.2 Reopen, R-13: reached in February, re-targeted to 80000,
+	// closed with its money released, reopened at available 0.
+	let mut closed = goal(80_000, None);
 	closed.status = GoalStatus::Closed;
-	assert_eq!(goals::reopen(&closed).status, GoalStatus::Active);
-	closed.reached_month = Some(ym("2026-09"));
-	assert_eq!(goals::reopen(&closed).status, GoalStatus::Reached);
+	closed.reached_month = Some(ym("2027-02"));
+	let reopened = goals::reopen(&closed, Money::ZERO);
+	assert_eq!(
+		(reopened.status, reopened.reached_month),
+		(GoalStatus::Active, Some(ym("2027-02")))
+	);
+	assert_eq!(
+		goals::reopen(&closed, cents(80_000)).status,
+		GoalStatus::Reached
+	);
+}
+
+#[test]
+fn a_second_reach_keeps_the_first_reached_month() {
+	// DEBT-8.2, D71: a re-targeted goal reached again keeps 2026-09.
+	let mut budget = with_goal();
+	budget.budget(M, "laptop", 150_000);
+	let mut retargeted = goal(150_000, None);
+	retargeted.reached_month = Some(ym("2026-09"));
+	let reached = goals::check_reached(&budget.sheet(TODAY), &retargeted, ym(M)).unwrap();
+	assert_eq!(
+		(reached.status, reached.reached_month),
+		(GoalStatus::Reached, Some(ym("2026-09")))
+	);
 }
 
 fn close(budget: &mut Budget, goal: &Goal, release_to: Envelope) -> goals::GoalClosing {
@@ -311,4 +334,28 @@ fn d36_the_target_is_written_as_a_goal_line_and_monthly_goal_rows() {
 
 	let zero = goals::target_writes(&budget.0, &sheet, &cat("laptop"), Money::ZERO, ym(M));
 	assert!(matches!(zero, Err(CoreError::Invalid(_))));
+}
+
+#[test]
+fn the_goal_line_is_written_at_the_currencys_places() {
+	// CLS-12.3, D63: 150000 yen is `#goal 150000`.
+	let mut budget = with_goal();
+	let sheet = budget.sheet(TODAY);
+	let line = |budget: &Budget| {
+		goals::target_writes(&budget.0, &sheet, &cat("laptop"), cents(150_000), ym(M))
+			.unwrap()
+			.notes[0]
+			.1
+			.clone()
+	};
+	budget.0.format.currency_code = Some("JPY".to_owned());
+	assert_eq!(line(&budget), "#goal 150000");
+	budget.0.format.currency_code = Some("USD".to_owned());
+	assert_eq!(line(&budget), "#goal 1500.00");
+	budget.0.format.currency_code = Some("XYZ".to_owned());
+	assert_eq!(
+		line(&budget),
+		"#goal 1500.00",
+		"an unlisted code uses 2 (CLS-12.7)"
+	);
 }

@@ -19,7 +19,7 @@ extension BudgetSession {
 		GoalClosePreview(leftover: 0, laterBudget: [], destinationAvailableAfter: 0)
 	}
 	func categoryHistory(_ categoryID: String) async throws -> CategoryHistory {
-		CategoryHistory(transactions: 0, budgetedMonths: 0)
+		CategoryHistory(transactions: 0, budgetedMonths: 0, taxBucket: nil)
 	}
 }
 

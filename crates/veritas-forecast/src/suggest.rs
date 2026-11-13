@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use veritas_domain::{
-	CategoryId, CategoryKind, CivilDate, CoreError, Money, TransactionKind, YearMonth,
+	CategoryId, CategoryKind, CivilDate, CoreError, GoalStatus, Money, TransactionKind, YearMonth,
 };
 use veritas_engine::EnvelopeSheet;
 use veritas_reports::Period;
@@ -59,6 +59,8 @@ pub enum Basis {
 	LoanPrincipal,
 	NoHistory,
 	NoTargetDate,
+	/// GOAL-10: a reached goal gets no refill suggestion.
+	GoalReached,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -155,8 +157,19 @@ impl Forecaster<'_> {
 				basis,
 				reason: format!("{text}, keeping {kept}"),
 			};
-			let goal = self.budget.goals.values().find(|goal| &goal.category == id);
+			let goals = || {
+				self.budget
+					.goals
+					.values()
+					.filter(|goal| &goal.category == id)
+			};
+			let goal = goals()
+				.find(|goal| goal.status == GoalStatus::Active)
+				.or_else(|| goals().find(|goal| goal.status != GoalStatus::Closed));
 			let item = match (self.budget.category_kind(id), goal) {
+				(CategoryKind::Expense, Some(goal)) if goal.status == GoalStatus::Reached => {
+					keeping(Basis::GoalReached, &format!("{name}: reached"))
+				}
 				(CategoryKind::Expense, Some(goal)) => match goal.target_date {
 					None => keeping(Basis::NoTargetDate, &format!("{name}: no target date")),
 					Some(target) => {

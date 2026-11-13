@@ -58,7 +58,9 @@ struct DeleteMovingHistorySheet: View {
 	let envelope: EnvelopeRow
 	let transactions: UInt64
 	let budgetedMonths: UInt64
+	let taxBucket: String?
 	@State private var destination: String?
+	@State private var destinationBucket: (id: String, bucket: String?)?
 	@State private var understood = false
 	@Environment(\.dismiss) private var dismiss
 
@@ -81,6 +83,12 @@ struct DeleteMovingHistorySheet: View {
 					.accessibilityIdentifier("deleteMoving.destination")
 				}
 			}
+			if let warning = taxWarning {
+				Label(warning, systemImage: "exclamationmark.triangle")
+					.foregroundStyle(.secondary)
+					.fixedSize(horizontal: false, vertical: true)
+					.accessibilityIdentifier("deleteMoving.taxWarning")
+			}
 			Toggle("Delete \(envelope.name) for good", isOn: $understood)
 				.toggleStyle(.checkbox)
 				.accessibilityIdentifier("deleteMoving.understood")
@@ -101,6 +109,17 @@ struct DeleteMovingHistorySheet: View {
 		.padding(Spacing.s5)
 		.frame(width: 500)
 		.containerIdentifier("sheet.deleteMoving")
+		.task(id: destination) {
+			guard let destination else { return }
+			destinationBucket = (destination, await screen.taxBucket(of: destination))
+		}
+	}
+
+	private var taxWarning: String? {
+		guard let destination, let loaded = destinationBucket, loaded.id == destination,
+			let target = screen.spendingEnvelopes.first(where: { $0.id == destination })
+		else { return nil }
+		return TaxBuckets.mergeWarning(source: envelope.name, sourceBucket: taxBucket, target: target.name, targetBucket: loaded.bucket)
 	}
 
 	static func count(_ value: UInt64, _ noun: String) -> String {

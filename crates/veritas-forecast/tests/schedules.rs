@@ -664,3 +664,47 @@ fn fc_2_a_schedule_overrides_the_loan_metadata() {
 		.collect();
 	assert!(dates.iter().all(|day| *day == 15));
 }
+
+#[test]
+fn fc_2_fl_5b_interest_and_escrow_can_share_a_category() {
+	let mut book = Book::household();
+	book.category("Mortgage", "Debt");
+	last_payment(
+		&mut book,
+		30_020_000,
+		20000,
+		&[("Mortgage", 150100), ("Mortgage", 50000)],
+	);
+	let result = flows(&book);
+	assert_eq!(
+		february(&result)[1],
+		(-50000, Some(cat("Mortgage"))),
+		"FL-5b: escrow is repeated"
+	);
+	assert!(result.not_repeated.is_empty());
+	assert_eq!(
+		result.escrow_sources[0].text(&book.budget),
+		"Escrow taken from Mortgage $500.00, the same category as the interest"
+	);
+}
+
+#[test]
+fn fc_2_fl_5c_a_lone_fee_is_taken_as_escrow_and_shown() {
+	let mut book = Book::household();
+	last_payment(
+		&mut book,
+		30_020_000,
+		20000,
+		&[("Loan interest", 150100), ("Loan interest", 3500)],
+	);
+	let result = flows(&book);
+	assert_eq!(
+		february(&result)[1],
+		(-3500, Some(cat("Loan interest"))),
+		"FL-5c"
+	);
+	assert_eq!(
+		result.escrow_sources[0].text(&book.budget),
+		"Escrow taken from Loan interest $35.00, the same category as the interest"
+	);
+}

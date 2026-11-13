@@ -470,7 +470,7 @@ impl<B: Backend> Session<B> {
 		let today = CivilDate::from(self.now().date_naive());
 		Ok(Overview {
 			budget_name: self.budget_name()?,
-			number_format: None,
+			number_format: Some(number_format(&self.data()?.format)),
 			groups: account_groups(self.data()?, today)?,
 		})
 	}
@@ -930,5 +930,26 @@ fn reserve_folder(parent: &Path, prefix: &str) -> Result<PathBuf, CoreError> {
 			Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
 			Err(error) => return Err(io_error("create a folder in", parent)(error)),
 		}
+	}
+}
+
+/// What the budget stores in its preferences, with Actual's defaults for what
+/// it doesn't: comma-dot, no currency, fractions shown.
+fn number_format(prefs: &veritas_domain::FormatPrefs) -> veritas_domain::NumberFormat {
+	use veritas_domain::NumberStyle;
+	let style = [
+		NumberStyle::CommaDot,
+		NumberStyle::DotComma,
+		NumberStyle::SpaceComma,
+		NumberStyle::ApostropheDot,
+		NumberStyle::CommaDotIn,
+	]
+	.into_iter()
+	.find(|style| prefs.number_format.as_deref() == Some(style.actual_value()))
+	.unwrap_or(NumberStyle::CommaDot);
+	veritas_domain::NumberFormat {
+		currency: prefs.currency_code.clone().filter(|code| !code.is_empty()),
+		style,
+		hide_decimals: prefs.hide_fraction,
 	}
 }

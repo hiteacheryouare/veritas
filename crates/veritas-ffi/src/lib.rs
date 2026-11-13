@@ -24,7 +24,7 @@ pub use custom_reports::{
 	DashboardWidget, PlaceholderReason, ReportBalanceKind, ReportGrouping, ReportIntervalUnit,
 	ReportSortOrder, StackedAmount, UncategorizedKind, WidgetView,
 };
-pub use goals::{GoalClosePreview, GoalState, GoalSummary, MonthAmount};
+pub use goals::{GoalClosePreview, GoalPace, GoalState, GoalSummary, MonthAmount};
 pub use records::{
 	AccountGroup, AccountGroupSummary, AccountSummary, AuditCheck, AuditFinding, BackupInfo,
 	BudgetListing, CategoryHistory, Change, Currency, EntityKind, EntityRef, NewAccount,
