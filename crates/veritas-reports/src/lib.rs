@@ -48,6 +48,6 @@ pub use tax::{
 	summary_csv, tax_summary,
 };
 pub use widgets::{
-	CalendarDay, CalendarMonth, SummaryContent, SummaryData, TimeRange, calculate_time_range,
-	calendar, summary,
+	AgeOfMoney, AgePoint, CalendarDay, CalendarMonth, Granularity, SummaryContent, SummaryData,
+	TimeRange, Trend, age_of_money, calculate_time_range, calendar, summary,
 };

@@ -82,6 +82,18 @@ export const widgetData = async ({ internal }: ActualSession, requests: WidgetRe
 				end,
 				data: await run(calendarSpreadsheet(start, end, meta?.conditions, meta?.conditionsOp, firstDayOfWeekIdx))
 			};
+		},
+		'age-of-money-card': async ({ meta }) => {
+			const { createAgeOfMoneySpreadsheet } = await loadSource(`${REPORTS}/spreadsheets/age-of-money-spreadsheet.ts`);
+			const [start, end] = ranges.calculateTimeRange(meta?.timeFrame, undefined, latestDay);
+			const spreadsheet = createAgeOfMoneySpreadsheet({
+				start,
+				end,
+				conditions: meta?.conditions,
+				conditionsOp: meta?.conditionsOp,
+				granularity: meta?.granularity ?? 'monthly'
+			});
+			return { start, end, data: await run(spreadsheet) };
 		}
 	};
 

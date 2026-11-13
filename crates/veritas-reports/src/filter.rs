@@ -293,7 +293,7 @@ fn sql_ne(column: Option<&str>, value: Option<&str>) -> bool {
 }
 
 /// `UNICODE_LIKE('%needle%', NORMALISE(column))`.
-fn contains(needle: &str, column: Option<&str>) -> bool {
+pub(crate) fn contains(needle: &str, column: Option<&str>) -> bool {
 	let text = column.map(normalise).unwrap_or_default();
 	like(&normalise(&format!("%{needle}%")), &text)
 }

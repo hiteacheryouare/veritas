@@ -10,7 +10,7 @@ use chrono::NaiveDate;
 use serde_json::{Value, json};
 use support::actual::{fixture, oracle};
 use veritas_domain::BudgetData;
-use veritas_reports::{Json, calendar, summary};
+use veritas_reports::{Granularity, Json, Trend, age_of_money, calendar, summary};
 
 const ORACLE_TODAY: &str = "2026-11-09";
 
@@ -178,5 +178,111 @@ fn d73_calendar_card_matches_actual() {
 				"{value} with weeks from {first_day_of_week}"
 			);
 		}
+	}
+}
+
+fn account(budget: &BudgetData, name: &str) -> String {
+	budget
+		.accounts
+		.values()
+		.find(|account| account.name == name)
+		.map(|account| account.id.to_string())
+		.unwrap()
+}
+
+#[test]
+fn d73_age_of_money_card_matches_actual() {
+	let budget = fixture("all-features");
+	let checking = account(&budget, "Checking");
+	let savings = account(&budget, "Savings");
+	let visa = account(&budget, "Visa Card");
+	let year = json!({"start": "2025-11", "end": "2026-11", "mode": "static"});
+	let mut metas = vec![json!(null), json!({"timeFrame": year})];
+	for granularity in ["daily", "weekly", "monthly"] {
+		metas.push(json!({"timeFrame": {"start": "2026-03", "end": "2026-11", "mode": "sliding-window"}, "granularity": granularity}));
+	}
+	for (conditions, op) in [
+		(
+			json!([{"field": "account", "op": "is", "value": checking, "type": "id"}]),
+			"and",
+		),
+		(
+			json!([{"field": "account", "op": "isNot", "value": visa, "type": "id"}]),
+			"and",
+		),
+		(
+			json!([{"field": "account", "op": "oneOf", "value": [checking, savings], "type": "id"}]),
+			"and",
+		),
+		(
+			json!([{"field": "account", "op": "notOneOf", "value": [visa], "type": "id"}]),
+			"and",
+		),
+		(
+			json!([{"field": "account", "op": "contains", "value": "check", "type": "id"}]),
+			"and",
+		),
+		(
+			json!([{"field": "account", "op": "doesNotContain", "value": "card", "type": "id"}]),
+			"and",
+		),
+		(
+			json!([{"field": "account", "op": "onBudget", "value": null, "type": "id"}]),
+			"and",
+		),
+		(
+			json!([{"field": "account", "op": "matches", "value": "^Che", "type": "id"}]),
+			"and",
+		),
+		(
+			json!([{"field": "account", "op": "is", "value": checking, "type": "id"}, {"field": "account", "op": "is", "value": visa, "type": "id"}]),
+			"or",
+		),
+		(
+			json!([{"field": "account", "op": "isNot", "value": checking, "type": "id"}, {"field": "account", "op": "isNot", "value": savings, "type": "id"}]),
+			"and",
+		),
+		(
+			json!([{"field": "amount", "op": "gt", "value": -50000, "type": "number"}]),
+			"and",
+		),
+	] {
+		metas.push(json!({"timeFrame": year, "conditions": conditions, "conditionsOp": op, "granularity": "weekly"}));
+	}
+	let cases: Vec<(String, &str, Value)> = metas
+		.into_iter()
+		.enumerate()
+		.map(|(index, meta)| (format!("aom-{index}"), "age-of-money-card", meta))
+		.collect();
+	let ours: Vec<_> = cases
+		.iter()
+		.map(|(_, _, value)| age_of_money(&budget, meta(value).as_ref(), today()).unwrap())
+		.collect();
+	let Some(theirs) = theirs("all-features", &cases, "0") else {
+		return;
+	};
+	for ((id, _, value), ours) in cases.iter().zip(ours) {
+		let data = &theirs[id.as_str()]["data"];
+		let label = |date: NaiveDate| match ours.granularity {
+			Granularity::Monthly => date.format("%b %Y").to_string(),
+			_ => date.format("%b %-d, %Y").to_string(),
+		};
+		let graph: Vec<Value> = ours
+			.points
+			.iter()
+			.map(|point| json!({"date": label(point.period), "ageOfMoney": point.age}))
+			.collect();
+		let trend = match ours.trend {
+			Trend::Up => "up",
+			Trend::Down => "down",
+			Trend::Stable => "stable",
+		};
+		let ours = json!({
+			"graphData": graph,
+			"currentAge": ours.current_age,
+			"trend": trend,
+			"insufficientData": ours.insufficient_data,
+		});
+		assert_eq!(&ours, data, "{value}");
 	}
 }
