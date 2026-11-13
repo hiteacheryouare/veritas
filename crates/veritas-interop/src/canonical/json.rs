@@ -20,6 +20,14 @@ impl Str {
 		}
 	}
 
+	/// `None` when it holds a lone surrogate.
+	pub(crate) fn to_utf8(&self) -> Option<String> {
+		match self {
+			Str::Utf8(text) => Some(text.clone()),
+			Str::Utf16(units) => String::from_utf16(units).ok(),
+		}
+	}
+
 	pub(crate) fn eq_ascii(&self, ascii: &str) -> bool {
 		match self {
 			Str::Utf8(text) => text == ascii,

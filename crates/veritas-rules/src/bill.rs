@@ -341,6 +341,11 @@ impl Bill {
 		}
 	}
 
+	/// The first date on or after `today`, as `createSchedule` stores it.
+	pub fn next_date(&self, today: CivilDate) -> Result<Option<CivilDate>, CoreError> {
+		next_date_from(&self.date_value()?, today).map_err(|error| invalid(error.to_string()))
+	}
+
 	fn date_value(&self) -> Result<DateValue, CoreError> {
 		let raw: Value = serde_json::from_str(&self.date.to_json())
 			.map_err(|error| invalid(error.to_string()))?;

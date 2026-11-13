@@ -24,7 +24,7 @@ pub use condition::{
 };
 pub use posting::{
 	LeftBill, LeftBy, NextDateWrite, Posting, SchedulePlan, ScheduleWrite, advance_schedules,
-	complete, counts_as_paid, pay, post_now, restart, skip,
+	bill_dates, bill_status, complete, counts_as_paid, pay, post_now, restart, skip,
 };
 pub use recur::{Frequency, RecurError, Recurrence, WeekendSolveMode};
 pub use rule::{Item, ParsedRule, RuleSupport};

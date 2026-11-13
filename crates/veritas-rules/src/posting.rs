@@ -15,7 +15,7 @@ use crate::bill::{schedule_slots, scheduled_amount};
 use crate::condition::{DateValue, Op, parse_date_value};
 use crate::run::{PayeeDirectory, RuleBook};
 use crate::schedule::{ScheduleStatus, next_date_after, next_date_from, paid_window_start, status};
-use crate::trigger::added_transaction;
+use crate::trigger::{added_transaction, transfers};
 
 /// How a new next date is stored in `schedules_next_date`
 /// (`setNextDate`, `app.ts:226-283`).
@@ -311,6 +311,22 @@ impl Planner<'_> {
 		if let Some(amount) = amount {
 			ruled.amount = amount;
 			ruled.date = date;
+		}
+		// D60: a post Veritas makes is left to Actual whole when its transfer
+		// leg's own run can't finish. The leg's payees are never kept.
+		for leg in transfers(&ruled, self.budget).legs {
+			let made = self.payees.made();
+			let outcome = self.book.run(&leg.mirror, self.budget, self.payees);
+			self.payees.forget_made_after(made);
+			if outcome.transaction.is_none() {
+				return Err(Box::new(LeftBill {
+					schedule: facts.schedule.id.clone(),
+					by: self.by,
+					partial: ruled,
+					undetermined: outcome.undetermined,
+					reasons: outcome.reasons,
+				}));
+			}
 		}
 		self.plan.posts.push(Posting {
 			schedule: facts.schedule.id.clone(),
@@ -625,6 +641,40 @@ pub fn counts_as_paid(
 	}))
 }
 
+/// A bill's status as the schedules page shows it (`getStatus` with
+/// `getHasTransactionsQuery`), counting `upcoming_days` ahead as upcoming.
+pub fn bill_status(
+	budget: &BudgetData,
+	id: &ScheduleId,
+	upcoming_days: i64,
+	today: CivilDate,
+) -> Result<ScheduleStatus, CoreError> {
+	let facts = schedule_facts(budget, id)?;
+	let next = facts.schedule.next_date;
+	Ok(status(
+		next,
+		facts.schedule.completed,
+		has_transaction(&facts, next, budget, &[]),
+		upcoming_days,
+		today,
+	))
+}
+
+/// The bill's occurrences from `start` through `end`, weekend moves applied.
+pub fn bill_dates(
+	budget: &BudgetData,
+	id: &ScheduleId,
+	start: CivilDate,
+	end: CivilDate,
+) -> Result<Vec<CivilDate>, CoreError> {
+	let facts = schedule_facts(budget, id)?;
+	let Some(date) = facts.date.as_ref() else {
+		return Ok(Vec::new());
+	};
+	crate::schedule::schedule_dates(date, start, Some(end), None)
+		.map_err(|error| CoreError::Invalid(error.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
 	use veritas_domain::{
@@ -876,6 +926,50 @@ mod tests {
 			left.note(),
 			"Veritas left this bill for Actual: 1 rule couldn't run here (a template action). Actual posts it the next time it opens this budget."
 		);
+	}
+
+	#[test]
+	fn a_post_whose_transfer_leg_cannot_run_is_left_to_actual_whole() {
+		// D60: the bill pays into savings, and a rule on the savings side has a
+		// template, so the leg can't be built here; nothing of the turn is kept.
+		let mut paying = bill(monthly(), true);
+		paying.payee = Some(PayeeId::new("to-savings"));
+		let mut budget = budget_with(&paying, "2026-10-15");
+		budget.accounts.insert(
+			AccountId::new("savings"),
+			Account {
+				id: AccountId::new("savings"),
+				name: "Savings".into(),
+				..budget.accounts[&AccountId::new("checking")].clone()
+			},
+		);
+		budget.payees.insert(
+			PayeeId::new("to-savings"),
+			veritas_domain::Payee {
+				id: PayeeId::new("to-savings"),
+				name: String::new(),
+				transfer_account: Some(AccountId::new("savings")),
+				favorite: false,
+				learn_categories: false,
+				tombstone: false,
+			},
+		);
+		budget
+			.payee_mapping
+			.insert(PayeeId::new("to-savings"), PayeeId::new("to-savings"));
+		add_rule(
+			&mut budget,
+			"template",
+			serde_json::json!([{"op": "is", "field": "acct", "value": "savings"}]),
+			serde_json::json!([{"op": "set", "field": "notes", "value": "", "options": {"template": "{{date}}"}}]),
+		);
+		let book = RuleBook::new(&budget);
+		let mut payees = BudgetPayees::new(&budget, || PayeeId::new("made"));
+		let plan = advance_schedules(&book, &budget, &mut payees, day("2026-10-15"));
+		assert!(plan.posts.is_empty());
+		assert!(plan.writes.is_empty(), "no lastScheduleRun either");
+		assert_eq!(plan.left.len(), 1);
+		assert_eq!(plan.left[0].undetermined, [RuleId::new("template")]);
 	}
 
 	#[test]
