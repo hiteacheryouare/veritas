@@ -96,7 +96,16 @@ final class BudgetJourneyTests: XCTestCase {
 		XCTAssertEqual(field.value as? String, "7", "typing a digit opens the field over the value")
 		field.typeKey(.escape, modifierFlags: [])
 		let title = app.windows.firstMatch.title
-		app.typeKey(.leftArrow, modifierFlags: .command)
+		let budgetScreen = app.descendants(matching: .any)["screen.budget"]
+		let previousMonth = app.menuBars.menuItems["Previous Month"]
+		XCTContext.runActivity(named: "Before ⌘←") { activity in
+			record(app, in: activity)
+		}
+		XCTAssertTrue(previousMonth.isEnabled, "Go › Previous Month is on while the Budget screen has focus")
+		budgetScreen.typeKey(.leftArrow, modifierFlags: .command)
+		XCTContext.runActivity(named: "After ⌘←") { activity in
+			record(app, in: activity)
+		}
 		XCTAssertTrue(waitUntil { app.windows.firstMatch.title != title }, "⌘← goes to the previous month")
 	}
 
@@ -148,6 +157,7 @@ final class BudgetJourneyTests: XCTestCase {
 		let find = app.textFields["findBar.field"]
 		XCTAssertTrue(find.waitForExistence(timeout: 5))
 		find.typeText("abc")
+		XCTAssertFalse(app.menuBars.menuItems["Previous Month"].isEnabled, "the find field keeps ⌘← for its caret")
 		find.typeKey(.leftArrow, modifierFlags: .command)
 		find.typeText("X")
 		XCTAssertEqual(find.value as? String, "Xabc")
@@ -160,6 +170,19 @@ final class BudgetJourneyTests: XCTestCase {
 		XCTAssertTrue(app.descendants(matching: .any)["screen.budget"].waitForExistence(timeout: 10))
 		XCTAssertTrue(app.buttons["envelope.groceries.budgeted"].waitForExistence(timeout: 10))
 		return app
+	}
+
+	/// The accessibility tree, which shows where keyboard focus is, and a screenshot.
+	@MainActor
+	private func record(_ app: XCUIApplication, in activity: XCTActivity) {
+		let tree = XCTAttachment(string: app.debugDescription)
+		tree.name = "\(activity.name) tree"
+		tree.lifetime = .keepAlways
+		activity.add(tree)
+		let shot = XCTAttachment(screenshot: app.windows.firstMatch.screenshot())
+		shot.name = "\(activity.name) screenshot"
+		shot.lifetime = .keepAlways
+		activity.add(shot)
 	}
 
 	private func waitUntil(_ condition: @escaping () -> Bool) -> Bool {

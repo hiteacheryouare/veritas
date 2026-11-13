@@ -4,6 +4,7 @@ import VeritasKit
 
 struct VeritasCommands: Commands {
 	@FocusedValue(\.workspace) private var model
+	@FocusedValue(\.budgetMonths) private var budgetMonths
 	@Environment(\.openWindow) private var openWindow
 
 	private var isOpen: Bool { model?.phase == .open }
@@ -67,6 +68,13 @@ struct VeritasCommands: Commands {
 					.keyboardShortcut(KeyEquivalent(Character(String(screen.shortcutNumber ?? 0))))
 					.disabled(!isOpen)
 			}
+			Divider()
+			Button("Previous Month") { budgetMonths?.previous() }
+				.keyboardShortcut(.leftArrow, modifiers: .command)
+				.disabled(budgetMonths?.canGoBack != true)
+			Button("Next Month") { budgetMonths?.next() }
+				.keyboardShortcut(.rightArrow, modifiers: .command)
+				.disabled(budgetMonths?.canGoForward != true)
 			Divider()
 			Button("Go to Anything…") { model?.isPaletteShown = true }
 				.keyboardShortcut("k")

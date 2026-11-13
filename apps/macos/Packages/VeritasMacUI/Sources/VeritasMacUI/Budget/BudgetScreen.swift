@@ -52,23 +52,20 @@ struct BudgetScreen: View {
 		.focusEffectDisabled()
 		.focused($hasKeyFocus)
 		.defaultFocus($hasKeyFocus, true)
+		.focusedValue(\.budgetMonths, screen.editing == nil ? BudgetMonthActions(
+			canGoBack: screen.canGoBack,
+			canGoForward: screen.canGoForward,
+			previous: { Task { await screen.previousMonth() } },
+			next: { Task { await screen.nextMonth() } }
+		) : nil)
 		.onKeyPress(keys: [.upArrow, .downArrow]) { press in
-			guard screen.editing == nil else { return .ignored }
-			let step = press.key == .upArrow ? -1 : 1
-			if press.modifiers.contains(.option) {
-				screen.moveSelectionToGroup(by: step)
-			} else {
-				screen.moveSelection(by: step)
+			guard screen.editing == nil, let action = BudgetKeys.action(for: press.key, modifiers: press.modifiers) else {
+				return .ignored
 			}
-			return .handled
-		}
-		// ⌘← and ⌘→ are handled here, not as menu or button shortcuts, so a text
-		// field that has focus keeps them for moving its caret. Arrow keys also
-		// carry the numeric-pad and function flags, so only the chord keys count.
-		.onKeyPress(keys: [.leftArrow, .rightArrow]) { press in
-			let chord = press.modifiers.intersection([.command, .option, .shift, .control])
-			guard chord == .command, screen.editing == nil else { return .ignored }
-			Task { press.key == .leftArrow ? await screen.previousMonth() : await screen.nextMonth() }
+			switch action {
+			case .moveSelection(let step): screen.moveSelection(by: step)
+			case .moveToGroup(let step): screen.moveSelectionToGroup(by: step)
+			}
 			return .handled
 		}
 		.onKeyPress(.return) {
