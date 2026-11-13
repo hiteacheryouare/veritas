@@ -2,7 +2,12 @@ use veritas_domain::{
 	Account, AccountId, BudgetData, CategoryGroupId, CategoryId, CivilDate, CoreError, GoalId,
 	Note, Row,
 };
-use veritas_session::{categories, goals};
+use veritas_domain::{AccountGroupId, PayeeId, TransactionId};
+use veritas_rules::RuleBook;
+use veritas_session::{accounts, categories, goals, payees, transactions, writes};
+
+use crate::accounts::TransactionDraft;
+use crate::records::NewAccount;
 
 use veritas_engine::EnvelopeSheet;
 
@@ -159,6 +164,120 @@ pub enum Command {
 		width: i64,
 		height: i64,
 	},
+	/// A new account at the end of its list, with its transfer payee and, for
+	/// a non-zero balance, a starting-balance row (R-ACC-1, §4.8). The id is
+	/// the `account` entity in the `Change`.
+	CreateAccount {
+		account: NewAccount,
+	},
+	/// Before `before_account_id`, or to the end, among the accounts it is
+	/// listed with.
+	MoveAccount {
+		account_id: String,
+		before_account_id: Option<String>,
+	},
+	/// Writes only the flag, as Actual does: no category or transaction changes.
+	SetAccountOffBudget {
+		account_id: String,
+		off_budget: bool,
+	},
+	SetAccountGroup {
+		account_id: String,
+		group_id: Option<String>,
+	},
+	CreateAccountGroup {
+		name: String,
+	},
+	RenameAccountGroup {
+		group_id: String,
+		name: String,
+	},
+	MoveAccountGroup {
+		group_id: String,
+		before_group_id: Option<String>,
+	},
+	/// Its accounts leave the group.
+	DeleteAccountGroup {
+		group_id: String,
+	},
+	/// Blank text removes the note.
+	SetAccountNote {
+		account_id: String,
+		text: String,
+	},
+	/// Actual's close (§4.9). With no rows the account is deleted instead. A
+	/// non-zero balance needs `transfer_to_account_id`: a "Closing account"
+	/// transfer moves it there, with `category_id` on this side when the money
+	/// leaves the budget.
+	CloseAccount {
+		account_id: String,
+		transfer_to_account_id: Option<String>,
+		category_id: Option<String>,
+	},
+	ReopenAccount {
+		account_id: String,
+	},
+	/// A typed row (R-ACC-2, R-ACC-4): rules fill what was left empty, or it
+	/// is saved as typed with a "may need Actual" note when a rule can't run
+	/// (D64). Transfers get their counterpart; categories are learned (§4.5).
+	/// The new id is the first `transaction` entity in the `Change`.
+	AddTransaction {
+		transaction: TransactionDraft,
+	},
+	/// Edits in place without rules; split lines keep their rows by id, and
+	/// the transfer hooks run (§4.2, §4.3).
+	EditTransaction {
+		transaction_id: String,
+		transaction: TransactionDraft,
+	},
+	/// With its split lines and transfer counterparts.
+	DeleteTransaction {
+		transaction_id: String,
+	},
+	/// A copy dated the same, uncleared, with its own transfer counterpart.
+	/// `new_id` picks the copy's id, as `TransactionDraft.id` does.
+	DuplicateTransaction {
+		transaction_id: String,
+		new_id: Option<String>,
+	},
+	/// Reconciled rows are skipped; split lines follow their parent.
+	SetCleared {
+		transaction_ids: Vec<String>,
+		cleared: bool,
+	},
+	/// Unlocks a reconciled row, leaving it cleared.
+	UnlockReconciled {
+		transaction_id: String,
+	},
+	/// The optional reconcile adjustment for `statement - cleared`, today,
+	/// cleared, through the rules (R-ACC-3, §4.7).
+	AddReconcileAdjustment {
+		account_id: String,
+		statement_balance: i64,
+	},
+	/// Locks every cleared row when the cleared balance equals the statement,
+	/// and records the reconcile either way.
+	FinishReconcile {
+		account_id: String,
+		statement_balance: i64,
+	},
+	RenamePayee {
+		payee_id: String,
+		name: String,
+	},
+	/// Actual's merge (§4.5): transfer payees are left out, mappings follow.
+	MergePayees {
+		target_payee_id: String,
+		payee_ids: Vec<String>,
+	},
+	SetPayeeFavorite {
+		payee_id: String,
+		favorite: bool,
+	},
+	SetPayeeLearnCategories {
+		payee_id: String,
+		learn: bool,
+	},
 }
 
 impl veritas_session::Command for Command {
@@ -185,6 +304,11 @@ impl veritas_session::Command for Command {
 				| Command::CloseGoal { .. }
 				| Command::ReopenGoal { .. }
 				| Command::RetargetGoal { .. }
+				| Command::CreateAccount { .. }
+				| Command::CloseAccount { .. }
+				| Command::AddTransaction { .. }
+				| Command::EditTransaction { .. }
+				| Command::AddReconcileAdjustment { .. }
 		)
 	}
 
@@ -318,9 +442,99 @@ impl veritas_session::Command for Command {
 				money(*target),
 				date(target_date)?,
 			),
+			Command::CreateAccount { account } => accounts::create_account(
+				data,
+				&veritas_domain::NewAccount::from(account),
+				sheet.today(),
+				now_ms(),
+			)
+			.map(|(rows, _)| rows),
+			Command::CloseAccount {
+				account_id,
+				transfer_to_account_id,
+				category_id,
+			} => accounts::close_account(
+				data,
+				&AccountId::new(account_id.as_str()),
+				transfer_to_account_id
+					.as_deref()
+					.map(AccountId::new)
+					.as_ref(),
+				category_id.as_deref().map(CategoryId::new).as_ref(),
+				sheet.today(),
+				now_ms(),
+			),
+			Command::AddTransaction { transaction } => {
+				let (mut rows, draft) = crate::accounts::draft(data, transaction)?;
+				let with = writes::applied(data, &rows);
+				let book = RuleBook::new(&with);
+				let planned = transactions::add(&with, &draft, &book, now_ms())?;
+				rows.extend(planned.rows);
+				learn(data, rows, &planned.id, sheet.today())
+			}
+			Command::EditTransaction {
+				transaction_id,
+				transaction,
+			} => {
+				let (mut rows, draft) = crate::accounts::draft(data, transaction)?;
+				let with = writes::applied(data, &rows);
+				let book = RuleBook::new(&with);
+				let id = TransactionId::new(transaction_id.as_str());
+				rows.extend(transactions::edit(
+					&with,
+					&id,
+					&draft,
+					Some(&book),
+					now_ms(),
+				)?);
+				learn(data, rows, &id, sheet.today())
+			}
+			Command::AddReconcileAdjustment {
+				account_id,
+				statement_balance,
+			} => payees::reconcile_adjustment(
+				data,
+				&AccountId::new(account_id.as_str()),
+				money(*statement_balance),
+				&RuleBook::new(data),
+				sheet.today(),
+				now_ms(),
+			)
+			.map(|planned| planned.rows),
 			_ => self.plan_plain(data),
 		}
 	}
+}
+
+fn now_ms() -> f64 {
+	std::time::SystemTime::now()
+		.duration_since(std::time::UNIX_EPOCH)
+		.map_or(0.0, |elapsed| elapsed.as_millis() as f64)
+}
+
+/// Adds the rules `learn_categories` writes for the saved row and its lines,
+/// as Actual's desktop register does with its default `learn-categories` on.
+fn learn(
+	data: &BudgetData,
+	mut rows: Vec<Row>,
+	id: &TransactionId,
+	today: CivilDate,
+) -> Result<Vec<Row>, CoreError> {
+	let saved: Vec<TransactionId> = rows
+		.iter()
+		.filter_map(|row| match row {
+			Row::Transaction(t) if !t.tombstone => Some(t),
+			_ => None,
+		})
+		.filter(|t| {
+			&t.id == id
+				|| matches!(&t.split, veritas_domain::SplitRole::Child { parent } if parent == id)
+		})
+		.map(|t| t.id.clone())
+		.collect();
+	let after = writes::applied(data, &rows);
+	rows.extend(transactions::learn_categories(&after, &saved, today)?);
+	Ok(rows)
 }
 
 fn date(text: &Option<String>) -> Result<Option<CivilDate>, CoreError> {
@@ -392,6 +606,105 @@ impl Command {
 				width,
 				height,
 			} => custom_reports::place_widget(data, widget_id, (*x, *y, *width, *height)),
+			Command::MoveAccount {
+				account_id,
+				before_account_id,
+			} => accounts::move_account(
+				data,
+				&AccountId::new(account_id.as_str()),
+				before_account_id.as_deref().map(AccountId::new).as_ref(),
+			),
+			Command::SetAccountOffBudget {
+				account_id,
+				off_budget,
+			} => accounts::set_off_budget(data, &AccountId::new(account_id.as_str()), *off_budget),
+			Command::SetAccountGroup {
+				account_id,
+				group_id,
+			} => accounts::set_account_group(
+				data,
+				&AccountId::new(account_id.as_str()),
+				group_id.as_deref().map(AccountGroupId::new).as_ref(),
+			),
+			Command::CreateAccountGroup { name } => {
+				accounts::create_account_group(data, name).map(|(rows, _)| rows)
+			}
+			Command::RenameAccountGroup { group_id, name } => {
+				accounts::rename_account_group(data, &AccountGroupId::new(group_id.as_str()), name)
+			}
+			Command::MoveAccountGroup {
+				group_id,
+				before_group_id,
+			} => accounts::move_account_group(
+				data,
+				&AccountGroupId::new(group_id.as_str()),
+				before_group_id.as_deref().map(AccountGroupId::new).as_ref(),
+			),
+			Command::DeleteAccountGroup { group_id } => {
+				accounts::delete_account_group(data, &AccountGroupId::new(group_id.as_str()))
+			}
+			Command::SetAccountNote { account_id, text } => {
+				accounts::set_account_note(data, &AccountId::new(account_id.as_str()), text)
+			}
+			Command::ReopenAccount { account_id } => {
+				accounts::reopen_account(data, &AccountId::new(account_id.as_str()))
+			}
+			Command::DeleteTransaction { transaction_id } => {
+				transactions::delete(data, &TransactionId::new(transaction_id.as_str()))
+			}
+			Command::DuplicateTransaction {
+				transaction_id,
+				new_id,
+			} => transactions::duplicate(
+				data,
+				&TransactionId::new(transaction_id.as_str()),
+				new_id.as_deref().map(TransactionId::new),
+				Some(&RuleBook::new(data)),
+				now_ms(),
+			)
+			.map(|planned| planned.rows),
+			Command::SetCleared {
+				transaction_ids,
+				cleared,
+			} => {
+				let ids: Vec<TransactionId> = transaction_ids
+					.iter()
+					.map(|id| TransactionId::new(id.as_str()))
+					.collect();
+				transactions::set_cleared(data, &ids, *cleared)
+			}
+			Command::UnlockReconciled { transaction_id } => {
+				transactions::unreconcile(data, &TransactionId::new(transaction_id.as_str()))
+			}
+			Command::FinishReconcile {
+				account_id,
+				statement_balance,
+			} => payees::finish_reconcile(
+				data,
+				&AccountId::new(account_id.as_str()),
+				money(*statement_balance),
+				now_ms(),
+			)
+			.map(|(rows, _)| rows),
+			Command::RenamePayee { payee_id, name } => {
+				payees::rename_payee(data, &PayeeId::new(payee_id.as_str()), name)
+			}
+			Command::MergePayees {
+				target_payee_id,
+				payee_ids,
+			} => {
+				let sources: Vec<PayeeId> = payee_ids
+					.iter()
+					.map(|id| PayeeId::new(id.as_str()))
+					.collect();
+				payees::merge_payees(data, &PayeeId::new(target_payee_id.as_str()), &sources)
+			}
+			Command::SetPayeeFavorite { payee_id, favorite } => {
+				payees::set_favorite(data, &PayeeId::new(payee_id.as_str()), *favorite)
+			}
+			Command::SetPayeeLearnCategories { payee_id, learn } => {
+				payees::set_learn_categories(data, &PayeeId::new(payee_id.as_str()), *learn)
+			}
 			_ => Err(CoreError::Internal(
 				"a budget command was planned without the envelope sheet".to_owned(),
 			)),

@@ -647,6 +647,7 @@ mod tests {
 		budget.accounts.insert(
 			AccountId::new("checking"),
 			Account {
+				last_reconciled: None,
 				id: AccountId::new("checking"),
 				name: "Checking".into(),
 				off_budget: false,

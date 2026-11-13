@@ -254,6 +254,7 @@ pub fn budget_from_dump(dump: &Value) -> veritas_domain::BudgetData {
 		budget.accounts.insert(
 			id.clone(),
 			Account {
+				last_reconciled: None,
 				id,
 				name: text(row, "name").unwrap_or_default(),
 				off_budget: flag(row, "offbudget"),

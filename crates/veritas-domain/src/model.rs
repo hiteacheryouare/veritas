@@ -19,6 +19,9 @@ pub struct Account {
 	pub group: Option<AccountGroupId>,
 	pub sort_order: f64,
 	pub tombstone: bool,
+	/// When a reconcile last finished, as Actual stores it: `String(Date.now())`,
+	/// epoch milliseconds as text (docs/actual-format.md §4.7).
+	pub last_reconciled: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

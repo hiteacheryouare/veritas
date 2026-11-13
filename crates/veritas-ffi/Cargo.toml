@@ -15,6 +15,7 @@ crate-type = ["lib", "staticlib", "cdylib"]
 veritas-domain = { path = "../veritas-domain" }
 veritas-engine = { path = "../veritas-engine" }
 veritas-reports = { path = "../veritas-reports" }
+veritas-rules = { path = "../veritas-rules" }
 veritas-session = { path = "../veritas-session" }
 veritas-store = { path = "../veritas-store" }
 chrono.workspace = true
@@ -22,6 +23,7 @@ thiserror.workspace = true
 uniffi.workspace = true
 
 [dev-dependencies]
+rusqlite.workspace = true
 serde_json.workspace = true
 
 [lints]
