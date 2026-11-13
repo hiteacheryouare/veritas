@@ -136,12 +136,8 @@ struct CloseGoalSheet: View {
 
 	var body: some View {
 		VStack(alignment: .leading, spacing: Spacing.s4) {
-			VStack(alignment: .leading, spacing: Spacing.s2) {
-				Text("Close \(goal.name)?")
-					.font(.text(.title, weight: .semibold))
-				Text("It leaves the budget but stays in reports, Wrapped and the archive.")
-					.foregroundStyle(.textSecondary)
-			}
+			Text("Close \(goal.name)?")
+				.font(.text(.title, weight: .semibold))
 			VStack(alignment: .leading, spacing: Spacing.s3) {
 				if let preview {
 					Label {
