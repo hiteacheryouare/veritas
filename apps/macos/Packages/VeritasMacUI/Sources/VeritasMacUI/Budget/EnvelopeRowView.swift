@@ -80,8 +80,8 @@ struct EnvelopeRowView: View {
 			Text(archiveMessage)
 		}
 		.sheet(isPresented: $isMovingHistory) {
-			if case .archive(let transactions, let months) = archivedHistory {
-				DeleteMovingHistorySheet(screen: screen, envelope: envelope, transactions: transactions, budgetedMonths: months)
+			if case .archive(let transactions, let months, let taxBucket) = archivedHistory {
+				DeleteMovingHistorySheet(screen: screen, envelope: envelope, transactions: transactions, budgetedMonths: months, taxBucket: taxBucket)
 			}
 		}
 		.draggable(BudgetDrag.envelope(envelope.id)) {
@@ -186,7 +186,7 @@ struct EnvelopeRowView: View {
 
 	/// R-BUD-5: deleting an envelope with history archives it instead.
 	private var archiveMessage: String {
-		guard case .archive(let transactions, let months) = removal else { return "" }
+		guard case .archive(let transactions, let months, _) = removal else { return "" }
 		return "It has \(DeleteMovingHistorySheet.count(transactions, "transaction")) and budget in \(DeleteMovingHistorySheet.count(months, "month")), so Veritas archives it instead of deleting it. It's hidden, and its history stays in reports."
 	}
 

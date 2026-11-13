@@ -130,8 +130,18 @@ struct BudgetScreenTests {
 		// R-BUD-5
 		let screen = await openScreen()
 		#expect(await screen.removal(for: "rent") == .delete)
-		session.history = CategoryHistory(transactions: 12, budgetedMonths: 3)
-		#expect(await screen.removal(for: "rent") == .archive(transactions: 12, budgetedMonths: 3))
+		session.history = CategoryHistory(transactions: 12, budgetedMonths: 3, taxBucket: "medical")
+		#expect(await screen.removal(for: "rent") == .archive(transactions: 12, budgetedMonths: 3, taxBucket: "medical"))
+		#expect(await screen.taxBucket(of: "rent") == "medical")
+	}
+
+	@Test func movingHistoryAcrossTaxBucketsWarnsAsTax8Says() {
+		#expect(TaxBuckets.mergeWarning(source: "Gifts", sourceBucket: "charitable", target: "Dining out", targetBucket: nil)
+			== "Gifts is in tax bucket Charitable giving. Dining out has none. Its rows will count under Dining out.")
+		#expect(TaxBuckets.mergeWarning(source: "Doctor", sourceBucket: "medical", target: "Pharmacy", targetBucket: "hsa")
+			== "Doctor is in tax bucket Medical. Pharmacy has HSA contributions. Its rows will count under Pharmacy.")
+		#expect(TaxBuckets.mergeWarning(source: "Doctor", sourceBucket: "medical", target: "Pharmacy", targetBucket: "medical") == nil)
+		#expect(TaxBuckets.mergeWarning(source: "Dining", sourceBucket: nil, target: "Gifts", targetBucket: "charitable") == nil)
 	}
 
 	@Test func categoryAndGroupEditsSendTheirCommands() async {
@@ -184,7 +194,7 @@ struct BudgetScreenTests {
 		GoalSummary(
 			id: id, categoryId: id, name: id.capitalized, target: target, targetDate: "2027-03-01", icon: nil, color: nil,
 			state: state, available: available, spent: 0, suggestedMonthly: state == .active ? 7_600 : nil, monthsLeft: 5,
-			reachedMonth: nil, closedMonth: state == .closed ? Month(year: 2026, month: 8) : nil, laterBudget: [], newActivity: false
+			pace: nil, reachedMonth: nil, closedMonth: state == .closed ? Month(year: 2026, month: 8) : nil, laterBudget: [], newActivity: false
 		)
 	}
 
@@ -210,7 +220,7 @@ final class BudgetFakeSession: BudgetSession, @unchecked Sendable {
 	var commands: [Command] = []
 	var hideRent = false
 	var goals: [GoalSummary] = []
-	var history = CategoryHistory(transactions: 0, budgetedMonths: 0)
+	var history = CategoryHistory(transactions: 0, budgetedMonths: 0, taxBucket: nil)
 
 	func goals(today: String) async throws -> [GoalSummary] {
 		goals

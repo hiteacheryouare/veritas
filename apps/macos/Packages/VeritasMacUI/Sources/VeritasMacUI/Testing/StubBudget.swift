@@ -52,13 +52,15 @@ final class StubBudget: @unchecked Sendable {
 	private var held: Int64 = 0
 	private var created = 0
 	private var goalList: [GoalSummary] = [
-		StubBudget.goal("laptop", "New laptop", target: 150_000, available: 112_000, date: "2027-03-01", state: .active, monthly: 7_600),
-		StubBudget.goal("japan", "Japan trip", target: 600_000, available: 231_000, date: "2027-09-01", state: .active, monthly: 41_000),
+		StubBudget.goal("laptop", "New laptop", target: 150_000, available: 112_000, date: "2027-03-01", state: .active, monthly: 7_600, pace: .onTrack(etaMonth: Month(year: 2027, month: 3))),
+		StubBudget.goal("japan", "Japan trip", target: 600_000, available: 231_000, date: "2027-09-01", state: .active, monthly: 41_000, pace: .behind(neededMonthly: 41_000)),
 		StubBudget.goal("tires", "Winter tires", target: 85_000, available: 2_000, date: nil, state: .reachedSpent, spent: 83_000),
 		StubBudget.goal("vet", "Vet bill", target: 120_418, available: 0, date: nil, state: .closed, spent: 120_418, closed: Month(year: 2026, month: 8))
 	]
 	/// Envelopes the stub says have history, so delete turns into Archive.
 	private let withHistory: Set<String> = ["groceries", "dining", "gas", "household", "rent", "electric", "internet", "hobbies", "gifts"]
+	/// Gifts is charitable, so moving its history elsewhere shows TAX-8's warning.
+	private let taxBuckets: [String: String] = ["gifts": "charitable"]
 
 	func month(_ month: Month) -> BudgetMonth {
 		lock.withLock {
@@ -160,7 +162,8 @@ final class StubBudget: @unchecked Sendable {
 	}
 
 	func history(_ id: String) -> CategoryHistory {
-		withHistory.contains(id) ? CategoryHistory(transactions: 14, budgetedMonths: 6) : CategoryHistory(transactions: 0, budgetedMonths: 0)
+		let bucket = taxBuckets[id]
+		return withHistory.contains(id) ? CategoryHistory(transactions: 14, budgetedMonths: 6, taxBucket: bucket) : CategoryHistory(transactions: 0, budgetedMonths: 0, taxBucket: bucket)
 	}
 
 	/// A goal's leftover goes to the destination; Japan trip has later-month budget (D66).
@@ -175,11 +178,11 @@ final class StubBudget: @unchecked Sendable {
 		}
 	}
 
-	static func goal(_ id: String, _ name: String, target: Int64, available: Int64, date: String?, state: GoalState, monthly: Int64? = nil, spent: Int64 = 0, closed: Month? = nil) -> GoalSummary {
+	static func goal(_ id: String, _ name: String, target: Int64, available: Int64, date: String?, state: GoalState, monthly: Int64? = nil, spent: Int64 = 0, closed: Month? = nil, pace: GoalPace? = nil) -> GoalSummary {
 		GoalSummary(
 			id: id, categoryId: id, name: name, target: target, targetDate: date, icon: nil, color: nil, state: state,
 			available: available, spent: spent, suggestedMonthly: monthly, monthsLeft: monthly == nil ? nil : 5,
-			reachedMonth: nil, closedMonth: closed, laterBudget: [], newActivity: false
+			pace: pace, reachedMonth: nil, closedMonth: closed, laterBudget: [], newActivity: false
 		)
 	}
 

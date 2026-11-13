@@ -188,13 +188,18 @@ public final class BudgetScreenModel {
 	/// history is archived instead, and a real delete moves its history.
 	public enum Removal: Hashable, Sendable {
 		case delete
-		case archive(transactions: UInt64, budgetedMonths: UInt64)
+		case archive(transactions: UInt64, budgetedMonths: UInt64, taxBucket: String?)
 	}
 
 	public func removal(for id: String) async -> Removal? {
 		guard let history = await workspace.categoryHistory(id) else { return nil }
 		if history.transactions == 0, history.budgetedMonths == 0 { return .delete }
-		return .archive(transactions: history.transactions, budgetedMonths: history.budgetedMonths)
+		return .archive(transactions: history.transactions, budgetedMonths: history.budgetedMonths, taxBucket: history.taxBucket)
+	}
+
+	/// The tax bucket a category's history would count under, for TAX-8.
+	public func taxBucket(of id: String) async -> String? {
+		await workspace.categoryHistory(id)?.taxBucket
 	}
 
 	@discardableResult

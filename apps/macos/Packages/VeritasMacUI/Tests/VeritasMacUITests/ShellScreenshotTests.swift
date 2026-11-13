@@ -149,7 +149,7 @@ struct BudgetScreenshotTests {
 		let (_, screen) = await openBudget()
 		await screen.load()
 		let dining = try #require(screen.envelope("dining"))
-		try render(DeleteMovingHistorySheet(screen: screen, envelope: dining, transactions: 14, budgetedMonths: 6), named: "delete-moving-history")
+		try render(DeleteMovingHistorySheet(screen: screen, envelope: dining, transactions: 14, budgetedMonths: 6, taxBucket: nil), named: "delete-moving-history")
 	}
 
 	private func openGoals() async -> (WorkspaceModel, GoalsScreenModel) {
