@@ -171,8 +171,8 @@ impl From<&BackupResult> for BackupInfo {
 	}
 }
 
-/// docs/finance/statements.md ST-9. The shell picks the words; Fred suggests
-/// showing `Investments` as "Other assets", since a house or car lands there.
+/// docs/finance/statements.md ST-9. The shell labels `Investments` as
+/// "Investments & Other assets" (D61), since property lands there too.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum AccountGroup {
 	Cash,
