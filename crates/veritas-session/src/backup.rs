@@ -1,10 +1,10 @@
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File};
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
 use veritas_domain::CoreError;
 
-use crate::fsio::{io_error, sync_dir};
+use crate::fsio::{io_error, reserve_partial, sweep_stale_partials, sync_dir};
 
 /// Writes an exported budget into `folder` so that `file_name` is either the
 /// previous complete file or the new complete file, never a partial one. A
@@ -33,22 +33,22 @@ pub fn write_backup(folder: &Path, file_name: &str, bytes: &[u8]) -> Result<Path
 	}
 
 	let target = folder.join(file_name);
-	let partial = folder.join(format!(".{file_name}.partial"));
-	if let Err(error) = write_then_rename(&partial, &target, bytes) {
+	let (partial, file) = reserve_partial(folder, file_name)?;
+	if let Err(error) = write_then_rename(file, &partial, &target, bytes) {
 		let _ = fs::remove_file(&partial);
 		return Err(error);
 	}
 	sync_dir(folder);
+	sweep_stale_partials(folder, Some(file_name));
 	Ok(target)
 }
 
-fn write_then_rename(partial: &Path, target: &Path, bytes: &[u8]) -> Result<(), CoreError> {
-	let mut file = OpenOptions::new()
-		.write(true)
-		.create(true)
-		.truncate(true)
-		.open(partial)
-		.map_err(io_error("write a backup in", partial))?;
+fn write_then_rename(
+	mut file: File,
+	partial: &Path,
+	target: &Path,
+	bytes: &[u8],
+) -> Result<(), CoreError> {
 	file.write_all(bytes)
 		.and_then(|()| file.sync_all())
 		.map_err(io_error("write", partial))?;

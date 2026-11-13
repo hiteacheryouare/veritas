@@ -28,6 +28,7 @@ pub enum EntityRef {
 	CategoryMeta(CategoryId),
 	AccountMeta(AccountId),
 	TransactionMeta(TransactionId),
+	TaxTag(String),
 	Goal(GoalId),
 }
 
@@ -65,6 +66,13 @@ pub struct CategoryMetaRow {
 pub struct AccountMetaRow {
 	pub account: AccountId,
 	pub meta: AccountMeta,
+}
+
+/// `veritas_tax_tag`: which TAX-2 bucket an Actual tag (without `#`) means.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TaxTag {
+	pub tag: String,
+	pub bucket: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -233,6 +241,7 @@ rows!(
 	CategoryMeta(CategoryMetaRow),
 	AccountMeta(AccountMetaRow),
 	TransactionMeta(TransactionMetaRow),
+	TaxTag(TaxTag),
 	Goal(Goal),
 );
 
@@ -515,6 +524,33 @@ impl Record for TransactionMetaRow {
 
 	fn entity(key: &TransactionId) -> EntityRef {
 		EntityRef::TransactionMeta(key.clone())
+	}
+}
+
+impl Record for TaxTag {
+	type Key = String;
+
+	fn key(&self) -> String {
+		self.tag.clone()
+	}
+
+	fn read(data: &BudgetData, key: &String) -> Option<Self> {
+		data.tax_tags.get(key).map(|bucket| TaxTag {
+			tag: key.clone(),
+			bucket: bucket.clone(),
+		})
+	}
+
+	fn write(data: &mut BudgetData, key: &String, value: Option<Self>) {
+		put(&mut data.tax_tags, key, value.map(|row| row.bucket));
+	}
+
+	fn retired(_: &Self) -> Retired<Self> {
+		Retired::Removed
+	}
+
+	fn entity(key: &String) -> EntityRef {
+		EntityRef::TaxTag(key.clone())
 	}
 }
 

@@ -151,7 +151,24 @@ fn id(row: &Row<'_>, index: usize) -> Cell<String> {
 	required_text(at(row, index)?, "the row has no id")
 }
 
+/// Every table is read inside one read transaction, so a load sees a single
+/// committed state even while another process writes. Called inside a
+/// transaction already, it reads within that one.
 pub fn load(conn: &Connection) -> Result<Loaded, CoreError> {
+	if !conn.is_autocommit() {
+		return load_tables(conn);
+	}
+	conn.execute_batch("BEGIN DEFERRED").map_err(storage)?;
+	let loaded = load_tables(conn);
+	// A read transaction has nothing to keep, so it ends the same way after a
+	// failed read; the read's own error is the one worth reporting.
+	let ended = conn.execute_batch("COMMIT").map_err(storage);
+	let loaded = loaded?;
+	ended?;
+	Ok(loaded)
+}
+
+fn load_tables(conn: &Connection) -> Result<Loaded, CoreError> {
 	let mut data = BudgetData::empty(budget_type(conn)?);
 	data.format = format_prefs(conn)?;
 	let mut skipped = Vec::new();
