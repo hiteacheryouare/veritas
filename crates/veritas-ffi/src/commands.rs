@@ -13,6 +13,7 @@ use veritas_engine::EnvelopeSheet;
 
 use crate::Month;
 use crate::budget::{civil_date, edit, envelope, money};
+use crate::custom_reports::{self, CustomReportSettings};
 
 /// A user action. Each one is a single transaction and a single undo step.
 /// Workstreams add commands through `contract` PRs.
@@ -262,6 +263,20 @@ pub enum Command {
 	SetPayeeLearnCategories {
 		payee_id: String,
 		learn: bool,
+	},
+	/// Saves a custom report's edited settings in Actual's format. Only the
+	/// columns that changed are written (R-REP-4).
+	SaveCustomReport {
+		settings: CustomReportSettings,
+	},
+	/// Moves or resizes a dashboard widget, clamped to Actual's 12-column
+	/// grid and the type's minimum size. Nothing else about it changes.
+	PlaceWidget {
+		widget_id: String,
+		x: i64,
+		y: i64,
+		width: i64,
+		height: i64,
 	},
 }
 
@@ -680,6 +695,16 @@ impl Command {
 			Command::SetPayeeLearnCategories { payee_id, learn } => {
 				payees::set_learn_categories(data, &PayeeId::new(payee_id.as_str()), *learn)
 			}
+			Command::SaveCustomReport { settings } => {
+				custom_reports::save_custom_report(data, settings)
+			}
+			Command::PlaceWidget {
+				widget_id,
+				x,
+				y,
+				width,
+				height,
+			} => custom_reports::place_widget(data, widget_id, (*x, *y, *width, *height)),
 			_ => Err(CoreError::Internal(
 				"a budget command was planned without the envelope sheet".to_owned(),
 			)),
