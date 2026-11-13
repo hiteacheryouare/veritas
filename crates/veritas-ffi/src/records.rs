@@ -63,6 +63,9 @@ pub enum EntityKind {
 	TransactionMeta,
 	TaxTag,
 	Goal,
+	CustomReport,
+	DashboardPage,
+	Widget,
 }
 
 /// One changed row. `id` is the row's id, absent for a month's hold;
@@ -109,6 +112,9 @@ impl From<&CoreEntity> for EntityRef {
 			CoreEntity::TransactionMeta(id) => row(EntityKind::TransactionMeta, id),
 			CoreEntity::TaxTag(tag) => row(EntityKind::TaxTag, tag),
 			CoreEntity::Goal(id) => row(EntityKind::Goal, id),
+			CoreEntity::CustomReport(id) => row(EntityKind::CustomReport, id),
+			CoreEntity::DashboardPage(id) => row(EntityKind::DashboardPage, id),
+			CoreEntity::Widget(id) => row(EntityKind::Widget, id),
 		}
 	}
 }

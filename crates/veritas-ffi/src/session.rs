@@ -116,7 +116,7 @@ impl<B: Backend> Core<B> {
 	}
 
 	/// Runs one call on the session, then hands what changed to subscribers.
-	fn call<T>(
+	pub(crate) fn call<T>(
 		&self,
 		call: impl FnOnce(&mut CoreSession<B>) -> Result<T, CoreError>,
 	) -> Result<T, FfiError> {
@@ -328,7 +328,7 @@ impl<B: Backend> Core<B> {
 /// on the same budget opens read-only, and `state().read_only` says why.
 #[derive(uniffi::Object)]
 pub struct Session {
-	core: Arc<Core<veritas_store::Store>>,
+	pub(crate) core: Arc<Core<veritas_store::Store>>,
 }
 
 impl Session {

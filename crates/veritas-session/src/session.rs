@@ -10,11 +10,13 @@ use veritas_interop::{ExportOutcome, ImportOutcome, Manifest, import_actual_zip}
 use veritas_store::{Access as StoreAccess, AuditReport, LoadReport, Loaded};
 
 use veritas_engine::{EnvelopeSheet, MAX_SAFE_MINOR};
+use veritas_reports::Classification;
 
 use crate::background::{OpenCheck, Pending};
 use crate::backup::write_backup;
 use crate::bus::{ChangeListener, ChangeSet, Command, CommandBus, Listeners, Permit, Subscription};
 use crate::cancel::CancelToken;
+use crate::classification::ClassificationCache;
 use crate::fsio::{io_error, reserve_partial, sweep_stale_folders, sync_dir, sync_folder};
 use crate::lock::{Access, WriterLock, acquire};
 use crate::overview::{Overview, account_groups};
@@ -112,6 +114,7 @@ pub struct Session<B: Backend> {
 	backup_folder: Option<PathBuf>,
 	last_backup: Option<BackupResult>,
 	sheet: SheetCache,
+	classification: ClassificationCache,
 	/// The local date the shell last read the budget as of. It decides the
 	/// months the envelope sheet covers.
 	today: CivilDate,
@@ -152,6 +155,7 @@ impl<B: Backend> Session<B> {
 			backup_folder: None,
 			last_backup: None,
 			sheet: SheetCache::default(),
+			classification: ClassificationCache::default(),
 			today,
 		};
 		let take_snapshot = session.read_only().is_none();
@@ -356,7 +360,9 @@ impl<B: Backend> Session<B> {
 			}
 		};
 		self.dirty |= !changed.is_empty();
-		if !refreshed {
+		if refreshed {
+			self.classification.refresh(&changed);
+		} else {
 			self.after_change(&changed);
 		}
 		Ok(changed)
@@ -392,8 +398,21 @@ impl<B: Backend> Session<B> {
 		read(bus.data(), sheet)
 	}
 
+	/// Runs `read` against the budget and every row's classification, which
+	/// is cached until a commit changes something it reads.
+	pub fn with_classification<T>(
+		&mut self,
+		read: impl FnOnce(&BudgetData, &Classification) -> Result<T, CoreError>,
+	) -> Result<T, CoreError> {
+		let State::Open(bus) = &self.state else {
+			return Err(closed());
+		};
+		read(bus.data(), self.classification.get(bus.data()))
+	}
+
 	fn after_change(&mut self, changed: &ChangeSet) {
 		self.dirty |= !changed.is_empty();
+		self.classification.refresh(changed);
 		if let State::Open(bus) = &self.state {
 			self.sheet.refresh(bus.data(), changed);
 		}
@@ -664,6 +683,7 @@ impl<B: Backend> Session<B> {
 
 	fn reopen(&mut self, listeners: Listeners) -> Result<(), CoreError> {
 		self.sheet.clear();
+		self.classification.clear();
 		match open_bus(&self.db, self.lock.as_ref(), listeners) {
 			Ok((bus, report)) => {
 				self.state = State::Open(Box::new(bus));

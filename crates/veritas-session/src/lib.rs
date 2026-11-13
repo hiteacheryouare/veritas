@@ -6,6 +6,7 @@ mod budgets;
 mod bus;
 mod cancel;
 pub mod categories;
+mod classification;
 mod fsio;
 pub mod goals;
 mod lock;

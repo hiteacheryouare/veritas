@@ -1343,6 +1343,7 @@ dependencies = [
  "uniffi",
  "veritas-domain",
  "veritas-engine",
+ "veritas-reports",
  "veritas-session",
  "veritas-store",
 ]
