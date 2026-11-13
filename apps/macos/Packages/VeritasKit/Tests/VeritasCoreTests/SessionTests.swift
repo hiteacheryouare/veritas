@@ -174,6 +174,59 @@ private final class Recorder: ChangeListener, @unchecked Sendable {
 	#expect(throws: FfiError.self) { try evaluateAmount(text: "abc", style: .commaDot) }
 }
 
+@Test func categoriesAndGoalsAreEditedThroughCommands() async throws {
+	let scratch = try Scratch()
+	let session = try await importSmall(into: scratch)
+	_ = try await settled(session)
+	let today = "2026-11-15"
+	let november = Month(year: 2026, month: 11)
+
+	let group = try session.perform(command: .createCategoryGroup(name: "Travel"))
+	let groupId = try #require(group.entities.first { $0.kind == .categoryGroup }?.id)
+	let category = try session.perform(command: .createCategory(groupId: groupId, name: "Flights"))
+	let categoryId = try #require(category.entities.first { $0.kind == .category }?.id)
+	#expect(
+		try session.categoryHistory(categoryId: categoryId)
+			== CategoryHistory(transactions: 0, budgetedMonths: 0, taxBucket: nil))
+	_ = try session.perform(command: .deleteCategory(categoryId: categoryId))
+
+	_ = try session.goals(today: today)
+	let created = try session.perform(
+		command: .createGoal(
+			name: "New laptop", target: 100_000, targetDate: "2027-06-30", icon: nil, color: nil))
+	let goalId = try #require(created.entities.first { $0.kind == .goal }?.id)
+	let goal = try #require(try session.goals(today: today).first { $0.id == goalId })
+	#expect(goal.state == .active)
+	#expect(goal.monthsLeft == 8)
+
+	_ = try session.perform(
+		command: .setBudget(month: november, categoryId: goal.categoryId, amount: 100_000))
+	#expect(try session.goals(today: today).first { $0.id == goalId }?.state == .reached)
+
+	let preview = try session.goalClosePreview(
+		goalId: goalId, releaseToCategoryId: nil, today: today)
+	#expect(preview.leftover == 100_000)
+	_ = try session.perform(
+		command: .closeGoal(goalId: goalId, releaseToCategoryId: nil, alsoMoveLater: false))
+	#expect(try session.goals(today: today).first { $0.id == goalId }?.state == .closed)
+
+	#expect(throws: FfiError.self) {
+		try session.perform(command: .retargetGoal(goalId: goalId, target: 150_000, targetDate: nil))
+	}
+	_ = try session.perform(command: .reopenGoal(goalId: goalId))
+	_ = try session.perform(command: .retargetGoal(goalId: goalId, target: 150_000, targetDate: nil))
+	let retargeted = try #require(try session.goals(today: today).first { $0.id == goalId })
+	#expect(retargeted.state == .active)
+	#expect(retargeted.reachedMonth == november)
+	#expect(retargeted.target == 150_000)
+
+	#expect(try evaluateBudgetAmount(text: "5000", style: .commaDot, decimalPlaces: 0) == 5_000)
+	#expect(try evaluateBudgetAmount(text: "12.50+3", style: .commaDot, decimalPlaces: 2) == 1_550)
+	let yen = try budgetAmountEditText(amount: 5_000, style: .commaDot, decimalPlaces: 0)
+	#expect(yen == "5,000")
+	#expect(try evaluateBudgetAmount(text: yen, style: .commaDot, decimalPlaces: 0) == 5_000)
+}
+
 /// What VeritasKit's wrapper does: the Swift task's cancellation reaches the
 /// core through the token, because UniFFI never cancels the Rust side itself.
 private func importCancellably(zip: String, into directory: String) async throws -> Session {

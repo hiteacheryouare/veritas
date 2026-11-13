@@ -323,6 +323,13 @@ fn a_second_session_on_the_same_budget_is_read_only_and_takes_no_snapshots() {
 		)
 	};
 	assert!(refused(second.perform(&rename("Nope"))));
+	let unplannable = |_: &BudgetData| -> Result<Vec<Row>, CoreError> {
+		Err(CoreError::Invalid("no".to_owned()))
+	};
+	assert!(
+		refused(second.perform(&unplannable)),
+		"the read-only reason comes before the plan's own error"
+	);
 	assert!(refused(second.restore("anything.sqlite")));
 	assert!(matches!(
 		second.snapshot(SnapshotReason::Hourly),
@@ -1167,4 +1174,107 @@ fn a_hot_journal_left_by_a_killed_writer_is_rolled_back_when_the_budget_opens() 
 	assert!(!crashed.join("db.sqlite-journal").exists());
 	session.wait_for_open_check();
 	assert!(!session.audit_report().unwrap().is_corrupt());
+}
+
+#[test]
+fn the_cached_envelope_sheet_always_matches_a_fresh_one() {
+	// R-PERF-2: commits update the cached sheet incrementally. After every
+	// kind of change, and after undo and redo, it must equal a full recompute.
+	use veritas_domain::{BudgetCell, Hold, Money};
+	use veritas_engine::EnvelopeSheet;
+	let (_root, dir) = imported("session-sheet-cache");
+	let mut session =
+		Session::<veritas_store::Store>::open(&dir, TestClock::new().options()).unwrap();
+	let today = veritas_domain::CivilDate::new(2026, 11, 15).unwrap();
+	let check = |session: &mut Session<veritas_store::Store>, step: &str| {
+		session
+			.with_sheet(today, |data, cached| {
+				let fresh = EnvelopeSheet::compute(data, today)?;
+				assert_eq!(cached.months(), fresh.months(), "{step}");
+				for month in fresh.months() {
+					assert_eq!(cached.month(*month), fresh.month(*month), "{step}: {month}");
+				}
+				Ok(())
+			})
+			.unwrap();
+	};
+	check(&mut session, "opened");
+	let (month, category) = session
+		.with_sheet(today, |data, sheet| {
+			let month = sheet.months()[sheet.months().len() / 2];
+			let category = data
+				.categories
+				.values()
+				.find(|c| !c.tombstone && !c.is_income)
+				.unwrap()
+				.id
+				.clone();
+			Ok((month, category))
+		})
+		.unwrap();
+
+	type Step = Box<dyn Fn(&BudgetData) -> Result<Vec<Row>, CoreError>>;
+	let steps: Vec<(&str, Step)> = vec![
+		(
+			"budget",
+			Box::new(move |_| {
+				Ok(vec![Row::BudgetCell(BudgetCell {
+					month,
+					category: category.clone(),
+					budgeted: Money::from_minor(12_345),
+					carryover: false,
+					goal: None,
+					long_goal: false,
+				})])
+			}),
+		),
+		(
+			"hold",
+			Box::new(move |_| {
+				Ok(vec![Row::Hold(Hold {
+					month,
+					amount: Some(Money::from_minor(500)),
+				})])
+			}),
+		),
+		(
+			"transaction",
+			Box::new(|data: &BudgetData| {
+				let mut transaction = data
+					.transactions
+					.values()
+					.find(|t| !t.tombstone && t.category.is_some())
+					.unwrap()
+					.clone();
+				transaction.amount = transaction.amount.checked_sub(Money::from_minor(777))?;
+				Ok(vec![Row::Transaction(transaction)])
+			}),
+		),
+		("rename", Box::new(rename_category("Renamed"))),
+	];
+	for (step, command) in &steps {
+		session.perform(command).unwrap();
+		check(&mut session, step);
+	}
+	for step in ["undo 1", "undo 2", "undo 3", "undo 4"] {
+		session.undo().unwrap();
+		check(&mut session, step);
+	}
+	for step in ["redo 1", "redo 2"] {
+		session.redo().unwrap();
+		check(&mut session, step);
+	}
+}
+
+fn rename_category(to: &'static str) -> impl Fn(&BudgetData) -> Result<Vec<Row>, CoreError> {
+	move |data: &BudgetData| {
+		let mut category = data
+			.categories
+			.values()
+			.find(|c| !c.tombstone && !c.is_income)
+			.unwrap()
+			.clone();
+		category.name = to.to_owned();
+		Ok(vec![Row::Category(category)])
+	}
 }

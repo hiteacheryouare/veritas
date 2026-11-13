@@ -206,7 +206,8 @@ pub struct AccountGroupSummary {
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct Overview {
 	pub budget_name: Option<String>,
-	/// `None` until the core reads Actual's preferences; use Actual's defaults.
+	/// The budget's format, with Actual's defaults for what it doesn't store.
+	/// Always set.
 	pub number_format: Option<NumberFormat>,
 	pub groups: Vec<AccountGroupSummary>,
 }
@@ -569,4 +570,15 @@ impl From<Retention> for RetentionPolicy {
 			operation_days: i64::from(retention.operation_days),
 		}
 	}
+}
+
+/// What deleting a category would lose. Empty means a plain delete is safe;
+/// otherwise the app offers Archive, or delete with the history moved.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct CategoryHistory {
+	pub transactions: u64,
+	pub budgeted_months: u64,
+	/// The category's tax bucket, for the TAX-8 warning before its history
+	/// moves to a category with a different one.
+	pub tax_bucket: Option<String>,
 }
