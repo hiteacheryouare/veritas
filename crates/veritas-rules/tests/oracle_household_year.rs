@@ -745,7 +745,7 @@ fn a_year_of_household_bills_matches_actual_step_by_step() {
 				let (_, stored_payee) = bill_view(&budget, n);
 				let mapped = budget.payee_mapping.get(&PayeeId::new(&stored_payee)).map_or(stored_payee.clone(), |p| p.to_string());
 				let id = schedule(n);
-				let plan = pay(&book, &budget, &mut payees, &id, Money::from_minor(amount), day(paid_on)).unwrap();
+				let plan = pay(&book, &budget, &mut payees, &id, Money::from_minor(amount), day(paid_on), day(today)).unwrap();
 				let payment = payment_op(n, lockstep.step, &mapped, amount, paid_on);
 				let next = budget.schedules[&id].next_date.unwrap();
 				let veritas = counts_as_paid(&budget, &id, day(paid_on)).unwrap();

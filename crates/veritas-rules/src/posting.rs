@@ -67,6 +67,11 @@ pub enum LeftBy {
 	Service,
 	/// Ryan marking the bill Paid.
 	Paid,
+	/// Ryan marking an auto-post bill Paid when it is due or missed. Nothing
+	/// was written, so Actual's service posts this occurrence at the
+	/// scheduled amount on its next open; entering it there too would pay it
+	/// twice.
+	PaidWhileDue,
 	/// "Post transaction" or "Post transaction today".
 	PostNow,
 }
@@ -111,6 +116,9 @@ impl LeftBill {
 			),
 			LeftBy::Paid => format!(
 				"Veritas didn't record this payment: {rules} couldn't run here{why}. Enter the payment in Actual instead."
+			),
+			LeftBy::PaidWhileDue => format!(
+				"Veritas didn't record this payment: {rules} couldn't run here{why}. Actual posts this bill at its scheduled amount the next time it opens this budget, so don't enter it there as well. Change the amount on that transaction if you paid a different amount."
 			),
 			LeftBy::PostNow => format!(
 				"Veritas didn't post this bill: {rules} couldn't run here{why}. Use Post transaction on it in Actual instead."
@@ -554,6 +562,7 @@ pub fn pay(
 	id: &ScheduleId,
 	amount: Money,
 	date: CivilDate,
+	today: CivilDate,
 ) -> Result<SchedulePlan, CoreError> {
 	let facts = schedule_facts(budget, id)?;
 	if facts.account.is_none() {
@@ -566,7 +575,11 @@ pub fn pay(
 		budget,
 		payees,
 		plan: SchedulePlan::default(),
-		by: LeftBy::Paid,
+		by: if service_posts(facts.schedule, today) {
+			LeftBy::PaidWhileDue
+		} else {
+			LeftBy::Paid
+		},
 	};
 	if let Err(left) = planner.post(&facts, date, Some(amount)) {
 		planner.plan.left.push(*left);
@@ -589,6 +602,14 @@ pub fn pay(
 		}
 	}
 	Ok(planner.plan)
+}
+
+/// Whether Actual's daily service would post this bill's next occurrence on
+/// `today` (`app.ts:680-825`).
+fn service_posts(schedule: &Schedule, today: CivilDate) -> bool {
+	schedule.posts_transaction
+		&& !schedule.completed
+		&& schedule.next_date.is_some_and(|next| next <= today)
 }
 
 /// Whether a payment on `date` counts as paying the bill's next occurrence
@@ -694,6 +715,7 @@ mod tests {
 			&mut payees,
 			&ScheduleId::new("rent"),
 			Money::from_minor(amount),
+			day(date),
 			day(date),
 		)
 		.unwrap()
@@ -877,6 +899,7 @@ mod tests {
 			&id,
 			Money::from_minor(-150_000),
 			day("2026-12-14"),
+			day("2026-12-14"),
 		)
 		.unwrap();
 		assert!(paid.posts.is_empty() && paid.writes.is_empty());
@@ -891,6 +914,42 @@ mod tests {
 			posted.left[0]
 				.note()
 				.ends_with("Use Post transaction on it in Actual instead.")
+		);
+	}
+
+	#[test]
+	fn paid_on_a_due_auto_post_bill_left_to_actual_warns_against_paying_twice() {
+		let mut budget = budget_with(&bill(monthly(), true), "2026-12-15");
+		add_rule(
+			&mut budget,
+			"template",
+			serde_json::json!([{"op": "lt", "field": "amount", "value": 0}]),
+			serde_json::json!([{"op": "set", "field": "notes", "value": "", "options": {"template": "{{date}}"}}]),
+		);
+		let book = RuleBook::new(&budget);
+		let id = ScheduleId::new("rent");
+		let mut payees = BudgetPayees::new(&budget, || PayeeId::new("made"));
+		let mut paid_on = |today: &str| {
+			pay(
+				&book,
+				&budget,
+				&mut payees,
+				&id,
+				Money::from_minor(-149_000),
+				day("2026-12-15"),
+				day(today),
+			)
+			.unwrap()
+			.left
+			.remove(0)
+		};
+		assert_eq!(paid_on("2026-12-14").by, LeftBy::Paid, "not due yet");
+		assert_eq!(paid_on("2026-12-20").by, LeftBy::PaidWhileDue, "missed");
+		let due = paid_on("2026-12-15");
+		assert_eq!(due.by, LeftBy::PaidWhileDue);
+		assert_eq!(
+			due.note(),
+			"Veritas didn't record this payment: 1 rule couldn't run here (a template action). Actual posts this bill at its scheduled amount the next time it opens this budget, so don't enter it there as well. Change the amount on that transaction if you paid a different amount."
 		);
 	}
 
