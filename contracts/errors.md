@@ -1,4 +1,4 @@
-# Error taxonomy (contract v1)
+# Error taxonomy (contract v3)
 
 Every failure is a typed error. The core never panics across the FFI (R-REL-7). `veritas_domain::CoreError` is the core's type. `veritas_ffi::FfiError` mirrors it one to one, and Swift receives it as a thrown `FfiError`. A panic caught at the boundary becomes `Internal`.
 
@@ -13,7 +13,7 @@ Every failure is a typed error. The core never panics across the FFI (R-REL-7). 
 | `Storage(message)` | SQLite failed; the command rolled back and memory was restored (R-REL-1) | "Couldn't save that change. Nothing was lost." Retry is offered. |
 | `Io(message)` | A file or folder problem: disk full, permissions, a missing backup folder (R-REL-4) | Names the path and what to check. Backup failures never block editing. |
 | `Overflow` | Money arithmetic left the i64 range | "That amount is too large." |
-| `Cancelled` | Long work was cancelled: open, create, import or export when the user closed the sheet, or a report or forecast when they navigated away. A cancelled create, import or export leaves nothing behind | Nothing. |
+| `Cancelled` | Long work was cancelled through its `CancelToken`: open, create, import or export when the user closed the sheet, or a report or forecast when they navigated away. A cancelled create, import or export leaves nothing behind, and a cancelled open closes the budget again | Nothing. |
 | `Internal(message)` | A bug, including a caught panic | "Veritas hit a bug." Offers to copy the details. Data is untouched. |
 
 ## Rules
