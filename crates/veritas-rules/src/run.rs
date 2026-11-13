@@ -767,6 +767,27 @@ mod tests {
 	}
 
 	#[test]
+	fn a_percentage_past_what_actual_can_count_is_undetermined() {
+		// 1e20 percent of the -4210 left: the fixed amounts are fine, so this
+		// is the percentage's own guard, with a remainder line still to fill.
+		let mut budget = budget();
+		split_rule(
+			&mut budget,
+			"huge",
+			RuleStage::Default,
+			json!([
+				line(1, "fixed-percent", json!(1e20)),
+				line(2, "remainder", Value::Null),
+			]),
+		);
+		let outcome = run(&budget, &transaction("split me"));
+		assert_eq!(outcome.undetermined, [RuleId::new("huge")]);
+		assert_eq!(outcome.transaction, None);
+		assert!(outcome.reasons[&RuleId::new("huge")].contains("too large"));
+		assert!(outcome.partial.splits.is_empty());
+	}
+
+	#[test]
 	fn a_child_run_on_its_own_takes_only_the_plain_actions() {
 		let mut budget = budget();
 		split_rule(
