@@ -726,22 +726,22 @@ fn groceries_book(level: i64) -> Book {
 }
 
 #[test]
-fn fc_3_sc_1_to_sc_4_percent_changes() {
+fn fc_3_sn_1_to_sn_4_percent_changes() {
 	let february = |level: i64, changes: &[i64]| {
 		project(&groceries_book(level), &[], Some(&percent(changes))).months[1].baselined_net_flow
 	};
 	assert_eq!(
 		february(43005, &[-1000]),
 		cents(-38704),
-		"SC-1 rounds half away"
+		"SN-1 rounds half away"
 	);
-	assert_eq!(february(43000, &[-15000]), cents(0), "SC-2 clamped at 0");
+	assert_eq!(february(43000, &[-15000]), cents(0), "SN-2 clamped at 0");
 	assert_eq!(
 		february(43000, &[1000, 500]),
 		cents(-49450),
-		"SC-3 deltas add"
+		"SN-3 deltas add"
 	);
-	assert_eq!(february(-3000, &[1000]), cents(0), "SC-4 negative forecast");
+	assert_eq!(february(-3000, &[1000]), cents(0), "SN-4 negative forecast");
 }
 
 #[test]
