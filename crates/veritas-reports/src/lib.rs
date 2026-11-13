@@ -49,6 +49,6 @@ pub use tax::{
 };
 pub use widgets::{
 	AgeOfMoney, AgePoint, BudgetAnalysis, BudgetAnalysisMonth, CalendarDay, CalendarMonth,
-	Granularity, SummaryContent, SummaryData, TimeRange, Trend, age_of_money, budget_analysis,
-	calculate_time_range, calendar, summary,
+	Crossover, CrossoverPoint, Granularity, SummaryContent, SummaryData, TimeRange, Trend,
+	age_of_money, budget_analysis, calculate_time_range, calendar, crossover, summary,
 };

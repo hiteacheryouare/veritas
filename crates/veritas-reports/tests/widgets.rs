@@ -12,7 +12,9 @@ use support::actual::{fixture, oracle};
 use veritas_domain::BudgetData;
 use veritas_domain::CivilDate;
 use veritas_engine::EnvelopeSheet;
-use veritas_reports::{Granularity, Json, Trend, age_of_money, budget_analysis, calendar, summary};
+use veritas_reports::{
+	Granularity, Json, Trend, age_of_money, budget_analysis, calendar, crossover, summary,
+};
 
 const ORACLE_TODAY: &str = "2026-11-09";
 
@@ -377,6 +379,80 @@ fn d73_budget_analysis_card_matches_actual() {
 			"totalSpent": ours.total_spent.minor(),
 			"totalOverspendingAdjustment": ours.total_overspending_adjustment.minor(),
 			"finalOverspendingAdjustment": ours.final_overspending_adjustment.minor(),
+		});
+		assert_eq!(&ours, data, "{value}");
+	}
+}
+
+fn optional(value: Option<f64>) -> Value {
+	value.map_or(Value::Null, number)
+}
+
+#[test]
+fn d73_crossover_card_matches_actual() {
+	let budget = fixture("all-features");
+	let brokerage = account(&budget, "Brokerage");
+	let savings = account(&budget, "Savings");
+	let groceries = category(&budget, "Groceries");
+	let dining = category(&budget, "Dining Out");
+	let mut metas = vec![json!(null), json!({"incomeAccountIds": []})];
+	for projection in ["hampel", "median", "mean"] {
+		metas.push(json!({"incomeAccountIds": [brokerage, savings], "projectionType": projection, "expectedContribution": 50000}));
+	}
+	metas.extend([
+		json!({"incomeAccountIds": [brokerage], "expenseCategoryIds": [groceries, dining], "safeWithdrawalRate": 0.035, "estimatedReturn": 0.07}),
+		json!({"incomeAccountIds": [savings], "expenseCategoryIds": [], "timeFrame": {"start": "2026-02", "end": "2026-08", "mode": "static"}}),
+		json!({"timeFrame": {"start": "2026-03", "end": "2026-09", "mode": "sliding-window"}, "showHiddenCategories": true, "expenseAdjustmentFactor": 1.25}),
+		json!({"incomeAccountIds": [brokerage], "timeFrame": {"start": "2020-01", "end": "2030-01", "mode": "static"}, "estimatedReturn": 0.0}),
+	]);
+	let cases: Vec<(String, &str, Value)> = metas
+		.into_iter()
+		.enumerate()
+		.map(|(index, meta)| (format!("crossover-{index}"), "crossover-card", meta))
+		.collect();
+	let ours: Vec<_> = cases
+		.iter()
+		.map(|(_, _, value)| crossover(&budget, meta(value).as_ref(), today()).unwrap())
+		.collect();
+	let Some(theirs) = theirs("all-features", &cases, "0") else {
+		return;
+	};
+	for ((id, _, value), ours) in cases.iter().zip(ours) {
+		let data = &theirs[id.as_str()]["data"];
+		let label = |month: veritas_domain::YearMonth| {
+			month.first_day().naive().format("%b %Y").to_string()
+		};
+		let points: Vec<Value> = ours
+			.points
+			.iter()
+			.map(|point| {
+				let mut entry = json!({
+					"x": label(point.month),
+					"investmentIncome": number(point.investment_income),
+					"expenses": number(point.expenses),
+					"nestEgg": number(point.nest_egg),
+				});
+				if point.projection {
+					entry["adjustedExpenses"] = optional(point.adjusted_expenses);
+					entry["isProjection"] = json!(true);
+				}
+				entry
+			})
+			.collect();
+		let ours = json!({
+			"graphData": {
+				"data": points,
+				"start": ours.start.to_string(),
+				"end": ours.end.to_string(),
+				"crossoverXLabel": ours.crossover.map(label),
+			},
+			"lastKnownBalance": number(ours.last_known_balance),
+			"lastKnownMonthlyIncome": number(ours.last_known_monthly_income),
+			"lastKnownMonthlyExpenses": number(ours.last_known_monthly_expenses),
+			"historicalReturn": optional(ours.historical_return),
+			"yearsToRetire": optional(ours.years_to_retire),
+			"targetMonthlyIncome": optional(ours.target_monthly_income),
+			"targetNestEgg": optional(ours.target_nest_egg),
 		});
 		assert_eq!(&ours, data, "{value}");
 	}

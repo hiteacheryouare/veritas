@@ -113,6 +113,56 @@ export const widgetData = async ({ internal }: ActualSession, requests: WidgetRe
 				showHiddenCategories: meta?.showHiddenCategories ?? false
 			});
 			return { start: startDate, end: endDate, data: await run(spreadsheet) };
+		},
+		// CrossoverCard.tsx's range effect and props; defaultTimeFrame is
+		// Crossover.tsx's, which Node can't load as TSX.
+		'crossover-card': async ({ meta }) => {
+			const { createCrossoverSpreadsheet } = await loadSource(`${REPORTS}/spreadsheets/crossover-spreadsheet.ts`);
+			const currentMonth = months.currentMonth();
+			const previousMonth = months.subMonths(currentMonth, 1);
+			const defaultTimeFrame = { start: months.subMonths(currentMonth, 120), end: previousMonth, mode: 'full' };
+			const earliestData = await internal.send('get-earliest-transaction');
+			const earliestDate = earliestData ? earliestData.date : months.firstDayOfMonth(previousMonth);
+			const allMonths = months.rangeInclusive(earliestDate, months.lastDayOfMonth(previousMonth)).reverse();
+			const [initialStart, initialEnd, mode] = ranges.calculateTimeRange(meta?.timeFrame, defaultTimeFrame, previousMonth);
+			const earliestMonth = allMonths[allMonths.length - 1];
+			const latestMonth = allMonths[0];
+			const clampMonth = (m: string) =>
+				months.isBefore(m, earliestMonth) ? earliestMonth : months.isAfter(m, latestMonth) ? latestMonth : m;
+			let start = initialStart;
+			let end = initialEnd;
+			if (mode === 'sliding-window') {
+				start = clampMonth(months.subMonths(start, 1));
+				end = clampMonth(months.subMonths(end, 1));
+			} else if (mode === 'full') {
+				start = earliestMonth;
+				end = latestMonth;
+			} else {
+				start = clampMonth(start);
+				end = clampMonth(end);
+			}
+			if (months.isBefore(end, start)) {
+				end = start;
+			}
+			const { list } = await internal.send('get-categories');
+			const showHidden = meta?.showHiddenCategories ?? false;
+			const stored = meta?.expenseCategoryIds;
+			const expenseCategoryIds = (stored !== undefined ? list.filter((c: any) => stored.includes(c.id)) : list.filter((c: any) => !c.is_income))
+				.filter((c: any) => showHidden || !c.hidden)
+				.map((c: any) => c.id);
+			const accounts = await internal.send('accounts-get');
+			const spreadsheet = createCrossoverSpreadsheet({
+				start,
+				end,
+				expenseCategoryIds,
+				incomeAccountIds: meta?.incomeAccountIds ?? accounts.map((a: any) => a.id),
+				safeWithdrawalRate: meta?.safeWithdrawalRate ?? 0.04,
+				estimatedReturn: meta?.estimatedReturn ?? null,
+				expectedContribution: meta?.expectedContribution ?? null,
+				projectionType: meta?.projectionType ?? 'hampel',
+				expenseAdjustmentFactor: meta?.expenseAdjustmentFactor ?? 1.0
+			});
+			return { start, end, data: await run(spreadsheet) };
 		}
 	};
 
