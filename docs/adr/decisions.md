@@ -365,3 +365,8 @@ Every decision behind Veritas, so no question gets asked twice. D1–D24 are PLA
 - **Options:** only reopening clears it / a Dismiss button / clear it automatically when the envelope is covered
 - **Decision:** The "Closed goal has new activity" notice (GOAL-6) gets a Dismiss button. Dismissing records the latest month with activity the user has seen. The notice comes back only when activity appears in a later month than the one dismissed, or the dismissed months' activity total changes, or when the close month's ending available becomes a non-zero amount other than the one it had when dismissed. Reopening still clears it, as before. Dismissing never moves money.
 - **Date:** 2026-11-13
+
+### D73. Every Actual dashboard widget is native
+- **Options:** draw common widgets and send the rest to Actual / draw every widget natively
+- **Decision:** Veritas draws every Actual 26.11 dashboard widget type natively, and filtered custom reports too. No widget says "Open in Actual". The widget types are summary, calendar, formula, crossover, budget analysis, balance forecast, age of money and Monte Carlo, plus the ones already drawn (net worth, cash flow, spending, custom report, markdown, Sankey). Numbers match Actual's own computation for the same widget config. Layout follows Actual's 12-column grid and sizes, so a user's dashboards carry over 1:1. Cards use Veritas's own type and colors.
+- **Date:** 2026-11-13
