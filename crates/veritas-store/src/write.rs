@@ -66,6 +66,7 @@ fn account_columns(row: &Account) -> Columns {
 		),
 		("sort_order", Value::Real(row.sort_order)),
 		("tombstone", flag(row.tombstone)),
+		("last_reconciled", text(row.last_reconciled.as_deref())),
 	]
 }
 

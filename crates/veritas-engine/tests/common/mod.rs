@@ -87,6 +87,7 @@ impl Budget {
 	pub fn account(&mut self, id: &str, off_budget: bool) -> &mut Account {
 		let id = AccountId::new(id);
 		self.0.accounts.entry(id.clone()).or_insert(Account {
+			last_reconciled: None,
 			id,
 			name: String::new(),
 			off_budget,

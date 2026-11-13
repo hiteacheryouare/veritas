@@ -111,6 +111,7 @@ type Bus = CommandBus<MirrorStore>;
 
 fn account(id: &str, name: &str) -> Account {
 	Account {
+		last_reconciled: None,
 		id: AccountId::new(id),
 		name: name.to_owned(),
 		off_budget: false,

@@ -176,7 +176,7 @@ fn load_tables(conn: &Connection) -> Result<Loaded, CoreError> {
 	each_row(
 		conn,
 		"accounts",
-		"SELECT id, name, offbudget, closed, account_group_id, sort_order, tombstone FROM accounts",
+		"SELECT id, name, offbudget, closed, account_group_id, sort_order, tombstone, last_reconciled FROM accounts",
 		&mut skipped,
 		|row| {
 			let id = AccountId::new(id(row, 0)?);
@@ -188,6 +188,11 @@ fn load_tables(conn: &Connection) -> Result<Loaded, CoreError> {
 				group: text(at(row, 4)?)?.map(AccountGroupId::new),
 				sort_order: sort_order(at(row, 5)?)?,
 				tombstone: tombstone(at(row, 6)?),
+				last_reconciled: match at(row, 7)? {
+					ValueRef::Text(bytes) => Some(String::from_utf8_lossy(bytes).into_owned()),
+					ValueRef::Integer(ms) => Some(ms.to_string()),
+					_ => None,
+				},
 			};
 			data.accounts.insert(id, account);
 			Ok(())

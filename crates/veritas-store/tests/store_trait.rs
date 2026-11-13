@@ -38,6 +38,7 @@ fn reloading_after_every_kind_of_change_matches_memory_r_rel_1() {
 	let mut data = store.load().unwrap().data;
 
 	let account = Account {
+		last_reconciled: None,
 		id: AccountId::new("acct-cu"),
 		name: "Credit union".to_owned(),
 		off_budget: false,
@@ -296,6 +297,7 @@ fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
 	let month = YearMonth::parse("2026-11").unwrap();
 
 	let account = Account {
+		last_reconciled: None,
 		id: AccountId::new("v-acct"),
 		name: "Brokerage".to_owned(),
 		off_budget: true,

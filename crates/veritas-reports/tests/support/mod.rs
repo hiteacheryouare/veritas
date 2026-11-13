@@ -56,6 +56,7 @@ impl Book {
 		self.budget.accounts.insert(
 			AccountId::new(id),
 			Account {
+				last_reconciled: None,
 				id: AccountId::new(id),
 				name: id.to_owned(),
 				off_budget,

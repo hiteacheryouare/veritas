@@ -151,6 +151,7 @@ mod tests {
 			data.accounts.insert(
 				id.clone(),
 				Account {
+					last_reconciled: None,
 					id: id.clone(),
 					name: case.name.to_owned(),
 					off_budget: case.off_budget,
