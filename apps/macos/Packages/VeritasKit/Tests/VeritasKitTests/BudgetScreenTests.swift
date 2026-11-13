@@ -99,6 +99,29 @@ struct BudgetScreenTests {
 		#expect(screen.sources.map(\.id) == ["groceries"])
 	}
 
+	@Test func hiddenEnvelopesShowOnlyWhenAsked() async {
+		session.hideRent = true
+		let screen = await openScreen()
+		#expect(!screen.envelopeIDs.contains("rent"))
+		#expect(screen.hasHiddenEnvelopes)
+		screen.workspace.showsHiddenEnvelopes = true
+		#expect(screen.envelopeIDs.contains("rent"))
+	}
+
+	@Test func goalsLoadWithTheMonth() async {
+		session.goals = [GoalSummary(id: "g", categoryID: "c", name: "New laptop", target: 150_000, available: 112_000, targetMonth: Month(year: 2027, month: 3), status: .onTrack)]
+		let screen = await openScreen()
+		#expect(screen.goals.map(\.name) == ["New laptop"])
+		#expect(abs(screen.goals[0].progress - 0.7467) < 0.001)
+	}
+
+	@Test func goalCardsRoundToWholeUnits() {
+		let format = MoneyFormat()
+		#expect(format.wholeCurrency(112_000) == "$1,120")
+		#expect(format.wholeCurrency(41_050) == "$411")
+		#expect(format.wholeCurrency(-41_049) == "\u{2212}$410")
+	}
+
 	@Test func todayIsTheLocalCivilDate() {
 		var calendar = Calendar(identifier: .gregorian)
 		calendar.timeZone = TimeZone(identifier: "Pacific/Auckland")!
@@ -119,6 +142,12 @@ final class BudgetFakeSession: BudgetSession, @unchecked Sendable {
 	static let month = Month(year: 2026, month: 11)
 	let canExport = true
 	var commands: [Command] = []
+	var hideRent = false
+	var goals: [GoalSummary] = []
+
+	func goals(_ month: Month, today: String) async throws -> [GoalSummary] {
+		goals
+	}
 
 	func overview() async throws -> BudgetOverview {
 		BudgetOverview(name: "Household", directory: URL(filePath: "/tmp/budget"), readOnly: nil, accountGroups: [])
@@ -148,7 +177,7 @@ final class BudgetFakeSession: BudgetSession, @unchecked Sendable {
 					row("dining", 18_000, -21_475, -3_475, .overspent)
 				]),
 				EnvelopeGroup(id: "housing", name: "Housing", isIncome: false, hidden: false, budgeted: 0, spent: 0, available: 0, envelopes: [
-					row("rent", 165_000, -165_000, 0, .neutral)
+					EnvelopeRow(id: "rent", name: "Rent", hidden: hideRent, budgeted: 165_000, spent: -165_000, available: 0, carryover: false, tone: .neutral, fill: 0, note: nil)
 				]),
 				EnvelopeGroup(id: "income", name: "Income", isIncome: true, hidden: false, budgeted: 0, spent: 0, available: 0, envelopes: [
 					row("salary", 0, 400_000, 0, .income)

@@ -20,8 +20,16 @@ struct BudgetScreen: View {
 		ScrollView {
 			VStack(alignment: .leading, spacing: 0) {
 				if let sheet = screen.sheet {
-					ToBudgetHeader(sheet: sheet, dense: workspace.isDense, screen: screen)
-						.padding(.bottom, workspace.isDense ? Spacing.s3 : Spacing.s6)
+					HStack(alignment: .center, spacing: Spacing.s4) {
+						ToBudgetHeader(sheet: sheet, dense: workspace.isDense, screen: screen)
+						Spacer(minLength: Spacing.s4)
+						if !workspace.isDense {
+							ForEach(screen.goals.prefix(2)) { goal in
+								GoalCard(goal: goal, format: screen.format)
+							}
+						}
+					}
+					.padding(.bottom, workspace.isDense ? Spacing.s3 : Spacing.s6)
 					if workspace.isDense {
 						GroupedRows {
 							EnvelopeColumns(dense: true)
@@ -52,6 +60,13 @@ struct BudgetScreen: View {
 			} else {
 				screen.moveSelection(by: step)
 			}
+			return .handled
+		}
+		// ⌘← and ⌘→ are handled here, not as menu or button shortcuts, so a text
+		// field that has focus keeps them for moving its caret.
+		.onKeyPress(keys: [.leftArrow, .rightArrow]) { press in
+			guard press.modifiers == .command, screen.editing == nil else { return .ignored }
+			Task { press.key == .leftArrow ? await screen.previousMonth() : await screen.nextMonth() }
 			return .handled
 		}
 		.onKeyPress(.return) {
@@ -89,7 +104,7 @@ struct BudgetScreen: View {
 	}
 
 	private func groups(_ sheet: BudgetMonth) -> some View {
-		ForEach(sheet.groups, id: \.id) { group in
+		ForEach(screen.groups, id: \.id) { group in
 			EnvelopeGroupView(group: group, screen: screen, dense: workspace.isDense)
 		}
 	}
@@ -115,7 +130,6 @@ private struct MonthStepper: View {
 			} label: {
 				Label("Previous month", systemImage: "chevron.left")
 			}
-			.keyboardShortcut(.leftArrow, modifiers: .command)
 			.disabled(!screen.canGoBack || isEditing)
 			.accessibilityIdentifier("budget.previousMonth")
 			Button {
@@ -123,7 +137,6 @@ private struct MonthStepper: View {
 			} label: {
 				Label("Next month", systemImage: "chevron.right")
 			}
-			.keyboardShortcut(.rightArrow, modifiers: .command)
 			.disabled(!screen.canGoForward || isEditing)
 			.accessibilityIdentifier("budget.nextMonth")
 		}
@@ -145,10 +158,13 @@ private struct ToBudgetHeader: View {
 					.font(.system(size: dense ? 15 : 26, weight: .semibold))
 				Text(screen.format.currency(sheet.toBudget))
 					.font(.figures(dense ? .title : .display, weight: .bold))
+					.lineLimit(1)
+					.fixedSize()
 			}
 			.foregroundStyle(Color(tone.text))
 			Text("To Budget")
 				.font(.text(dense ? .body : .heading, weight: .semibold))
+				.fixedSize()
 			if sheet.forNextMonth > 0 {
 				Text("\(screen.format.amount(sheet.forNextMonth)) held for next month")
 					.font(.text(.body))

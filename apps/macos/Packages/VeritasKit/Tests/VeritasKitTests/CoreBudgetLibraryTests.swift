@@ -113,6 +113,25 @@ struct CoreBudgetLibraryTests {
 		#expect(try await library.listBudgets().first?.name == "Household")
 	}
 
+	@Test func aCancelledImportStopsAndLeavesNothingBehind() async throws {
+		defer { try? FileManager.default.removeItem(at: budgets) }
+		let library = library
+		let smallZip = smallZip
+		let directory = library.newBudgetDirectory()
+		let task = Task {
+			while !Task.isCancelled { await Task.yield() }
+			return try await library.importActualZip(smallZip, into: directory)
+		}
+		task.cancel()
+		await #expect {
+			_ = try await task.value
+		} throws: { error in
+			guard case FfiError.Cancelled = error else { return false }
+			return true
+		}
+		#expect(!FileManager.default.fileExists(atPath: directory.path(percentEncoded: false)))
+	}
+
 	@Test func currenciesComeFromActualsTable() async throws {
 		let currencies = try await library.currencies()
 		#expect(currencies.first?.code == "")

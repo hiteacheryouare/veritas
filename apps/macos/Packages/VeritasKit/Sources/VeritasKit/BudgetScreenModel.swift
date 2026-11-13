@@ -9,11 +9,12 @@ import VeritasCore
 public final class BudgetScreenModel {
 	public private(set) var month: Month
 	public private(set) var sheet: BudgetMonth?
+	public private(set) var goals: [GoalSummary] = []
 	public var selection: String?
 	public private(set) var editing: AmountFieldModel?
 	public private(set) var editingID: String?
 
-	@ObservationIgnored private let workspace: WorkspaceModel
+	@ObservationIgnored let workspace: WorkspaceModel
 	@ObservationIgnored private let amountReader: any AmountReader
 
 	public init(workspace: WorkspaceModel, reader: any AmountReader, month: Month = BudgetScreenModel.currentMonth()) {
@@ -35,9 +36,25 @@ public final class BudgetScreenModel {
 
 	public var reader: any AmountReader { amountReader }
 
+	/// The groups and envelopes on screen: hidden ones only while Show Hidden is on.
+	public var groups: [EnvelopeGroup] {
+		guard let sheet else { return [] }
+		if workspace.showsHiddenEnvelopes { return sheet.groups }
+		return sheet.groups.compactMap { group in
+			guard !group.hidden else { return nil }
+			var visible = group
+			visible.envelopes = group.envelopes.filter { !$0.hidden }
+			return visible
+		}
+	}
+
+	public var hasHiddenEnvelopes: Bool {
+		sheet?.groups.contains { $0.hidden || $0.envelopes.contains(where: \.hidden) } ?? false
+	}
+
 	/// Envelopes in screen order, income last, for ↑ and ↓.
 	public var envelopeIDs: [String] {
-		sheet?.groups.flatMap { $0.envelopes.map(\.id) } ?? []
+		groups.flatMap { $0.envelopes.map(\.id) }
 	}
 
 	public var canGoBack: Bool {
@@ -54,6 +71,7 @@ public final class BudgetScreenModel {
 		guard let loaded = await workspace.budgetMonth(month) else { return }
 		sheet = loaded
 		month = loaded.month
+		goals = await workspace.goals(loaded.month)
 		if let selection, !envelopeIDs.contains(selection) {
 			self.selection = nil
 		}
@@ -72,11 +90,11 @@ public final class BudgetScreenModel {
 	}
 
 	public func envelope(_ id: String) -> EnvelopeRow? {
-		sheet?.groups.lazy.flatMap(\.envelopes).first { $0.id == id }
+		groups.lazy.flatMap(\.envelopes).first { $0.id == id }
 	}
 
 	public func group(of id: String) -> EnvelopeGroup? {
-		sheet?.groups.first { $0.envelopes.contains { $0.id == id } }
+		groups.first { $0.envelopes.contains { $0.id == id } }
 	}
 
 
@@ -119,16 +137,17 @@ public final class BudgetScreenModel {
 
 	/// ⌥↑ and ⌥↓: the first envelope of the previous or next group.
 	public func moveSelectionToGroup(by step: Int) {
-		guard let groups = sheet?.groups.filter({ !$0.envelopes.isEmpty }), !groups.isEmpty else { return }
+		let groups = self.groups.filter { !$0.envelopes.isEmpty }
+		guard !groups.isEmpty else { return }
 		let index = selection.flatMap { id in groups.firstIndex { $0.envelopes.contains { $0.id == id } } }
 		let target = index.map { min(max($0 + step, 0), groups.count - 1) } ?? (step > 0 ? 0 : groups.count - 1)
 		selection = groups[target].envelopes.first?.id
 	}
 
 	private func neighbour(of id: String, step: Int, skippingIncome: Bool) -> String? {
-		let ids = sheet?.groups
+		let ids = groups
 			.filter { !skippingIncome || !$0.isIncome }
-			.flatMap { $0.envelopes.map(\.id) } ?? []
+			.flatMap { $0.envelopes.map(\.id) }
 		guard let index = ids.firstIndex(of: id) else { return nil }
 		let next = index + step
 		return ids.indices.contains(next) ? ids[next] : nil
@@ -167,11 +186,11 @@ public final class BudgetScreenModel {
 
 	/// Envelopes that can give budget: those with money available, in screen order.
 	public var sources: [EnvelopeRow] {
-		sheet?.groups.filter { !$0.isIncome }.flatMap(\.envelopes).filter { $0.available > 0 } ?? []
+		groups.filter { !$0.isIncome }.flatMap(\.envelopes).filter { $0.available > 0 }
 	}
 
 	public var spendingEnvelopes: [EnvelopeRow] {
-		sheet?.groups.filter { !$0.isIncome }.flatMap(\.envelopes) ?? []
+		groups.filter { !$0.isIncome }.flatMap(\.envelopes)
 	}
 
 	static func shift(_ month: Month, by step: Int) -> Month {

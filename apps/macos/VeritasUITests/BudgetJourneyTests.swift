@@ -126,6 +126,34 @@ final class BudgetJourneyTests: XCTestCase {
 	}
 
 	@MainActor
+	func testGoalCardsAndHiddenEnvelopes() {
+		let app = openBudget()
+		let laptop = app.descendants(matching: .any)["goal.laptop"]
+		XCTAssertTrue(laptop.waitForExistence(timeout: 5))
+		XCTAssertTrue(laptop.staticTexts["On track for March"].exists)
+		XCTAssertTrue(app.descendants(matching: .any)["goal.japan"].staticTexts["Behind, needs $410 a month"].exists)
+		XCTAssertFalse(app.buttons["envelope.landline.budgeted"].exists, "hidden until asked")
+		app.menuBars.menuBarItems["View"].click()
+		app.menuItems["Show Hidden Envelopes"].click()
+		XCTAssertTrue(app.buttons["envelope.landline.budgeted"].waitForExistence(timeout: 5))
+		attachScreenshot(of: app, named: "budget-goals-and-hidden")
+	}
+
+	@MainActor
+	func testCommandLeftInTheFindFieldMovesTheCaret() {
+		let app = openBudget()
+		let title = app.windows.firstMatch.title
+		app.typeKey("f", modifierFlags: .command)
+		let find = app.textFields["findBar.field"]
+		XCTAssertTrue(find.waitForExistence(timeout: 5))
+		find.typeText("abc")
+		find.typeKey(.leftArrow, modifierFlags: .command)
+		find.typeText("X")
+		XCTAssertEqual(find.value as? String, "Xabc")
+		XCTAssertEqual(app.windows.firstMatch.title, title, "the month stays put")
+	}
+
+	@MainActor
 	private func openBudget() -> XCUIApplication {
 		let app = XCUIApplication.veritas(stub: "open")
 		XCTAssertTrue(app.descendants(matching: .any)["screen.budget"].waitForExistence(timeout: 10))

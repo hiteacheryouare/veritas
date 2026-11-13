@@ -57,6 +57,8 @@ struct VeritasCommands: Commands {
 			Toggle("Dense", isOn: Binding(get: { model?.isDense ?? false }, set: { _ in model?.toggleDense() }))
 				.keyboardShortcut("d")
 				.disabled(model?.canToggleDense != true)
+			Toggle("Show Hidden Envelopes", isOn: Binding(get: { model?.showsHiddenEnvelopes ?? false }, set: { model?.showsHiddenEnvelopes = $0 }))
+				.disabled(model?.canToggleDense != true)
 			Divider()
 		}
 		CommandMenu("Go") {

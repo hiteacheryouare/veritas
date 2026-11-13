@@ -14,6 +14,7 @@ final class StubBudget: @unchecked Sendable {
 		let carriedIn: Int64
 		var note: String?
 		var carryover = false
+		var hidden = false
 	}
 
 	struct Group {
@@ -36,7 +37,8 @@ final class StubBudget: @unchecked Sendable {
 		Group(id: "housing", name: "Housing and utilities", isIncome: false, envelopes: [
 			Envelope(id: "rent", name: "Rent", budgeted: 165_000, spent: -165_000, carriedIn: 0),
 			Envelope(id: "electric", name: "Electric", budgeted: 9_000, spent: 0, carriedIn: 0),
-			Envelope(id: "internet", name: "Internet", budgeted: 7_000, spent: -7_000, carriedIn: 0)
+			Envelope(id: "internet", name: "Internet", budgeted: 7_000, spent: -7_000, carriedIn: 0),
+			Envelope(id: "landline", name: "Landline", budgeted: 0, spent: 0, carriedIn: 0, hidden: true)
 		]),
 		Group(id: "personal", name: "Personal", isIncome: false, envelopes: [
 			Envelope(id: "hobbies", name: "Hobbies", budgeted: 7_500, spent: -1_299, carriedIn: 0),
@@ -96,6 +98,12 @@ final class StubBudget: @unchecked Sendable {
 		}
 	}
 
+	/// The mockup's two goal cards.
+	let goals = [
+		GoalSummary(id: "laptop", categoryID: "laptop", name: "New laptop", target: 150_000, available: 112_000, targetMonth: Month(year: 2027, month: 3), status: .onTrack),
+		GoalSummary(id: "japan", categoryID: "japan", name: "Japan trip", target: 600_000, available: 231_000, targetMonth: Month(year: 2027, month: 9), status: .behind(monthly: 41_000))
+	]
+
 	private func envelope(_ id: String) -> Envelope? {
 		groups.lazy.flatMap(\.envelopes).first { $0.id == id }
 	}
@@ -120,7 +128,7 @@ final class StubBudget: @unchecked Sendable {
 		let fill = left <= 0 ? 0 : start <= 0 ? 1 : min(Double(left) / Double(start), 1)
 		let tone: VeritasCore.MoneyTone = isIncome ? .income : left < 0 ? .overspent : left == 0 ? .neutral : fill <= 0.2 ? .low : .available
 		return EnvelopeRow(
-			id: envelope.id, name: envelope.name, hidden: false, budgeted: envelope.budgeted, spent: envelope.spent,
+			id: envelope.id, name: envelope.name, hidden: envelope.hidden, budgeted: envelope.budgeted, spent: envelope.spent,
 			available: isIncome ? 0 : left, carryover: envelope.carryover, tone: tone, fill: fill, note: envelope.note
 		)
 	}

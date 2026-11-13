@@ -30,6 +30,7 @@ public final class WorkspaceModel {
 	public var isPaletteShown = false
 	public var isFindShown = false
 	public var isDense = false
+	public var showsHiddenEnvelopes = false
 	/// The budget's own format once the core reports it, else the Mac's.
 	public var format: MoneyFormat {
 		overview?.format ?? fallbackFormat
@@ -154,6 +155,11 @@ public final class WorkspaceModel {
 			present(error, isRefresh: true)
 			return nil
 		}
+	}
+
+	public func goals(_ month: Month) async -> [GoalSummary] {
+		guard let session else { return [] }
+		return (try? await session.goals(month, today: Self.today())) ?? []
 	}
 
 	/// Runs one command. Errors are shown here; `false` means nothing changed.

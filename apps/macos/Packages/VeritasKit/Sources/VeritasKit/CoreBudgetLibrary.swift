@@ -28,14 +28,16 @@ public struct CoreBudgetLibrary: BudgetLibrary {
 
 	public func open(directory: URL) async throws -> any BudgetSession {
 		let path = directory.path(percentEncoded: false)
-		return CoreBudgetSession(try await Core.call { try await Session.open(directory: path) })
+		return CoreBudgetSession(try await Core.cancellable { try await Session.open(directory: path, cancel: $0) })
 	}
 
 	public func importActualZip(_ zip: URL, into directory: URL) async throws -> any BudgetSession {
 		try makeBudgetsDirectory()
 		let zipPath = zip.path(percentEncoded: false)
 		let path = directory.path(percentEncoded: false)
-		return CoreBudgetSession(try await Core.call { try await Session.importActualZip(zip: zipPath, intoDirectory: path) })
+		return CoreBudgetSession(try await Core.cancellable {
+			try await Session.importActualZip(zip: zipPath, intoDirectory: path, cancel: $0)
+		})
 	}
 
 	public func createBudget(_ budget: NewBudget, into directory: URL) async throws -> any BudgetSession {
@@ -47,8 +49,8 @@ public struct CoreBudgetLibrary: BudgetLibrary {
 			hsa: budget.hasHealthSavingsAccount,
 			accounts: budget.accounts.map { NewAccount(name: $0.name, kind: $0.type, startingBalance: $0.balance) }
 		)
-		return CoreBudgetSession(try await Core.call {
-			try await Session.createBudget(name: budget.name, directory: path, format: format, options: options)
+		return CoreBudgetSession(try await Core.cancellable {
+			try await Session.createBudget(name: budget.name, directory: path, format: format, options: options, cancel: $0)
 		})
 	}
 
@@ -76,6 +78,17 @@ enum Core {
 	/// Synchronous core calls block while SQLite works, so they run off the main actor.
 	static func run<T: Sendable>(_ call: @escaping @Sendable () throws -> T) async throws -> T {
 		try await self.call { try await Task.detached(priority: .userInitiated, operation: call).value }
+	}
+
+	/// Long core work gets its own token; cancelling the Swift task cancels it,
+	/// and the core then answers `Cancelled`.
+	static func cancellable<T>(_ work: (CancelToken) async throws -> T) async throws -> T {
+		let token = CancelToken()
+		return try await withTaskCancellationHandler {
+			try await call { try await work(token) }
+		} onCancel: {
+			token.cancel()
+		}
 	}
 
 	/// Everything the core throws is an `FfiError`. A cancelled Swift task becomes `Cancelled`.

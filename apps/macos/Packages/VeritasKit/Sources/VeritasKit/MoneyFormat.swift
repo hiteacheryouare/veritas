@@ -60,6 +60,14 @@ public struct MoneyFormat: Hashable, Sendable {
 		sign(minorUnits) + currencySymbol + digits(minorUnits.magnitude)
 	}
 
+	/// `$1,120`: goal cards, rounded half away from zero to the whole unit.
+	public func wholeCurrency(_ minorUnits: Int64) -> String {
+		let whole = (minorUnits.magnitude + 50) / 100 * 100
+		let text = digits(whole)
+		let wholePart = text.split(separator: Character(decimalSeparator)).first.map(String.init) ?? text
+		return sign(minorUnits) + currencySymbol + wholePart
+	}
+
 	private func sign(_ minorUnits: Int64) -> String {
 		minorUnits < 0 ? Self.minus : ""
 	}

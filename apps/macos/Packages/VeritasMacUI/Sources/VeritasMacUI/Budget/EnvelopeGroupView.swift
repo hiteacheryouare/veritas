@@ -23,6 +23,7 @@ struct EnvelopeGroupView: View {
 				figure(group.isIncome ? group.spent : group.available)
 			}
 			.frame(height: dense ? Size.rowDense : 30)
+			.opacity(group.hidden ? 0.5 : 1)
 			.background(dense ? AnyShapeStyle(.surfaceHover) : AnyShapeStyle(.clear))
 			.accessibilityElement(children: .combine)
 			.accessibilityAddTraits(.isHeader)

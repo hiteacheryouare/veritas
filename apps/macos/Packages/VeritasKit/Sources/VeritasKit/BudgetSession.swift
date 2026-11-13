@@ -104,6 +104,8 @@ public protocol BudgetSession: AnyObject, Sendable {
 	func budgetMonth(_ month: Month, today: String) async throws -> BudgetMonth
 	/// One user action: one transaction and one undo step.
 	func perform(_ command: Command) async throws
+	/// The open goals for `month`, in the order the core shows them.
+	func goals(_ month: Month, today: String) async throws -> [GoalSummary]
 }
 
 /// The budgets in the app's budgets folder: new ones, Actual imports and reopened ones.

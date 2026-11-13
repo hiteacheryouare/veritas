@@ -203,6 +203,10 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 		budget.month(month)
 	}
 
+	func goals(_ month: Month, today: String) async throws -> [GoalSummary] {
+		budget.goals
+	}
+
 	func perform(_ command: Command) async throws {
 		if let readOnly { throw FfiError.ReadOnly(reason: readOnly) }
 		try budget.perform(command)

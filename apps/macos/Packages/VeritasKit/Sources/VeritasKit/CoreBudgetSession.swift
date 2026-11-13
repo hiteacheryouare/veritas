@@ -59,7 +59,7 @@ final class CoreBudgetSession: BudgetSession {
 			throw FfiError.Io(message: "Can't prepare the export in \(staging.path(percentEncoded: false)). Check the disk has space.")
 		}
 		let session = session
-		let findings = try await Core.call { try await session.exportActualZip(to: staged.path(percentEncoded: false)) }
+		let findings = try await Core.cancellable { try await session.exportActualZip(to: staged.path(percentEncoded: false), cancel: $0) }
 		do {
 			try Self.place(staged, at: destination)
 		} catch {
@@ -139,6 +139,12 @@ final class CoreBudgetSession: BudgetSession {
 	func budgetMonth(_ month: Month, today: String) async throws -> BudgetMonth {
 		let session = session
 		return try await Core.run { try session.budgetMonth(month: month, today: today) }
+	}
+
+	/// WS-SESSION's goals query isn't exported yet (ws/session-3), so a real
+	/// budget shows no goal cards until it is.
+	func goals(_ month: Month, today: String) async throws -> [GoalSummary] {
+		[]
 	}
 
 	func perform(_ command: Command) async throws {

@@ -48,6 +48,7 @@ struct EnvelopeRowView: View {
 			available
 		}
 		.frame(height: dense ? Size.rowDense : Size.row)
+		.opacity(envelope.hidden ? 0.5 : 1)
 		.background(isSelected || field != nil ? AnyShapeStyle(.accentSoft) : AnyShapeStyle(.clear))
 		.motion(.fast, value: isSelected)
 		.contentShape(.rect)
