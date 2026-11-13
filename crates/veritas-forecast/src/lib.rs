@@ -31,7 +31,7 @@ pub use projection::{
 	Comparison, Forecaster, HORIZONS, HorizonForecast, MonthForecast, Projection,
 };
 pub use scenario::{MAX_COMPARED, cadence_dates, validate as validate_scenario};
-pub use schedules::{NotRepeated, ScheduledFlows, Unforecast};
+pub use schedules::{EscrowSource, NotRepeated, ScheduledFlows, Unforecast};
 pub use suggest::{Basis, Envelope, Suggestion, Suggestions, next_month_envelopes};
 pub use wrapped::{
 	CategoryRank, Change, GroupRank, NoSpend, PayeeRank, PriorYear, Redacted, Streak, Wrapped,
