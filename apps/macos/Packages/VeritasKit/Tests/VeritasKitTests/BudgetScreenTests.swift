@@ -109,10 +109,14 @@ struct BudgetScreenTests {
 	}
 
 	@Test func goalsLoadWithTheMonth() async {
-		session.goals = [GoalSummary(id: "g", categoryID: "c", name: "New laptop", target: 150_000, available: 112_000, targetMonth: Month(year: 2027, month: 3), status: .onTrack)]
+		session.goals = [
+			Self.goal("laptop", state: .active, available: 112_000, target: 150_000),
+			Self.goal("tires", state: .closed, available: 0, target: 85_000)
+		]
 		let screen = await openScreen()
-		#expect(screen.goals.map(\.name) == ["New laptop"])
+		#expect(screen.goals.map(\.id) == ["laptop"], "closed goals stay off the overview")
 		#expect(abs(screen.goals[0].progress - 0.7467) < 0.001)
+		#expect(screen.goals[0].targetMonth == Month(year: 2027, month: 3))
 	}
 
 	@Test func goalCardsRoundToWholeUnits() {
@@ -120,6 +124,68 @@ struct BudgetScreenTests {
 		#expect(format.wholeCurrency(112_000) == "$1,120")
 		#expect(format.wholeCurrency(41_050) == "$411")
 		#expect(format.wholeCurrency(-41_049) == "\u{2212}$410")
+	}
+
+	@Test func deletingAnEnvelopeWithHistoryArchivesItInstead() async {
+		// R-BUD-5
+		let screen = await openScreen()
+		#expect(await screen.removal(for: "rent") == .delete)
+		session.history = CategoryHistory(transactions: 12, budgetedMonths: 3)
+		#expect(await screen.removal(for: "rent") == .archive(transactions: 12, budgetedMonths: 3))
+	}
+
+	@Test func categoryAndGroupEditsSendTheirCommands() async {
+		let screen = await openScreen()
+		#expect(await screen.createEnvelope(in: "housing", named: "Water"))
+		#expect(await screen.renameEnvelope("rent", to: "Mortgage"))
+		await screen.moveEnvelope("rent", to: "everyday", before: "dining")
+		await screen.moveEnvelope("rent", to: "everyday", before: "rent")
+		await screen.archive("dining")
+		#expect(await screen.delete("dining", movingHistoryTo: "groceries"))
+		await screen.moveGroup("housing", before: nil)
+		await screen.setGroupHidden("housing", true)
+		#expect(session.commands == [
+			.createCategory(groupId: "housing", name: "Water"),
+			.renameCategory(categoryId: "rent", name: "Mortgage"),
+			.moveCategory(categoryId: "rent", groupId: "everyday", beforeCategoryId: "dining"),
+			.archiveCategory(categoryId: "dining"),
+			.deleteCategoryMovingHistory(categoryId: "dining", toCategoryId: "groceries"),
+			.moveCategoryGroup(groupId: "housing", beforeGroupId: nil),
+			.setCategoryGroupHidden(groupId: "housing", hidden: true)
+		])
+	}
+
+	@Test func goalsSplitIntoOpenAndArchiveAndOnlyOpenOnesRetarget() async {
+		session.goals = [
+			Self.goal("laptop", state: .active, available: 112_000, target: 150_000),
+			Self.goal("tires", state: .reachedSpent, available: 2_000, target: 85_000),
+			Self.goal("vet", state: .closed, available: 0, target: 120_000)
+		]
+		let workspace = WorkspaceModel(library: BudgetFakeLibrary(session: session), format: MoneyFormat())
+		await workspace.reopen(directory: URL(filePath: "/tmp/budget"))
+		let goals = GoalsScreenModel(workspace: workspace, reader: CoreAmountReader(budgetDecimalPlaces: 2))
+		await goals.load()
+		#expect(goals.open.map(\.id) == ["laptop", "tires"])
+		#expect(goals.archive.map(\.id) == ["vet"])
+		#expect(!(await goals.retarget(goals.archive[0], target: 1, date: nil)), "a closed goal is reopened first")
+		#expect(!session.goals[1].canRetarget, "a spent goal is reopened or closed, not re-targeted")
+		#expect(await goals.close(goals.open[1], releaseTo: "groceries", alsoMoveLater: false))
+		#expect(session.commands == [.closeGoal(goalId: "tires", releaseToCategoryId: "groceries", alsoMoveLater: false)])
+	}
+
+	@Test func budgetCellsUseTheCurrencysPlaces() async throws {
+		// D63: a 0-place currency shows and reads whole units.
+		let field = AmountFieldModel(amount: 5_000, style: .commaDot, reader: CoreAmountReader(budgetDecimalPlaces: 0))
+		#expect(field.text == "5,000")
+		#expect(await field.commit() == 5_000)
+	}
+
+	static func goal(_ id: String, state: GoalState, available: Int64, target: Int64) -> GoalSummary {
+		GoalSummary(
+			id: id, categoryId: id, name: id.capitalized, target: target, targetDate: "2027-03-01", icon: nil, color: nil,
+			state: state, available: available, spent: 0, suggestedMonthly: state == .active ? 7_600 : nil, monthsLeft: 5,
+			reachedMonth: nil, closedMonth: state == .closed ? Month(year: 2026, month: 8) : nil, laterBudget: [], newActivity: false
+		)
 	}
 
 	@Test func todayIsTheLocalCivilDate() {
@@ -144,9 +210,14 @@ final class BudgetFakeSession: BudgetSession, @unchecked Sendable {
 	var commands: [Command] = []
 	var hideRent = false
 	var goals: [GoalSummary] = []
+	var history = CategoryHistory(transactions: 0, budgetedMonths: 0)
 
-	func goals(_ month: Month, today: String) async throws -> [GoalSummary] {
+	func goals(today: String) async throws -> [GoalSummary] {
 		goals
+	}
+
+	func categoryHistory(_ categoryID: String) async throws -> CategoryHistory {
+		history
 	}
 
 	func overview() async throws -> BudgetOverview {

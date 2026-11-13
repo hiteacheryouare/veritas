@@ -10,11 +10,20 @@ public protocol AmountReader: Sendable {
 	func evaluate(_ text: String, style: NumberStyle) async throws -> Int64
 }
 
+/// The register's amounts are always two places; budget cells and goal
+/// amounts use the currency's own places (D63).
 public struct CoreAmountReader: AmountReader {
-	public init() {}
+	public let budgetDecimalPlaces: UInt8?
+
+	public init(budgetDecimalPlaces: UInt8? = nil) {
+		self.budgetDecimalPlaces = budgetDecimalPlaces
+	}
 
 	public func editText(_ amount: Int64, style: NumberStyle) -> String {
-		(try? amountEditText(amount: amount, style: style)) ?? ""
+		if let places = budgetDecimalPlaces {
+			return (try? budgetAmountEditText(amount: amount, style: style, decimalPlaces: places)) ?? ""
+		}
+		return (try? amountEditText(amount: amount, style: style)) ?? ""
 	}
 
 	public func fieldText(original: String, typed: String) -> String {
@@ -22,7 +31,11 @@ public struct CoreAmountReader: AmountReader {
 	}
 
 	public func evaluate(_ text: String, style: NumberStyle) async throws -> Int64 {
-		try await Core.run { try evaluateAmount(text: text, style: style) }
+		let places = budgetDecimalPlaces
+		return try await Core.run {
+			if let places { return try evaluateBudgetAmount(text: text, style: style, decimalPlaces: places) }
+			return try evaluateAmount(text: text, style: style)
+		}
 	}
 }
 

@@ -1,40 +1,40 @@
 import Foundation
 import VeritasCore
 
-/// One goal as the Budget overview and the Goals screen show it (R-GOAL-1/3,
-/// D66). The core decides the status and the monthly amount a goal needs.
-public struct GoalSummary: Hashable, Identifiable, Sendable {
-	public enum Status: Hashable, Sendable {
-		/// On pace to reach the target by `targetMonth`.
-		case onTrack
-		/// Needs `monthly` a month from now on to reach the target in time.
-		case behind(monthly: Int64)
-		case reached
-		/// Reached, then spent: no refill suggestion until it's reopened (D66).
-		case spent
-	}
+extension GoalSummary: Identifiable {}
 
-	public let id: String
-	public let categoryID: String
-	public let name: String
-	public let target: Int64
-	public let available: Int64
-	public let targetMonth: Month?
-	public let status: Status
-
-	public init(id: String, categoryID: String, name: String, target: Int64, available: Int64, targetMonth: Month?, status: Status) {
-		self.id = id
-		self.categoryID = categoryID
-		self.name = name
-		self.target = target
-		self.available = available
-		self.targetMonth = targetMonth
-		self.status = status
-	}
-
+public extension GoalSummary {
 	/// How full the ring is: available over target, 0 to 1.
-	public var progress: Double {
+	var progress: Double {
 		guard target > 0 else { return 0 }
 		return min(max(Double(available) / Double(target), 0), 1)
+	}
+
+	/// A goal that was reached reads as reached on its card, even once it's
+	/// spent: a full ring and the target as its progress (design/mockups/goals.html).
+	var wasReached: Bool {
+		state == .reached || state == .reachedSpent
+	}
+
+	var ringProgress: Double {
+		wasReached ? 1 : progress
+	}
+
+	var shownProgress: Int64 {
+		state == .reachedSpent ? target : available
+	}
+
+	var targetMonth: Month? {
+		guard let targetDate, let month = try? parseMonth(text: String(targetDate.prefix(7))) else { return nil }
+		return month
+	}
+
+	var isOpen: Bool {
+		state != .closed
+	}
+
+	/// Re-targeting needs an open goal; a closed one is reopened first.
+	var canRetarget: Bool {
+		state == .active || state == .reached
 	}
 }

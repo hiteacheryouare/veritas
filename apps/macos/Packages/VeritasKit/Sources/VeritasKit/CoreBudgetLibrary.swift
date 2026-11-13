@@ -57,7 +57,10 @@ public struct CoreBudgetLibrary: BudgetLibrary {
 	/// Actual's own currency list, in its order. "None" has an empty code.
 	public func currencies() async throws -> [CurrencyOption] {
 		try await Core.run { try VeritasCore.currencies() }.map { currency in
-			CurrencyOption(code: currency.code, name: currency.name, symbol: currency.symbol, numberStyle: currency.numberFormat)
+			CurrencyOption(
+				code: currency.code, name: currency.name, symbol: currency.symbol,
+				numberStyle: currency.numberFormat, decimalPlaces: currency.decimalPlaces
+			)
 		}
 	}
 

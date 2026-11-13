@@ -7,37 +7,23 @@ import VeritasKit
 struct GoalCard: View {
 	let goal: GoalSummary
 	let format: MoneyFormat
-	@Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+	private var words: GoalWords { GoalWords(goal, format: format) }
 
 	var body: some View {
 		HStack(spacing: Spacing.s3) {
-			ZStack {
-				Circle().stroke(Color.track, lineWidth: 5)
-				Circle()
-					.trim(from: 0, to: goal.progress)
-					.stroke(Color(tone.fill), style: StrokeStyle(lineWidth: 5, lineCap: .round))
-					.rotationEffect(.degrees(-90))
-			}
-			.frame(width: Size.ring, height: Size.ring)
-			.padding(2.5)
-			.motion(.fast, value: goal.progress)
-			.accessibilityHidden(true)
+			GoalRing(goal: goal, tone: words.tone, size: Size.ring, lineWidth: 5)
 			VStack(alignment: .leading, spacing: 2) {
 				Text(goal.name)
 					.font(.text(.body, weight: .semibold))
-				HStack(spacing: 4) {
-					Text(format.wholeCurrency(goal.available)).font(.figures(.body, weight: .semibold))
-					Text("of")
-					Text(format.wholeCurrency(goal.target)).font(.figures(.body, weight: .semibold))
-				}
-				.font(.text(.body))
+				GoalProgress(goal: goal, format: format)
 				Label {
-					Text(note)
+					Text(words.note)
 				} icon: {
-					Image(systemName: tone.symbol ?? "checkmark.circle").imageScale(.small)
+					Image(systemName: words.tone.symbol ?? "checkmark.circle").imageScale(.small)
 				}
 				.font(.text(.caption))
-				.foregroundStyle(Color(tone.text))
+				.foregroundStyle(Color(words.tone.text))
 				.lineLimit(1)
 				.fixedSize()
 				.padding(.top, 1)
@@ -51,35 +37,47 @@ struct GoalCard: View {
 		.background(.surfaceGrouped, in: .rect(cornerRadius: Radius.section))
 		.overlay(RoundedRectangle(cornerRadius: Radius.section).strokeBorder(Color.edgeGrouped))
 		.accessibilityElement(children: .ignore)
-		.accessibilityLabel("\(goal.name), \(format.wholeCurrency(goal.available)) of \(format.wholeCurrency(goal.target)), \(note)")
+		.accessibilityLabel("\(goal.name), \(format.wholeCurrency(goal.shownProgress)) of \(format.wholeCurrency(goal.target)), \(words.note)")
 		.accessibilityIdentifier("goal.\(goal.id)")
 	}
+}
 
-	private var tone: VeritasDesign.MoneyTone {
-		switch goal.status {
-		case .behind: .low
-		default: .available
+struct GoalProgress: View {
+	let goal: GoalSummary
+	let format: MoneyFormat
+
+	var body: some View {
+		HStack(spacing: 4) {
+			Text(format.wholeCurrency(goal.shownProgress)).font(.figures(.body, weight: .semibold))
+			Text("of")
+			Text(format.wholeCurrency(goal.target)).font(.figures(.body, weight: .semibold))
 		}
+		.font(.text(.body))
 	}
+}
 
-	private var note: String {
-		switch goal.status {
-		case .onTrack:
-			goal.targetMonth.map { "On track for \(Self.monthName($0))" } ?? "On track"
-		case .behind(let monthly):
-			"Behind, needs \(format.wholeCurrency(monthly)) a month"
-		case .reached:
-			"Reached"
-		case .spent:
-			"Reached → Spent"
+struct GoalRing: View {
+	let goal: GoalSummary
+	let tone: VeritasDesign.MoneyTone
+	let size: CGFloat
+	let lineWidth: CGFloat
+	var showsPercent = false
+
+	var body: some View {
+		ZStack {
+			Circle().stroke(Color.track, lineWidth: lineWidth)
+			Circle()
+				.trim(from: 0, to: goal.ringProgress)
+				.stroke(Color(tone == .neutral ? ColorToken.moneyNeutral : tone.fill), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+				.rotationEffect(.degrees(-90))
+			if showsPercent {
+				Text(goal.ringProgress, format: .percent.precision(.fractionLength(0)))
+					.font(.figures(.title, weight: .bold))
+			}
 		}
-	}
-
-	static func monthName(_ month: Month) -> String {
-		var parts = DateComponents()
-		parts.year = Int(month.year)
-		parts.month = Int(month.month)
-		parts.day = 1
-		return Calendar.current.date(from: parts)?.formatted(.dateTime.month(.wide)) ?? ""
+		.frame(width: size, height: size)
+		.padding(lineWidth / 2)
+		.motion(.fast, value: goal.ringProgress)
+		.accessibilityHidden(true)
 	}
 }

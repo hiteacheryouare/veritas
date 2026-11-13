@@ -9,11 +9,15 @@ struct BudgetScreen: View {
 	@Bindable var workspace: WorkspaceModel
 	@State private var screen: BudgetScreenModel
 	@State private var isMovingBudget = false
+	@State private var isAddingGroup = false
 	@FocusState private var hasKeyFocus: Bool
 
 	init(workspace: WorkspaceModel, screen: BudgetScreenModel? = nil) {
 		self.workspace = workspace
-		_screen = State(initialValue: screen ?? BudgetScreenModel(workspace: workspace, reader: CoreAmountReader()))
+		_screen = State(initialValue: screen ?? BudgetScreenModel(
+			workspace: workspace,
+			reader: CoreAmountReader(budgetDecimalPlaces: workspace.budgetDecimalPlaces)
+		))
 	}
 
 	var body: some View {
@@ -40,6 +44,19 @@ struct BudgetScreen: View {
 						EnvelopeColumns(dense: false)
 						groups(sheet)
 					}
+					Button {
+						isAddingGroup = true
+					} label: {
+						Label("New group", systemImage: "plus")
+					}
+					.disabled(screen.isReadOnly)
+					.padding(.top, Spacing.s3)
+					.popover(isPresented: $isAddingGroup, arrowEdge: .bottom) {
+						NamePrompt(title: "New group", action: "Add group") { name in
+							await screen.createGroup(named: name)
+						}
+					}
+					.accessibilityIdentifier("budget.newGroup")
 				}
 			}
 			.padding(.top, Spacing.s2)

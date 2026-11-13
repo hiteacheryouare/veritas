@@ -10,8 +10,12 @@ struct EnvelopeRowView: View {
 	let isIncome: Bool
 	let screen: BudgetScreenModel
 	let dense: Bool
+	let groupID: String
 	@State private var isCovering = false
 	@State private var isEditingNote = false
+	@State private var isRenaming = false
+	@State private var removal: BudgetScreenModel.Removal?
+	@State private var isMovingHistory = false
 	@Environment(\.accessibilityReduceMotion) private var reduceMotion
 
 	private var isSelected: Bool { screen.selection == envelope.id }
@@ -56,6 +60,37 @@ struct EnvelopeRowView: View {
 		.contextMenu { menu }
 		.popover(isPresented: $isEditingNote, arrowEdge: .trailing) {
 			NotePopover(screen: screen, envelope: envelope)
+		}
+		.popover(isPresented: $isRenaming, arrowEdge: .bottom) {
+			NamePrompt(title: "Rename envelope", action: "Rename", name: envelope.name) { name in
+				await screen.renameEnvelope(envelope.id, to: name)
+			}
+		}
+		.confirmationDialog("Delete \(envelope.name)?", isPresented: Binding(get: { removal == .delete }, set: { if !$0 { removal = nil } })) {
+			Button("Delete", role: .destructive) { Task { await screen.delete(envelope.id) } }
+		} message: {
+			Text("It has no transactions or budget.")
+		}
+		.alert(archiveTitle, isPresented: Binding(get: { isArchive }, set: { if !$0 { removal = nil } })) {
+			Button("Archive") { Task { await screen.archive(envelope.id) } }
+				.keyboardShortcut(.defaultAction)
+			Button("Delete and Move History…", role: .destructive) { isMovingHistory = true }
+			Button("Cancel", role: .cancel) {}
+		} message: {
+			Text(archiveMessage)
+		}
+		.sheet(isPresented: $isMovingHistory) {
+			if case .archive(let transactions, let months) = archivedHistory {
+				DeleteMovingHistorySheet(screen: screen, envelope: envelope, transactions: transactions, budgetedMonths: months)
+			}
+		}
+		.draggable(BudgetDrag.envelope(envelope.id)) {
+			Text(envelope.name).padding(Spacing.s2)
+		}
+		.dropDestination(for: String.self) { items, _ in
+			guard let item = items.first.flatMap(BudgetDrag.parse), !item.isGroup else { return false }
+			Task { await screen.moveEnvelope(item.id, to: groupID, before: envelope.id) }
+			return true
 		}
 		.accessibilityElement(children: .contain)
 		.accessibilityLabel(Self.spoken(envelope, isIncome: isIncome, format: screen.format))
@@ -127,6 +162,32 @@ struct EnvelopeRowView: View {
 			Divider()
 		}
 		Button(envelope.note == nil ? "Add Note…" : "Edit Note…") { isEditingNote = true }
+		Divider()
+		Button("Rename…") { isRenaming = true }
+		Button(envelope.hidden ? "Show" : "Hide") { Task { await screen.setHidden(envelope.id, !envelope.hidden) } }
+		Button("Delete…") {
+			Task {
+				removal = await screen.removal(for: envelope.id)
+				if case .archive = removal { archivedHistory = removal }
+			}
+		}
+	}
+
+	@State private var archivedHistory: BudgetScreenModel.Removal?
+
+	private var isArchive: Bool {
+		if case .archive = removal { return true }
+		return false
+	}
+
+	private var archiveTitle: String {
+		"Archive \(envelope.name)?"
+	}
+
+	/// R-BUD-5: deleting an envelope with history archives it instead.
+	private var archiveMessage: String {
+		guard case .archive(let transactions, let months) = removal else { return "" }
+		return "It has \(DeleteMovingHistorySheet.count(transactions, "transaction")) and budget in \(DeleteMovingHistorySheet.count(months, "month")), so Veritas archives it instead of deleting it. It's hidden, and its history stays in reports."
 	}
 
 	/// design/interaction.md: rows read as a sentence.

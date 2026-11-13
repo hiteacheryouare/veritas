@@ -157,10 +157,45 @@ public final class WorkspaceModel {
 		}
 	}
 
-	public func goals(_ month: Month) async -> [GoalSummary] {
+	public func goals() async -> [GoalSummary] {
 		guard let session else { return [] }
-		return (try? await session.goals(month, today: Self.today())) ?? []
+		do {
+			return try await session.goals(today: Self.today())
+		} catch {
+			present(error, isRefresh: true)
+			return []
+		}
 	}
+
+	public func goalClosePreview(_ goalID: String, releaseTo: String?) async -> GoalClosePreview? {
+		guard let session else { return nil }
+		do {
+			return try await session.goalClosePreview(goalID, releaseTo: releaseTo, today: Self.today())
+		} catch {
+			present(error)
+			return nil
+		}
+	}
+
+	public func categoryHistory(_ categoryID: String) async -> CategoryHistory? {
+		guard let session else { return nil }
+		do {
+			return try await session.categoryHistory(categoryID)
+		} catch {
+			present(error)
+			return nil
+		}
+	}
+
+	/// D62: a code Actual doesn't know uses 2 places.
+	private func decimalPlaces(for code: String?) async -> UInt8 {
+		guard let code, let currencies = try? await library.currencies() else { return 2 }
+		return currencies.first { $0.code == code }?.decimalPlaces ?? 2
+	}
+
+	/// The budget currency's decimal places (D63): budget cells and goal
+	/// amounts use them; the register always uses two.
+	public private(set) var budgetDecimalPlaces: UInt8 = 2
 
 	/// Runs one command. Errors are shown here; `false` means nothing changed.
 	@discardableResult
@@ -338,6 +373,7 @@ public final class WorkspaceModel {
 			}
 			self.settings = settings
 			startMaintenance(of: opened)
+			budgetDecimalPlaces = await decimalPlaces(for: overview.currencyCode)
 			await settings.connectBackupFolder()
 			await settings.backUpIfDue()
 		} catch {

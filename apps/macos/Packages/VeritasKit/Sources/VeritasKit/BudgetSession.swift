@@ -42,6 +42,7 @@ public struct BudgetOverview: Hashable, Sendable {
 	public let format: MoneyFormat?
 	/// How amount fields read what's typed: the budget's separators.
 	public let numberStyle: NumberStyle
+	public let currencyCode: String?
 
 	public init(
 		name: String?,
@@ -52,7 +53,8 @@ public struct BudgetOverview: Hashable, Sendable {
 		isChecking: Bool = false,
 		accountGroups: [SidebarGroup],
 		format: MoneyFormat? = nil,
-		numberStyle: NumberStyle = .commaDot
+		numberStyle: NumberStyle = .commaDot,
+		currencyCode: String? = nil
 	) {
 		self.name = name
 		self.directory = directory
@@ -63,6 +65,7 @@ public struct BudgetOverview: Hashable, Sendable {
 		self.accountGroups = accountGroups
 		self.format = format
 		self.numberStyle = numberStyle
+		self.currencyCode = currencyCode
 	}
 
 	public var accounts: [SidebarAccount] {
@@ -104,8 +107,12 @@ public protocol BudgetSession: AnyObject, Sendable {
 	func budgetMonth(_ month: Month, today: String) async throws -> BudgetMonth
 	/// One user action: one transaction and one undo step.
 	func perform(_ command: Command) async throws
-	/// The open goals for `month`, in the order the core shows them.
-	func goals(_ month: Month, today: String) async throws -> [GoalSummary]
+	/// Every goal, closed ones included, in the core's order.
+	func goals(today: String) async throws -> [GoalSummary]
+	/// What closing a goal would move, this month and later (D66).
+	func goalClosePreview(_ goalID: String, releaseTo: String?, today: String) async throws -> GoalClosePreview
+	/// Whether a category has history, which turns delete into Archive (R-BUD-5).
+	func categoryHistory(_ categoryID: String) async throws -> CategoryHistory
 }
 
 /// The budgets in the app's budgets folder: new ones, Actual imports and reopened ones.

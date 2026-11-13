@@ -27,7 +27,8 @@ final class CoreBudgetSession: BudgetSession {
 				})
 			},
 			format: overview.numberFormat.map(MoneyFormat.init),
-			numberStyle: overview.numberFormat?.style ?? .commaDot
+			numberStyle: overview.numberFormat?.style ?? .commaDot,
+			currencyCode: overview.numberFormat?.currency
 		)
 	}
 
@@ -141,10 +142,19 @@ final class CoreBudgetSession: BudgetSession {
 		return try await Core.run { try session.budgetMonth(month: month, today: today) }
 	}
 
-	/// WS-SESSION's goals query isn't exported yet (ws/session-3), so a real
-	/// budget shows no goal cards until it is.
-	func goals(_ month: Month, today: String) async throws -> [GoalSummary] {
-		[]
+	func goals(today: String) async throws -> [GoalSummary] {
+		let session = session
+		return try await Core.run { try session.goals(today: today) }
+	}
+
+	func goalClosePreview(_ goalID: String, releaseTo: String?, today: String) async throws -> GoalClosePreview {
+		let session = session
+		return try await Core.run { try session.goalClosePreview(goalId: goalID, releaseToCategoryId: releaseTo, today: today) }
+	}
+
+	func categoryHistory(_ categoryID: String) async throws -> CategoryHistory {
+		let session = session
+		return try await Core.run { try session.categoryHistory(categoryId: categoryID) }
 	}
 
 	func perform(_ command: Command) async throws {

@@ -71,7 +71,7 @@ public final class BudgetScreenModel {
 		guard let loaded = await workspace.budgetMonth(month) else { return }
 		sheet = loaded
 		month = loaded.month
-		goals = await workspace.goals(loaded.month)
+		goals = await workspace.goals().filter(\.isOpen)
 		if let selection, !envelopeIDs.contains(selection) {
 			self.selection = nil
 		}
@@ -182,6 +182,73 @@ public final class BudgetScreenModel {
 
 	public func setNote(_ id: String, _ text: String) async {
 		if await workspace.perform(.setCategoryNote(categoryId: id, text: text)) { await load() }
+	}
+
+	/// What happens when the user deletes an envelope (R-BUD-5): one with
+	/// history is archived instead, and a real delete moves its history.
+	public enum Removal: Hashable, Sendable {
+		case delete
+		case archive(transactions: UInt64, budgetedMonths: UInt64)
+	}
+
+	public func removal(for id: String) async -> Removal? {
+		guard let history = await workspace.categoryHistory(id) else { return nil }
+		if history.transactions == 0, history.budgetedMonths == 0 { return .delete }
+		return .archive(transactions: history.transactions, budgetedMonths: history.budgetedMonths)
+	}
+
+	@discardableResult
+	public func run(_ command: Command) async -> Bool {
+		let done = await workspace.perform(command)
+		if done { await load() }
+		return done
+	}
+
+	public func createEnvelope(in groupID: String, named name: String) async -> Bool {
+		await run(.createCategory(groupId: groupID, name: name))
+	}
+
+	public func renameEnvelope(_ id: String, to name: String) async -> Bool {
+		await run(.renameCategory(categoryId: id, name: name))
+	}
+
+	public func setHidden(_ id: String, _ hidden: Bool) async {
+		await run(.setCategoryHidden(categoryId: id, hidden: hidden))
+	}
+
+	public func archive(_ id: String) async {
+		await run(.archiveCategory(categoryId: id))
+	}
+
+	public func delete(_ id: String) async {
+		await run(.deleteCategory(categoryId: id))
+	}
+
+	public func delete(_ id: String, movingHistoryTo destination: String) async -> Bool {
+		await run(.deleteCategoryMovingHistory(categoryId: id, toCategoryId: destination))
+	}
+
+	/// Drops `id` before `beforeID` in `groupID`, or at the end when `beforeID` is `nil`.
+	public func moveEnvelope(_ id: String, to groupID: String, before beforeID: String?) async {
+		guard id != beforeID else { return }
+		await run(.moveCategory(categoryId: id, groupId: groupID, beforeCategoryId: beforeID))
+	}
+
+	public func createGroup(named name: String) async -> Bool {
+		await run(.createCategoryGroup(name: name))
+	}
+
+	public func renameGroup(_ id: String, to name: String) async -> Bool {
+		await run(.renameCategoryGroup(groupId: id, name: name))
+	}
+
+	public func setGroupHidden(_ id: String, _ hidden: Bool) async {
+		await run(.setCategoryGroupHidden(groupId: id, hidden: hidden))
+	}
+
+	public func moveGroup(_ id: String, before beforeID: String?) async {
+		guard id != beforeID else { return }
+		await run(.moveCategoryGroup(groupId: id, beforeGroupId: beforeID))
 	}
 
 	/// Envelopes that can give budget: those with money available, in screen order.

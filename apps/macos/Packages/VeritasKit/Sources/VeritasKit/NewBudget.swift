@@ -21,14 +21,16 @@ public struct CurrencyOption: Hashable, Identifiable, Sendable {
 	public let name: String
 	public let symbol: String
 	public let numberStyle: NumberStyle
+	public let decimalPlaces: UInt8
 
 	public var id: String { code }
 
-	public init(code: String, name: String, symbol: String, numberStyle: NumberStyle) {
+	public init(code: String, name: String, symbol: String, numberStyle: NumberStyle, decimalPlaces: UInt8 = 2) {
 		self.code = code
 		self.name = name
 		self.symbol = symbol
 		self.numberStyle = numberStyle
+		self.decimalPlaces = decimalPlaces
 	}
 }
 

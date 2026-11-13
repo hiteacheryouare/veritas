@@ -127,6 +127,39 @@ struct BudgetScreenshotTests {
 		try render(CoverPopover(screen: screen, envelope: dining), named: "cover-overspending")
 	}
 
+	@Test func goals() async throws {
+		let (workspace, goals) = await openGoals()
+		try render(GoalsScreen(workspace: workspace, goals: goals).frame(width: 1100, height: 640), named: "goals")
+	}
+
+	@Test func newGoal() async throws {
+		let (_, goals) = await openGoals()
+		try render(NewGoalSheet(goals: goals), named: "new-goal")
+	}
+
+	@Test func closeGoal() async throws {
+		let (_, goals) = await openGoals()
+		let japan = try #require(goals.open.first { $0.id == "japan" })
+		let destinations = await goals.destinations()
+		let preview = await goals.preview(close: japan, releaseTo: nil)
+		try render(CloseGoalSheet(goals: goals, goal: japan, destinations: destinations, preview: preview), named: "close-goal")
+	}
+
+	@Test func deleteMovingHistory() async throws {
+		let (_, screen) = await openBudget()
+		await screen.load()
+		let dining = try #require(screen.envelope("dining"))
+		try render(DeleteMovingHistorySheet(screen: screen, envelope: dining, transactions: 14, budgetedMonths: 6), named: "delete-moving-history")
+	}
+
+	private func openGoals() async -> (WorkspaceModel, GoalsScreenModel) {
+		let workspace = WorkspaceModel(library: StubLibrary(readOnly: nil, importError: nil), localSettings: InMemoryBudgetSettings(), format: MoneyFormat())
+		await workspace.reopen(directory: StubLaunch.budgetDirectory)
+		let goals = GoalsScreenModel(workspace: workspace, reader: CoreAmountReader(budgetDecimalPlaces: 2))
+		await goals.load()
+		return (workspace, goals)
+	}
+
 	private func openBudget() async -> (WorkspaceModel, BudgetScreenModel) {
 		let workspace = WorkspaceModel(library: StubLibrary(readOnly: nil, importError: nil), localSettings: InMemoryBudgetSettings(), format: MoneyFormat())
 		await workspace.reopen(directory: StubLaunch.budgetDirectory)
@@ -134,7 +167,7 @@ struct BudgetScreenshotTests {
 		return (workspace, screen)
 	}
 
-	private func render(_ view: some View, named name: String) throws {
+	private func render(_ view: some View, named name: String, settle: TimeInterval = 0.4) throws {
 		try FileManager.default.createDirectory(at: Self.output, withIntermediateDirectories: true)
 		for (appearance, suffix) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] {
 			let host = NSHostingView(rootView: view.tint(Color.accent).background(.surfaceRaised))
@@ -144,7 +177,8 @@ struct BudgetScreenshotTests {
 			window.contentView = host
 			host.layoutSubtreeIfNeeded()
 			// The screen loads its month in a task; let it land before drawing.
-			RunLoop.main.run(until: .now.addingTimeInterval(0.4))
+			RunLoop.main.run(until: .now.addingTimeInterval(settle))
+			host.frame.size = host.fittingSize
 			host.layoutSubtreeIfNeeded()
 			let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
 			host.cacheDisplay(in: host.bounds, to: bitmap)

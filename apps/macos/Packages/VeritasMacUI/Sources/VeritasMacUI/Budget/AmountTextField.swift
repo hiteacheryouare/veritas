@@ -17,10 +17,13 @@ struct AmountTextField: NSViewRepresentable {
 
 	let field: AmountFieldModel
 	var alignment: NSTextAlignment = .right
+	/// Off in a form whose first field is something else.
+	var takesFocus = true
 	let exit: (Exit) -> Void
 
 	func makeNSView(context: Context) -> FocusingTextField {
 		let view = FocusingTextField()
+		view.takesFocus = takesFocus
 		view.stringValue = field.text
 		view.alignment = alignment
 		view.font = NSFont.monospacedDigitSystemFont(ofSize: TextSize.body.rawValue, weight: .medium)
@@ -78,6 +81,8 @@ struct AmountTextField: NSViewRepresentable {
 }
 
 final class FocusingTextField: NSTextField {
+	var takesFocus = true
+
 	var hasProblem = false {
 		didSet { layer?.borderWidth = hasProblem ? 1.5 : 0 }
 	}
@@ -88,6 +93,7 @@ final class FocusingTextField: NSTextField {
 		wantsLayer = true
 		layer?.cornerRadius = Radius.field
 		layer?.borderColor = NSColor(Color(ColorToken.moneyOverspent)).cgColor
+		guard takesFocus else { return }
 		window.makeFirstResponder(self)
 		currentEditor()?.selectAll(nil)
 	}
