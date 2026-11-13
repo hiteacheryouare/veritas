@@ -154,6 +154,26 @@ pub fn amount_edit_text(amount: i64, style: NumberStyle) -> Result<String, FfiEr
 	})
 }
 
+/// What a budget cell or goal amount field shows when it opens, at the
+/// currency's `decimal_places` (D63, CLS-12): `amountEditText` for budget
+/// amounts. In a 0-place budget 5000 shows `5,000`, and
+/// `evaluateBudgetAmount` reads that back as 5000.
+#[uniffi::export]
+pub fn budget_amount_edit_text(
+	amount: i64,
+	style: NumberStyle,
+	decimal_places: u8,
+) -> Result<String, FfiError> {
+	guard(|| {
+		Ok(veritas_engine::edit_text_at(
+			veritas_domain::Money::from_minor(amount),
+			engine_format(style),
+			false,
+			decimal_places,
+		))
+	})
+}
+
 /// Actual's single-operator rule, for every keystroke in an amount field: when
 /// the whole text is one operator typed over the selected value, it becomes
 /// `original` followed by that operator, so `+40` adds 40.
@@ -335,6 +355,21 @@ mod tests {
 			evaluate("99999999999999999", 0),
 			Err(FfiError::Overflow)
 		));
+	}
+
+	#[test]
+	fn a_budget_amount_round_trips_through_its_edit_text() {
+		// D63: open the field, commit it unchanged, get the same integer back.
+		for (amount, places, style, shown) in [
+			(5_000, 0, NumberStyle::CommaDot, "5,000"),
+			(-1_234_567, 0, NumberStyle::DotComma, "-1.234.567"),
+			(1_234_567, 3, NumberStyle::CommaDot, "1,234.567"),
+			(123_450, 2, NumberStyle::SpaceComma, "1\u{202f}234,50"),
+		] {
+			let text = budget_amount_edit_text(amount, style, places).unwrap();
+			assert_eq!(text, shown);
+			assert_eq!(evaluate_budget_amount(text, style, places).unwrap(), amount);
+		}
 	}
 
 	#[test]

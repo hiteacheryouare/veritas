@@ -218,6 +218,9 @@ private final class Recorder: ChangeListener, @unchecked Sendable {
 
 	#expect(try evaluateBudgetAmount(text: "5000", style: .commaDot, decimalPlaces: 0) == 5_000)
 	#expect(try evaluateBudgetAmount(text: "12.50+3", style: .commaDot, decimalPlaces: 2) == 1_550)
+	let yen = try budgetAmountEditText(amount: 5_000, style: .commaDot, decimalPlaces: 0)
+	#expect(yen == "5,000")
+	#expect(try evaluateBudgetAmount(text: yen, style: .commaDot, decimalPlaces: 0) == 5_000)
 }
 
 /// What VeritasKit's wrapper does: the Swift task's cancellation reaches the
