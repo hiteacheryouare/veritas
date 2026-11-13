@@ -15,7 +15,7 @@ use crate::background::{OpenCheck, Pending};
 use crate::backup::write_backup;
 use crate::bus::{ChangeListener, ChangeSet, Command, CommandBus, Listeners, Permit, Subscription};
 use crate::cancel::CancelToken;
-use crate::fsio::{io_error, reserve_partial, sweep_stale_folders, sync_dir};
+use crate::fsio::{io_error, reserve_partial, sweep_stale_folders, sync_dir, sync_folder};
 use crate::lock::{Access, WriterLock, acquire};
 use crate::overview::{Overview, account_groups};
 use crate::retention::RetentionPolicy;
@@ -816,6 +816,7 @@ fn build_aside(
 	let staging = reserve_folder(parent, &prefix)?;
 	let inner = staging.join(&folder_name);
 	let built = build(&inner)
+		.and_then(|()| sync_folder(&inner))
 		.and_then(|()| cancel.check())
 		.and_then(|()| std::fs::rename(&inner, budget_dir).map_err(io_error("create", budget_dir)));
 	let _ = std::fs::remove_dir_all(&staging);

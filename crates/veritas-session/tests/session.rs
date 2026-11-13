@@ -1124,3 +1124,47 @@ fn a_crashed_writers_journal_is_recovered_before_the_budget_opens() {
 	assert_eq!(RECOVERIES.get(), 1);
 	assert_eq!(session.read_only(), None);
 }
+
+#[test]
+fn a_hot_journal_left_by_a_killed_writer_is_rolled_back_when_the_budget_opens() {
+	// R-REL-1: a writer dies mid-transaction with pages already spilled into
+	// the file. Copying the file and its journal while the transaction is open
+	// leaves exactly that. Opening must roll the journal back through
+	// veritas_store::recover_after_crash and load the state from before.
+	let (root, dir) = imported("session-hot-journal");
+	let before = {
+		let mut first =
+			Session::<veritas_store::Store>::open(&dir, TestClock::new().options()).unwrap();
+		// Its background check reads the file; let it finish before the writer
+		// needs the file to itself.
+		first.wait_for_open_check();
+		first.data().unwrap().clone()
+	};
+	let writer = Connection::open(dir.join("db.sqlite")).unwrap();
+	writer
+		.execute_batch(
+			"PRAGMA journal_mode = DELETE;
+			PRAGMA cache_size = 1;
+			BEGIN IMMEDIATE;
+			UPDATE accounts SET name = 'Half written';
+			CREATE TABLE spill (x);
+			WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 20000)
+			INSERT INTO spill SELECT randomblob(100) FROM n;",
+		)
+		.unwrap();
+	let crashed = root.path().join("crashed");
+	std::fs::create_dir(&crashed).unwrap();
+	for file in ["db.sqlite", "db.sqlite-journal", "metadata.json"] {
+		std::fs::copy(dir.join(file), crashed.join(file)).unwrap();
+	}
+	drop(writer);
+
+	let mut session =
+		Session::<veritas_store::Store>::open(&crashed, TestClock::new().options()).unwrap();
+
+	assert_eq!(session.read_only(), None);
+	assert_eq!(session.data().unwrap().accounts, before.accounts);
+	assert!(!crashed.join("db.sqlite-journal").exists());
+	session.wait_for_open_check();
+	assert!(!session.audit_report().unwrap().is_corrupt());
+}

@@ -208,10 +208,17 @@ struct Moments(u64);
 
 impl Moments {
 	fn next_delay(&mut self) -> Duration {
+		self.next_delay_up_to(Duration::from_millis(40))
+	}
+
+	fn next_delay_up_to(&mut self, longest: Duration) -> Duration {
 		self.0 ^= self.0 << 13;
 		self.0 ^= self.0 >> 7;
 		self.0 ^= self.0 << 17;
-		Duration::from_micros(self.0 % 40_000)
+		let longest = u64::try_from(longest.as_micros())
+			.unwrap_or(u64::MAX)
+			.max(1);
+		Duration::from_micros(self.0 % longest)
 	}
 }
 
@@ -313,7 +320,10 @@ fn a_killed_create_never_leaves_a_half_made_budget() {
 	for kill in 0..kills {
 		let batch = budgets.join(format!("run-{kill}"));
 		std::fs::create_dir(&batch).unwrap();
-		let heard = run_and_kill_with(&batch, moments.next_delay(), "create_until_killed", || {});
+		// A create flushes every file to the drive before its rename, which takes
+		// longer than an edit, so kills spread wider to land on either side.
+		let delay = moments.next_delay_up_to(Duration::from_millis(400));
+		let heard = run_and_kill_with(&batch, delay, "create_until_killed", || {});
 		let visible: Vec<PathBuf> = std::fs::read_dir(&batch)
 			.unwrap()
 			.map(|entry| entry.unwrap().path())
