@@ -4,15 +4,15 @@ Status: draft for Gate 0. Owner: Fred. Builds on classification.md (cited as CLS
 
 ## ST-1 Net Profit and Net cash flow (R-REP-2)
 
-Definitions are CLS-6. Restated as the Net Profit report layout:
+Definitions are CLS-6. Restated as the Net Profit report layout. The line names here are the Net Profit screen's labels and follow ST-10.1, which supersedes any other wording of them in this file:
 
 | Line | Value |
 |---|---|
 | Income | `income_total` |
-| Expenses (interest, fees, escrow included) | `expense_total` |
+| Expenses | `expense_total` (interest, fees and escrow are included) |
 | **Net Profit** | `income_total - expense_total` |
 | Debt paydown (principal) | `debt_paydown` |
-| Savings contributions | `savings_total` |
+| Savings | `savings_total` |
 | **Net cash flow** | `net_profit - debt_paydown - savings_total` |
 | Unreviewed transfers (only shown when non-zero, shown below Net cash flow, never inside it) | `unreviewed_total` (CLS-6), positive = money out |
 
@@ -231,3 +231,25 @@ Examples (made-up):
 | G-8 Car loan, on-budget | on-budget, kind unset, loan_rate_bps 600, +0 | Credit (loan fields) |
 | G-9 Closed card | closed, kind Liability, 0 | Credit, flagged closed |
 | G-10 Zero-balance new account | on-budget, kind unset, 0, no loan fields | Cash |
+
+## ST-10 Report copy and labels (WS-MAC-REPORTS)
+
+Approved by Ryan on 2026-11-13. Where a mockup and this file differ on wording, the mockup wins on copy and this file wins on numbers. Amounts follow CLS-12: reports are on the register scale, so a stored integer is divided by 100 and shown at the currency's places, rounded at display only. A 0-place budget's report screens stay off until the oracle reproduces CLS-12.12 (CLS-12.13).
+
+- **ST-10.1 Line names, by screen.** ST-10.1 supersedes the wording of ST-1's table, including "Expenses (interest, fees, escrow included)" and "Savings contributions". Each screen has its own names:
+  - **Net Profit screen (ST-1):** Income, Expenses, Net Profit, Debt paydown, Savings, Net cash flow, then Unreviewed transfers (ST-10.2). No note on any line except Unreviewed transfers. The line for `savings_total` is "Savings" here.
+  - **Cash Flow Statement (ST-6, ST-10.7):** its own lines. The `savings_total` line there stays "Savings contributions", with a negative sign.
+  - **Net worth (ST-10.6), Sankey (ST-10.5), Spending by category and Income vs expense (ST-10.8):** the names in those items.
+- **ST-10.2 Unreviewed transfers.** A row below Net cash flow, shown only if any column is non-zero, and then in every column with `0.00` where a column is zero. It shows `unreviewed_total` (CLS-6) with a true minus sign when negative, in a neutral tone: positive means money left the budget, negative means money came in. Its note reads "No category. Positive means money left, negative means money came in. Not in Net cash flow." Example (X-9): Income 100000, Groceries 20000 and an uncategorized transfer from a brokerage into checking of +10000 give `unreviewed_total` -10000, which the row shows as `-100.00` in a 2-place budget, with the note above.
+- **ST-10.3 Category labels.** The same everywhere (Net Profit, Spending by category, the Sankey, drilldowns, exports):
+  - Hidden: "Old Gym (hidden)". Archived: "Old Gym (archived)". A closed goal's category: "Old Gym (closed goal)".
+  - Several at once: one bracket, in the order hidden, archived, closed goal: "Old Gym (hidden, archived)". Every true flag is listed.
+  - A closed goal's category is hidden by the close (DEBT-8.3, GOAL-1), so it reads "Old Gym (hidden, closed goal)". If the user has since unhidden it while the goal is still closed, it reads "Old Gym (closed goal)". A reopened goal is no longer a closed goal and, unhidden by the reopen, carries no bracket.
+  - A deleted category is a prefix and keeps the name: "(deleted) Old Gym" (CLS-1). It can carry the brackets after the name too.
+  - Rows with no category: "Uncategorized (needs review)".
+- **ST-10.4 Negatives.** A negative Expenses total (refunds exceed spending, ST-1.2) shows a true minus sign in a neutral tone. The overspent tone is used only for a negative Net Profit or a negative Net cash flow.
+- **ST-10.5 Sankey labels.** Nodes are named exactly: Refunds and withdrawals; Unreviewed transfers in; Shortfall; Income; Savings; Debt paydown; Income reversals; Unreviewed transfers; Unallocated. A category group or category with no id reads "Uncategorized (needs review)". Unallocated has the caption "Income not yet spent, saved or paid toward debt" and a button "Show income and outflow totals" (ST-8 rule 6). Shortfall has no button: its popover reads "Money drawn from earlier balances" and shows the amount.
+- **ST-10.6 Net worth.** The lines are Assets, Liabilities and Net worth. Liabilities is shown as a positive number (ST-2: assets minus liabilities is net worth).
+- **ST-10.7 Cash flow, compact layout.** These lines always show, in this order: Budget accounts balance (opening), Net Profit, Debt paydown, Savings contributions, Net cash flow, Budget accounts balance (closing). These lines show only when non-zero in the range: Unreviewed transfers, Transfers in transit between budget accounts, Starting balances in budget accounts, Reconciliation adjustments in budget accounts. "Change in budget cash from operations" shows only when Unreviewed transfers shows. Signs are ST-6's: debt paydown and savings are negative. The closing line still equals opening plus change in budget cash from operations plus the other lines, to the cent, whichever lines are hidden, because a hidden line is zero.
+- **ST-10.8 Spending by category and Income vs expense.** Spending by category keeps negative categories in a neutral tone, sorts largest first, and its Total equals `expense_total`. Income vs expense shows Income, Expenses and Net Profit for each month.
+- **ST-10.9 Drilldown link.** "Show N transactions", or "Show 1 transaction" for one, with thousands separators for N from 1,000 up. Nothing is shown for 0.
