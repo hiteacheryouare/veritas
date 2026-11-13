@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use crate::{
 	AccountGroupId, AccountId, AccountKind, BudgetType, CategoryGroupId, CategoryId, CategoryKind,
 	CivilDate, CustomReportId, DashboardPageId, GoalId, GoalStatus, Money, PayeeId, RuleId,
-	ScheduleId, TagId, TransactionId, WidgetId, YearMonth,
+	Scenario, ScenarioId, ScheduleId, TagId, TransactionId, WidgetId, YearMonth,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -288,6 +288,7 @@ pub struct BudgetData {
 	pub custom_reports: BTreeMap<CustomReportId, CustomReportRow>,
 	pub dashboard_pages: BTreeMap<DashboardPageId, DashboardPage>,
 	pub widgets: BTreeMap<WidgetId, Widget>,
+	pub scenarios: BTreeMap<ScenarioId, Scenario>,
 }
 
 impl BudgetData {
@@ -317,6 +318,7 @@ impl BudgetData {
 			custom_reports: BTreeMap::new(),
 			dashboard_pages: BTreeMap::new(),
 			widgets: BTreeMap::new(),
+			scenarios: BTreeMap::new(),
 		}
 	}
 

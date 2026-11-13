@@ -5,9 +5,10 @@ use rusqlite::{Connection, OptionalExtension, Row};
 use veritas_domain::{
 	Account, AccountGroup, AccountGroupId, AccountId, AccountKind, AccountMeta, BudgetCell,
 	BudgetData, BudgetType, Category, CategoryGroup, CategoryGroupId, CategoryId, CategoryKind,
-	CategoryMeta, CivilDate, ConditionsOp, CoreError, FormatPrefs, Goal, GoalId, GoalStatus, Money,
-	Payee, PayeeId, Rule, RuleId, RuleStage, Schedule, ScheduleId, SplitRole, Tag, TagId,
-	Transaction, TransactionId, TransactionMeta,
+	CategoryMeta, CivilDate, ConditionsOp, CoreError, CustomReportId, CustomReportRow,
+	DashboardPage, DashboardPageId, FormatPrefs, Goal, GoalId, GoalStatus, Money, Payee, PayeeId,
+	Rule, RuleId, RuleStage, Schedule, ScheduleId, SplitRole, Tag, TagId, Transaction,
+	TransactionId, TransactionMeta, Widget, WidgetId,
 };
 
 use crate::cells::{
@@ -434,6 +435,7 @@ pub fn load(conn: &Connection) -> Result<Loaded, CoreError> {
 		},
 	)?;
 
+	load_reports(conn, &mut data, &mut skipped)?;
 	load_veritas_tables(conn, &mut data, &mut skipped)?;
 
 	Ok(Loaded {
@@ -529,6 +531,96 @@ fn next_dates(
 		},
 	)?;
 	Ok(dates)
+}
+
+fn load_reports(
+	conn: &Connection,
+	data: &mut BudgetData,
+	skipped: &mut Vec<SkippedRow>,
+) -> Result<(), CoreError> {
+	each_row(
+		conn,
+		"custom_reports",
+		"SELECT id, name, start_date, end_date, date_static, date_range, mode, group_by, \
+		 balance_type, show_empty, show_offbudget, show_hidden, show_uncategorized, \
+		 selected_categories, graph_type, conditions, conditions_op, metadata, interval, \
+		 color_scheme, tombstone, include_current, sort_by, trim_intervals, show_trend_lines \
+		 FROM custom_reports",
+		skipped,
+		|row| {
+			let t = |index| text(at(row, index)?);
+			let n = |index| integer(at(row, index)?);
+			let id = CustomReportId::new(id(row, 0)?);
+			let report = CustomReportRow {
+				id: id.clone(),
+				name: t(1)?,
+				start_date: t(2)?,
+				end_date: t(3)?,
+				date_static: n(4)?,
+				date_range: t(5)?,
+				mode: t(6)?,
+				group_by: t(7)?,
+				balance_type: t(8)?,
+				show_empty: n(9)?,
+				show_offbudget: n(10)?,
+				show_hidden: n(11)?,
+				show_uncategorized: n(12)?,
+				selected_categories: t(13)?,
+				graph_type: t(14)?,
+				conditions: t(15)?,
+				conditions_op: t(16)?,
+				metadata: t(17)?,
+				interval: t(18)?,
+				color_scheme: t(19)?,
+				tombstone: tombstone(at(row, 20)?),
+				include_current: n(21)?,
+				sort_by: t(22)?,
+				trim_intervals: n(23)?,
+				show_trend_lines: n(24)?,
+			};
+			data.custom_reports.insert(id, report);
+			Ok(())
+		},
+	)?;
+	each_row(
+		conn,
+		"dashboard_pages",
+		"SELECT id, name, tombstone FROM dashboard_pages",
+		skipped,
+		|row| {
+			let id = DashboardPageId::new(id(row, 0)?);
+			let page = DashboardPage {
+				id: id.clone(),
+				name: text(at(row, 1)?)?,
+				tombstone: tombstone(at(row, 2)?),
+			};
+			data.dashboard_pages.insert(id, page);
+			Ok(())
+		},
+	)?;
+	each_row(
+		conn,
+		"dashboard",
+		"SELECT id, type, width, height, x, y, meta, tombstone, dashboard_page_id FROM dashboard",
+		skipped,
+		|row| {
+			let id = WidgetId::new(id(row, 0)?);
+			let widget = Widget {
+				id: id.clone(),
+				kind: text(at(row, 1)?)?,
+				width: integer(at(row, 2)?)?,
+				height: integer(at(row, 3)?)?,
+				x: integer(at(row, 4)?)?,
+				y: integer(at(row, 5)?)?,
+				meta: text(at(row, 6)?)?,
+				tombstone: tombstone(at(row, 7)?),
+				page: text(at(row, 8)?)?.map(DashboardPageId::new),
+			};
+			data.widgets.insert(id, widget);
+			Ok(())
+		},
+	)?;
+	Ok(())
 }
 
 fn category_kind(text: &str) -> Cell<CategoryKind> {

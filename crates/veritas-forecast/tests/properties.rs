@@ -8,11 +8,8 @@ mod support;
 
 use proptest::prelude::*;
 use support::*;
-use veritas_domain::{GoalId, PayeeId};
-use veritas_forecast::{
-	Cadence, Certainty, FlowKind, Forecaster, IncomeDelta, KnownFlow, Scenario, ScenarioEvent,
-	wrapped,
-};
+use veritas_domain::{Cadence, GoalId, IncomeDelta, PayeeId, ScenarioChange};
+use veritas_forecast::{Certainty, FlowKind, Forecaster, KnownFlow, wrapped};
 use veritas_reports::classify;
 
 const CATEGORIES: [&str; 8] = [
@@ -105,12 +102,12 @@ fn flow_spec() -> impl Strategy<Value = KnownFlow> {
 		})
 }
 
-fn event_spec() -> impl Strategy<Value = ScenarioEvent> {
+fn event_spec() -> impl Strategy<Value = ScenarioChange> {
 	let month = || (0..14i32).prop_map(|step| ym("2027-01").offset(step).unwrap());
 	prop_oneof![
 		(1..14i32, 1..=28u32, -500_000..500_000i64).prop_map(|(step, day, amount)| {
 			let month = ym("2027-01").offset(step).unwrap();
-			ScenarioEvent::OneTime {
+			ScenarioChange::OneTime {
 				date: date(&format!("{month}-{day:02}")),
 				account: acct("CHK"),
 				category: None,
@@ -125,7 +122,7 @@ fn event_spec() -> impl Strategy<Value = ScenarioEvent> {
 			-50_000..50_000i64
 		)
 			.prop_map(
-				|(month, day, step, weeks, amount)| ScenarioEvent::Recurring {
+				|(month, day, step, weeks, amount)| ScenarioChange::Recurring {
 					start: date(&format!("{month}-{day:02}")),
 					end_month: None,
 					cadence: if weeks {
@@ -139,7 +136,7 @@ fn event_spec() -> impl Strategy<Value = ScenarioEvent> {
 				}
 			),
 		(month(), 0..CATEGORIES.len(), -10_000..10_000i64).prop_map(|(month, category, bp)| {
-			ScenarioEvent::CategoryPercent {
+			ScenarioChange::CategoryPercent {
 				category: cat(CATEGORIES[category]),
 				percent_bp: bp,
 				start_month: month,
@@ -147,7 +144,7 @@ fn event_spec() -> impl Strategy<Value = ScenarioEvent> {
 			}
 		}),
 		(month(), any::<bool>(), -3_000..3_000i64).prop_map(|(month, percent, value)| {
-			ScenarioEvent::IncomeChange {
+			ScenarioChange::IncomeChange {
 				account: acct("CHK"),
 				category: None,
 				change: if percent {
@@ -159,7 +156,7 @@ fn event_spec() -> impl Strategy<Value = ScenarioEvent> {
 				end_month: None,
 			}
 		}),
-		(month(), 0..100_000i64).prop_map(|(month, amount)| ScenarioEvent::GoalContribution {
+		(month(), 0..100_000i64).prop_map(|(month, amount)| ScenarioChange::GoalContribution {
 			goal: GoalId::new("laptop"),
 			amount: cents(amount),
 			start_month: month,
@@ -181,10 +178,10 @@ proptest! {
 		let before = book.budget.clone();
 		let flows_before = flows.clone();
 		let forecaster = Forecaster::new(&book.budget).unwrap();
-		let first = forecaster.project(date(TODAY), &flows, &Scenario::baseline()).unwrap();
-		let scenario = Scenario { name: "What if".to_owned(), events };
-		let comparison = forecaster.compare(date(TODAY), &flows, &[scenario]).unwrap();
-		let after = forecaster.project(date(TODAY), &flows, &Scenario::baseline()).unwrap();
+		let first = forecaster.project(date(TODAY), &flows, None).unwrap();
+		let scenario = scenario("What if", events);
+		let comparison = forecaster.compare(date(TODAY), &flows, &[&scenario]).unwrap();
+		let after = forecaster.project(date(TODAY), &flows, None).unwrap();
 
 		prop_assert_eq!(&book.budget, &before);
 		prop_assert_eq!(&flows, &flows_before);
@@ -205,8 +202,8 @@ proptest! {
 	) {
 		let book = build(&rows);
 		let forecaster = Forecaster::new(&book.budget).unwrap();
-		let scenario = Scenario { name: "What if".to_owned(), events };
-		let projection = forecaster.project(date(TODAY), &flows, &scenario).unwrap();
+		let scenario = scenario("What if", events);
+		let projection = forecaster.project(date(TODAY), &flows, Some(&scenario)).unwrap();
 		let mut worth = projection.net_worth_today.minor();
 		for month in &projection.months {
 			worth += month.net_income.minor();

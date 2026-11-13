@@ -1,111 +1,116 @@
-use chrono::{Days, Months};
-use veritas_domain::{AccountId, CategoryId, CivilDate, CoreError, GoalId, Money, YearMonth};
+use serde_json::json;
+use veritas_domain::{
+	AccountId, Cadence, CategoryId, CivilDate, CoreError, GoalId, IncomeDelta, Money, Scenario,
+	ScenarioChange, ScenarioEvent, YearMonth,
+};
+use veritas_rules::Recurrence;
 
 use crate::math::{round_half_away, to_money};
 
 /// Scenarios compared against the baseline at once (R-FC-2).
 pub const MAX_COMPARED: usize = 3;
 
-/// A recurrence anchored on its start date, as bills repeat: the k-th date is
-/// `start + k * n` months or weeks, never chained from the previous date, so
-/// a month-end anchor comes back to the month end.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Cadence {
-	EveryMonths(u32),
-	EveryWeeks(u32),
-}
-
-impl Cadence {
-	/// Dates from `start` through `last`, inclusive.
-	pub fn dates(self, start: CivilDate, last: CivilDate) -> Result<Vec<CivilDate>, CoreError> {
-		let step = match self {
-			Cadence::EveryMonths(n) | Cadence::EveryWeeks(n) => n,
-		};
-		if step == 0 {
-			return Err(CoreError::Invalid(
-				"a recurring change repeats at least every 1 month or week".to_owned(),
-			));
-		}
-		let mut dates = Vec::new();
-		for k in 0u32.. {
-			let offset = k.checked_mul(step).ok_or(CoreError::Overflow)?;
-			let date = match self {
-				Cadence::EveryMonths(_) => start.naive().checked_add_months(Months::new(offset)),
-				Cadence::EveryWeeks(_) => start
-					.naive()
-					.checked_add_days(Days::new(u64::from(offset) * 7)),
-			}
-			.map(CivilDate::from)
-			.ok_or(CoreError::Overflow)?;
-			if date > last {
-				break;
-			}
-			dates.push(date);
-		}
-		Ok(dates)
+/// Dates of a cadence from `start` through `last`, with the recurrence bills
+/// use (`veritas_rules::Recurrence`), anchored on the start and never on a
+/// weekend move.
+pub fn cadence_dates(
+	cadence: Cadence,
+	start: CivilDate,
+	last: CivilDate,
+) -> Result<Vec<CivilDate>, CoreError> {
+	let (frequency, interval) = match cadence {
+		Cadence::EveryMonths(n) => ("monthly", n),
+		Cadence::EveryWeeks(n) => ("weekly", n),
+	};
+	if interval == 0 {
+		return Err(CoreError::Invalid(
+			"a recurring change repeats at least every 1 month or week".to_owned(),
+		));
 	}
+	let invalid = |error: veritas_rules::RecurError| CoreError::Invalid(error.to_string());
+	let recurrence = Recurrence::parse(&json!({
+		"frequency": frequency,
+		"interval": interval,
+		"start": start.to_string(),
+		"endMode": "never",
+	}))
+	.map_err(invalid)?;
+	let mut dates = Vec::new();
+	let mut from = start.naive();
+	while let Some(date) = recurrence.first_on_or_after(from).map_err(invalid)? {
+		if date > last.naive() {
+			break;
+		}
+		dates.push(CivilDate::from(date));
+		match date.succ_opt() {
+			Some(next) => from = next,
+			None => break,
+		}
+	}
+	Ok(dates)
 }
 
-/// What an income change does to a month's income.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum IncomeDelta {
-	/// Added each month, signed (a raise is positive).
-	Amount(Money),
-	/// Basis points of the month's expected income, signed.
-	Percent(i64),
-}
-
-/// One overlay line (`veritas_scenario_event`). Amounts use Actual's sign:
-/// positive is money in, and every amount changes net worth.
-#[derive(Clone, Debug, PartialEq)]
-pub enum ScenarioEvent {
-	OneTime {
-		date: CivilDate,
-		account: AccountId,
-		category: Option<CategoryId>,
-		amount: Money,
-	},
-	Recurring {
-		start: CivilDate,
-		/// The last month with an occurrence; open-ended when `None`.
-		end_month: Option<YearMonth>,
-		cadence: Cadence,
-		account: AccountId,
-		category: Option<CategoryId>,
-		amount: Money,
-	},
-	/// Changes a category's baseline by `round_half_away(baseline * percent_bp / 10000)`.
-	CategoryPercent {
-		category: CategoryId,
-		percent_bp: i64,
-		start_month: YearMonth,
-		end_month: Option<YearMonth>,
-	},
-	/// A change to expected income, for one income category or, with no
-	/// category, for all of it. The difference posts to `account`.
-	IncomeChange {
-		account: AccountId,
-		category: Option<CategoryId>,
-		change: IncomeDelta,
-		start_month: YearMonth,
-		end_month: Option<YearMonth>,
-	},
-	/// Extra money budgeted to a goal each month. A budget move, so it
-	/// changes the goal's ETA and never a balance or net worth.
-	GoalContribution {
-		goal: GoalId,
-		amount: Money,
-		start_month: YearMonth,
-		end_month: Option<YearMonth>,
-	},
-}
-
-/// A named what-if (R-FC-2): an overlay on the baseline that never touches
-/// the budget it reads.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Scenario {
-	pub name: String,
-	pub events: Vec<ScenarioEvent>,
+/// Checks a scenario before it overlays anything. A what-if is about the
+/// future: a one-time change dated before `today` is rejected, not moved.
+pub fn validate(scenario: &Scenario, today: CivilDate) -> Result<(), CoreError> {
+	let invalid = |text: &str| Err(CoreError::Invalid(format!("{}: {text}", scenario.name)));
+	for event in &scenario.events {
+		let (start, end) = match &event.change {
+			ScenarioChange::OneTime { date, .. } => {
+				if *date < today {
+					return invalid("a one-time change can't be dated before today");
+				}
+				continue;
+			}
+			ScenarioChange::OneTimeTransfer {
+				date,
+				from,
+				to,
+				amount,
+			} => {
+				if *date < today {
+					return invalid("a one-time change can't be dated before today");
+				}
+				if from == to {
+					return invalid("a transfer needs two different accounts");
+				}
+				if *amount <= Money::ZERO {
+					return invalid("a transfer moves a positive amount");
+				}
+				continue;
+			}
+			ScenarioChange::Recurring {
+				start,
+				end_month,
+				cadence,
+				..
+			} => {
+				if matches!(cadence, Cadence::EveryMonths(0) | Cadence::EveryWeeks(0)) {
+					return invalid("a recurring change repeats at least every 1 month or week");
+				}
+				(start.year_month(), *end_month)
+			}
+			ScenarioChange::CategoryPercent {
+				start_month,
+				end_month,
+				..
+			}
+			| ScenarioChange::IncomeChange {
+				start_month,
+				end_month,
+				..
+			}
+			| ScenarioChange::GoalContribution {
+				start_month,
+				end_month,
+				..
+			} => (*start_month, *end_month),
+		};
+		if end.is_some_and(|end| end < start) {
+			return invalid("a change ends before it starts");
+		}
+	}
+	Ok(())
 }
 
 /// A dated scenario cash flow.
@@ -114,76 +119,38 @@ pub(crate) struct ScenarioFlow {
 	pub date: CivilDate,
 	pub account: AccountId,
 	pub amount: Money,
+	/// Set for a transfer: it moves by `-amount`, and net worth doesn't move.
+	pub counterpart: Option<AccountId>,
 }
 
 fn active(month: YearMonth, start: YearMonth, end: Option<YearMonth>) -> bool {
 	start <= month && end.is_none_or(|end| month <= end)
 }
 
-impl Scenario {
-	pub fn baseline() -> Scenario {
-		Scenario::default()
+/// A scenario's events read for one projection; the baseline has none.
+#[derive(Clone, Copy)]
+pub(crate) struct Overlay<'a> {
+	events: &'a [ScenarioEvent],
+}
+
+impl<'a> Overlay<'a> {
+	pub fn new(scenario: Option<&'a Scenario>) -> Overlay<'a> {
+		Overlay {
+			events: scenario.map_or(&[], |scenario| scenario.events.as_slice()),
+		}
 	}
 
-	/// A what-if is about the future: a one-time event dated before `today`
-	/// is rejected rather than moved.
-	pub fn validate(&self, today: CivilDate) -> Result<(), CoreError> {
-		let invalid = |text: &str| Err(CoreError::Invalid(format!("{}: {text}", self.name)));
-		for event in &self.events {
-			let (start, end) = match event {
-				ScenarioEvent::OneTime { date, .. } => {
-					if *date < today {
-						return invalid("a one-time change can't be dated before today");
-					}
-					continue;
-				}
-				ScenarioEvent::Recurring {
-					start,
-					end_month,
-					cadence,
-					..
-				} => {
-					if matches!(cadence, Cadence::EveryMonths(0) | Cadence::EveryWeeks(0)) {
-						return invalid(
-							"a recurring change repeats at least every 1 month or week",
-						);
-					}
-					(start.year_month(), *end_month)
-				}
-				ScenarioEvent::CategoryPercent {
-					start_month,
-					end_month,
-					..
-				}
-				| ScenarioEvent::IncomeChange {
-					start_month,
-					end_month,
-					..
-				}
-				| ScenarioEvent::GoalContribution {
-					start_month,
-					end_month,
-					..
-				} => (*start_month, *end_month),
-			};
-			if end.is_some_and(|end| end < start) {
-				return invalid("a change ends before it starts");
-			}
-		}
-		Ok(())
+	fn changes(self) -> impl Iterator<Item = &'a ScenarioChange> {
+		self.events.iter().map(|event| &event.change)
 	}
 
 	/// One-time and recurring flows dated `today` through `last`. A recurring
 	/// change that started earlier keeps its anchor and contributes from today.
-	pub(crate) fn flows(
-		&self,
-		today: CivilDate,
-		last: CivilDate,
-	) -> Result<Vec<ScenarioFlow>, CoreError> {
+	pub fn flows(self, today: CivilDate, last: CivilDate) -> Result<Vec<ScenarioFlow>, CoreError> {
 		let mut flows = Vec::new();
-		for event in &self.events {
-			match event {
-				ScenarioEvent::OneTime {
+		for change in self.changes() {
+			match change {
+				ScenarioChange::OneTime {
 					date,
 					account,
 					amount,
@@ -194,10 +161,26 @@ impl Scenario {
 							date: *date,
 							account: account.clone(),
 							amount: *amount,
+							counterpart: None,
 						});
 					}
 				}
-				ScenarioEvent::Recurring {
+				ScenarioChange::OneTimeTransfer {
+					date,
+					from,
+					to,
+					amount,
+				} => {
+					if today <= *date && *date <= last {
+						flows.push(ScenarioFlow {
+							date: *date,
+							account: from.clone(),
+							amount: amount.checked_neg()?,
+							counterpart: Some(to.clone()),
+						});
+					}
+				}
+				ScenarioChange::Recurring {
 					start,
 					end_month,
 					cadence,
@@ -205,12 +188,13 @@ impl Scenario {
 					amount,
 					..
 				} => {
-					for date in cadence.dates(*start, last)? {
+					for date in cadence_dates(*cadence, *start, last)? {
 						if today <= date && end_month.is_none_or(|end| date.year_month() <= end) {
 							flows.push(ScenarioFlow {
 								date,
 								account: account.clone(),
 								amount: *amount,
+								counterpart: None,
 							});
 						}
 					}
@@ -223,21 +207,21 @@ impl Scenario {
 
 	/// FC-3: each active change adds `round_half_away(forecast+ * pct / 10000)`
 	/// to the same unadjusted `forecast+`, so changes add and never compound.
-	pub(crate) fn adjust_baseline(
-		&self,
+	pub fn adjust_baseline(
+		self,
 		category: &CategoryId,
 		month: YearMonth,
 		forecast: Money,
 	) -> Result<Money, CoreError> {
 		let forecast = forecast.max(Money::ZERO);
 		let mut adjusted = forecast;
-		for event in &self.events {
-			if let ScenarioEvent::CategoryPercent {
+		for change in self.changes() {
+			if let ScenarioChange::CategoryPercent {
 				category: changed,
 				percent_bp,
 				start_month,
 				end_month,
-			} = event && changed == category
+			} = change && changed == category
 				&& active(month, *start_month, *end_month)
 			{
 				let delta = to_money(round_half_away(
@@ -250,13 +234,13 @@ impl Scenario {
 		Ok(adjusted.max(Money::ZERO))
 	}
 
-	/// Income changes active in `month`, each with the income it applies to.
-	pub(crate) fn income_changes(
-		&self,
+	/// Income changes active in `month`.
+	pub fn income_changes(
+		self,
 		month: YearMonth,
-	) -> impl Iterator<Item = (&AccountId, Option<&CategoryId>, IncomeDelta)> {
-		self.events.iter().filter_map(move |event| match event {
-			ScenarioEvent::IncomeChange {
+	) -> impl Iterator<Item = (&'a AccountId, Option<&'a CategoryId>, IncomeDelta)> {
+		self.changes().filter_map(move |change| match change {
+			ScenarioChange::IncomeChange {
 				account,
 				category,
 				change,
@@ -268,9 +252,9 @@ impl Scenario {
 	}
 
 	/// Extra contribution to `goal` in `month`.
-	pub fn goal_contribution(&self, goal: &GoalId, month: YearMonth) -> Result<Money, CoreError> {
-		Money::checked_sum(self.events.iter().filter_map(|event| match event {
-			ScenarioEvent::GoalContribution {
+	pub fn goal_contribution(self, goal: &GoalId, month: YearMonth) -> Result<Money, CoreError> {
+		Money::checked_sum(self.changes().filter_map(|change| match change {
+			ScenarioChange::GoalContribution {
 				goal: target,
 				amount,
 				start_month,
@@ -281,14 +265,10 @@ impl Scenario {
 	}
 
 	/// The start and end month of each contribution to `goal`.
-	pub(crate) fn goal_contribution_months(
-		&self,
-		goal: &GoalId,
-	) -> Vec<(YearMonth, Option<YearMonth>)> {
-		self.events
-			.iter()
-			.filter_map(|event| match event {
-				ScenarioEvent::GoalContribution {
+	pub fn goal_contribution_months(self, goal: &GoalId) -> Vec<(YearMonth, Option<YearMonth>)> {
+		self.changes()
+			.filter_map(|change| match change {
+				ScenarioChange::GoalContribution {
 					goal: target,
 					start_month,
 					end_month,

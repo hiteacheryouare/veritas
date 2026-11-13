@@ -10,6 +10,37 @@ export type TransactionRef = string | { transferOf: string };
 
 type OpHandler = (session: ActualSession, op: Op) => Promise<unknown>;
 
+// Actual's own budget handlers, called with exactly the arguments its client
+// sends (desktop-client/src/budget/mutations.ts:780-900). Unlike the api.*
+// wrappers they skip the API's month and amount validation.
+// Some of Actual's work outlives the call that started it: the 6- and
+// 12-month averages start one `void setNMonthAvg` per category
+// (budget/actions.ts:311-357), and the sheet recomputes on a later tick after
+// a transaction changes. A person's next click always comes after that work,
+// so `replay` lets it finish before the next op. `apply` and `generate` don't,
+// which keeps the committed fixtures byte-identical.
+const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+
+const BUDGET_ACTIONS = new Set([
+	'budget-amount',
+	'copy-previous-month',
+	'copy-single-month',
+	'set-zero',
+	'set-3month-avg',
+	'set-6month-avg',
+	'set-12month-avg',
+	'set-n-month-avg',
+	'hold-for-next-month',
+	'reset-hold',
+	'cover-overspending',
+	'transfer-available',
+	'cover-overbudgeted',
+	'transfer-category',
+	'copy-until-year-end',
+	'set-carryover',
+	'reset-income-carryover'
+]);
+
 const required = (op: Op, ...fields: string[]) => {
 	const missing = fields.filter(field => op[field] === undefined);
 	if (missing.length > 0) {
@@ -212,6 +243,13 @@ export const opHandlers: Record<string, OpHandler> = {
 			currencyCode: op.currencyCode ?? ''
 		});
 	},
+	budgetAction: ({ internal }, op) => {
+		required(op, 'action', 'args');
+		if (!BUDGET_ACTIONS.has(op.action)) {
+			throw new Error(`"${op.action}" isn't a budget action this op runs. Known: ${[...BUDGET_ACTIONS].join(', ')}`);
+		}
+		return internal.send(`budget/${op.action}`, op.args);
+	},
 	applyTemplates: ({ internal }, op) => {
 		required(op, 'month');
 		return internal.send('budget/apply-goal-template', { month: op.month });
@@ -243,6 +281,24 @@ export const opHandlers: Record<string, OpHandler> = {
 		);
 	},
 	runSchedules: ({ internal }) => internal.send('schedule/force-run-service'),
+	// The schedule list's Skip, Post transaction (today) and Complete or Restart
+	// menu items (dc/components/schedules/index.tsx:48-75).
+	skipSchedule: ({ internal }, op) => {
+		required(op, 'id');
+		return internal.send('schedule/skip-next-date', { id: op.id });
+	},
+	postSchedule: ({ internal }, op) => {
+		required(op, 'id');
+		return internal.send('schedule/post-transaction', { id: op.id, today: Boolean(op.today) });
+	},
+	updateSchedule: ({ internal }, op) => {
+		required(op, 'id');
+		return internal.send('schedule/update', {
+			schedule: { id: op.id, ...op.fields },
+			conditions: op.conditions,
+			resetNextDate: op.resetNextDate
+		});
+	},
 
 	setNote: ({ api }, op) => {
 		required(op, 'id', 'note');
@@ -298,7 +354,7 @@ export const parseOpFile = (text: string): Op[] => {
 	return parsed.ops;
 };
 
-export const applyOps = async (session: ActualSession, ops: Op[]) => {
+export const applyOps = async (session: ActualSession, ops: Op[], { settleEachOp = false } = {}) => {
 	for (const [index, op] of ops.entries()) {
 		const handler = opHandlers[op.op];
 		if (!handler) {
@@ -306,6 +362,9 @@ export const applyOps = async (session: ActualSession, ops: Op[]) => {
 		}
 		try {
 			await handler(session, op);
+			if (settleEachOp) {
+				await settle();
+			}
 		} catch (error) {
 			throw new Error(`Op #${index} (${op.op}) failed: ${(error as Error).message}`, { cause: error });
 		}
