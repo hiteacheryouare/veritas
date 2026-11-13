@@ -839,7 +839,6 @@ fn quick_entry_for_a_merged_payee_uses_the_category_its_old_name_learned() {
 }
 
 #[test]
-#[ignore = "known bug on PR #56: learn_categories matches setter rules on the raw payee id, not the merged one, so it adds a second rule and the old category keeps winning"]
 fn relearning_after_a_merge_updates_the_merged_rule_as_actual_does() {
 	// §4.5: learning updates every `payee is <payee>` setter rule, matched on
 	// the mapped payee, the way Actual's in-memory rules are remapped by
@@ -911,6 +910,55 @@ fn relearning_after_a_merge_updates_the_merged_rule_as_actual_does() {
 		rules_naming(&theirs, &["cafe-a", "cafe-b"]),
 		"one setter rule, now Utilities"
 	);
+}
+
+#[test]
+fn a_one_of_rule_for_a_merged_payee_stops_learning_adding_another() {
+	// §4.5: no new rule is learned when a `payee oneOf […]` rule already sets
+	// the category, and Actual reads that list through payee_mapping. The
+	// list names Cafe A; once Cafe A is merged into Cafe B, Cafe B learning
+	// Groceries finds it and adds nothing.
+	let scratch = Scratch::new("merge-one-of");
+	let Some(oracle) = oracle() else {
+		return;
+	};
+	let (cafes, everyday, groceries, _) = two_cafes(&scratch, &oracle);
+	let base = scratch.join("with-rule.zip");
+	actual_apply(
+		&oracle,
+		&cafes,
+		json!([{"op": "createRule", "id": "cafes-are-groceries",
+			"conditions": [{"op": "oneOf", "field": "payee", "value": ["cafe-a"]}],
+			"actions": [{"op": "set", "field": "category", "value": groceries}]}]),
+		&base,
+		14,
+	);
+
+	let veritas = import(&scratch, &base, "veritas");
+	perform(&veritas, merge_a_into_b());
+	for day in [1, 2, 3] {
+		typed_visit(&veritas, &everyday, day, "cafe-b", Some(&groceries));
+	}
+	let ours_zip = scratch.join("veritas.zip");
+	export(&veritas, &ours_zip);
+	let ours = actual_reads(&oracle, &ours_zip);
+
+	let learned = scratch.join("actual.zip");
+	actual_apply(
+		&oracle,
+		&base,
+		json!([
+			{"op": "mergePayees", "target": "cafe-b", "merge": ["cafe-a"]},
+			{"op": "addTransactions", "account": everyday, "learnCategories": true,
+				"transactions": ([1, 2, 3].map(|day| visit(day, "cafe-b", Some(&groceries))))},
+		]),
+		&learned,
+		15,
+	);
+	let theirs = actual_reads(&oracle, &learned);
+	let rules = rules_naming(&theirs, &["cafe-a", "cafe-b"]);
+	assert_eq!(rules.len(), 1, "Actual keeps only the oneOf rule");
+	assert_eq!(rules_naming(&ours, &["cafe-a", "cafe-b"]), rules);
 }
 
 const SPLIT_ERROR: &str = r#"{"type":"SplitTransactionError","version":1,"difference":-500}"#;

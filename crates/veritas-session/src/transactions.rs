@@ -859,8 +859,39 @@ fn stored(rule: &Rule) -> Option<(Vec<Value>, Vec<Value>)> {
 	Some((conditions, actions))
 }
 
+/// An id as `migrateIds` reads it: one lookup in the union of the category
+/// and payee mappings, which a merge keeps flat.
+fn migrated(data: &BudgetData, id: &Value) -> Value {
+	let Some(raw) = id.as_str() else {
+		return id.clone();
+	};
+	let target = data
+		.resolve_category(&CategoryId::new(raw))
+		.map(CategoryId::as_str)
+		.or_else(|| data.resolve_payee(&PayeeId::new(raw)).map(PayeeId::as_str))
+		.filter(|target| !target.is_empty());
+	Value::String(target.unwrap_or(raw).to_owned())
+}
+
+/// A payee condition or category action as `serialize()` writes it back.
+fn serialized(item: &Value, value: Value) -> Value {
+	let mut out = serde_json::json!({
+		"op": item["op"],
+		"field": item["field"],
+		"value": value,
+		"type": "id",
+	});
+	if let Some(options) = item.get("options").filter(|options| !options.is_null()) {
+		out["options"] = options.clone();
+	}
+	out
+}
+
 /// Updates every `payee is <payee> → set category` rule, or adds one unless
-/// a `payee oneOf […]` rule already sets that category (§4.5).
+/// a `payee oneOf […]` rule already sets that category (§4.5). Rules are read
+/// through the mappings, as Actual's in-memory rules are, so a rule written
+/// for a payee since merged into `payee` is that payee's rule. An update
+/// writes the rule back as Actual serializes it, with the mapped payee.
 fn category_rule(
 	data: &BudgetData,
 	payee: &PayeeId,
@@ -887,23 +918,30 @@ fn category_rule(
 		if !setter(action) || condition["field"] != "description" {
 			continue;
 		}
+		let sets = migrated(data, &action["value"]);
 		let op = condition["op"].as_str().unwrap_or_default();
-		if (op == "is" || op == "isNot") && condition["value"] == payee.as_str() {
+		if op == "is" || op == "isNot" {
+			let names = migrated(data, &condition["value"]);
+			if names != payee.as_str() {
+				continue;
+			}
 			found = true;
-			if action["value"] != category.as_str() {
-				let mut action = action.clone();
-				action["value"] = Value::String(category.to_string());
+			if sets != category.as_str() {
+				let condition = serialized(condition, names);
+				let action = serialized(action, Value::String(category.to_string()));
 				rows.push(Row::Rule(Rule {
+					conditions_json: Value::Array(vec![condition]).to_string(),
 					actions_json: Value::Array(vec![action]).to_string(),
 					..rule.clone()
 				}));
 			}
 		} else if op == "oneOf"
-			&& action["value"] == category.as_str()
-			&& condition["value"]
-				.as_array()
-				.is_some_and(|values| values.iter().any(|v| v == payee.as_str()))
-		{
+			&& sets == category.as_str()
+			&& condition["value"].as_array().is_some_and(|values| {
+				values
+					.iter()
+					.any(|value| migrated(data, value) == payee.as_str())
+			}) {
 			one_of = true;
 		}
 	}
