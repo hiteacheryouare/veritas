@@ -514,6 +514,13 @@ pub fn edit(
 	let existing = top_level(data, id)?;
 	let off = off_budget(data, &draft.account);
 	let moved = existing.account != draft.account;
+	// Actual's status cell on a locked row offers only to unlock it
+	// (TransactionsTable.tsx:1212-1227), so a reconciled row is never unchecked.
+	if existing.reconciled && existing.cleared && !draft.cleared && !moved {
+		return Err(CoreError::Invalid(
+			"That transaction is reconciled. Unlock it before unchecking it.".to_owned(),
+		));
+	}
 	let split = !draft.splits.is_empty();
 	let mut top = Transaction {
 		account: draft.account.clone(),

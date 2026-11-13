@@ -2773,12 +2773,38 @@ mod tests {
 			row(&core, &lunch).cleared,
 			"batch clearing skips reconciled rows"
 		);
+		let mut noted = typed(&checking, -1_500);
+		noted.notes = Some("with Sam".to_owned());
+		noted.cleared = true;
+		core.perform(Command::EditTransaction {
+			transaction_id: lunch.clone(),
+			transaction: noted.clone(),
+		})
+		.unwrap();
+		let mut unchecked = noted;
+		unchecked.cleared = false;
+		let refused = core.perform(Command::EditTransaction {
+			transaction_id: lunch.clone(),
+			transaction: unchecked.clone(),
+		});
+		assert!(
+			matches!(refused, Err(FfiError::Invalid { .. })),
+			"Actual never unchecks a locked row, it only offers to unlock it"
+		);
+		let locked = row(&core, &lunch);
+		assert!(locked.reconciled && locked.cleared);
 		core.perform(Command::UnlockReconciled {
 			transaction_id: lunch.clone(),
 		})
 		.unwrap();
 		let unlocked = row(&core, &lunch);
 		assert!(!unlocked.reconciled && unlocked.cleared);
+		core.perform(Command::EditTransaction {
+			transaction_id: lunch.clone(),
+			transaction: unchecked,
+		})
+		.unwrap();
+		assert!(!row(&core, &lunch).cleared, "once unlocked it unchecks");
 	}
 
 	#[test]
