@@ -5,6 +5,7 @@ mod backup;
 mod budgets;
 mod bus;
 mod cancel;
+pub mod categories;
 mod fsio;
 mod lock;
 mod overview;

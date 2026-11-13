@@ -11,7 +11,8 @@ use crate::budget::BudgetMonth;
 use crate::commands::Command;
 use crate::records::NewBudgetOptions;
 use crate::records::{
-	AuditFinding, BackupInfo, Change, NumberFormat, Overview, Retention, SessionState, SnapshotInfo,
+	AuditFinding, BackupInfo, CategoryHistory, Change, NumberFormat, Overview, Retention,
+	SessionState, SnapshotInfo,
 };
 use crate::{FfiError, Month, guard};
 
@@ -168,6 +169,19 @@ impl<B: Backend> Core<B> {
 
 	pub(crate) fn overview(&self) -> Result<Overview, FfiError> {
 		self.call(|session| session.overview().map(|overview| Overview::from(&overview)))
+	}
+
+	pub(crate) fn category_history(&self, category_id: &str) -> Result<CategoryHistory, FfiError> {
+		self.call(|session| {
+			let history = veritas_session::categories::category_history(
+				session.data()?,
+				&veritas_domain::CategoryId::new(category_id),
+			)?;
+			Ok(CategoryHistory {
+				transactions: history.transactions as u64,
+				budgeted_months: history.budgeted_months as u64,
+			})
+		})
 	}
 
 	pub(crate) fn budget_month(&self, month: Month, today: &str) -> Result<BudgetMonth, FfiError> {
@@ -365,6 +379,12 @@ impl Session {
 
 	/// The Budget screen for `month`, clamped to the months Actual has created.
 	/// `today` is the local civil date, `YYYY-MM-DD`; it decides that range.
+	/// Whether a category can simply be deleted, or has history to archive or
+	/// move first.
+	pub fn category_history(&self, category_id: String) -> Result<CategoryHistory, FfiError> {
+		self.core.category_history(&category_id)
+	}
+
 	pub fn budget_month(&self, month: Month, today: String) -> Result<BudgetMonth, FfiError> {
 		self.core.budget_month(month, &today)
 	}
@@ -1240,5 +1260,293 @@ mod tests {
 			}),
 			Err(FfiError::NotFound { .. })
 		));
+	}
+
+	fn data(core: &Core<veritas_store::Store>) -> veritas_domain::BudgetData {
+		core.call(|session| Ok(session.data()?.clone())).unwrap()
+	}
+
+	/// An expense group of the small fixture with at least two live categories.
+	fn busy_group(data: &veritas_domain::BudgetData) -> (String, Vec<String>) {
+		let mut groups: std::collections::BTreeMap<String, Vec<(f64, String)>> = Default::default();
+		for category in data
+			.categories
+			.values()
+			.filter(|c| !c.tombstone && !c.is_income)
+		{
+			groups
+				.entry(category.group.to_string())
+				.or_default()
+				.push((category.sort_order, category.id.to_string()));
+		}
+		let (group, mut members) = groups.into_iter().find(|(_, m)| m.len() >= 2).unwrap();
+		members.sort_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+		(group, members.into_iter().map(|(_, id)| id).collect())
+	}
+
+	fn created_category(change: &Change) -> String {
+		change
+			.entities
+			.iter()
+			.find(|e| e.kind == crate::EntityKind::Category && e.id.is_some())
+			.and_then(|e| e.id.clone())
+			.unwrap()
+	}
+
+	#[test]
+	fn a_new_category_lands_at_the_top_of_its_group_and_undo_takes_it_away() {
+		// R-BUD-5, Actual's insertCategory (db/index.ts:470-499).
+		let (_scratch, core) = imported("category-create");
+		let (group, members) = busy_group(&data(&core));
+		let change = core
+			.perform(Command::CreateCategory {
+				group_id: group.clone(),
+				name: "  Coffee  ".to_owned(),
+			})
+			.unwrap();
+		let id = created_category(&change);
+		let after = data(&core);
+		let created = &after.categories[&veritas_domain::CategoryId::new(id.as_str())];
+		assert_eq!(created.name, "Coffee");
+		let first = &after.categories[&veritas_domain::CategoryId::new(members[0].as_str())];
+		assert!(created.sort_order < first.sort_order);
+		assert_eq!(
+			after.category_mapping.get(&created.id),
+			Some(&created.id),
+			"every new category maps to itself"
+		);
+		let (month, today) = this_month();
+		let sheet = core.budget_month(month, &today).unwrap();
+		assert!(envelopes(&sheet).iter().any(|e| e.id == id));
+
+		assert!(matches!(
+			core.perform(Command::CreateCategory {
+				group_id: group,
+				name: "COFFEE".to_owned(),
+			}),
+			Err(FfiError::Invalid { .. })
+		));
+		core.undo().unwrap();
+		assert!(data(&core).categories[&created.id].tombstone);
+	}
+
+	#[test]
+	fn categories_reorder_move_between_groups_and_hide() {
+		// R-BUD-5, Actual's moveCategory (db/index.ts:517-536).
+		let (_scratch, core) = imported("category-move");
+		let before = data(&core);
+		let (group, members) = busy_group(&before);
+		let last = members.last().unwrap().clone();
+
+		core.perform(Command::MoveCategory {
+			category_id: last.clone(),
+			group_id: group.clone(),
+			before_category_id: Some(members[0].clone()),
+		})
+		.unwrap();
+		let (_, order) = busy_group(&data(&core));
+		assert_eq!(order.first(), Some(&last));
+
+		let change = core
+			.perform(Command::CreateCategoryGroup {
+				name: "Somewhere else".to_owned(),
+			})
+			.unwrap();
+		let new_group = change.entities[0].id.clone().unwrap();
+		core.perform(Command::MoveCategory {
+			category_id: last.clone(),
+			group_id: new_group.clone(),
+			before_category_id: None,
+		})
+		.unwrap();
+		let moved = &data(&core).categories[&veritas_domain::CategoryId::new(last.as_str())];
+		assert_eq!(moved.group.to_string(), new_group);
+
+		let income_group = before
+			.category_groups
+			.values()
+			.find(|g| g.is_income && !g.tombstone)
+			.unwrap();
+		assert!(matches!(
+			core.perform(Command::MoveCategory {
+				category_id: last.clone(),
+				group_id: income_group.id.to_string(),
+				before_category_id: None,
+			}),
+			Err(FfiError::Invalid { .. })
+		));
+
+		core.perform(Command::SetCategoryHidden {
+			category_id: last.clone(),
+			hidden: true,
+		})
+		.unwrap();
+		assert!(data(&core).categories[&moved.id].hidden);
+	}
+
+	#[test]
+	fn a_category_with_history_is_archived_or_deleted_with_its_history_moved() {
+		// R-BUD-5, Actual's category-delete with transferId (budget/app.ts:378-422,
+		// db/index.ts:538-562).
+		let (scratch, core) = imported("category-delete");
+		let before = data(&core);
+		let with_history = before
+			.categories
+			.values()
+			.find(|c| {
+				!c.tombstone
+					&& !c.is_income && core.category_history(c.id.as_str()).unwrap().transactions > 0
+			})
+			.unwrap()
+			.clone();
+		let target = before
+			.categories
+			.values()
+			.find(|c| !c.tombstone && !c.is_income && c.id != with_history.id)
+			.unwrap()
+			.clone();
+
+		assert!(matches!(
+			core.perform(Command::DeleteCategory {
+				category_id: with_history.id.to_string()
+			}),
+			Err(FfiError::Invalid { .. })
+		));
+		let (month, today) = this_month();
+		core.budget_month(month, &today).unwrap();
+		core.perform(Command::ArchiveCategory {
+			category_id: with_history.id.to_string(),
+		})
+		.unwrap();
+		let archived = data(&core);
+		assert!(archived.categories[&with_history.id].hidden);
+		assert!(
+			archived.category_meta[&with_history.id]
+				.archived_on
+				.is_some()
+		);
+		core.undo().unwrap();
+		assert!(!data(&core).categories[&with_history.id].hidden);
+
+		let moved_transactions = core
+			.category_history(with_history.id.as_str())
+			.unwrap()
+			.transactions;
+		let target_before = core
+			.category_history(target.id.as_str())
+			.unwrap()
+			.transactions;
+		core.perform(Command::DeleteCategoryMovingHistory {
+			category_id: with_history.id.to_string(),
+			to_category_id: target.id.to_string(),
+		})
+		.unwrap();
+		let after = data(&core);
+		assert!(after.categories[&with_history.id].tombstone);
+		assert_eq!(
+			after.category_mapping.get(&with_history.id),
+			Some(&target.id)
+		);
+		assert_eq!(
+			core.category_history(target.id.as_str())
+				.unwrap()
+				.transactions,
+			target_before + moved_transactions
+		);
+
+		core.close().unwrap();
+		let reopened =
+			Core::<veritas_store::Store>::open(&scratch.budget(), &CancelToken::default()).unwrap();
+		let reloaded = data(&reopened);
+		assert!(reloaded.categories[&with_history.id].tombstone);
+		assert_eq!(
+			reloaded.category_mapping.get(&with_history.id),
+			Some(&target.id)
+		);
+	}
+
+	#[test]
+	fn a_category_with_no_history_simply_deletes() {
+		let (_scratch, core) = imported("category-delete-empty");
+		let (group, _) = busy_group(&data(&core));
+		let id = created_category(
+			&core
+				.perform(Command::CreateCategory {
+					group_id: group,
+					name: "Nothing yet".to_owned(),
+				})
+				.unwrap(),
+		);
+		assert_eq!(
+			core.category_history(&id).unwrap(),
+			crate::CategoryHistory {
+				transactions: 0,
+				budgeted_months: 0
+			}
+		);
+		core.perform(Command::DeleteCategory {
+			category_id: id.clone(),
+		})
+		.unwrap();
+		assert!(data(&core).categories[&veritas_domain::CategoryId::new(id.as_str())].tombstone);
+	}
+
+	#[test]
+	fn groups_are_created_renamed_reordered_and_hidden() {
+		// R-BUD-5, Actual's group rules (db/index.ts:364-434).
+		let (_scratch, core) = imported("group-edits");
+		let change = core
+			.perform(Command::CreateCategoryGroup {
+				name: "Travel".to_owned(),
+			})
+			.unwrap();
+		let travel = change.entities[0].id.clone().unwrap();
+		let after = data(&core);
+		let created =
+			&after.category_groups[&veritas_domain::CategoryGroupId::new(travel.as_str())];
+		let highest = after
+			.category_groups
+			.values()
+			.filter(|g| !g.tombstone && g.id != created.id)
+			.map(|g| g.sort_order)
+			.fold(0.0, f64::max);
+		assert_eq!(created.sort_order, highest + 16384.0);
+		assert!(matches!(
+			core.perform(Command::CreateCategoryGroup {
+				name: "travel".to_owned()
+			}),
+			Err(FfiError::Invalid { .. })
+		));
+
+		core.perform(Command::RenameCategoryGroup {
+			group_id: travel.clone(),
+			name: "Trips".to_owned(),
+		})
+		.unwrap();
+		let first = after
+			.category_groups
+			.values()
+			.filter(|g| !g.tombstone)
+			.min_by(|a, b| a.sort_order.total_cmp(&b.sort_order))
+			.unwrap()
+			.id
+			.to_string();
+		core.perform(Command::MoveCategoryGroup {
+			group_id: travel.clone(),
+			before_group_id: Some(first.clone()),
+		})
+		.unwrap();
+		core.perform(Command::SetCategoryGroupHidden {
+			group_id: travel.clone(),
+			hidden: true,
+		})
+		.unwrap();
+		let done = data(&core);
+		let trips = &done.category_groups[&veritas_domain::CategoryGroupId::new(travel.as_str())];
+		assert_eq!(trips.name, "Trips");
+		assert!(trips.hidden);
+		let first_order =
+			done.category_groups[&veritas_domain::CategoryGroupId::new(first.as_str())].sort_order;
+		assert!(trips.sort_order < first_order);
 	}
 }

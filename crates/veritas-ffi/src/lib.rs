@@ -15,9 +15,9 @@ pub use budget::{BudgetMonth, EnvelopeGroup, EnvelopeRow, MoneyTone};
 pub use commands::Command;
 pub use records::{
 	AccountGroup, AccountGroupSummary, AccountSummary, AuditCheck, AuditFinding, BackupInfo,
-	BudgetListing, Change, Currency, EntityKind, EntityRef, NewAccount, NewAccountKind,
-	NewBudgetOptions, NumberFormat, NumberStyle, Overview, Retention, SessionState, SnapshotInfo,
-	SnapshotKind,
+	BudgetListing, CategoryHistory, Change, Currency, EntityKind, EntityRef, NewAccount,
+	NewAccountKind, NewBudgetOptions, NumberFormat, NumberStyle, Overview, Retention, SessionState,
+	SnapshotInfo, SnapshotKind,
 };
 pub use session::{ChangeListener, Session};
 

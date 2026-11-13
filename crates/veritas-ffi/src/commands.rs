@@ -1,4 +1,7 @@
-use veritas_domain::{Account, AccountId, BudgetData, CategoryId, CoreError, Note, Row};
+use veritas_domain::{
+	Account, AccountId, BudgetData, CategoryGroupId, CategoryId, CoreError, Note, Row,
+};
+use veritas_session::categories;
 
 use veritas_engine::EnvelopeSheet;
 
@@ -55,18 +58,83 @@ pub enum Command {
 		category_id: String,
 		text: String,
 	},
+	/// A new category at the top of its group (R-BUD-5). Its id comes back in
+	/// the `Change`.
+	CreateCategory {
+		group_id: String,
+		name: String,
+	},
+	RenameCategory {
+		category_id: String,
+		name: String,
+	},
+	/// Moves a category before `before_category_id` in `group_id`, or to the end
+	/// of it. Income and expense categories stay among their own kind.
+	MoveCategory {
+		category_id: String,
+		group_id: String,
+		before_category_id: Option<String>,
+	},
+	/// Showing a category again also ends its archive.
+	SetCategoryHidden {
+		category_id: String,
+		hidden: bool,
+	},
+	/// Hides a category and records when, keeping all its history (R-BUD-5).
+	/// What the app offers instead of delete for a category with history.
+	ArchiveCategory {
+		category_id: String,
+	},
+	/// Deletes a category with no history (`Session.categoryHistory` is empty).
+	/// One with history answers `Invalid`.
+	DeleteCategory {
+		category_id: String,
+	},
+	/// Deletes a category and moves all its history and budget to another, as
+	/// Actual does. Irreversible in Actual, so the app shows its explicit
+	/// confirmation first; in Veritas it is still one undo step.
+	DeleteCategoryMovingHistory {
+		category_id: String,
+		to_category_id: String,
+	},
+	CreateCategoryGroup {
+		name: String,
+	},
+	RenameCategoryGroup {
+		group_id: String,
+		name: String,
+	},
+	/// Moves a group before `before_group_id`, or to the end.
+	MoveCategoryGroup {
+		group_id: String,
+		before_group_id: Option<String>,
+	},
+	SetCategoryGroupHidden {
+		group_id: String,
+		hidden: bool,
+	},
 }
 
 impl veritas_session::Command for Command {
 	fn plan(&self, data: &BudgetData) -> Result<Vec<Row>, CoreError> {
+		if !self.reads_sheet() {
+			return self.plan_plain(data);
+		}
 		let sheet = EnvelopeSheet::compute(data, today(data))?;
 		self.plan_with_sheet(data, &sheet)
 	}
 
 	fn reads_sheet(&self) -> bool {
-		!matches!(
+		matches!(
 			self,
-			Command::RenameAccount { .. } | Command::SetCategoryNote { .. }
+			Command::SetBudget { .. }
+				| Command::MoveBudget { .. }
+				| Command::CoverOverspending { .. }
+				| Command::HoldForNextMonth { .. }
+				| Command::ResetHold { .. }
+				| Command::SetCarryover { .. }
+				| Command::ArchiveCategory { .. }
+				| Command::DeleteCategoryMovingHistory { .. }
 		)
 	}
 
@@ -76,7 +144,6 @@ impl veritas_session::Command for Command {
 		sheet: &EnvelopeSheet,
 	) -> Result<Vec<Row>, CoreError> {
 		match self {
-			Command::RenameAccount { account_id, name } => rename_account(data, account_id, name),
 			Command::SetBudget {
 				month,
 				category_id,
@@ -144,6 +211,32 @@ impl veritas_session::Command for Command {
 			} => edit(data, sheet, *month, |editor, month| {
 				editor.set_carryover(month, &live_category(data, category_id)?, *carryover)
 			}),
+			Command::ArchiveCategory { category_id } => categories::archive_category(
+				data,
+				&CategoryId::new(category_id.as_str()),
+				sheet.today(),
+			),
+			Command::DeleteCategoryMovingHistory {
+				category_id,
+				to_category_id,
+			} => categories::delete_category_moving_history(
+				data,
+				sheet.months(),
+				&CategoryId::new(category_id.as_str()),
+				&CategoryId::new(to_category_id.as_str()),
+			),
+			_ => self.plan_plain(data),
+		}
+	}
+}
+
+impl Command {
+	/// Commands that don't read the envelope sheet.
+	fn plan_plain(&self, data: &BudgetData) -> Result<Vec<Row>, CoreError> {
+		let category = |id: &String| CategoryId::new(id.as_str());
+		let group = |id: &String| CategoryGroupId::new(id.as_str());
+		match self {
+			Command::RenameAccount { account_id, name } => rename_account(data, account_id, name),
 			Command::SetCategoryNote { category_id, text } => {
 				let id = live_category(data, category_id)?;
 				let text = text.trim();
@@ -152,6 +245,49 @@ impl veritas_session::Command for Command {
 					text: (!text.is_empty()).then(|| text.to_owned()),
 				})])
 			}
+			Command::CreateCategory { group_id, name } => {
+				categories::create_category(data, &group(group_id), name).map(|(rows, _)| rows)
+			}
+			Command::RenameCategory { category_id, name } => {
+				categories::rename_category(data, &category(category_id), name)
+			}
+			Command::MoveCategory {
+				category_id,
+				group_id,
+				before_category_id,
+			} => categories::move_category(
+				data,
+				&category(category_id),
+				&group(group_id),
+				before_category_id.as_ref().map(category).as_ref(),
+			),
+			Command::SetCategoryHidden {
+				category_id,
+				hidden,
+			} => categories::set_category_hidden(data, &category(category_id), *hidden),
+			Command::DeleteCategory { category_id } => {
+				categories::delete_category(data, &category(category_id))
+			}
+			Command::CreateCategoryGroup { name } => {
+				categories::create_group(data, name).map(|(rows, _)| rows)
+			}
+			Command::RenameCategoryGroup { group_id, name } => {
+				categories::rename_group(data, &group(group_id), name)
+			}
+			Command::MoveCategoryGroup {
+				group_id,
+				before_group_id,
+			} => categories::move_group(
+				data,
+				&group(group_id),
+				before_group_id.as_ref().map(group).as_ref(),
+			),
+			Command::SetCategoryGroupHidden { group_id, hidden } => {
+				categories::set_group_hidden(data, &group(group_id), *hidden)
+			}
+			_ => Err(CoreError::Internal(
+				"a budget command was planned without the envelope sheet".to_owned(),
+			)),
 		}
 	}
 }

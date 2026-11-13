@@ -570,3 +570,11 @@ impl From<Retention> for RetentionPolicy {
 		}
 	}
 }
+
+/// What deleting a category would lose. Empty means a plain delete is safe;
+/// otherwise the app offers Archive, or delete with the history moved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct CategoryHistory {
+	pub transactions: u64,
+	pub budgeted_months: u64,
+}
