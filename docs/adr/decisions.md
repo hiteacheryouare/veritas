@@ -363,5 +363,5 @@ Every decision behind Veritas, so no question gets asked twice. D1–D24 are PLA
 
 ### D72. Dismissing a closed goal's new-activity notice
 - **Options:** only reopening clears it / a Dismiss button / clear it automatically when the envelope is covered
-- **Decision:** The "Closed goal has new activity" notice (GOAL-6) gets a Dismiss button. Dismissing records the latest month with activity the user has seen. The notice comes back only when activity appears in a later month than the one dismissed, or when the close month's ending available becomes a non-zero amount other than the one it had when dismissed. Reopening still clears it, as before. Dismissing never moves money.
+- **Decision:** The "Closed goal has new activity" notice (GOAL-6) gets a Dismiss button. Dismissing records the latest month with activity the user has seen. The notice comes back only when activity appears in a later month than the one dismissed, or the dismissed months' activity total changes, or when the close month's ending available becomes a non-zero amount other than the one it had when dismissed. Reopening still clears it, as before. Dismissing never moves money.
 - **Date:** 2026-11-13
