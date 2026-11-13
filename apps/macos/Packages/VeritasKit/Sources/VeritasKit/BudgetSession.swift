@@ -40,6 +40,8 @@ public struct BudgetOverview: Hashable, Sendable {
 	public let accountGroups: [SidebarGroup]
 	/// `nil` until the core reads the budget's own format.
 	public let format: MoneyFormat?
+	/// How amount fields read what's typed: the budget's separators.
+	public let numberStyle: NumberStyle
 
 	public init(
 		name: String?,
@@ -49,7 +51,8 @@ public struct BudgetOverview: Hashable, Sendable {
 		canRedo: Bool = false,
 		isChecking: Bool = false,
 		accountGroups: [SidebarGroup],
-		format: MoneyFormat? = nil
+		format: MoneyFormat? = nil,
+		numberStyle: NumberStyle = .commaDot
 	) {
 		self.name = name
 		self.directory = directory
@@ -59,6 +62,7 @@ public struct BudgetOverview: Hashable, Sendable {
 		self.isChecking = isChecking
 		self.accountGroups = accountGroups
 		self.format = format
+		self.numberStyle = numberStyle
 	}
 
 	public var accounts: [SidebarAccount] {
@@ -95,6 +99,11 @@ public protocol BudgetSession: AnyObject, Sendable {
 	func restoreSnapshot(id: String) async throws
 	func retention() async throws -> Retention
 	func setRetention(_ retention: Retention) async throws
+
+	/// The Budget screen for `month`. `today` is the local civil date, `YYYY-MM-DD`.
+	func budgetMonth(_ month: Month, today: String) async throws -> BudgetMonth
+	/// One user action: one transaction and one undo step.
+	func perform(_ command: Command) async throws
 }
 
 /// The budgets in the app's budgets folder: new ones, Actual imports and reopened ones.

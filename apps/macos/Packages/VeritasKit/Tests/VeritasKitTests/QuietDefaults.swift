@@ -12,6 +12,8 @@ extension BudgetSession {
 	func restoreSnapshot(id: String) async throws {}
 	func retention() async throws -> Retention { Retention(hourly: 48, daily: 30, monthly: 12, operationDays: 30) }
 	func setRetention(_ retention: Retention) async throws {}
+	func budgetMonth(_ month: Month, today: String) async throws -> BudgetMonth { throw FfiError.Cancelled }
+	func perform(_ command: Command) async throws {}
 }
 
 extension BudgetLibrary {

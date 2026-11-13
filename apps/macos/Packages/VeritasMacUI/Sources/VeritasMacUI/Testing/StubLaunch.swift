@@ -120,6 +120,7 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 		SnapshotInfo(id: "open", takenAt: "2026-11-11T14:00:00Z", reason: .open)
 	]
 	private var keep = Retention(hourly: 48, daily: 30, monthly: 12, operationDays: 30)
+	private let budget = StubBudget()
 
 	init(readOnly: ReadOnlyKind?, hasFindings: Bool = false, backupFails: Bool = false) {
 		self.readOnly = readOnly
@@ -196,6 +197,15 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 
 	func setRetention(_ retention: Retention) async throws {
 		lock.withLock { keep = retention }
+	}
+
+	func budgetMonth(_ month: Month, today: String) async throws -> BudgetMonth {
+		budget.month(month)
+	}
+
+	func perform(_ command: Command) async throws {
+		if let readOnly { throw FfiError.ReadOnly(reason: readOnly) }
+		try budget.perform(command)
 	}
 }
 #endif

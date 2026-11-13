@@ -78,3 +78,78 @@ struct SettingsSectionTests {
 		#expect(SettingsView.Section.allCases.map(\.title) == ["Backups", "Actual", "Appearance"])
 	}
 }
+
+/// The Budget screen and its actions, light and dark, into target/screenshots/budget.
+@MainActor
+struct BudgetScreenshotTests {
+	static let output = URL(filePath: #filePath)
+		.deletingLastPathComponent()
+		.appending(path: "../../../../../../target/screenshots/budget")
+		.standardizedFileURL
+
+	@Test func budget() async throws {
+		let (workspace, screen) = await openBudget()
+		await screen.load()
+		try render(BudgetScreen(workspace: workspace, screen: screen).frame(width: 1000, height: 900), named: "budget")
+	}
+
+	@Test func editing() async throws {
+		let (workspace, screen) = await openBudget()
+		await screen.load()
+		screen.beginEditing("groceries")
+		screen.editing?.type("+")
+		screen.editing?.type("412.00+40")
+		var turns = 0
+		while screen.editing?.preview == nil, turns < 100 {
+			try await Task.sleep(for: .milliseconds(10))
+			turns += 1
+		}
+		try render(BudgetScreen(workspace: workspace, screen: screen).frame(width: 1000, height: 420), named: "budget-editing")
+	}
+
+	@Test func dense() async throws {
+		let (workspace, screen) = await openBudget()
+		await screen.load()
+		workspace.isDense = true
+		try render(BudgetScreen(workspace: workspace, screen: screen).frame(width: 1000, height: 640), named: "budget-dense")
+	}
+
+	@Test func moveBudget() async throws {
+		let (workspace, screen) = await openBudget()
+		await screen.load()
+		try render(MoveBudgetSheet(screen: screen, from: "groceries"), named: "move-budget")
+	}
+
+	@Test func cover() async throws {
+		let (_, screen) = await openBudget()
+		await screen.load()
+		let dining = try #require(screen.envelope("dining"))
+		try render(CoverPopover(screen: screen, envelope: dining), named: "cover-overspending")
+	}
+
+	private func openBudget() async -> (WorkspaceModel, BudgetScreenModel) {
+		let workspace = WorkspaceModel(library: StubLibrary(readOnly: nil, importError: nil), localSettings: InMemoryBudgetSettings(), format: MoneyFormat())
+		await workspace.reopen(directory: StubLaunch.budgetDirectory)
+		let screen = BudgetScreenModel(workspace: workspace, reader: CoreAmountReader(), month: StubBudget.month)
+		return (workspace, screen)
+	}
+
+	private func render(_ view: some View, named name: String) throws {
+		try FileManager.default.createDirectory(at: Self.output, withIntermediateDirectories: true)
+		for (appearance, suffix) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] {
+			let host = NSHostingView(rootView: view.tint(Color.accent).background(.surfaceRaised))
+			host.frame.size = host.fittingSize
+			let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+			window.appearance = NSAppearance(named: appearance)
+			window.contentView = host
+			host.layoutSubtreeIfNeeded()
+			// The screen loads its month in a task; let it land before drawing.
+			RunLoop.main.run(until: .now.addingTimeInterval(0.4))
+			host.layoutSubtreeIfNeeded()
+			let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+			host.cacheDisplay(in: host.bounds, to: bitmap)
+			let png = try #require(bitmap.representation(using: .png, properties: [:]))
+			try png.write(to: Self.output.appending(path: "\(name)-\(suffix).png"))
+		}
+	}
+}

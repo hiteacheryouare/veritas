@@ -26,7 +26,8 @@ final class CoreBudgetSession: BudgetSession {
 					SidebarAccount(id: account.id, name: account.name, balance: account.balance, isInactive: account.closed || account.deleted)
 				})
 			},
-			format: overview.numberFormat.map(MoneyFormat.init)
+			format: overview.numberFormat.map(MoneyFormat.init),
+			numberStyle: overview.numberFormat?.style ?? .commaDot
 		)
 	}
 
@@ -133,6 +134,16 @@ final class CoreBudgetSession: BudgetSession {
 	func retention() async throws -> Retention {
 		let session = session
 		return try await Core.run { try session.retention() }
+	}
+
+	func budgetMonth(_ month: Month, today: String) async throws -> BudgetMonth {
+		let session = session
+		return try await Core.run { try session.budgetMonth(month: month, today: today) }
+	}
+
+	func perform(_ command: Command) async throws {
+		let session = session
+		_ = try await Core.run { try session.perform(command: command) }
 	}
 
 	func setRetention(_ retention: Retention) async throws {

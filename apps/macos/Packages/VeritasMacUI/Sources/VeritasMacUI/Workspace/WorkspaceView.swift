@@ -14,6 +14,8 @@ struct WorkspaceView: View {
 			Group {
 				if model.destination == .screen(.settings) {
 					SettingsView(model: model)
+				} else if model.destination == .screen(.budget) {
+					BudgetScreen(workspace: model)
 				} else {
 					ScreenView(destination: model.destination, title: model.title(of: model.destination))
 				}

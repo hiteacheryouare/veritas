@@ -20,6 +20,8 @@ public final class WorkspaceModel {
 	public private(set) var integrityReport: IntegrityReport?
 	public private(set) var budgetList: [BudgetListingItem]?
 	public var isOpenPickerShown = false
+	/// Goes up after every change the core announces, so open screens refetch.
+	public private(set) var changeCount = 0
 	public var destination = Destination.start
 	public var sheet: WorkspaceSheet?
 	public var alert: ErrorAlert?
@@ -138,6 +140,41 @@ public final class WorkspaceModel {
 				present(error)
 			}
 		}
+	}
+
+	public var numberStyle: NumberStyle {
+		overview?.numberStyle ?? .commaDot
+	}
+
+	public func budgetMonth(_ month: Month) async -> BudgetMonth? {
+		guard let session else { return nil }
+		do {
+			return try await session.budgetMonth(month, today: Self.today())
+		} catch {
+			present(error, isRefresh: true)
+			return nil
+		}
+	}
+
+	/// Runs one command. Errors are shown here; `false` means nothing changed.
+	@discardableResult
+	public func perform(_ command: Command) async -> Bool {
+		guard let session else { return false }
+		do {
+			try await session.perform(command)
+			changeCount += 1
+			await refresh()
+			return true
+		} catch {
+			present(error) { [weak self] in await self?.perform(command) }
+			return false
+		}
+	}
+
+	/// The local civil date (PLAN §9 #14): time zones never shift it.
+	public static func today(_ now: Date = .now, calendar: Calendar = .current) -> String {
+		let parts = calendar.dateComponents([.year, .month, .day], from: now)
+		return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 1, parts.day ?? 1)
 	}
 
 	public func showOpenPicker() {
@@ -274,7 +311,10 @@ public final class WorkspaceModel {
 			do {
 				overview = try await opened.overview()
 				try await opened.observeChanges { [weak self] in
-					Task { @MainActor in await self?.refresh() }
+					Task { @MainActor in
+						self?.changeCount += 1
+						await self?.refresh()
+					}
 				}
 			} catch {
 				await opened.close()
