@@ -43,7 +43,11 @@ CREATE TABLE IF NOT EXISTS veritas_goal (
 	closed_month TEXT,
 	released_to_category_id TEXT,
 	released_cents INTEGER,
-	created_at INTEGER NOT NULL
+	created_at INTEGER NOT NULL,
+	-- docs/finance/debt.md GOAL-6 (D72): what the last dismiss of "new activity" saw.
+	activity_seen_through TEXT,
+	activity_seen_total INTEGER,
+	close_month_dismissed_available INTEGER
 );
 
 -- docs/finance/classification.md CLS-5: reconciliation adjustments Veritas made.
