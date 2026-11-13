@@ -5,9 +5,9 @@ use rusqlite::types::Value;
 use rusqlite::{OptionalExtension, Transaction as SqlTransaction, params_from_iter};
 use veritas_domain::{
 	Account, AccountGroup, AccountId, AccountKind, AccountMeta, BudgetCell, BudgetType, Category,
-	CategoryGroup, CategoryId, CategoryKind, CategoryMeta, CivilDate, CoreError, Goal, GoalStatus,
-	Money, Payee, PayeeId, Rule, RuleStage, Schedule, SplitRole, Tag, Transaction, TransactionId,
-	TransactionMeta, YearMonth,
+	CategoryGroup, CategoryId, CategoryKind, CategoryMeta, CivilDate, CoreError, CustomReportRow,
+	DashboardPage, Goal, GoalStatus, Money, Payee, PayeeId, Rule, RuleStage, Schedule, SplitRole,
+	Tag, Transaction, TransactionId, TransactionMeta, Widget, YearMonth,
 };
 
 use crate::connection::storage;
@@ -271,6 +271,65 @@ fn goal_columns(row: &Goal) -> Columns {
 			text(row.released_to.as_ref().map(|id| id.as_str())),
 		),
 		("released_cents", money(row.released)),
+	]
+}
+
+fn number(value: Option<i64>) -> Value {
+	value.map_or(Value::Null, Value::Integer)
+}
+
+fn custom_report_columns(row: &CustomReportRow) -> Columns {
+	vec![
+		("name", text(row.name.as_deref())),
+		("start_date", text(row.start_date.as_deref())),
+		("end_date", text(row.end_date.as_deref())),
+		("date_static", number(row.date_static)),
+		("date_range", text(row.date_range.as_deref())),
+		("mode", text(row.mode.as_deref())),
+		("group_by", text(row.group_by.as_deref())),
+		("balance_type", text(row.balance_type.as_deref())),
+		("show_empty", number(row.show_empty)),
+		("show_offbudget", number(row.show_offbudget)),
+		("show_hidden", number(row.show_hidden)),
+		("show_uncategorized", number(row.show_uncategorized)),
+		(
+			"selected_categories",
+			text(row.selected_categories.as_deref()),
+		),
+		("graph_type", text(row.graph_type.as_deref())),
+		("conditions", text(row.conditions.as_deref())),
+		("conditions_op", text(row.conditions_op.as_deref())),
+		("metadata", text(row.metadata.as_deref())),
+		("interval", text(row.interval.as_deref())),
+		("color_scheme", text(row.color_scheme.as_deref())),
+		("tombstone", flag(row.tombstone)),
+		("include_current", number(row.include_current)),
+		("sort_by", text(row.sort_by.as_deref())),
+		("trim_intervals", number(row.trim_intervals)),
+		("show_trend_lines", number(row.show_trend_lines)),
+	]
+}
+
+fn dashboard_page_columns(row: &DashboardPage) -> Columns {
+	vec![
+		("name", text(row.name.as_deref())),
+		("tombstone", flag(row.tombstone)),
+	]
+}
+
+fn widget_columns(row: &Widget) -> Columns {
+	vec![
+		("type", text(row.kind.as_deref())),
+		("width", number(row.width)),
+		("height", number(row.height)),
+		("x", number(row.x)),
+		("y", number(row.y)),
+		("meta", text(row.meta.as_deref())),
+		("tombstone", flag(row.tombstone)),
+		(
+			"dashboard_page_id",
+			text(row.page.as_ref().map(|id| id.as_str())),
+		),
 	]
 }
 
@@ -863,6 +922,66 @@ impl<'conn> Writer<'conn> {
 			after,
 			transaction_meta_columns,
 		)
+	}
+
+	pub fn put_custom_report(
+		&mut self,
+		before: Option<&CustomReportRow>,
+		after: Option<&CustomReportRow>,
+	) -> Result<(), CoreError> {
+		let id = before
+			.or(after)
+			.map(|row| row.id.as_str().to_owned())
+			.unwrap_or_default();
+		self.put_actual("custom_reports", &id, before, after, custom_report_columns)
+			.map(|_| ())
+	}
+
+	pub fn put_dashboard_page(
+		&mut self,
+		before: Option<&DashboardPage>,
+		after: Option<&DashboardPage>,
+	) -> Result<(), CoreError> {
+		let id = before
+			.or(after)
+			.map(|row| row.id.as_str().to_owned())
+			.unwrap_or_default();
+		self.put_actual(
+			"dashboard_pages",
+			&id,
+			before,
+			after,
+			dashboard_page_columns,
+		)
+		.map(|_| ())
+	}
+
+	/// A `dashboard` row. Only changed columns are written, so moving or
+	/// resizing a widget touches nothing but its x, y, width and height.
+	pub fn put_widget(
+		&mut self,
+		before: Option<&Widget>,
+		after: Option<&Widget>,
+	) -> Result<(), CoreError> {
+		let id = before
+			.or(after)
+			.map(|row| row.id.as_str().to_owned())
+			.unwrap_or_default();
+		self.put_actual("dashboard", &id, before, after, widget_columns)
+			.map(|_| ())
+	}
+
+	/// A synced preference, such as `defaultCurrencyCode` or `numberFormat`.
+	/// Actual stores every value as text.
+	pub fn put_preference(&mut self, id: &str, value: &str) -> Result<(), CoreError> {
+		self.tx
+			.execute(
+				"INSERT INTO preferences (id, value) VALUES (?1, ?2) \
+				 ON CONFLICT (id) DO UPDATE SET value = excluded.value",
+				[id, value],
+			)
+			.map(|_| ())
+			.map_err(storage)
 	}
 
 	/// A `veritas_tax_tag` row: which tax bucket an Actual tag means.

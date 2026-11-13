@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 
 use veritas_domain::{
-	CategoryId, CategoryKind, CivilDate, CoreError, Money, TransactionKind, YearMonth,
+	CategoryId, CategoryKind, CivilDate, CoreError, GoalStatus, Money, TransactionKind, YearMonth,
 };
+use veritas_engine::EnvelopeSheet;
 use veritas_reports::Period;
 
 use crate::baseline::Baseline;
@@ -20,6 +21,34 @@ pub struct Envelope {
 	pub carry_into_next: Money,
 }
 
+/// Every category's envelope for the month after `today`, from Actual's
+/// math: DEBT-8.1's carry is that month's available minus its own budgeted
+/// amount, so it already nets out spending and Actual's carryover rules.
+pub fn next_month_envelopes(
+	sheet: &EnvelopeSheet,
+	today: CivilDate,
+) -> Result<BTreeMap<CategoryId, Envelope>, CoreError> {
+	let month = today.year_month().offset(1)?;
+	let Some(sheet) = sheet.month(month) else {
+		return Err(CoreError::Invalid(format!(
+			"the envelope sheet has no {month}, so goal suggestions can't know what carries in"
+		)));
+	};
+	sheet
+		.categories
+		.iter()
+		.filter(|(_, cell)| !cell.is_income)
+		.map(|(category, cell)| {
+			Ok((
+				category.clone(),
+				Envelope {
+					carry_into_next: cell.balance.checked_sub(cell.budgeted)?,
+				},
+			))
+		})
+		.collect()
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Basis {
 	Baseline,
@@ -30,6 +59,8 @@ pub enum Basis {
 	LoanPrincipal,
 	NoHistory,
 	NoTargetDate,
+	/// GOAL-10: a reached goal gets no refill suggestion.
+	GoalReached,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -126,8 +157,19 @@ impl Forecaster<'_> {
 				basis,
 				reason: format!("{text}, keeping {kept}"),
 			};
-			let goal = self.budget.goals.values().find(|goal| &goal.category == id);
+			let goals = || {
+				self.budget
+					.goals
+					.values()
+					.filter(|goal| &goal.category == id)
+			};
+			let goal = goals()
+				.find(|goal| goal.status == GoalStatus::Active)
+				.or_else(|| goals().find(|goal| goal.status != GoalStatus::Closed));
 			let item = match (self.budget.category_kind(id), goal) {
+				(CategoryKind::Expense, Some(goal)) if goal.status == GoalStatus::Reached => {
+					keeping(Basis::GoalReached, &format!("{name}: reached"))
+				}
 				(CategoryKind::Expense, Some(goal)) => match goal.target_date {
 					None => keeping(Basis::NoTargetDate, &format!("{name}: no target date")),
 					Some(target) => {

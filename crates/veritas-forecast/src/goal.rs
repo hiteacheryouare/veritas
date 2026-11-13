@@ -1,8 +1,11 @@
-use veritas_domain::{BudgetData, CoreError, GoalId, Money, YearMonth};
+use veritas_domain::{
+	BudgetData, CivilDate, CoreError, GoalId, GoalStatus, Money, Scenario, YearMonth,
+};
+use veritas_engine::EnvelopeSheet;
 
 use crate::baseline::months_between;
 use crate::math::{ceil_div, median};
-use crate::scenario::Scenario;
+use crate::scenario::Overlay;
 
 const PACE_MONTHS: i32 = 3;
 /// FC-6's cap: an ETA further out than this is "No ETA", never an error.
@@ -27,6 +30,8 @@ impl Reach {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EtaStatus {
 	Reached,
+	/// GOAL-10: reached, then spent below the target. No ETA and no refill.
+	Spent,
 	/// No complete month of contributions yet.
 	NoHistory,
 	/// The median pace is 0 or less.
@@ -56,6 +61,7 @@ impl GoalEta {
 	pub fn text(&self) -> String {
 		match self.status {
 			EtaStatus::Reached => "Reached".to_owned(),
+			EtaStatus::Spent => "Reached → Spent".to_owned(),
 			EtaStatus::NoHistory => "No ETA yet".to_owned(),
 			EtaStatus::NotAdding => "No ETA: nothing is being added".to_owned(),
 			EtaStatus::Eta {
@@ -112,8 +118,9 @@ pub fn goal_eta(
 	goal: &GoalId,
 	current: YearMonth,
 	available: Money,
-	scenario: &Scenario,
+	scenario: Option<&Scenario>,
 ) -> Result<GoalEta, CoreError> {
+	let overlay = Overlay::new(scenario);
 	let found = budget.goals.get(goal).ok_or_else(|| CoreError::NotFound {
 		entity: "goal",
 		id: goal.to_string(),
@@ -149,9 +156,10 @@ pub fn goal_eta(
 		(Some(mid), Some(max), Some(min)) => Some((mid, *max, *min)),
 		_ => None,
 	};
-	let eta = |pace: i64| months_to_go(remaining, pace, goal, current, scenario);
+	let eta = |pace: i64| months_to_go(remaining, pace, goal, current, overlay);
 	let status = match pace {
-		_ if remaining == Money::ZERO => EtaStatus::Reached,
+		_ if found.status == GoalStatus::Reached && available < found.target => EtaStatus::Spent,
+		_ if found.status == GoalStatus::Reached || remaining == Money::ZERO => EtaStatus::Reached,
 		None => EtaStatus::NoHistory,
 		Some((mid, max, min)) => match eta(mid)? {
 			Reach::Never => EtaStatus::NotAdding,
@@ -191,7 +199,7 @@ fn months_to_go(
 	pace: i64,
 	goal: &GoalId,
 	current: YearMonth,
-	scenario: &Scenario,
+	scenario: Overlay,
 ) -> Result<Reach, CoreError> {
 	let remaining = i128::from(remaining.minor());
 	let mut simulated = 0i32;
@@ -223,4 +231,26 @@ fn months_to_go(
 	}
 	let total = i32::try_from(total).map_err(|_| CoreError::Overflow)?;
 	current.offset(total).map(Reach::At)
+}
+
+/// The ETA of every goal that isn't closed, with `available` read from the
+/// envelope sheet for the current month.
+pub fn goal_etas(
+	budget: &BudgetData,
+	sheet: &EnvelopeSheet,
+	today: CivilDate,
+	scenario: Option<&Scenario>,
+) -> Result<Vec<GoalEta>, CoreError> {
+	let current = today.year_month();
+	budget
+		.goals
+		.values()
+		.filter(|goal| goal.status != GoalStatus::Closed)
+		.map(|goal| {
+			let available = sheet
+				.category(current, &goal.category)
+				.map_or(Money::ZERO, |cell| cell.balance);
+			goal_eta(budget, &goal.id, current, available, scenario)
+		})
+		.collect()
 }

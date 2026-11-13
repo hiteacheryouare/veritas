@@ -3,7 +3,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { nameId } from '../src/rng.ts';
+import { DEFAULT_SEED } from '../src/environment.ts';
+import { createRng, formatUuidV4, nameId } from '../src/rng.ts';
 import { FIXTURES, runOracle, runOracleOk, scratchDir } from './helpers.ts';
 
 const groceries = nameId('small:category:groceries');
@@ -52,3 +53,22 @@ test('replay refuses a malformed sessions file', t => {
 	assert.notEqual(result.status, 0);
 	assert.match(result.stderr, /A sessions file must look like/);
 });
+
+// Replay hands Actual ids from the same seeded stream that made the fixtures,
+// restarted at every process start. Any id Actual allocates itself (a split
+// child without an id, a transfer counterpart, a new payee) can land on a
+// fixture row and overwrite it, which shows up as a false divergence.
+test(
+	"ids Actual allocates during replay never reuse a fixture row's id",
+	{ todo: 'bug: all-features has 4 transfer counterparts whose ids are uuids 177-180 of the seed-1 stream' },
+	() => {
+		const rng = createRng(DEFAULT_SEED);
+		const stream = new Set(Array.from({ length: 5000 }, () => formatUuidV4(rng.fill(new Uint8Array(16)))));
+		for (const fixture of ['small', 'all-features']) {
+			const dump = JSON.parse(runOracleOk(['dump', join(FIXTURES, `${fixture}.zip`), '--raw-only']));
+			const transactions = dump.tables.transactions.rows ?? dump.tables.transactions;
+			const reused = transactions.map((row: { id: string }) => row.id).filter((id: string) => stream.has(id));
+			assert.deepEqual(reused, [], `${fixture}: replay can overwrite these rows`);
+		}
+	}
+);

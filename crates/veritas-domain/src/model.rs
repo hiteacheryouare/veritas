@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use crate::{
 	AccountGroupId, AccountId, AccountKind, BudgetType, CategoryGroupId, CategoryId, CategoryKind,
 	CivilDate, CustomReportId, DashboardPageId, GoalId, GoalStatus, Money, PayeeId, RuleId,
-	ScheduleId, TagId, TransactionId, WidgetId, YearMonth,
+	Scenario, ScenarioId, ScheduleId, TagId, TransactionId, WidgetId, YearMonth,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -227,6 +227,17 @@ pub struct Widget {
 	pub tombstone: bool,
 }
 
+/// Actual's synced number-format preferences, as stored: `numberFormat`
+/// (`comma-dot`, `dot-comma`, `space-comma`, `apostrophe-dot` or another
+/// value a newer Actual writes), `hideFraction` and `defaultCurrencyCode`.
+/// `None` means the preference isn't set, which Actual reads as its default.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct FormatPrefs {
+	pub number_format: Option<String>,
+	pub hide_fraction: bool,
+	pub currency_code: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Goal {
 	pub id: GoalId,
@@ -272,10 +283,12 @@ pub struct BudgetData {
 	pub transaction_meta: BTreeMap<TransactionId, TransactionMeta>,
 	/// `veritas_tax_tag`: Actual tag name (without `#`) to TAX-2 bucket id.
 	pub tax_tags: BTreeMap<String, String>,
+	pub format: FormatPrefs,
 	pub goals: BTreeMap<GoalId, Goal>,
 	pub custom_reports: BTreeMap<CustomReportId, CustomReportRow>,
 	pub dashboard_pages: BTreeMap<DashboardPageId, DashboardPage>,
 	pub widgets: BTreeMap<WidgetId, Widget>,
+	pub scenarios: BTreeMap<ScenarioId, Scenario>,
 }
 
 impl BudgetData {
@@ -300,10 +313,12 @@ impl BudgetData {
 			account_meta: BTreeMap::new(),
 			transaction_meta: BTreeMap::new(),
 			tax_tags: BTreeMap::new(),
+			format: FormatPrefs::default(),
 			goals: BTreeMap::new(),
 			custom_reports: BTreeMap::new(),
 			dashboard_pages: BTreeMap::new(),
 			widgets: BTreeMap::new(),
+			scenarios: BTreeMap::new(),
 		}
 	}
 

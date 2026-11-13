@@ -1,16 +1,17 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use veritas_domain::{
-	AccountId, BudgetData, CategoryId, CivilDate, CoreError, Money, TransactionKind, YearMonth,
+	AccountId, BudgetData, CategoryId, CivilDate, CoreError, IncomeDelta, Money, Scenario,
+	ScenarioEventId, ScenarioId, ScheduleId, TransactionKind, YearMonth,
 };
-use veritas_reports::{Classification, Period, classify, net_worth};
+use veritas_reports::{Classification, Decision, Period, classify, net_worth};
 
 use crate::band::{Band, band};
-use crate::baseline::{Baseline, WINDOW, complete_months};
+use crate::baseline::{Baseline, SEASON_MIN, WINDOW, complete_months};
 use crate::flows::{FlowKind, KnownFlow};
 use crate::history::{History, Series, Side, asset_purchase, balances, bill_linked};
 use crate::math::{median, round_half_away, to_money};
-use crate::scenario::{IncomeDelta, MAX_COMPARED, Scenario};
+use crate::scenario::{MAX_COMPARED, Overlay, in_the_past, validate};
 
 /// FC-3's horizons, in complete months after the current month.
 pub const HORIZONS: [u32; 4] = [3, 6, 10, 12];
@@ -43,7 +44,8 @@ pub struct HorizonForecast {
 /// A baseline (or scenario) projection for one "today" (R-FC-1).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Projection {
-	pub scenario: String,
+	/// `None` for the baseline.
+	pub scenario: Option<ScenarioId>,
 	pub today: CivilDate,
 	pub net_worth_today: Money,
 	pub balances_today: BTreeMap<AccountId, Money>,
@@ -54,6 +56,9 @@ pub struct Projection {
 	pub horizons: Vec<HorizonForecast>,
 	/// Known flows dated before today, counted as due now.
 	pub overdue: Vec<KnownFlow>,
+	/// The scenario's stored events dated in the past (D67): kept, left out
+	/// of the projection, shown so the user can delete or re-date them.
+	pub in_the_past: Vec<ScenarioEventId>,
 	/// Categories whose unlinked median is at least half an active bill's
 	/// amount, where a hand-typed bill may be counted twice (FC-2).
 	pub possible_double_counts: Vec<CategoryId>,
@@ -70,22 +75,66 @@ pub struct Projection {
 impl Projection {
 	/// "N asset purchase(s) excluded: $X", omitted when there are none.
 	pub fn asset_purchase_note(&self) -> Option<String> {
-		let dollars = round_half_away(i128::from(self.asset_purchase_total.minor()), 100);
+		let dollars = whole_dollars(self.asset_purchase_total);
+		let total = if dollars < 0 {
+			format!("-${}", -dollars)
+		} else {
+			format!("${dollars}")
+		};
 		match self.asset_purchases {
 			0 => None,
-			1 => Some(format!("1 asset purchase excluded: ${dollars}")),
-			n => Some(format!("{n} asset purchases excluded: ${dollars}")),
+			1 => Some(format!("1 asset purchase excluded: {total}")),
+			n => Some(format!("{n} asset purchases excluded: {total}")),
 		}
 	}
 
 	/// "Not forecast: $X a month in uncategorized or hidden spending", in
 	/// whole dollars rounded half up, omitted when that rounds to $0.
 	pub fn not_forecast_note(&self) -> Option<String> {
-		let dollars = (self.not_forecast.minor().max(0) + 50) / 100;
+		let dollars = whole_dollars(self.not_forecast);
 		(dollars > 0).then(|| {
 			format!("Not forecast: ${dollars} a month in uncategorized or hidden spending")
 		})
 	}
+}
+
+/// Each schedule's most common category over the classified rows it posted
+/// (a split child counts through its linked parent), ties to the lower id.
+fn schedule_categories(
+	budget: &BudgetData,
+	classification: &Classification,
+) -> BTreeMap<ScheduleId, CategoryId> {
+	let mut counts: BTreeMap<(&ScheduleId, &CategoryId), usize> = BTreeMap::new();
+	for row in classification.rows() {
+		let Some(category) = row.category.as_ref().filter(|_| row.is_primary()) else {
+			continue;
+		};
+		let schedule = [Some(&row.id), row.parent.as_ref()]
+			.into_iter()
+			.flatten()
+			.find_map(|id| budget.transactions.get(id)?.schedule.as_ref());
+		if let Some(schedule) = schedule {
+			*counts.entry((schedule, category)).or_default() += 1;
+		}
+	}
+	let mut best: BTreeMap<ScheduleId, (usize, CategoryId)> = BTreeMap::new();
+	for ((schedule, category), count) in counts {
+		let entry = best
+			.entry(schedule.clone())
+			.or_insert((0, category.clone()));
+		if count > entry.0 {
+			*entry = (count, category.clone());
+		}
+	}
+	best.into_iter()
+		.map(|(schedule, (_, category))| (schedule, category))
+		.collect()
+}
+
+/// Cents to whole dollars, rounded half up (toward +infinity on a tie) in
+/// i128, so no amount overflows.
+fn whole_dollars(amount: Money) -> i128 {
+	(2 * i128::from(amount.minor()) + 100).div_euclid(200)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -100,17 +149,32 @@ pub struct Forecaster<'a> {
 	pub(crate) budget: &'a BudgetData,
 	pub(crate) classification: Classification,
 	pub(crate) history: History,
+	pub(crate) season_min: i32,
+	/// FC-2: the most common category of each schedule's posted rows.
+	schedule_categories: BTreeMap<ScheduleId, CategoryId>,
 }
 
 impl<'a> Forecaster<'a> {
 	pub fn new(budget: &'a BudgetData) -> Result<Forecaster<'a>, CoreError> {
 		let classification = classify(budget);
 		let history = History::new(budget, &classification)?;
+		let schedule_categories = schedule_categories(budget, &classification);
 		Ok(Forecaster {
 			budget,
 			classification,
 			history,
+			season_min: SEASON_MIN,
+			schedule_categories,
 		})
+	}
+
+	/// The same forecaster with seasonality never turning on, for FC-7's
+	/// seasonality-off backtest. Not for projections a user sees.
+	pub fn without_seasonality(self) -> Forecaster<'a> {
+		Forecaster {
+			season_min: i32::MAX,
+			..self
+		}
 	}
 
 	pub fn classification(&self) -> &Classification {
@@ -121,27 +185,12 @@ impl<'a> Forecaster<'a> {
 	/// schedule with none, the most common category of the rows it posted
 	/// (ties to the lower id).
 	fn feeding_category(&self, flow: &KnownFlow) -> Option<CategoryId> {
-		if let Some(category) = &flow.category {
-			return Some(category.clone());
-		}
-		let schedule = flow.schedule.as_ref()?;
-		let mut counts: BTreeMap<&CategoryId, usize> = BTreeMap::new();
-		for row in self.budget.transactions.values() {
-			if row.tombstone || row.schedule.as_ref() != Some(schedule) {
-				continue;
-			}
-			if let Some(category) = row
-				.category
+		flow.category.clone().or_else(|| {
+			flow.schedule
 				.as_ref()
-				.and_then(|category| self.budget.resolve_category(category))
-			{
-				*counts.entry(category).or_default() += 1;
-			}
-		}
-		counts
-			.into_iter()
-			.max_by(|(a, x), (b, y)| x.cmp(y).then_with(|| b.cmp(a)))
-			.map(|(category, _)| category.clone())
+				.and_then(|schedule| self.schedule_categories.get(schedule))
+				.cloned()
+		})
 	}
 
 	/// The series that get a baseline: income categories fed by an income
@@ -168,7 +217,15 @@ impl<'a> Forecaster<'a> {
 	) -> Result<Vec<Baseline>, CoreError> {
 		self.baselined_series(known)
 			.into_iter()
-			.map(|series| Baseline::new(self.budget, series, today.year_month(), Some(today)))
+			.map(|series| {
+				Baseline::new(
+					self.budget,
+					series,
+					today.year_month(),
+					Some(today),
+					self.season_min,
+				)
+			})
 			.collect()
 	}
 
@@ -176,19 +233,22 @@ impl<'a> Forecaster<'a> {
 		&self,
 		today: CivilDate,
 		known: &[KnownFlow],
-		scenario: &Scenario,
+		scenario: Option<&Scenario>,
 	) -> Result<Projection, CoreError> {
-		scenario.validate(today)?;
+		if let Some(scenario) = scenario {
+			validate(scenario)?;
+		}
+		let overlay = Overlay::new(scenario);
 		let current = today.year_month();
 		let series = self.baselined_series(known);
 		let baselines = self.baselines(today, known)?;
-		let band = band(self.budget, &series, current)?;
+		let band = band(self.budget, &series, current, self.season_min)?;
 		let start = balances(self.budget, &self.classification, today)?;
 		let mut running = start.clone();
 		let mut worth = net_worth(&self.classification, today)?.minor();
 		let net_worth_today = worth;
 		let last = Period::month(current.offset(LAST_HORIZON)?).last();
-		let scenario_flows = scenario.flows(today, last)?;
+		let scenario_flows = overlay.flows(today, last)?;
 		let (asset_purchases, asset_purchase_total) = self.asset_purchases(current)?;
 
 		let mut months = Vec::new();
@@ -205,7 +265,7 @@ impl<'a> Forecaster<'a> {
 				}
 			};
 			let mut known_net = 0i64;
-			let mut known_income: BTreeMap<Option<&CategoryId>, i64> = BTreeMap::new();
+			let mut known_income: BTreeMap<Option<CategoryId>, i64> = BTreeMap::new();
 			for flow in known.iter().filter(|flow| in_month(flow.date)) {
 				post(&mut running, &flow.account, flow.amount.minor())?;
 				if let FlowKind::Transfer { counterpart } = &flow.kind {
@@ -217,7 +277,7 @@ impl<'a> Forecaster<'a> {
 				}
 				known_net = add(known_net, flow.net_income().minor())?;
 				if flow.kind == FlowKind::Income {
-					let total = known_income.entry(flow.category.as_ref()).or_default();
+					let total = known_income.entry(self.feeding_category(flow)).or_default();
 					*total = add(*total, flow.amount.minor())?;
 				}
 			}
@@ -225,7 +285,7 @@ impl<'a> Forecaster<'a> {
 			let mut baselined = 0i64;
 			let mut baseline_income: BTreeMap<&CategoryId, i64> = BTreeMap::new();
 			for baseline in &baselines {
-				let forecast = scenario.adjust_baseline(
+				let forecast = overlay.adjust_baseline(
 					&baseline.category,
 					month,
 					baseline.forecast_plus(month)?,
@@ -254,15 +314,24 @@ impl<'a> Forecaster<'a> {
 			let mut scenario_net = 0i64;
 			for flow in scenario_flows.iter().filter(|flow| in_month(flow.date)) {
 				post(&mut running, &flow.account, flow.amount.minor())?;
-				scenario_net = add(scenario_net, flow.amount.minor())?;
+				match &flow.counterpart {
+					Some(counterpart) => {
+						post(
+							&mut running,
+							counterpart,
+							flow.amount.checked_neg()?.minor(),
+						)?;
+					}
+					None => scenario_net = add(scenario_net, flow.amount.minor())?,
+				}
 			}
-			for (account, category, change) in scenario.income_changes(month) {
+			for (account, category, change) in overlay.income_changes(month) {
 				let delta = match change {
 					IncomeDelta::Amount(amount) => amount.minor(),
 					IncomeDelta::Percent(bp) => {
 						let base = known_income
 							.iter()
-							.filter(|(flow, _)| category.is_none() || **flow == category)
+							.filter(|(fed, _)| category.is_none() || fed.as_ref() == category)
 							.map(|(_, amount)| *amount)
 							.chain(
 								baseline_income
@@ -317,10 +386,22 @@ impl<'a> Forecaster<'a> {
 		}
 
 		Ok(Projection {
-			scenario: scenario.name.clone(),
+			scenario: scenario.map(|scenario| scenario.id.clone()),
 			today,
 			net_worth_today: Money::from_minor(net_worth_today),
 			balances_today: money_map(&start),
+			in_the_past: match scenario {
+				Some(scenario) => {
+					let mut past = Vec::new();
+					for event in &scenario.events {
+						if in_the_past(&event.change, today)? {
+							past.push(event.id.clone());
+						}
+					}
+					past
+				}
+				None => Vec::new(),
+			},
 			overdue: known
 				.iter()
 				.filter(|flow| flow.date < today)
@@ -342,7 +423,7 @@ impl<'a> Forecaster<'a> {
 		&self,
 		today: CivilDate,
 		known: &[KnownFlow],
-		scenarios: &[Scenario],
+		scenarios: &[&Scenario],
 	) -> Result<Comparison, CoreError> {
 		if scenarios.len() > MAX_COMPARED {
 			return Err(CoreError::Invalid(format!(
@@ -350,10 +431,10 @@ impl<'a> Forecaster<'a> {
 			)));
 		}
 		Ok(Comparison {
-			baseline: self.project(today, known, &Scenario::baseline())?,
+			baseline: self.project(today, known, None)?,
 			scenarios: scenarios
 				.iter()
-				.map(|scenario| self.project(today, known, scenario))
+				.map(|scenario| self.project(today, known, Some(scenario)))
 				.collect::<Result<_, _>>()?,
 		})
 	}
@@ -380,10 +461,10 @@ impl<'a> Forecaster<'a> {
 					.category
 					.as_ref()
 					.is_some_and(|id| spending.contains(id));
-				if row.is_primary()
-					&& row.kind() == TransactionKind::Expense
-					&& !covered && !bill_linked(self.budget, row)
-				{
+				let spending = row.kind() == TransactionKind::Expense
+					&& !asset_purchase(row)
+					&& row.decision != Decision::MisfiledTransferCategory;
+				if row.is_primary() && spending && !covered && !bill_linked(self.budget, row) {
 					total = total
 						.checked_sub(row.amount.minor())
 						.ok_or(CoreError::Overflow)?;

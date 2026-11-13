@@ -155,6 +155,8 @@ pub fn rule_transaction(input: &Value, account: &str) -> RuleTransaction {
 		reconciled: None,
 		schedule: None,
 		deleted: false,
+		splits: Vec::new(),
+		is_child: false,
 	}
 }
 
@@ -173,4 +175,211 @@ pub fn expected_row(outcome: &RuleTransaction, account: &str) -> Value {
 		"schedule": outcome.schedule.as_ref().map(ScheduleId::as_str),
 		"tombstone": i64::from(outcome.deleted),
 	})
+}
+
+/// Like `apply_and_dump`, for an op file written by hand so its JSON keeps
+/// a chosen key order.
+pub fn apply_text_and_dump(
+	oracle: &Path,
+	scratch: &Path,
+	label: &str,
+	base: &Path,
+	ops_text: &str,
+	today: &str,
+) -> Value {
+	let ops_path = scratch.join(format!("{label}.json"));
+	let zip_path = scratch.join(format!("{label}.zip"));
+	std::fs::write(&ops_path, ops_text).unwrap();
+	let (base, ops_path, zip_path) = (
+		base.to_string_lossy().into_owned(),
+		ops_path.to_string_lossy().into_owned(),
+		zip_path.to_string_lossy().into_owned(),
+	);
+	node(
+		oracle,
+		&[
+			"apply", &base, &ops_path, "--out", &zip_path, "--today", today,
+		],
+	);
+	dump(oracle, &zip_path, today)
+}
+
+pub fn apply_only(oracle: &Path, base: &Path, ops: Vec<Value>, out: &Path, today: &str) {
+	let ops_path = out.with_extension("json");
+	std::fs::write(
+		&ops_path,
+		serde_json::json!({"version": 1, "ops": ops}).to_string(),
+	)
+	.unwrap();
+	node(
+		oracle,
+		&[
+			"apply",
+			&base.to_string_lossy(),
+			&ops_path.to_string_lossy(),
+			"--out",
+			&out.to_string_lossy(),
+			"--today",
+			today,
+		],
+	);
+}
+
+fn rows<'a>(dump: &'a Value, table: &str) -> impl Iterator<Item = &'a Value> {
+	dump["tables"][table]["rows"]
+		.as_array()
+		.into_iter()
+		.flatten()
+}
+
+fn date_int(value: &Value) -> Option<veritas_domain::CivilDate> {
+	let n = value.as_i64()?;
+	veritas_domain::CivilDate::new(
+		i32::try_from(n / 10_000).ok()?,
+		u32::try_from(n / 100 % 100).ok()?,
+		u32::try_from(n % 100).ok()?,
+	)
+	.ok()
+}
+
+/// The budget the store would load from a dump: what rules and schedules
+/// read. Next dates come from what Actual computed (`v_schedules`).
+pub fn budget_from_dump(dump: &Value) -> veritas_domain::BudgetData {
+	use veritas_domain::*;
+	let text = |row: &Value, key: &str| row[key].as_str().map(str::to_owned);
+	let flag = |row: &Value, key: &str| row[key] == 1;
+	let mut budget = BudgetData::empty(BudgetType::Envelope);
+	for row in rows(dump, "accounts") {
+		let id = AccountId::new(row["id"].as_str().unwrap());
+		budget.accounts.insert(
+			id.clone(),
+			Account {
+				id,
+				name: text(row, "name").unwrap_or_default(),
+				off_budget: flag(row, "offbudget"),
+				closed: flag(row, "closed"),
+				group: None,
+				sort_order: row["sort_order"].as_f64().unwrap_or_default(),
+				tombstone: flag(row, "tombstone"),
+			},
+		);
+	}
+	for row in rows(dump, "payees") {
+		let id = PayeeId::new(row["id"].as_str().unwrap());
+		budget.payees.insert(
+			id.clone(),
+			Payee {
+				id,
+				name: text(row, "name").unwrap_or_default(),
+				transfer_account: text(row, "transfer_acct").map(AccountId::new),
+				favorite: flag(row, "favorite"),
+				learn_categories: flag(row, "learn_categories"),
+				tombstone: flag(row, "tombstone"),
+			},
+		);
+	}
+	for row in rows(dump, "payee_mapping") {
+		budget.payee_mapping.insert(
+			PayeeId::new(row["id"].as_str().unwrap()),
+			PayeeId::new(row["targetId"].as_str().unwrap()),
+		);
+	}
+	for row in rows(dump, "category_mapping") {
+		budget.category_mapping.insert(
+			CategoryId::new(row["id"].as_str().unwrap()),
+			CategoryId::new(row["transferId"].as_str().unwrap()),
+		);
+	}
+	for row in rows(dump, "categories") {
+		let id = CategoryId::new(row["id"].as_str().unwrap());
+		budget.categories.insert(
+			id.clone(),
+			Category {
+				id,
+				name: text(row, "name").unwrap_or_default(),
+				group: CategoryGroupId::new(row["cat_group"].as_str().unwrap_or_default()),
+				is_income: flag(row, "is_income"),
+				hidden: flag(row, "hidden"),
+				sort_order: row["sort_order"].as_f64().unwrap_or_default(),
+				tombstone: flag(row, "tombstone"),
+			},
+		);
+	}
+	for row in rows(dump, "rules") {
+		let id = RuleId::new(row["id"].as_str().unwrap());
+		budget.rules.insert(
+			id.clone(),
+			Rule {
+				id,
+				stage: match row["stage"].as_str() {
+					Some("pre" | "cleanup" | "modify") => RuleStage::Pre,
+					Some("post") => RuleStage::Post,
+					_ => RuleStage::Default,
+				},
+				conditions_op: if row["conditions_op"] == "or" {
+					ConditionsOp::Or
+				} else {
+					ConditionsOp::And
+				},
+				conditions_json: text(row, "conditions").unwrap_or_default(),
+				actions_json: text(row, "actions").unwrap_or_default(),
+				tombstone: flag(row, "tombstone"),
+			},
+		);
+	}
+	for row in rows(dump, "schedules") {
+		let id = ScheduleId::new(row["id"].as_str().unwrap());
+		let computed = &dump["computed"]["schedules"][id.as_str()];
+		budget.schedules.insert(
+			id.clone(),
+			Schedule {
+				id,
+				name: text(row, "name"),
+				rule: RuleId::new(row["rule"].as_str().unwrap_or_default()),
+				posts_transaction: flag(row, "posts_transaction"),
+				completed: flag(row, "completed"),
+				next_date: computed["nextDate"]
+					.as_str()
+					.and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+					.map(CivilDate::from),
+				tombstone: flag(row, "tombstone"),
+			},
+		);
+	}
+	for row in rows(dump, "transactions") {
+		let id = TransactionId::new(row["id"].as_str().unwrap());
+		let Some(date) = date_int(&row["date"]) else {
+			continue;
+		};
+		budget.transactions.insert(
+			id.clone(),
+			Transaction {
+				id,
+				account: AccountId::new(row["acct"].as_str().unwrap_or_default()),
+				date,
+				amount: Money::from_minor(row["amount"].as_i64().unwrap_or_default()),
+				payee: text(row, "description").map(PayeeId::new),
+				imported_payee: text(row, "imported_description"),
+				category: text(row, "category").map(CategoryId::new),
+				notes: text(row, "notes"),
+				cleared: flag(row, "cleared"),
+				reconciled: flag(row, "reconciled"),
+				split: if flag(row, "isParent") {
+					SplitRole::Parent
+				} else if flag(row, "isChild") {
+					SplitRole::Child {
+						parent: TransactionId::new(row["parent_id"].as_str().unwrap_or_default()),
+					}
+				} else {
+					SplitRole::None
+				},
+				transfer: text(row, "transferred_id").map(TransactionId::new),
+				schedule: text(row, "schedule").map(ScheduleId::new),
+				starting_balance: flag(row, "starting_balance_flag"),
+				sort_order: row["sort_order"].as_f64().unwrap_or_default(),
+				tombstone: flag(row, "tombstone"),
+			},
+		);
+	}
+	budget
 }

@@ -9,11 +9,12 @@ mod kinds;
 mod model;
 mod money;
 mod new_budget;
+mod scenario;
 mod store;
 
 pub use change::{
 	AccountMetaRow, CategoryMapping, CategoryMetaRow, Change, Delta, EntityRef, Hold, Note,
-	PayeeMapping, Record, Retired, Row, TransactionMetaRow,
+	PayeeMapping, Record, Retired, Row, TaxTag, TransactionMetaRow,
 };
 pub use currency::{CURRENCIES, Currency, currency};
 pub use date::{CivilDate, YearMonth};
@@ -23,4 +24,5 @@ pub use kinds::{AccountKind, BudgetType, CategoryKind, GoalStatus, TransactionKi
 pub use model::*;
 pub use money::Money;
 pub use new_budget::{NewAccount, NewAccountKind, NewBudget, NumberFormat, NumberStyle};
+pub use scenario::{Cadence, IncomeDelta, Scenario, ScenarioChange, ScenarioEvent};
 pub use store::{Store, StoreTransaction};

@@ -151,7 +151,7 @@ pub fn audit(loaded: &Loaded) -> AuditReport {
 }
 
 /// The known tax buckets. `none` is only a tag override, never a category bucket.
-const TAX_BUCKETS: [&str; 10] = [
+pub(crate) const TAX_BUCKETS: [&str; 10] = [
 	"w2_income",
 	"interest_income",
 	"business_income",
@@ -449,6 +449,20 @@ fn references(data: &BudgetData, findings: &mut Findings) {
 				"budget",
 				&id,
 				Some(row_category.as_str()),
+			);
+		}
+	}
+
+	for widget in data.widgets.values().filter(|row| !row.tombstone) {
+		if let Some(page) = &widget.page {
+			let exists = data.dashboard_pages.get(page).map(|page| page.tombstone);
+			reference(
+				findings,
+				"dashboard",
+				widget.id.as_str(),
+				"dashboard page",
+				page.as_str(),
+				exists,
 			);
 		}
 	}

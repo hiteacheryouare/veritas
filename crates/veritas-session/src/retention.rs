@@ -1,18 +1,22 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use chrono::{DateTime, Datelike, Timelike, Utc};
+use chrono::{DateTime, Datelike, TimeDelta, Timelike, Utc};
 
 use crate::snapshot::Snapshot;
 
 /// How many hours, days and months keep a snapshot. Each tier keeps the
 /// newest snapshot of each of its most recent periods that has one, so a
 /// budget left closed for weeks never loses its history to the calendar.
+/// Snapshots taken before an operation (import, export, version change, bulk
+/// edit, rule apply, restore) are also kept for `operation_days`, whatever
+/// the tiers say, so a later snapshot in the same hour can't replace them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RetentionPolicy {
 	pub hourly: usize,
 	pub daily: usize,
 	pub monthly: usize,
+	pub operation_days: i64,
 }
 
 impl Default for RetentionPolicy {
@@ -21,6 +25,7 @@ impl Default for RetentionPolicy {
 			hourly: 48,
 			daily: 30,
 			monthly: 12,
+			operation_days: 30,
 		}
 	}
 }
@@ -40,15 +45,25 @@ fn period(tier: Tier, at: DateTime<Utc>) -> (i32, u32, u32, u32) {
 	}
 }
 
-/// The snapshots a prune should delete, newest first. The newest snapshot
-/// overall is always kept, even when every tier is set to zero.
-pub fn expired(snapshots: &[Snapshot], policy: &RetentionPolicy) -> Vec<Snapshot> {
+/// The snapshots a prune at `now` should delete, newest first. The newest
+/// snapshot overall is always kept, even when every limit is zero.
+pub fn expired(
+	snapshots: &[Snapshot],
+	policy: &RetentionPolicy,
+	now: DateTime<Utc>,
+) -> Vec<Snapshot> {
 	let mut newest_first: Vec<&Snapshot> = snapshots.iter().collect();
 	newest_first.sort_by(|a, b| (b.taken_at, &b.path).cmp(&(a.taken_at, &a.path)));
 
 	let mut keep: BTreeSet<&Path> = BTreeSet::new();
 	if let Some(newest) = newest_first.first() {
 		keep.insert(&newest.path);
+	}
+	let window = TimeDelta::days(policy.operation_days);
+	for snapshot in &newest_first {
+		if !snapshot.reason.is_routine() && now - snapshot.taken_at < window {
+			keep.insert(&snapshot.path);
+		}
 	}
 	for (tier, limit) in [
 		(Tier::Hour, policy.hourly),
@@ -89,11 +104,11 @@ mod tests {
 	use super::*;
 	use crate::snapshot::SnapshotReason;
 
-	fn snapshot(index: usize, millis: i64) -> Snapshot {
+	fn snapshot(index: usize, millis: i64, reason: SnapshotReason) -> Snapshot {
 		Snapshot {
 			path: PathBuf::from(format!("snapshots/{index:05}.sqlite")),
 			taken_at: Utc.timestamp_millis_opt(millis).unwrap(),
-			reason: SnapshotReason::Hourly,
+			reason,
 		}
 	}
 
@@ -102,12 +117,25 @@ mod tests {
 	}
 
 	fn named(name: &str, taken_at: &str) -> Snapshot {
+		tagged(name, taken_at, SnapshotReason::Hourly)
+	}
+
+	fn tagged(name: &str, taken_at: &str, reason: SnapshotReason) -> Snapshot {
 		Snapshot {
 			path: PathBuf::from(name),
 			taken_at: at(taken_at),
-			reason: SnapshotReason::Hourly,
+			reason,
 		}
 	}
+
+	fn paths(snapshots: Vec<Snapshot>) -> Vec<PathBuf> {
+		snapshots
+			.into_iter()
+			.map(|snapshot| snapshot.path)
+			.collect()
+	}
+
+	const NOW: &str = "2026-11-10T00:00:00Z";
 
 	fn newest_per_period(snapshots: &[Snapshot], tier: Tier, limit: usize) -> Vec<&Snapshot> {
 		let mut newest: BTreeMap<(i32, u32, u32, u32), &Snapshot> = BTreeMap::new();
@@ -137,11 +165,9 @@ mod tests {
 			hourly: 2,
 			daily: 2,
 			monthly: 2,
+			operation_days: 30,
 		};
-		let gone: Vec<_> = expired(&snapshots, &policy)
-			.into_iter()
-			.map(|snapshot| snapshot.path)
-			.collect();
+		let gone = paths(expired(&snapshots, &policy, at(NOW)));
 		assert_eq!(gone, [PathBuf::from("b"), "e".into(), "g".into()]);
 	}
 
@@ -155,30 +181,60 @@ mod tests {
 			hourly: 0,
 			daily: 0,
 			monthly: 0,
+			operation_days: 0,
 		};
-		let gone = expired(&snapshots, &policy);
+		let gone = expired(&snapshots, &policy, at(NOW));
 		assert_eq!(gone.len(), 1);
 		assert_eq!(gone[0].path, PathBuf::from("old"));
 	}
 
+	#[test]
+	fn a_snapshot_before_an_operation_outlives_its_hour_for_thirty_days() {
+		// R-REL-3: the pre-import copy survives a later hourly snapshot.
+		let snapshots = [
+			named("hourly", "2026-11-09T20:40:00Z"),
+			tagged(
+				"before-import",
+				"2026-11-09T20:05:00Z",
+				SnapshotReason::Import,
+			),
+			named("routine", "2026-11-09T20:01:00Z"),
+		];
+		let policy = RetentionPolicy::default();
+		assert_eq!(
+			paths(expired(&snapshots, &policy, at(NOW))),
+			[PathBuf::from("routine")]
+		);
+		assert_eq!(
+			paths(expired(&snapshots, &policy, at("2026-12-10T00:00:00Z"))),
+			[PathBuf::from("before-import"), "routine".into()]
+		);
+	}
+
 	proptest! {
 		// R-REL-3: random snapshot histories never lose the newest snapshot of
-		// a kept period, never keep more than the tiers allow, and a second
-		// prune deletes nothing more.
+		// a kept period or a recent pre-operation snapshot, never keep more
+		// than the limits allow, and a second prune deletes nothing more.
 		#[test]
 		fn pruning_never_loses_the_newest_of_any_tier(
-			millis in prop::collection::vec(1_700_000_000_000i64..1_800_000_000_000, 0..300),
+			taken in prop::collection::vec(
+				(1_700_000_000_000i64..1_800_000_000_000, prop::sample::select(SnapshotReason::ALL.to_vec())),
+				0..300,
+			),
 			hourly in 0usize..60,
 			daily in 0usize..40,
 			monthly in 0usize..15,
+			operation_days in 0i64..60,
+			now in 1_700_000_000_000i64..1_850_000_000_000,
 		) {
-			let snapshots: Vec<Snapshot> = millis
+			let snapshots: Vec<Snapshot> = taken
 				.iter()
 				.enumerate()
-				.map(|(index, &millis)| snapshot(index, millis))
+				.map(|(index, &(millis, reason))| snapshot(index, millis, reason))
 				.collect();
-			let policy = RetentionPolicy { hourly, daily, monthly };
-			let gone = expired(&snapshots, &policy);
+			let now = Utc.timestamp_millis_opt(now).unwrap();
+			let policy = RetentionPolicy { hourly, daily, monthly, operation_days };
+			let gone = expired(&snapshots, &policy, now);
 			let gone_paths: BTreeSet<&Path> = gone.iter().map(|s| s.path.as_path()).collect();
 			let kept: Vec<Snapshot> = snapshots
 				.iter()
@@ -198,10 +254,20 @@ mod tests {
 				}
 			}
 
-			let allowed = (hourly + daily + monthly).max(1).min(snapshots.len());
+			let recent_operations: Vec<&Snapshot> = snapshots
+				.iter()
+				.filter(|s| !s.reason.is_routine() && now - s.taken_at < TimeDelta::days(operation_days))
+				.collect();
+			for snapshot in &recent_operations {
+				prop_assert!(!gone_paths.contains(snapshot.path.as_path()));
+			}
+
+			let allowed = (hourly + daily + monthly + recent_operations.len())
+				.max(1)
+				.min(snapshots.len());
 			prop_assert!(kept.len() <= allowed);
 
-			prop_assert!(expired(&kept, &policy).is_empty());
+			prop_assert!(expired(&kept, &policy, now).is_empty());
 		}
 	}
 }

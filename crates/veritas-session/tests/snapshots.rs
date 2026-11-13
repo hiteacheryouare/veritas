@@ -12,18 +12,26 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, TimeDelta, Utc};
 use rusqlite::Connection;
-use support::{TempDir, entries};
+use support::{TempDir, age_file, entries};
 use veritas_domain::CoreError;
 use veritas_session::{
-	RetentionPolicy, SNAPSHOTS_DIR, SnapshotReason, list_snapshots, prune_snapshots,
-	restore_snapshot, take_snapshot,
+	Access, LOCK_FILE, RetentionPolicy, SNAPSHOTS_DIR, SnapshotReason, WriterLock, acquire,
+	list_snapshots, prune_snapshots, restore_snapshot, take_snapshot,
 };
 
 fn at(text: &str) -> DateTime<Utc> {
 	DateTime::parse_from_rfc3339(text).unwrap().to_utc()
 }
 
+fn writer(dir: &TempDir) -> WriterLock {
+	match acquire(dir.path()).unwrap() {
+		Access::Writer(lock) => lock,
+		Access::ReadOnly(reason) => panic!("expected the writer lock, got {reason:?}"),
+	}
+}
+
 struct Budget {
+	lock: WriterLock,
 	dir: TempDir,
 	db: PathBuf,
 	snapshots: PathBuf,
@@ -43,7 +51,15 @@ fn budget(label: &str) -> (Budget, Connection) {
 			INSERT INTO accounts VALUES ('checking', 'Checking', 120000);",
 		)
 		.unwrap();
-	(Budget { dir, db, snapshots }, connection)
+	(
+		Budget {
+			lock: writer(&dir),
+			dir,
+			db,
+			snapshots,
+		},
+		connection,
+	)
 }
 
 fn balance(db: &Path) -> i64 {
@@ -120,6 +136,7 @@ fn restore_brings_back_the_exact_prior_state_in_one_call() {
 	drop(connection);
 
 	let safety = restore_snapshot(
+		&budget.lock,
 		&before_import.path,
 		&budget.db,
 		&budget.snapshots,
@@ -131,7 +148,10 @@ fn restore_brings_back_the_exact_prior_state_in_one_call() {
 	assert_eq!(balance(&budget.db), 120_000);
 	assert_eq!(safety.reason, SnapshotReason::Restore);
 	assert_eq!(balance(&safety.path), 1);
-	assert_eq!(entries(budget.dir.path()), ["db.sqlite", "snapshots"]);
+	assert_eq!(
+		entries(budget.dir.path()),
+		["db.sqlite", "snapshots", LOCK_FILE]
+	);
 	let integrity: String = Connection::open(&budget.db)
 		.unwrap()
 		.query_row("PRAGMA integrity_check", [], |row| row.get(0))
@@ -149,6 +169,7 @@ fn a_damaged_snapshot_is_refused_and_the_budget_is_untouched() {
 	fs::write(&damaged, b"not a database at all, just bytes").unwrap();
 
 	let result = restore_snapshot(
+		&budget.lock,
 		&damaged,
 		&budget.db,
 		&budget.snapshots,
@@ -181,6 +202,7 @@ fn restore_refuses_while_the_budget_is_still_open() {
 	set_balance(&connection, 7);
 
 	let result = restore_snapshot(
+		&budget.lock,
 		&snapshot.path,
 		&budget.db,
 		&budget.snapshots,
@@ -206,21 +228,29 @@ fn pruning_applies_the_policy_and_clears_half_written_copies() {
 		)
 		.unwrap();
 	}
-	let partial = budget
+	let crashed = budget
 		.snapshots
-		.join(".20261101T000000000Z-hourly.sqlite.partial");
-	fs::write(&partial, b"half").unwrap();
+		.join(".20261101T000000000Z-hourly.sqlite.1234-0.partial");
+	fs::write(&crashed, b"half").unwrap();
+	age_file(&crashed, std::time::Duration::from_secs(2 * 60 * 60));
+	let in_progress = budget
+		.snapshots
+		.join(".20261101T000000000Z-hourly.sqlite.5678-0.partial");
+	fs::write(&in_progress, b"still copying").unwrap();
 	fs::write(budget.snapshots.join("keep-me.txt"), b"mine").unwrap();
 
 	let policy = RetentionPolicy {
 		hourly: 2,
 		daily: 1,
 		monthly: 1,
+		operation_days: 30,
 	};
-	let gone = prune_snapshots(&budget.snapshots, &policy).unwrap();
+	let now = start + TimeDelta::days(3);
+	let gone = prune_snapshots(&budget.snapshots, &policy, now).unwrap();
 
 	assert_eq!(gone.len(), 8);
-	assert!(!partial.exists());
+	assert!(!crashed.exists());
+	assert!(in_progress.exists());
 	let left: Vec<_> = list_snapshots(&budget.snapshots)
 		.unwrap()
 		.into_iter()
@@ -232,7 +262,7 @@ fn pruning_applies_the_policy_and_clears_half_written_copies() {
 	);
 	assert!(budget.snapshots.join("keep-me.txt").exists());
 	assert!(
-		prune_snapshots(&budget.snapshots, &policy)
+		prune_snapshots(&budget.snapshots, &policy, now)
 			.unwrap()
 			.is_empty()
 	);
@@ -301,7 +331,15 @@ fn realistic_budget(label: &str) -> (Budget, Connection) {
 			)
 			.unwrap();
 	}
-	(Budget { dir, db, snapshots }, connection)
+	(
+		Budget {
+			lock: writer(&dir),
+			dir,
+			db,
+			snapshots,
+		},
+		connection,
+	)
 }
 
 /// Every schema object and every row, read through a fresh connection, so two
@@ -386,6 +424,7 @@ fn restoring_after_a_bulk_edit_brings_back_every_row_and_schema_object() {
 	assert_ne!(after_edit, before_edit);
 
 	let safety = restore_snapshot(
+		&budget.lock,
 		&snapshot.path,
 		&budget.db,
 		&budget.snapshots,
@@ -403,6 +442,7 @@ fn restoring_after_a_bulk_edit_brings_back_every_row_and_schema_object() {
 	assert_eq!(dump(&safety.path), after_edit);
 
 	restore_snapshot(
+		&budget.lock,
 		&safety.path,
 		&budget.db,
 		&budget.snapshots,
@@ -457,7 +497,7 @@ fn a_month_of_daily_use_keeps_every_recent_hour_and_the_end_of_every_day() {
 			let snapshot =
 				take_snapshot(&budget.db, &budget.snapshots, reason, evening + offset).unwrap();
 			taken.push(snapshot.taken_at);
-			prune_snapshots(&budget.snapshots, &policy).unwrap();
+			prune_snapshots(&budget.snapshots, &policy, evening + offset).unwrap();
 		};
 		snap(TimeDelta::minutes(2), SnapshotReason::Open);
 		if day % 7 == 3 {
@@ -500,8 +540,17 @@ fn a_month_of_daily_use_keeps_every_recent_hour_and_the_end_of_every_day() {
 		assert!(kept.contains(&wanted), "lost the end of {month}");
 	}
 	assert!(kept.contains(&newest));
+	let recent_operations = list_snapshots(&budget.snapshots)
+		.unwrap()
+		.iter()
+		.filter(|snapshot| {
+			!snapshot.reason.is_routine()
+				&& newest - snapshot.taken_at < TimeDelta::days(policy.operation_days)
+		})
+		.count();
+	assert!(recent_operations > 0);
 	assert!(
-		kept.len() <= policy.hourly + policy.daily + policy.monthly,
+		kept.len() <= policy.hourly + policy.daily + policy.monthly + recent_operations,
 		"{} snapshots kept",
 		kept.len()
 	);
@@ -515,7 +564,6 @@ fn a_month_of_daily_use_keeps_every_recent_hour_and_the_end_of_every_day() {
 }
 
 #[test]
-#[ignore = "R-REL-3 bug: the hourly tier keeps only the newest snapshot of each hour, so a safety snapshot taken before a risky operation is deleted by the next snapshot in that hour"]
 fn a_snapshot_taken_before_a_risky_operation_survives_the_next_prune_in_the_same_hour() {
 	// R-REL-3 and §10 "restoring a snapshot brings back the exact prior state":
 	// the user imports at 14:20 and exports at 14:50, then wants the budget
@@ -538,7 +586,7 @@ fn a_snapshot_taken_before_a_risky_operation_survives_the_next_prune_in_the_same
 		at("2026-11-10T14:50:00Z"),
 	)
 	.unwrap();
-	prune_snapshots(&budget.snapshots, &policy).unwrap();
+	prune_snapshots(&budget.snapshots, &policy, at("2026-11-10T14:50:00Z")).unwrap();
 	assert!(
 		before_import.path.exists(),
 		"the pre-import snapshot was pruned"
@@ -546,6 +594,7 @@ fn a_snapshot_taken_before_a_risky_operation_survives_the_next_prune_in_the_same
 
 	drop(connection);
 	let safety = restore_snapshot(
+		&budget.lock,
 		&before_import.path,
 		&budget.db,
 		&budget.snapshots,
@@ -560,9 +609,68 @@ fn a_snapshot_taken_before_a_risky_operation_survives_the_next_prune_in_the_same
 		at("2026-11-10T15:30:01Z"),
 	)
 	.unwrap();
-	prune_snapshots(&budget.snapshots, &policy).unwrap();
+	prune_snapshots(&budget.snapshots, &policy, at("2026-11-10T15:30:01Z")).unwrap();
 	assert!(
 		safety.path.exists(),
 		"the restore's safety snapshot was pruned"
 	);
+}
+
+#[test]
+fn restore_refuses_a_lock_held_for_another_budget() {
+	// The lock is what keeps every other connection away while -wal and
+	// -shm are deleted, so it has to be this budget's lock.
+	let (mine, connection) = budget("snap-other-lock");
+	let snapshot = take_snapshot(
+		&mine.db,
+		&mine.snapshots,
+		SnapshotReason::Open,
+		at("2026-11-09T20:00:00Z"),
+	)
+	.unwrap();
+	set_balance(&connection, 3);
+	drop(connection);
+	let (other, _other_connection) = budget("snap-other-lock-2");
+
+	let result = restore_snapshot(
+		&other.lock,
+		&snapshot.path,
+		&mine.db,
+		&mine.snapshots,
+		at("2026-11-09T21:00:00Z"),
+	);
+
+	assert!(matches!(result, Err(CoreError::Internal(_))), "{result:?}");
+	assert_eq!(balance(&mine.db), 3);
+}
+
+#[test]
+fn snapshots_taken_at_the_same_instant_from_two_threads_both_survive() {
+	// R-REL-3: the background open snapshot and an hourly one can overlap.
+	let (budget, _connection) = budget("snap-race");
+	let now = at("2026-11-09T20:30:00Z");
+	let taken: Vec<_> = std::thread::scope(|scope| {
+		let threads: Vec<_> = (0..4)
+			.map(|_| {
+				scope.spawn(|| {
+					take_snapshot(&budget.db, &budget.snapshots, SnapshotReason::Hourly, now)
+						.unwrap()
+				})
+			})
+			.collect();
+		threads
+			.into_iter()
+			.map(|thread| thread.join().unwrap())
+			.collect()
+	});
+
+	let mut paths: Vec<_> = taken.iter().map(|snapshot| snapshot.path.clone()).collect();
+	paths.sort();
+	paths.dedup();
+	assert_eq!(paths.len(), 4);
+	for snapshot in &taken {
+		assert_eq!(integrity(&snapshot.path), "ok");
+		assert_eq!(balance(&snapshot.path), 120_000);
+	}
+	assert_eq!(entries(&budget.snapshots).len(), 4);
 }

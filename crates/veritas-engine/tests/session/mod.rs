@@ -7,9 +7,10 @@
 use proptest::prelude::*;
 use serde_json::{Value, json};
 use veritas_domain::{
-	AccountId, BudgetData, CategoryId, CivilDate, Money, SplitRole, Transaction, TransactionId,
-	YearMonth,
+	AccountId, BudgetData, CategoryId, CivilDate, Goal, GoalId, GoalStatus, Money, SplitRole,
+	Transaction, TransactionId, YearMonth,
 };
+use veritas_engine::goals;
 use veritas_engine::{
 	AverageSpan, BudgetEditor, BudgetWrites, Envelope, EnvelopeSheet, NumberFormat, SheetChange,
 };
@@ -104,6 +105,29 @@ pub enum Op {
 	DeleteTransaction {
 		index: usize,
 	},
+	Recategorize {
+		index: usize,
+		category: Option<usize>,
+	},
+	ChangeAmount {
+		index: usize,
+		amount: i64,
+	},
+	/// A split parent whose children are `(category, amount)`.
+	AddSplit {
+		month: usize,
+		day: u32,
+		children: Vec<(Option<usize>, i64)>,
+	},
+	DeleteSplit {
+		index: usize,
+	},
+	/// DEBT-8.3 in today's month: release the envelope's leftover to `to` (or
+	/// To Budget), then hide the envelope.
+	CloseGoal {
+		goal: usize,
+		to: Option<usize>,
+	},
 }
 
 /// Transactions only land from the fourth month on, so the first transaction
@@ -189,6 +213,26 @@ pub fn op_strategy(months: usize, expenses: usize) -> BoxedStrategy<Op> {
 			}),
 		(0..64usize, 3..months).prop_map(|(index, month)| Op::MoveTransaction { index, month }),
 		(0..64usize).prop_map(|index| Op::DeleteTransaction { index }),
+		(0..64usize, proptest::option::of(0..expenses + 1))
+			.prop_map(|(index, category)| Op::Recategorize { index, category }),
+		(0..64usize, -100_000i64..100_000)
+			.prop_map(|(index, amount)| Op::ChangeAmount { index, amount }),
+		(
+			3..months,
+			1..29u32,
+			proptest::collection::vec(
+				(proptest::option::of(0..expenses + 1), -60_000i64..60_000),
+				1..4
+			)
+		)
+			.prop_map(|(month, day, children)| Op::AddSplit {
+				month,
+				day,
+				children
+			}),
+		(0..16usize).prop_map(|index| Op::DeleteSplit { index }),
+		(category.clone(), proptest::option::of(category))
+			.prop_map(|(goal, to)| Op::CloseGoal { goal, to }),
 	]
 	.boxed()
 }
@@ -201,6 +245,7 @@ pub struct Session {
 	universe: Universe,
 	months: Vec<YearMonth>,
 	added: Vec<TransactionId>,
+	splits: Vec<TransactionId>,
 	oracle_ops: Vec<Value>,
 }
 
@@ -214,6 +259,7 @@ impl Session {
 			universe,
 			months,
 			added: Vec::new(),
+			splits: Vec::new(),
 			oracle_ops: Vec::new(),
 		}
 	}
@@ -225,6 +271,28 @@ impl Session {
 	/// What Actual has to run to end where this session is.
 	pub fn oracle_ops(&self) -> &[Value] {
 		&self.oracle_ops
+	}
+
+	/// An op for Actual that brings it to the same starting point, such as
+	/// creating a category the budget was given before the session began.
+	pub fn record(&mut self, op: Value) {
+		self.oracle_ops.push(op);
+	}
+
+	/// The transactions `AddTransaction` has created so far, in order. `Recategorize`
+	/// and `ChangeAmount` index into this list.
+	pub fn added(&self) -> &[TransactionId] {
+		&self.added
+	}
+
+	/// The position of `id` among the live added transactions, which is what
+	/// `MoveTransaction` and `DeleteTransaction` pick from.
+	pub fn live_index(&self, id: &TransactionId) -> usize {
+		self.added
+			.iter()
+			.filter(|id| !self.budget.transactions[*id].tombstone)
+			.position(|live| live == id)
+			.unwrap()
 	}
 
 	fn month(&self, index: usize) -> YearMonth {
@@ -501,7 +569,180 @@ impl Session {
 				let actual = json!({ "op": "deleteTransaction", "id": id.as_str() });
 				self.transactions_changed(id, actual);
 			}
+			Op::Recategorize { index, category } => {
+				let Some(id) = self.added.get(index % self.added.len().max(1)).cloned() else {
+					return;
+				};
+				if self.budget.transactions[&id].tombstone {
+					return;
+				}
+				let category = category.map(|c| self.category(c));
+				self.budget.transactions.get_mut(&id).unwrap().category = category.clone();
+				let value = category.map_or(Value::Null, |c| json!(c.as_str()));
+				let actual = json!({ "op": "updateTransaction", "id": id.as_str(), "fields": { "category": value } });
+				self.transactions_changed(id, actual);
+			}
+			Op::ChangeAmount { index, amount } => {
+				let Some(id) = self.added.get(index % self.added.len().max(1)).cloned() else {
+					return;
+				};
+				if self.budget.transactions[&id].tombstone {
+					return;
+				}
+				self.budget.transactions.get_mut(&id).unwrap().amount = Money::from_minor(amount);
+				let actual = json!({ "op": "updateTransaction", "id": id.as_str(), "fields": { "amount": amount } });
+				self.transactions_changed(id, actual);
+			}
+			Op::AddSplit {
+				month,
+				day,
+				ref children,
+			} => self.split(month, day, children),
+			Op::DeleteSplit { index } => {
+				let Some(parent) = self.splits.get(index % self.splits.len().max(1)).cloned()
+				else {
+					return;
+				};
+				let row = self.budget.transactions.get_mut(&parent).unwrap();
+				if row.tombstone {
+					return;
+				}
+				row.tombstone = true;
+				let actual = json!({ "op": "deleteTransaction", "id": parent.as_str() });
+				self.transactions_changed(parent, actual);
+			}
+			Op::CloseGoal { goal, to } => self.close_goal(goal, to),
 		}
+	}
+
+	fn split(&mut self, month: usize, day: u32, children: &[(Option<usize>, i64)]) {
+		let parent =
+			TransactionId::new(format!("00000000-0000-4000-9000-{:012}", self.splits.len()));
+		let date =
+			CivilDate::new(self.month(month).year(), self.month(month).month(), day).unwrap();
+		let total: i64 = children.iter().map(|(_, amount)| amount).sum();
+		let mut parent_row = transaction(&parent, &self.universe.account, date, total, None);
+		parent_row.split = SplitRole::Parent;
+		self.budget.transactions.insert(parent.clone(), parent_row);
+		let mut ids = vec![parent.clone()];
+		let mut subtransactions = Vec::new();
+		for (index, (category, amount)) in children.iter().enumerate() {
+			let id = TransactionId::new(format!(
+				"00000000-0000-4000-a{index:03}-{:012}",
+				self.splits.len()
+			));
+			let category = category.map(|c| self.category(c));
+			let mut child =
+				transaction(&id, &self.universe.account, date, *amount, category.clone());
+			child.split = SplitRole::Child {
+				parent: parent.clone(),
+			};
+			self.budget.transactions.insert(id.clone(), child);
+			ids.push(id.clone());
+			// Actual's own ids come from the oracle's seeded stream, which also
+			// made the fixtures, so an id it picks can overwrite a fixture row.
+			let mut sub = json!({ "id": id.as_str(), "amount": amount });
+			if let Some(category) = &category {
+				sub["category"] = json!(category.as_str());
+			}
+			subtransactions.push(sub);
+		}
+		self.splits.push(parent.clone());
+		self.sheet
+			.apply(&self.budget, SheetChange::Transactions(&ids))
+			.unwrap();
+		self.oracle_ops.push(json!({
+			"op": "addTransactions",
+			"account": self.universe.account.as_str(),
+			"transactions": [{
+				"id": parent.as_str(),
+				"date": date.to_string(),
+				"amount": total,
+				"subtransactions": subtransactions
+			}]
+		}));
+	}
+
+	fn close_goal(&mut self, goal: usize, to: Option<usize>) {
+		if to == Some(goal) {
+			return;
+		}
+		let month = self.sheet.today().year_month();
+		let goal = Goal {
+			id: GoalId::new("session-goal"),
+			category: self.category(goal),
+			target: Money::from_minor(1),
+			target_date: None,
+			icon: None,
+			color: None,
+			status: GoalStatus::Active,
+			reached_month: None,
+			closed_month: None,
+			released_to: None,
+			released: None,
+		};
+		let to = self.envelope(to);
+		let editor = BudgetEditor::new(&self.budget, &self.sheet, NumberFormat::CommaDot, false);
+		let leftover = self.sheet.category(month, &goal.category).unwrap().balance;
+		let closing = goals::close(&editor, &self.sheet, &goal, month, &to).unwrap();
+		assert!(
+			closing.writes.cells.iter().all(|cell| cell.month == month),
+			"closing writes only today's month (GOAL-1)"
+		);
+		let transactions = self.budget.transactions.clone();
+		closing.writes.apply_to(&mut self.budget);
+		if let Some(first) = closing.writes.first_month() {
+			self.sheet
+				.apply(&self.budget, SheetChange::Month(first))
+				.unwrap();
+		}
+		self.budget
+			.categories
+			.get_mut(&closing.hide)
+			.unwrap()
+			.hidden = true;
+		assert_eq!(self.budget.transactions, transactions, "GOAL-1");
+		assert_eq!(
+			self.sheet.category(month, &goal.category).unwrap().balance,
+			Money::ZERO,
+			"a closed goal ends its month at 0"
+		);
+		assert_eq!(closing.goal.released, Some(leftover));
+
+		let month_text = month.to_string();
+		let amount = leftover.minor().abs();
+		let goal_id = goal.category.as_str();
+		match (leftover.minor().signum(), &to) {
+			(0, _) => {}
+			(1, _) => self.oracle_ops.push(json!({
+				"op": "budgetAction",
+				"action": "transfer-category",
+				"args": { "month": month_text, "amount": amount, "from": goal_id, "to": envelope_id(&to), "currencyCode": "" }
+			})),
+			(_, Envelope::Category(source)) => self.oracle_ops.push(json!({
+				"op": "budgetAction",
+				"action": "transfer-category",
+				"args": { "month": month_text, "amount": amount, "from": source.as_str(), "to": goal_id, "currencyCode": "" }
+			})),
+			(_, Envelope::ToBudget) => {
+				let budgeted = self.budget.budget_cells[&(month, goal.category.clone())]
+					.budgeted
+					.minor();
+				self.oracle_ops.push(json!({
+					"op": "budgetAction",
+					"action": "budget-amount",
+					"args": { "month": month_text, "category": goal_id, "amount": budgeted }
+				}));
+				let (id, note) = closing.writes.notes.last().unwrap();
+				self.oracle_ops
+					.push(json!({ "op": "setNote", "id": id, "note": note }));
+			}
+		}
+		self.oracle_ops.push(json!({
+			"op": "updateCategory",
+			"id": goal_id,
+			"fields": { "hidden": true }
+		}));
 	}
 
 	fn held(&self, month: YearMonth) -> i64 {

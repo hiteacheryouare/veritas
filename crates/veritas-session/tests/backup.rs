@@ -8,14 +8,15 @@
 mod support;
 
 use std::fs;
-use std::io::{ErrorKind, Read};
+use std::io::Read;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
-use support::TempDir;
+use support::{TempDir, age_file};
 use veritas_domain::CoreError;
 use veritas_session::write_backup;
 
@@ -39,11 +40,9 @@ fn a_newer_backup_replaces_the_old_one_atomically() {
 	// R-REL-4
 	let folder = TempDir::new("backup-replace");
 	write_backup(folder.path(), NAME, b"monday").unwrap();
-	fs::write(
-		folder.path().join(format!(".{NAME}.partial")),
-		b"left by a crash",
-	)
-	.unwrap();
+	let crashed = folder.path().join(format!(".{NAME}.1234-0.partial"));
+	fs::write(&crashed, b"left by a crash").unwrap();
+	age_file(&crashed, Duration::from_secs(2 * 60 * 60));
 
 	write_backup(folder.path(), NAME, b"tuesday").unwrap();
 
@@ -284,12 +283,20 @@ fn a_backup_that_runs_out_of_space_keeps_the_previous_one() {
 		.unwrap_or_else(|| panic!("the helper never reported: {stdout}"));
 
 	assert!(outcome.starts_with("failed "), "{outcome}");
-	assert!(outcome.contains(&format!(".{NAME}.partial")), "{outcome}");
+	assert!(outcome.contains(&format!(".{NAME}.")), "{outcome}");
 	assert_eq!(fs::read(folder.path().join(NAME)).unwrap(), yesterday);
 	assert_eq!(folder.entries(), [NAME]);
-	let leftover = fs::metadata(folder.path().join(format!(".{NAME}.partial")));
-	assert_eq!(
-		leftover.map(|_| ()).unwrap_err().kind(),
-		ErrorKind::NotFound
-	);
+}
+
+#[test]
+fn a_backup_leaves_another_writers_temp_file_alone() {
+	// R-REL-4: a second writer mid-backup in the same folder keeps its file.
+	let folder = TempDir::new("backup-concurrent");
+	let in_progress = folder.path().join(format!(".{NAME}.99999-0.partial"));
+	fs::write(&in_progress, b"still being written").unwrap();
+
+	write_backup(folder.path(), NAME, b"budget").unwrap();
+
+	assert_eq!(fs::read(&in_progress).unwrap(), b"still being written");
+	assert_eq!(fs::read(folder.path().join(NAME)).unwrap(), b"budget");
 }
