@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { registerHooks } from 'node:module';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -84,8 +84,11 @@ const installHooks = (dir: string) => {
 	});
 };
 
-export const loadArithmetic = async (dir = referenceDir()): Promise<ActualArithmetic> => {
-	const pin = verifiedReference(dir);
+export const loadArithmetic = async (given = referenceDir()): Promise<ActualArithmetic> => {
+	const pin = verifiedReference(given);
+	// Node resolves imports to real paths, so the hooks must match the real
+	// directory even when reference/actual is a symlink to another checkout.
+	const dir = realpathSync(given);
 	installHooks(dir);
 	const shared = join(dir, 'packages/loot-core/src/shared');
 	const arithmetic = await import(pathToFileURL(join(shared, 'arithmetic.ts')).href);
