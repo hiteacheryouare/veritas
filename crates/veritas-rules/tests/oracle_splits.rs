@@ -158,7 +158,7 @@ fn veritas_rows(outcome: &RuleTransaction, account: &str) -> (Value, Vec<Value>)
 		"description": outcome.payee.as_ref().map(PayeeId::as_str),
 		"isParent": i64::from(!outcome.splits.is_empty()),
 		"notes": outcome.notes.as_deref(),
-		"error": outcome.split_difference().map(|difference| difference.minor()),
+		"error": outcome.split_difference().unwrap().map(|difference| difference.minor()),
 	});
 	let lines = outcome
 		.splits
