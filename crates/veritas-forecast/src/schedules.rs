@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
 use veritas_domain::{
-	AccountId, AccountKind, CategoryId, CategoryKind, CivilDate, ConditionsOp, CoreError, Money,
-	PayeeId, Schedule, ScheduleId, TransactionKind,
+	AccountId, AccountKind, BudgetData, CategoryId, CategoryKind, CivilDate, ConditionsOp,
+	CoreError, Money, PayeeId, Schedule, ScheduleId, TransactionKind,
 };
 use veritas_reports::{ClassifiedRow, Period};
 use veritas_rules::{
@@ -35,6 +35,35 @@ pub struct ScheduledFlows {
 	/// Parts of a loan's last payment the forecast doesn't repeat (fees),
 	/// for "Not repeated: {category} {amount}" (FC-2).
 	pub not_repeated: Vec<NotRepeated>,
+	/// The part of each loan's last payment taken as escrow (FC-2), for
+	/// "Escrow taken from {category} {amount}".
+	pub escrow_sources: Vec<EscrowSource>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EscrowSource {
+	pub loan: AccountId,
+	pub category: Option<CategoryId>,
+	pub amount: Money,
+	pub same_category_as_interest: bool,
+}
+
+impl EscrowSource {
+	/// "Escrow taken from {category} {amount}", plus ", the same category as
+	/// the interest" when the two share one.
+	pub fn text(&self, budget: &BudgetData) -> String {
+		let name = self
+			.category
+			.as_ref()
+			.and_then(|id| budget.categories.get(id))
+			.map_or("Uncategorized", |category| category.name.as_str());
+		let shared = if self.same_category_as_interest {
+			", the same category as the interest"
+		} else {
+			""
+		};
+		format!("Escrow taken from {name} ${}{shared}", self.amount)
+	}
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -44,9 +73,14 @@ pub struct NotRepeated {
 	pub amount: Money,
 }
 
-/// A loan's payment read from its last payment, the parts not repeated and
-/// what this month has already paid.
-type Inferred = (LoanPayment, Vec<NotRepeated>, Option<MonthSoFar>);
+/// A loan's payment read from its last payment, the parts not repeated,
+/// where the escrow came from and what this month has already paid.
+type Inferred = (
+	LoanPayment,
+	Vec<NotRepeated>,
+	Option<EscrowSource>,
+	Option<MonthSoFar>,
+);
 
 fn compare_order(
 	a: &(f64, f64, Option<CategoryId>),
@@ -145,6 +179,7 @@ impl Forecaster<'_> {
 			unforecast: Vec::new(),
 			shortfalls: Vec::new(),
 			not_repeated: Vec::new(),
+			escrow_sources: Vec::new(),
 		};
 		for schedule in self.budget.schedules.values() {
 			if schedule.tombstone || schedule.completed {
@@ -230,7 +265,7 @@ impl Forecaster<'_> {
 			// FC-2: a bill paying a loan is that loan's payment, split into
 			// interest, escrow and principal, never one transfer.
 			scheduled_loans.insert(counterpart.clone());
-			let (loan_payment, not_repeated, so_far) =
+			let (loan_payment, not_repeated, escrow_source, so_far) =
 				match self.loan_payment(counterpart, name, amount.checked_neg()?, today)? {
 					Ok(found) => found,
 					Err(reason) => return Ok(Err(reason)),
@@ -241,6 +276,7 @@ impl Forecaster<'_> {
 			};
 			let split = loan_payment.split_from(&dates, so_far)?;
 			result.not_repeated.extend(not_repeated);
+			result.escrow_sources.extend(escrow_source);
 			result
 				.flows
 				.extend(split.flows.into_iter().map(|flow| KnownFlow {
@@ -358,26 +394,33 @@ impl Forecaster<'_> {
 				));
 			}
 		};
-		// FL-5: a part in the interest's category is a fee; of the rest the
-		// largest is escrow, and every other part is a fee. Fees aren't repeated.
+		// FL-5: of every part but the interest, the largest is the escrow,
+		// whatever its category. Every other part is a fee and isn't repeated.
 		let interest_category = interest.and_then(|row| row.category.clone());
-		let (fees, rest): (Vec<&ClassifiedRow>, Vec<&ClassifiedRow>) = parts
+		let others: Vec<&ClassifiedRow> = parts
 			.iter()
 			.copied()
 			.filter(|row| interest.is_none_or(|interest| interest.id != row.id))
-			.partition(|row| row.category.is_some() && row.category == interest_category);
-		let escrow = rest.iter().copied().min_by(|a, b| {
+			.collect();
+		let escrow = others.iter().copied().min_by(|a, b| {
 			i128::from(b.amount.minor())
 				.abs()
 				.cmp(&i128::from(a.amount.minor()).abs())
 				.then_with(|| by_order(a, b))
 		});
-		let mut not_repeated: Vec<NotRepeated> = fees
+		let escrow_source = match escrow {
+			Some(row) => Some(EscrowSource {
+				loan: loan.clone(),
+				category: row.category.clone(),
+				amount: row.amount.checked_neg()?,
+				same_category_as_interest: row.category.is_some()
+					&& row.category == interest_category,
+			}),
+			None => None,
+		};
+		let mut not_repeated: Vec<NotRepeated> = others
 			.into_iter()
-			.chain(
-				rest.into_iter()
-					.filter(|row| escrow.is_none_or(|escrow| escrow.id != row.id)),
-			)
+			.filter(|row| escrow.is_none_or(|escrow| escrow.id != row.id))
 			.map(|row| {
 				Ok(NotRepeated {
 					loan: loan.clone(),
@@ -410,6 +453,7 @@ impl Forecaster<'_> {
 				principal_category: last.category.clone(),
 			},
 			not_repeated,
+			escrow_source,
 			so_far,
 		)))
 	}
@@ -488,7 +532,7 @@ impl Forecaster<'_> {
 				.get(loan)
 				.map(|account| account.name.clone())
 				.unwrap_or_default();
-			let (loan_payment, not_repeated, so_far) =
+			let (loan_payment, not_repeated, escrow_source, so_far) =
 				match self.loan_payment(loan, name, payment, today)? {
 					Ok(found) => found,
 					Err(reason) => {
@@ -513,6 +557,7 @@ impl Forecaster<'_> {
 			}
 			let split = loan_payment.split_from(&dates, so_far)?;
 			result.not_repeated.extend(not_repeated);
+			result.escrow_sources.extend(escrow_source);
 			result.flows.extend(split.flows);
 			result.shortfalls.extend(split.shortfalls);
 		}
