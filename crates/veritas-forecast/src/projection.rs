@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use veritas_domain::{
 	AccountId, BudgetData, CategoryId, CivilDate, CoreError, IncomeDelta, Money, Scenario,
-	ScenarioId, ScheduleId, TransactionKind, YearMonth,
+	ScenarioEventId, ScenarioId, ScheduleId, TransactionKind, YearMonth,
 };
 use veritas_reports::{Classification, Decision, Period, classify, net_worth};
 
@@ -11,7 +11,7 @@ use crate::baseline::{Baseline, SEASON_MIN, WINDOW, complete_months};
 use crate::flows::{FlowKind, KnownFlow};
 use crate::history::{History, Series, Side, asset_purchase, balances, bill_linked};
 use crate::math::{median, round_half_away, to_money};
-use crate::scenario::{MAX_COMPARED, Overlay, validate};
+use crate::scenario::{MAX_COMPARED, Overlay, in_the_past, validate};
 
 /// FC-3's horizons, in complete months after the current month.
 pub const HORIZONS: [u32; 4] = [3, 6, 10, 12];
@@ -56,6 +56,9 @@ pub struct Projection {
 	pub horizons: Vec<HorizonForecast>,
 	/// Known flows dated before today, counted as due now.
 	pub overdue: Vec<KnownFlow>,
+	/// The scenario's stored events dated in the past (D67): kept, left out
+	/// of the projection, shown so the user can delete or re-date them.
+	pub in_the_past: Vec<ScenarioEventId>,
 	/// Categories whose unlinked median is at least half an active bill's
 	/// amount, where a hand-typed bill may be counted twice (FC-2).
 	pub possible_double_counts: Vec<CategoryId>,
@@ -233,7 +236,7 @@ impl<'a> Forecaster<'a> {
 		scenario: Option<&Scenario>,
 	) -> Result<Projection, CoreError> {
 		if let Some(scenario) = scenario {
-			validate(scenario, today)?;
+			validate(scenario)?;
 		}
 		let overlay = Overlay::new(scenario);
 		let current = today.year_month();
@@ -387,6 +390,18 @@ impl<'a> Forecaster<'a> {
 			today,
 			net_worth_today: Money::from_minor(net_worth_today),
 			balances_today: money_map(&start),
+			in_the_past: match scenario {
+				Some(scenario) => {
+					let mut past = Vec::new();
+					for event in &scenario.events {
+						if in_the_past(&event.change, today)? {
+							past.push(event.id.clone());
+						}
+					}
+					past
+				}
+				None => Vec::new(),
+			},
 			overdue: known
 				.iter()
 				.filter(|flow| flow.date < today)
