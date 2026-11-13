@@ -30,6 +30,8 @@ impl Reach {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EtaStatus {
 	Reached,
+	/// GOAL-10: reached, then spent below the target. No ETA and no refill.
+	Spent,
 	/// No complete month of contributions yet.
 	NoHistory,
 	/// The median pace is 0 or less.
@@ -59,6 +61,7 @@ impl GoalEta {
 	pub fn text(&self) -> String {
 		match self.status {
 			EtaStatus::Reached => "Reached".to_owned(),
+			EtaStatus::Spent => "Reached → Spent".to_owned(),
 			EtaStatus::NoHistory => "No ETA yet".to_owned(),
 			EtaStatus::NotAdding => "No ETA: nothing is being added".to_owned(),
 			EtaStatus::Eta {
@@ -155,7 +158,8 @@ pub fn goal_eta(
 	};
 	let eta = |pace: i64| months_to_go(remaining, pace, goal, current, overlay);
 	let status = match pace {
-		_ if remaining == Money::ZERO => EtaStatus::Reached,
+		_ if found.status == GoalStatus::Reached && available < found.target => EtaStatus::Spent,
+		_ if found.status == GoalStatus::Reached || remaining == Money::ZERO => EtaStatus::Reached,
 		None => EtaStatus::NoHistory,
 		Some((mid, max, min)) => match eta(mid)? {
 			Reach::Never => EtaStatus::NotAdding,
