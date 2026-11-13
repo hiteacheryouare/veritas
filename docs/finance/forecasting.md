@@ -260,7 +260,7 @@ Examples: F-1 gives `Groceries $430, 6-month median`. A median of 42950 gives 43
 | E-11 What-if in the current month reaches the target | Target 150000, `available` 100000 (so `remaining` 50000), pace 25000, current month 2027-01. Scenario adds 50000 in January | `available` plus the what-if is 150000, which reaches the target. ETA **January 2027**, the line reads "ETA January 2027", and it is not "Reached" |
 | E-12 What-if in the current month shortens the count | Target 150000, `available` 100000, `remaining` 50000, pace 15000, current month 2027-01. Scenario adds 20000 in January | Without it: ceil(50000 / 15000) = 4, **May 2027**. With it, the running total starts at 20000: February 35000, March 50000, which reaches 50000. ETA **March 2027**. The January extra is counted once |
 | E-13 Pace line, no history | A new goal: target 150000, target date June 2027, current month 2027-01, `available` 0, no complete month of history | `remaining` 150000, months left 6, `needed` = ceil(150000 / 6) = 25000. The line reads "Not enough history yet. Budget $250 a month to reach it by June 2027". It is not "Behind" |
-| E-14 Pace line, not adding | Same goal with three complete months of contributions 0, 0, 0 | The median is 0, so the line reads "Nothing is being added. Budget $250 a month to reach it by June 2027" |
+| E-14 Pace line, not adding | Target 150000, target date June 2027, current month 2027-01, `available` 0. The goal's budget cells are 0 in 2026-10, 2026-11 and 2026-12 | Three complete months of history with contributions 0, 0, 0, so the median is 0 and `remaining` is 150000. `needed` = ceil(150000 / 6) = 25000. The line reads "Nothing is being added. Budget $250 a month to reach it by June 2027" |
 
 ## FC-7 Backtest and error metrics
 
