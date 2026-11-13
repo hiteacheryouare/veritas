@@ -143,6 +143,11 @@ pub enum Command {
 	ReopenGoal {
 		goal_id: String,
 	},
+	/// Hides a closed goal's "new activity" notice until something new
+	/// happens in its envelope (GOAL-6, D72). No money moves.
+	DismissGoalActivity {
+		goal_id: String,
+	},
 	/// A new target on the same goal: back to active, first reached month kept
 	/// (D71). A closed goal is `Invalid`: reopen it first (DEBT-8.2).
 	RetargetGoal {
@@ -303,6 +308,7 @@ impl veritas_session::Command for Command {
 				| Command::CreateGoal { .. }
 				| Command::CloseGoal { .. }
 				| Command::ReopenGoal { .. }
+				| Command::DismissGoalActivity { .. }
 				| Command::RetargetGoal { .. }
 				| Command::CreateAccount { .. }
 				| Command::CloseAccount { .. }
@@ -430,6 +436,9 @@ impl veritas_session::Command for Command {
 			),
 			Command::ReopenGoal { goal_id } => {
 				goals::reopen_goal(data, sheet, &GoalId::new(goal_id.as_str()))
+			}
+			Command::DismissGoalActivity { goal_id } => {
+				goals::dismiss_goal_activity(data, sheet, &GoalId::new(goal_id.as_str()))
 			}
 			Command::RetargetGoal {
 				goal_id,

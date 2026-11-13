@@ -1997,6 +1997,98 @@ mod tests {
 	}
 
 	#[test]
+	fn dismissing_new_activity_on_a_closed_goal_waits_for_something_new() {
+		// GOAL-6 R-16 (D72), in cents.
+		use crate::NewAccountKind::Checking;
+		let (_scratch, core) = imported("goal-dismiss");
+		let checking = new_account(&core, "Everyday", Checking, 0);
+		let id = new_goal(&core, "New laptop", 100_000, None);
+		let category = goal_of(&core, &id).category_id;
+		let march = Month {
+			year: 2027,
+			month: 3,
+		};
+		let on = |today: &str| {
+			core.goals(today)
+				.unwrap()
+				.into_iter()
+				.find(|goal| goal.id == id)
+				.unwrap()
+		};
+		on("2027-03-10");
+		core.perform(Command::CloseGoal {
+			goal_id: id.clone(),
+			release_to_category_id: None,
+			also_move_later: false,
+		})
+		.unwrap();
+		assert_eq!(on("2027-03-10").closed_month, Some(march));
+		let buy = |date: &str, amount: i64| {
+			let mut draft = typed(&checking, amount);
+			draft.date = date.to_owned();
+			draft.category_id = Some(category.clone());
+			add(&core, draft);
+		};
+		let dismiss = || {
+			let before = data(&core);
+			core.perform(Command::DismissGoalActivity {
+				goal_id: id.clone(),
+			})
+			.unwrap();
+			let after = data(&core);
+			assert_eq!(after.budget_cells, before.budget_cells, "no money moves");
+			assert_eq!(after.transactions, before.transactions, "no money moves");
+			let goal = after.goals[&veritas_domain::GoalId::new(id.as_str())].clone();
+			(
+				goal.activity_seen_through.map(|m| (m.year(), m.month())),
+				goal.activity_seen_total.map(|m| m.minor()),
+				goal.close_month_dismissed_available.map(|m| m.minor()),
+			)
+		};
+
+		buy("2027-04-05", -1000);
+		assert!(
+			on("2027-04-20").new_activity,
+			"(B) after the April purchase"
+		);
+		assert_eq!(dismiss(), (Some((2027, 4)), Some(-1000), None));
+		assert!(!on("2027-04-20").new_activity);
+		buy("2027-04-21", -200);
+		assert!(on("2027-04-21").new_activity, "April's total is now -1200");
+		assert_eq!(dismiss(), (Some((2027, 4)), Some(-1200), None));
+		assert!(!on("2027-04-21").new_activity);
+
+		buy("2027-05-03", -500);
+		assert!(on("2027-05-03").new_activity, "May is later than 2027-04");
+		assert_eq!(dismiss(), (Some((2027, 5)), Some(-1700), None));
+		assert!(!on("2027-05-03").new_activity);
+
+		budget(&core, march, &category, 300);
+		assert!(on("2027-05-03").new_activity, "(A): March ends at +300");
+		assert_eq!(dismiss(), (Some((2027, 5)), Some(-1700), Some(300)));
+		assert!(!on("2027-05-03").new_activity);
+		budget(&core, march, &category, 0);
+		assert!(!on("2027-05-03").new_activity, "March back at 0");
+		budget(&core, march, &category, -200);
+		assert!(on("2027-05-03").new_activity, "-200 is neither 0 nor 300");
+
+		core.perform(Command::ReopenGoal {
+			goal_id: id.clone(),
+		})
+		.unwrap();
+		let reopened = &data(&core).goals[&veritas_domain::GoalId::new(id.as_str())];
+		assert_eq!(
+			(
+				reopened.activity_seen_through,
+				reopened.activity_seen_total,
+				reopened.close_month_dismissed_available
+			),
+			(None, None, None),
+			"reopen clears all three"
+		);
+	}
+
+	#[test]
 	fn an_overspent_goal_released_to_to_budget_ends_at_zero() {
 		// GOAL-8, R-5 with L < 0. The goal is overspent by moving its budget away.
 		let (_scratch, core) = imported("goal-close-to-budget");

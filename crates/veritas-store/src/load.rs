@@ -756,7 +756,9 @@ fn load_veritas_tables(
 			conn,
 			"veritas_goal",
 			"SELECT id, category_id, target_cents, target_date, icon, color, status, \
-			 reached_month, closed_month, released_to_category_id, released_cents FROM veritas_goal",
+			 reached_month, closed_month, released_to_category_id, released_cents, \
+			 activity_seen_through, activity_seen_total, close_month_dismissed_available \
+			 FROM veritas_goal",
 			skipped,
 			|row| {
 				let id = GoalId::new(id(row, 0)?);
@@ -780,6 +782,9 @@ fn load_veritas_tables(
 					closed_month: text_month(at(row, 8)?)?,
 					released_to: text(at(row, 9)?)?.map(CategoryId::new),
 					released: money(at(row, 10)?)?,
+					activity_seen_through: text_month(at(row, 11)?)?,
+					activity_seen_total: money(at(row, 12)?)?,
+					close_month_dismissed_available: money(at(row, 13)?)?,
 				};
 				data.goals.insert(id, goal);
 				Ok(())

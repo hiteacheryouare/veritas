@@ -149,6 +149,9 @@ fn reloading_after_every_kind_of_change_matches_memory_r_rel_1() {
 				closed_month: None,
 				released_to: None,
 				released: None,
+				activity_seen_through: None,
+				activity_seen_total: None,
+				close_month_dismissed_available: None,
 			}),
 		],
 	)
@@ -457,6 +460,9 @@ fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
 			closed_month: None,
 			released_to: None,
 			released: None,
+			activity_seen_through: None,
+			activity_seen_total: None,
+			close_month_dismissed_available: None,
 		}),
 		Row::CustomReport(CustomReportRow {
 			id: CustomReportId::new("v-report"),

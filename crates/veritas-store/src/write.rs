@@ -272,6 +272,15 @@ fn goal_columns(row: &Goal) -> Columns {
 			text(row.released_to.as_ref().map(|id| id.as_str())),
 		),
 		("released_cents", money(row.released)),
+		(
+			"activity_seen_through",
+			text_month(row.activity_seen_through),
+		),
+		("activity_seen_total", money(row.activity_seen_total)),
+		(
+			"close_month_dismissed_available",
+			money(row.close_month_dismissed_available),
+		),
 	]
 }
 

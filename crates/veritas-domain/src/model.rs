@@ -254,6 +254,12 @@ pub struct Goal {
 	pub closed_month: Option<YearMonth>,
 	pub released_to: Option<CategoryId>,
 	pub released: Option<Money>,
+	/// GOAL-6's dismiss (D72): activity through this month, totalling
+	/// `activity_seen_total`, was seen, and the close month's ending available
+	/// was `close_month_dismissed_available`.
+	pub activity_seen_through: Option<YearMonth>,
+	pub activity_seen_total: Option<Money>,
+	pub close_month_dismissed_available: Option<Money>,
 }
 
 /// Everything Veritas models about one budget. Collections are keyed by id;

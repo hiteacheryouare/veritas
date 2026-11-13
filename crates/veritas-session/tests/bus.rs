@@ -183,6 +183,9 @@ fn goal(id: &str) -> Goal {
 		closed_month: None,
 		released_to: None,
 		released: None,
+		activity_seen_through: None,
+		activity_seen_total: None,
+		close_month_dismissed_available: None,
 	}
 }
 
