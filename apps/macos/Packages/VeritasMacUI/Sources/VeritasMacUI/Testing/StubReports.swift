@@ -52,15 +52,10 @@ final class StubReports: @unchecked Sendable {
 	]
 
 	private let lock = NSLock()
-	private var widgets: [DashboardWidget] = []
 	private var settings: [String: CustomReportSettings] = [
 		"spending": StubReports.settings(id: "spending", name: "Spending by category", groupBy: .category, totalMode: true, graph: "BarGraph"),
 		"worth": StubReports.settings(id: "worth", name: "Net worth over time", groupBy: .account, totalMode: false, graph: "StackedBarGraph")
 	]
-
-	init() {
-		widgets = Self.initialWidgets
-	}
 
 	static func figures(_ month: Month) -> MonthFigures {
 		figures[Int(month.month)] ?? MonthFigures(income: 541_200, expenses: 460_000, debt: 31_500, savings: 40_000)
@@ -327,46 +322,29 @@ final class StubReports: @unchecked Sendable {
 		}
 	}
 
-	func dashboards() -> [DashboardPage] {
-		let widgets = lock.withLock { self.widgets }
-		let report = Self.view(lock.withLock { settings["spending"] } ?? Self.settings(id: "spending", name: "Spending by category", groupBy: .category, totalMode: true, graph: "BarGraph"))
-		let views: [String: WidgetView] = [
-			"worth": .netWorth(points: netWorth(first: Month(year: 2026, month: 6), last: Month(year: 2026, month: 11))),
-			"flow": .cashFlow(first: Month(year: 2026, month: 11), last: Month(year: 2026, month: 11), income: 387_440, expenses: 310_566, netProfit: 76_874),
-			"spending": .spending(month: Month(year: 2026, month: 11), spent: 310_566, compareMonth: Month(year: 2026, month: 10), compareSpent: 461_844),
-			"report": .customReport(report: report),
-			"notes": .markdown(text: "## Budget notes\n\nPay the card **in full** every month.", align: "left"),
-			"sankey": .sankey(report: sankey(first: "2026-10-01", last: "2026-10-31"))
-		]
-		return [
-			DashboardPage(id: "main", name: "Main", widgets: widgets.map { widget in
-				var widget = widget
-				if let view = views[widget.id] { widget.view = view }
-				return widget
-			}),
-			DashboardPage(id: "deep", name: "Deep dive", widgets: [])
-		]
+	private var filters: [String: ([ReportCondition], Bool)] = [:]
+	private var created = 0
+
+	func draft(_ id: String) throws -> ReportDraft {
+		let view = try customReport(id)
+		let (conditions, or) = lock.withLock { filters[id] ?? ([], false) }
+		return ReportDraft(settings: view.settings, conditions: conditions, conditionsOr: or)
 	}
 
-	func place(_ id: String, x: Int64, y: Int64, width: Int64, height: Int64) throws {
-		try lock.withLock {
-			guard let index = widgets.firstIndex(where: { $0.id == id }) else { throw FfiError.NotFound(entity: "widget", id: id) }
-			widgets[index].x = x
-			widgets[index].y = y
-			widgets[index].width = width
-			widgets[index].height = height
+	func save(_ draft: ReportDraft) throws {
+		try save(draft.settings)
+		lock.withLock { filters[draft.settings.id] = (draft.conditions, draft.conditionsOr) }
+	}
+
+	func create(_ draft: ReportDraft) throws -> String {
+		let id = lock.withLock {
+			created += 1
+			return "report-\(created)"
 		}
+		var settings = draft.settings
+		settings.id = id
+		try save(ReportDraft(settings: settings, conditions: draft.conditions, conditionsOr: draft.conditionsOr))
+		return id
 	}
-
-	static let initialWidgets: [DashboardWidget] = [
-		DashboardWidget(id: "worth", kind: "net-worth-card", name: "Net worth", x: 0, y: 0, width: 6, height: 2, minWidth: 3, minHeight: 2, view: .openInActual(reason: .notNative)),
-		DashboardWidget(id: "flow", kind: "cash-flow-card", name: "Cash flow", x: 6, y: 0, width: 3, height: 2, minWidth: 2, minHeight: 2, view: .openInActual(reason: .notNative)),
-		DashboardWidget(id: "spending", kind: "spending-card", name: "This month", x: 9, y: 0, width: 3, height: 2, minWidth: 3, minHeight: 2, view: .openInActual(reason: .notNative)),
-		DashboardWidget(id: "report", kind: "custom-report", name: "Spending by category", x: 0, y: 2, width: 6, height: 3, minWidth: 2, minHeight: 1, view: .openInActual(reason: .notNative)),
-		DashboardWidget(id: "notes", kind: "markdown-card", name: nil, x: 6, y: 2, width: 3, height: 2, minWidth: 2, minHeight: 1, view: .openInActual(reason: .notNative)),
-		DashboardWidget(id: "summary", kind: "summary-card", name: "Total income (YTD)", x: 9, y: 2, width: 3, height: 2, minWidth: 2, minHeight: 2, view: .openInActual(reason: .notNative)),
-		DashboardWidget(id: "sankey", kind: "sankey-card", name: "Where it went", x: 0, y: 5, width: 8, height: 3, minWidth: 3, minHeight: 3, view: .openInActual(reason: .notNative)),
-		DashboardWidget(id: "future", kind: "future-widget-card", name: nil, x: 8, y: 5, width: 4, height: 2, minWidth: 1, minHeight: 1, view: .openInActual(reason: .unknownType))
-	]
 }
 #endif

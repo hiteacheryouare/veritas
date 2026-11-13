@@ -51,17 +51,93 @@ final class ReportsJourneyTests: XCTestCase {
 	}
 
 	@MainActor
-	func testTheDashboardKeepsPlaceholdersAndMovesAWidget() {
+	func testTheDashboardDrawsEveryWidgetAndMovesOne() {
+		// D73: nothing opens in Actual. A type Veritas doesn't know is a plain card.
 		let app = openReport("dashboard")
 		let future = app.descendants(matching: .any)["widget.future"]
-		XCTAssertTrue(future.waitForExistence(timeout: 5))
-		XCTAssertTrue(present(future.descendants(matching: .any)["openInActual"], in: app), "the unknown widget is an Open in Actual placeholder")
-		app.descendants(matching: .any)["dashboard.edit"].click()
+		XCTAssertTrue(present(future, in: app))
+		XCTAssertEqual(future.label, "future-widget-card")
+		XCTAssertTrue(app.descendants(matching: .any)["widget.salary"].descendants(matching: .any)["widget.figure"].exists, "a summary card shows its figure")
 		let worth = app.descendants(matching: .any)["widget.worth"]
 		let before = worth.frame
-		app.buttons["widget.worth.move-down"].click()
+		worth.rightClick()
+		app.menuItems["Move"].hover()
+		app.menuItems["Down"].click()
 		XCTAssertTrue(waitUntil { worth.frame.minY > before.minY })
+		app.descendants(matching: .any)["dashboard.edit"].click()
 		attachScreenshot(of: app, named: "dashboard-editing")
+	}
+
+	@MainActor
+	func testAddingConfiguringAndRemovingAWidget() {
+		let app = openReport("dashboard")
+		app.descendants(matching: .any)["dashboard.add"].click()
+		app.menuItems["Summary"].click()
+		let added = app.descendants(matching: .any)["widget.added-1"]
+		XCTAssertTrue(present(added, in: app), "the new summary card is on the page")
+		added.rightClick()
+		app.menuItems["Configure…"].click()
+		let sheet = app.descendants(matching: .any)["sheet.widgetConfig"]
+		XCTAssertTrue(sheet.waitForExistence(timeout: 5))
+		let name = sheet.textFields["widgetConfig.name"]
+		name.click()
+		name.typeText("Groceries YTD")
+		sheet.buttons["filters.add"].click()
+		let value = sheet.textFields["filters.value"]
+		value.click()
+		value.typeText("Groceries")
+		attachScreenshot(of: app, named: "widget-config")
+		sheet.buttons["widgetConfig.save"].click()
+		XCTAssertTrue(sheet.waitForDisappearance())
+		XCTAssertTrue(waitUntil { added.label == "Groceries YTD" }, added.label)
+		added.rightClick()
+		app.menuItems["Remove Widget…"].click()
+		app.buttons["Remove"].click()
+		XCTAssertTrue(added.waitForDisappearance())
+	}
+
+	@MainActor
+	func testDashboardsAreMadeRenamedAndDeleted() {
+		let app = openReport("dashboard")
+		let pages = app.descendants(matching: .any)["dashboard.pages"]
+		pages.click()
+		app.menuItems["New Dashboard…"].click()
+		let field = app.textFields["namePrompt.name"]
+		XCTAssertTrue(field.waitForExistence(timeout: 5))
+		field.typeText("Taxes")
+		app.buttons["namePrompt.save"].click()
+		XCTAssertTrue(waitUntil { app.windows.firstMatch.title == "Taxes" }, app.windows.firstMatch.title)
+		XCTAssertTrue(present(app.descendants(matching: .any)["dashboard.empty"], in: app), "a new dashboard starts empty")
+		pages.click()
+		app.menuItems["Rename Dashboard…"].click()
+		XCTAssertTrue(field.waitForExistence(timeout: 5))
+		field.typeKey("a", modifierFlags: .command)
+		field.typeText("Taxes 2026")
+		app.buttons["namePrompt.save"].click()
+		XCTAssertTrue(waitUntil { app.windows.firstMatch.title == "Taxes 2026" }, app.windows.firstMatch.title)
+		pages.click()
+		app.menuItems["Delete Dashboard…"].click()
+		app.buttons["Delete Dashboard"].click()
+		XCTAssertTrue(waitUntil { app.windows.firstMatch.title == "Main" }, app.windows.firstMatch.title)
+	}
+
+	@MainActor
+	func testCreatingACustomReportWithAFilter() {
+		let app = openReport("customReports")
+		app.buttons["customReport.new"].click()
+		let name = app.textFields["customReport.name"]
+		XCTAssertTrue(name.waitForExistence(timeout: 5))
+		name.click()
+		name.typeKey("a", modifierFlags: .command)
+		name.typeText("Dining")
+		app.buttons["filters.add"].click()
+		let value = app.textFields["filters.value"]
+		value.click()
+		value.typeText("Dining out")
+		attachScreenshot(of: app, named: "custom-report-new")
+		app.buttons["customReport.save"].click()
+		XCTAssertTrue(name.waitForDisappearance())
+		XCTAssertTrue(waitUntil { self.text(app.buttons["reports.custom.report-1"]).contains("Dining") }, text(app.buttons["reports.custom.report-1"]))
 	}
 
 	@MainActor

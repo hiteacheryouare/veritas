@@ -201,6 +201,24 @@ public final class WorkspaceModel {
 		}
 	}
 
+	/// A write that isn't a `Command`, such as a dashboard edit. Like
+	/// `perform`, it shows its own error and refreshes on success.
+	@discardableResult
+	public func change<T: Sendable>(_ write: @Sendable (any BudgetSession) async throws -> T) async -> T? {
+		guard let session else { return nil }
+		do {
+			let result = try await write(session)
+			changeCount += 1
+			await refresh()
+			return result
+		} catch {
+			present(error)
+			return nil
+		}
+	}
+
+	public var canEditDashboards: Bool { session?.canEditDashboards ?? false }
+
 	/// D62: a code Actual doesn't know uses 2 places.
 	private func decimalPlaces(for code: String?) async -> UInt8 {
 		guard let code, let currencies = try? await library.currencies() else { return 2 }

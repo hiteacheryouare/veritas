@@ -122,6 +122,7 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 	private var keep = Retention(hourly: 48, daily: 30, monthly: 12, operationDays: 30)
 	private let budget = StubBudget()
 	private let reports = StubReports()
+	private lazy var dashboardStore = StubDashboards(reports: reports)
 
 	init(readOnly: ReadOnlyKind?, hasFindings: Bool = false, backupFails: Bool = false) {
 		self.readOnly = readOnly
@@ -220,7 +221,7 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 		if let readOnly { throw FfiError.ReadOnly(reason: readOnly) }
 		switch command {
 		case .saveCustomReport(let settings): try reports.save(settings)
-		case .placeWidget(let id, let x, let y, let width, let height): try reports.place(id, x: x, y: y, width: width, height: height)
+		case .placeWidget(let id, let x, let y, let width, let height): try dashboardStore.place(id, x: x, y: y, width: width, height: height)
 		default: try budget.perform(command)
 		}
 	}
@@ -234,7 +235,47 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 	func customReports() async throws -> [CustomReportItem] { reports.customReports() }
 	func customReport(_ id: String, today: String) async throws -> CustomReportView { try reports.customReport(id) }
 	func previewCustomReport(_ settings: CustomReportSettings, today: String) async throws -> CustomReportView { StubReports.view(settings) }
-	func dashboards(today: String) async throws -> [DashboardPage] { reports.dashboards() }
+	func dashboards(today: String) async throws -> [DashboardPage] { [] }
+	let canEditDashboards = true
+	func dashboardSheets(today: String) async throws -> [DashboardSheet] { dashboardStore.all() }
+	func addWidget(page: String, kind: WidgetKind, x: Int64, y: Int64, width: Int64, height: Int64, config: WidgetConfig) async throws -> String {
+		try writable()
+		return try dashboardStore.add(page: page, kind: kind, frame: (x, y, width, height), config: config)
+	}
+	func removeWidget(_ id: String) async throws {
+		try writable()
+		try dashboardStore.remove(id)
+	}
+	func setWidgetConfig(_ id: String, _ config: WidgetConfig) async throws {
+		try writable()
+		try dashboardStore.configure(id, config)
+	}
+	func createDashboard(named name: String) async throws -> String {
+		try writable()
+		return dashboardStore.createDashboard(name)
+	}
+	func renameDashboard(_ id: String, to name: String) async throws {
+		try writable()
+		dashboardStore.renameDashboard(id, name)
+	}
+	func deleteDashboard(_ id: String) async throws {
+		try writable()
+		dashboardStore.deleteDashboard(id)
+	}
+	func reportDraft(_ id: String) async throws -> ReportDraft { try reports.draft(id) }
+	func previewReport(_ draft: ReportDraft, today: String) async throws -> CustomReportView { StubReports.view(draft.settings) }
+	func saveReport(_ draft: ReportDraft) async throws {
+		try writable()
+		try reports.save(draft)
+	}
+	func createReport(_ draft: ReportDraft) async throws -> String {
+		try writable()
+		return try reports.create(draft)
+	}
+
+	private func writable() throws {
+		if let readOnly { throw FfiError.ReadOnly(reason: readOnly) }
+	}
 }
 #endif
 

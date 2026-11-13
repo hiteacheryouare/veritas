@@ -25,7 +25,7 @@ struct CustomReportsScreen: View {
 			Divider()
 			ScrollView {
 				VStack(alignment: .leading, spacing: Spacing.s4) {
-					switch model.choice {
+					switch model.isCreating ? .custom(id: "") : model.choice {
 					case .standard:
 						StandardReportView(model: model.standard) { drilldown = $0 }
 					case .custom:
@@ -44,7 +44,7 @@ struct CustomReportsScreen: View {
 			if let draft = model.draft {
 				Divider()
 				CustomReportEditor(model: model, draft: draft)
-					.frame(width: 300)
+					.frame(width: 340)
 			}
 		}
 		.background(.surfaceWindow)
@@ -58,7 +58,7 @@ struct CustomReportsScreen: View {
 	private var title: String {
 		switch model.choice {
 		case .standard(let kind): kind.title
-		case .custom(let id): model.items.first { $0.id == id }?.name ?? "Custom reports"
+		case .custom(let id): model.isCreating ? "New report" : (model.items.first { $0.id == id }?.name ?? "Custom reports")
 		}
 	}
 
@@ -86,13 +86,25 @@ struct CustomReportsScreen: View {
 		case .custom:
 			ToolbarItem(placement: .primaryAction) {
 				Button {
-					model.edit()
+					Task { await model.edit() }
 				} label: {
 					Label("Edit report", systemImage: "slider.horizontal.3")
 				}
 				.labelStyle(.titleAndIcon)
 				.disabled(model.isEditing || model.isReadOnly || model.view?.settings == nil)
 				.accessibilityIdentifier("customReport.edit")
+			}
+		}
+		if model.canCreate {
+			ToolbarItem(placement: .primaryAction) {
+				Button {
+					Task { await model.startNew() }
+				} label: {
+					Label("New report", systemImage: "plus")
+				}
+				.labelStyle(.titleAndIcon)
+				.disabled(model.isEditing)
+				.accessibilityIdentifier("customReport.new")
 			}
 		}
 	}
@@ -175,8 +187,11 @@ struct CustomReportDetail: View {
 				if !compact {
 					CustomReportTable(data: data, settings: view.settings, format: format)
 				}
-			} else {
-				OpenInActual(message: view.problem.map { "\($0). It's unchanged; open it in Actual to see it." } ?? "Open it in Actual to see it.")
+			} else if let problem = view.problem {
+				Text(problem)
+					.foregroundStyle(.textSecondary)
+					.frame(maxWidth: .infinity, minHeight: compact ? 40 : 160)
+					.accessibilityIdentifier("customReport.problem")
 			}
 		}
 		.containerIdentifier("customReport.detail")
@@ -185,26 +200,6 @@ struct CustomReportDetail: View {
 	static func range(_ settings: CustomReportSettings) -> String {
 		if !settings.dateStatic, let name = settings.dateRange { return name }
 		return "\(settings.startDate) to \(settings.endDate)"
-	}
-}
-
-struct OpenInActual: View {
-	let message: String
-
-	var body: some View {
-		VStack(alignment: .leading, spacing: Spacing.s2) {
-			Label("Open in Actual", systemImage: "arrow.up.forward.app")
-				.font(.text(.body, weight: .semibold))
-			Text(message)
-				.foregroundStyle(.textSecondary)
-				.fixedSize(horizontal: false, vertical: true)
-		}
-		.padding(Spacing.s4)
-		.frame(maxWidth: .infinity, alignment: .leading)
-		.background(.surfaceGrouped, in: .rect(cornerRadius: Radius.section))
-		.overlay { RoundedRectangle(cornerRadius: Radius.section).strokeBorder(Color.edgeGrouped, style: StrokeStyle(lineWidth: 1, dash: [4, 3])) }
-		.accessibilityElement(children: .combine)
-		.accessibilityIdentifier("openInActual")
 	}
 }
 
@@ -324,48 +319,48 @@ private struct CustomReportTable: View {
 /// Actual wrote them.
 private struct CustomReportEditor: View {
 	let model: CustomReportsModel
-	@State private var draft: CustomReportSettings
+	@State private var draft: ReportDraft
 	@State private var fixedFirst: Month
 	@State private var fixedLast: Month
 
-	init(model: CustomReportsModel, draft: CustomReportSettings) {
+	init(model: CustomReportsModel, draft: ReportDraft) {
 		self.model = model
 		_draft = State(initialValue: draft)
-		_fixedFirst = State(initialValue: Month(date: draft.startDate) ?? Month(year: 2026, month: 1))
-		_fixedLast = State(initialValue: Month(date: draft.endDate) ?? Month(year: 2026, month: 1))
+		_fixedFirst = State(initialValue: Month(date: draft.settings.startDate) ?? Month(year: 2026, month: 1))
+		_fixedLast = State(initialValue: Month(date: draft.settings.endDate) ?? Month(year: 2026, month: 1))
 	}
 
 	var body: some View {
 		Form {
 			Section {
-				TextField("Name", text: $draft.name)
+				TextField("Name", text: $draft.settings.name)
 					.accessibilityIdentifier("customReport.name")
-				Picker("Show", selection: $draft.totalMode) {
+				Picker("Show", selection: $draft.settings.totalMode) {
 					Text("Totals").tag(true)
 					Text("Over time").tag(false)
 				}
 				.accessibilityIdentifier("customReport.mode")
-				Picker("Group by", selection: $draft.groupBy) {
+				Picker("Group by", selection: $draft.settings.groupBy) {
 					ForEach([ReportGrouping.category, .group, .payee, .account, .interval], id: \.self) { Text($0.title).tag($0) }
 				}
 				.accessibilityIdentifier("customReport.groupBy")
-				Picker("Balance", selection: $draft.balanceType) {
+				Picker("Balance", selection: $draft.settings.balanceType) {
 					ForEach([ReportBalanceKind.payment, .deposit, .net, .netPayment, .netDeposit], id: \.self) { Text($0.title).tag($0) }
 				}
 				.accessibilityIdentifier("customReport.balance")
-				Picker("Interval", selection: $draft.interval) {
+				Picker("Interval", selection: $draft.settings.interval) {
 					ForEach([ReportIntervalUnit.daily, .weekly, .monthly, .yearly], id: \.self) { Text($0.title).tag($0) }
 				}
-				Picker("Sort", selection: $draft.sortBy) {
+				Picker("Sort", selection: $draft.settings.sortBy) {
 					ForEach([ReportSortOrder.descending, .ascending, .name, .budget], id: \.self) { Text($0.title).tag($0) }
 				}
-				Picker("Graph", selection: Binding(get: { ReportGraph(draft.graphType) }, set: { draft.graphType = $0.rawValue })) {
-					ForEach(ReportGraph.allCases.filter { draft.totalMode ? $0.drawsTotals : true }, id: \.self) { Text($0.title).tag($0) }
+				Picker("Graph", selection: Binding(get: { ReportGraph(draft.settings.graphType) }, set: { draft.settings.graphType = $0.rawValue })) {
+					ForEach(ReportGraph.allCases.filter { draft.settings.totalMode ? $0.drawsTotals : true }, id: \.self) { Text($0.title).tag($0) }
 				}
 				.accessibilityIdentifier("customReport.graph")
 			}
 			Section("Dates") {
-				Picker("Range", selection: Binding(get: { draft.dateStatic ? "" : (draft.dateRange ?? "") }, set: { name in
+				Picker("Range", selection: Binding(get: { draft.settings.dateStatic ? "" : (draft.settings.dateRange ?? "") }, set: { name in
 					if name.isEmpty {
 						model.setFixedRange(first: fixedFirst, last: fixedLast)
 					} else {
@@ -377,21 +372,27 @@ private struct CustomReportEditor: View {
 					Text("Fixed dates").tag("")
 				}
 				.accessibilityIdentifier("customReport.range")
-				if draft.dateStatic {
+				if draft.settings.dateStatic {
 					MonthRow(title: "From", month: $fixedFirst) { applyFixed() }
 					MonthRow(title: "To", month: $fixedLast) { applyFixed() }
 				}
 			}
 			Section("Options") {
-				Toggle("Show empty rows", isOn: $draft.showEmpty)
-				Toggle("Show off-budget accounts", isOn: $draft.showOffBudget)
-				Toggle("Show hidden categories", isOn: $draft.showHidden)
-				Toggle("Show uncategorized", isOn: $draft.showUncategorized)
-				Toggle("Include the current interval", isOn: $draft.includeCurrent)
-				Toggle("Trim empty intervals", isOn: $draft.trimIntervals)
-				if draft.conditionCount > 0 {
-					Text(draft.conditionCount == 1 ? "1 filter, edited in Actual" : "\(draft.conditionCount) filters, edited in Actual")
+				Toggle("Show empty rows", isOn: $draft.settings.showEmpty)
+				Toggle("Show off-budget accounts", isOn: $draft.settings.showOffBudget)
+				Toggle("Show hidden categories", isOn: $draft.settings.showHidden)
+				Toggle("Show uncategorized", isOn: $draft.settings.showUncategorized)
+				Toggle("Include the current interval", isOn: $draft.settings.includeCurrent)
+				Toggle("Trim empty intervals", isOn: $draft.settings.trimIntervals)
+			}
+			Section("Filters") {
+				if model.canEditFilters {
+					ConditionsEditor(conditions: $draft.conditions, matchAny: $draft.conditionsOr)
+				} else if draft.settings.conditionCount > 0 {
+					Text(draft.settings.conditionCount == 1 ? "1 filter" : "\(draft.settings.conditionCount) filters")
 						.foregroundStyle(.textSecondary)
+				} else {
+					Text("No filters").foregroundStyle(.textSecondary)
 				}
 			}
 			Section {
@@ -399,9 +400,9 @@ private struct CustomReportEditor: View {
 					Button("Cancel", role: .cancel) { model.cancelEditing() }
 						.keyboardShortcut(.cancelAction)
 					Spacer()
-					Button("Save report") { Task { await model.save() } }
+					Button(model.isCreating ? "Create report" : "Save report") { Task { await model.save() } }
 						.keyboardShortcut(.defaultAction)
-						.disabled(draft.name.trimmingCharacters(in: .whitespaces).isEmpty)
+						.disabled(draft.settings.name.trimmingCharacters(in: .whitespaces).isEmpty)
 						.accessibilityIdentifier("customReport.save")
 				}
 			}

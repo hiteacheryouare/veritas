@@ -155,6 +155,23 @@ final class ReportFakeSession: BudgetSession, @unchecked Sendable {
 	func previewCustomReport(_ settings: CustomReportSettings, today: String) async throws -> CustomReportView {
 		CustomReportView(settings: settings, data: nil, problem: "preview")
 	}
+	var edits: [String] = []
+	var canEditDashboards: Bool { true }
+	func addWidget(page: String, kind: WidgetKind, x: Int64, y: Int64, width: Int64, height: Int64, config: WidgetConfig) async throws -> String {
+		edits.append("add \(kind.rawValue) on \(page) at \(x),\(y) \(width)x\(height) \(config.content ?? "")")
+		return "new"
+	}
+	func removeWidget(_ id: String) async throws { edits.append("remove \(id)") }
+	func setWidgetConfig(_ id: String, _ config: WidgetConfig) async throws { edits.append("config \(id) \(config.name ?? "")") }
+	func createDashboard(named name: String) async throws -> String {
+		edits.append("create \(name)")
+		dashboard.append(DashboardPage(id: "p\(dashboard.count)", name: name, widgets: []))
+		return "p\(dashboard.count - 1)"
+	}
+	func createReport(_ draft: ReportDraft) async throws -> String {
+		edits.append("report \(draft.settings.name) \(draft.conditions.map { "\($0.field) \($0.op) \($0.value)" })")
+		return "r2"
+	}
 }
 
 final class ReportFakeLibrary: BudgetLibrary, @unchecked Sendable {
@@ -273,7 +290,7 @@ struct DashboardModelTests {
 		await workspace.reopen(directory: URL(filePath: "/tmp/budget"))
 		let model = DashboardModel(workspace: workspace)
 		await model.load()
-		guard let widget = model.page?.widgets.first else { Issue.record("no widget"); return }
+		guard let widget = model.sheet?.cards.first else { Issue.record("no widget"); return }
 		await model.move(widget, columns: 9)
 		await model.resize(widget, columns: -5)
 		await model.move(widget, columns: -1)
@@ -336,8 +353,8 @@ struct StandardReportTests {
 		let model = CustomReportsModel(workspace: workspace, thisMonth: Month(year: 2026, month: 11))
 		await model.load()
 		await model.show(.custom(id: "r"))
-		model.edit()
-		model.draft?.groupBy = .payee
+		await model.edit()
+		model.draft?.settings.groupBy = .payee
 		await model.refreshPreview()
 		#expect(model.shown?.problem == "preview")
 		#expect(await model.save())
@@ -357,16 +374,82 @@ struct CustomReportRangeTests {
 		await workspace.reopen(directory: URL(filePath: "/tmp/budget"))
 		let model = CustomReportsModel(workspace: workspace, thisMonth: Month(year: 2026, month: 11))
 		await model.show(.custom(id: "r"))
-		model.edit()
+		await model.edit()
 		model.setFixedRange(first: Month(year: 2026, month: 3), last: Month(year: 2026, month: 1))
-		#expect(model.draft?.dateStatic == true)
-		#expect(model.draft?.startDate == "2026-01")
-		#expect(model.draft?.endDate == "2026-03")
-		model.draft?.startDate = "2026-01-01"
+		#expect(model.draft?.settings.dateStatic == true)
+		#expect(model.draft?.settings.startDate == "2026-01")
+		#expect(model.draft?.settings.endDate == "2026-03")
+		model.draft?.settings.startDate = "2026-01-01"
 		model.setFixedRange(first: Month(year: 2026, month: 2), last: Month(year: 2026, month: 2))
-		#expect(model.draft?.endDate == "2026-02-28")
+		#expect(model.draft?.settings.endDate == "2026-02-28")
 		model.setLiveRange("Last 3 months")
-		#expect(model.draft?.dateStatic == false)
-		#expect(model.draft?.dateRange == "Last 3 months")
+		#expect(model.draft?.settings.dateStatic == false)
+		#expect(model.draft?.settings.dateRange == "Last 3 months")
+	}
+}
+
+@MainActor
+struct DashboardEditingTests {
+	let session = ReportFakeSession()
+
+	func open() async -> DashboardModel {
+		session.dashboard = [DashboardPage(id: "main", name: "Main", widgets: [
+			DashboardWidget(id: "w", kind: "net-worth-card", name: "Net worth", x: 2, y: 0, width: 6, height: 2, minWidth: 3, minHeight: 2, view: .netWorth(points: [])),
+			DashboardWidget(id: "s", kind: "sankey-card", name: nil, x: 0, y: 2, width: 8, height: 3, minWidth: 3, minHeight: 3, view: .netWorth(points: []))
+		])]
+		let workspace = WorkspaceModel(library: ReportFakeLibrary(session: session), format: MoneyFormat())
+		await workspace.reopen(directory: URL(filePath: "/tmp/budget"))
+		let model = DashboardModel(workspace: workspace)
+		await model.load()
+		return model
+	}
+
+	@Test func aNewWidgetGoesUnderEverythingAtActualsDefaultSize() async {
+		let model = await open()
+		#expect(model.canEdit)
+		await model.add(.summary)
+		await model.add(.sankey)
+		await model.add(.markdown)
+		#expect(session.edits == [
+			"add summary-card on main at 0,5 4x2 ",
+			"add sankey-card on main at 0,5 4x3 ",
+			"add markdown-card on main at 0,5 4x2 ## Notes"
+		])
+	}
+
+	@Test func dragginALeadingEdgeKeepsTheTrailingEdgeWhereItWas() async {
+		let model = await open()
+		guard let card = model.sheet?.cards.first else { Issue.record("no card"); return }
+		await model.resize(card, leading: -2)
+		await model.resize(card, top: 0, bottom: 1)
+		await model.resize(card, leading: 4)
+		#expect(session.commands == [
+			.placeWidget(widgetId: "w", x: 0, y: 0, width: 8, height: 2),
+			.placeWidget(widgetId: "w", x: 2, y: 0, width: 6, height: 3),
+			.placeWidget(widgetId: "w", x: 5, y: 0, width: 3, height: 2)
+		])
+	}
+
+	@Test func aNewDashboardIsShownOnceMade() async {
+		let model = await open()
+		await model.createDashboard(named: "  Taxes ")
+		#expect(session.edits == ["create Taxes"])
+		#expect(model.sheet?.name == "Taxes")
+		await model.createDashboard(named: "  ")
+		#expect(session.edits.count == 1, "a blank name makes nothing")
+	}
+
+	@Test func aNewReportIsCreatedOnlyOnSave() async {
+		let workspace = WorkspaceModel(library: ReportFakeLibrary(session: session), format: MoneyFormat())
+		await workspace.reopen(directory: URL(filePath: "/tmp/budget"))
+		let model = CustomReportsModel(workspace: workspace, thisMonth: Month(year: 2026, month: 11))
+		await model.startNew()
+		#expect(model.isCreating)
+		#expect(session.edits.isEmpty)
+		model.draft?.settings.name = "Dining"
+		model.draft?.conditions = [ReportCondition(field: "category", op: "is", value: "Dining out")]
+		#expect(await model.save())
+		#expect(session.edits == ["report Dining [\"category is Dining out\"]"])
+		#expect(model.choice == .custom(id: "r2"))
 	}
 }

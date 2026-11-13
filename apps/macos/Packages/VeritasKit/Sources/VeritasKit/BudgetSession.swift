@@ -131,6 +131,29 @@ public protocol BudgetSession: AnyObject, Sendable {
 	/// What edited settings would show, without saving.
 	func previewCustomReport(_ settings: CustomReportSettings, today: String) async throws -> CustomReportView
 	func dashboards(today: String) async throws -> [DashboardPage]
+
+	/// Whether the core can add, remove and configure widgets and dashboards,
+	/// and save report filters. Until it can, those actions stay hidden.
+	var canEditDashboards: Bool { get }
+	/// Every dashboard with each card's numbers as of `today`.
+	func dashboardSheets(today: String) async throws -> [DashboardSheet]
+	/// Returns the new widget's id.
+	@discardableResult
+	func addWidget(page: String, kind: WidgetKind, x: Int64, y: Int64, width: Int64, height: Int64, config: WidgetConfig) async throws -> String
+	func removeWidget(_ id: String) async throws
+	func setWidgetConfig(_ id: String, _ config: WidgetConfig) async throws
+	/// Returns the new dashboard's id.
+	@discardableResult
+	func createDashboard(named name: String) async throws -> String
+	func renameDashboard(_ id: String, to name: String) async throws
+	func deleteDashboard(_ id: String) async throws
+	/// A saved report's settings with its filters.
+	func reportDraft(_ id: String) async throws -> ReportDraft
+	func previewReport(_ draft: ReportDraft, today: String) async throws -> CustomReportView
+	func saveReport(_ draft: ReportDraft) async throws
+	/// Returns the new report's id.
+	@discardableResult
+	func createReport(_ draft: ReportDraft) async throws -> String
 }
 
 /// The budgets in the app's budgets folder: new ones, Actual imports and reopened ones.

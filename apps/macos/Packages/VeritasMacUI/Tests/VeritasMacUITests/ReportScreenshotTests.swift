@@ -43,8 +43,19 @@ struct ReportScreenshotTests {
 		let model = DashboardModel(workspace: workspace)
 		await model.load()
 		try render(DashboardScreen(workspace: workspace, model: model), named: "dashboard", size: CGSize(width: 1200, height: 860))
+		try render(DashboardScreen(workspace: workspace, model: model), named: "dashboard-full", size: CGSize(width: 1200, height: 1660))
 		model.isEditing = true
 		try render(DashboardScreen(workspace: workspace, model: model), named: "dashboard-editing", size: CGSize(width: 1200, height: 860))
+	}
+
+	@Test func widgetConfig() async throws {
+		let workspace = await workspace()
+		let model = DashboardModel(workspace: workspace)
+		await model.load()
+		let salary = try #require(model.sheet?.cards.first { $0.id == "salary" })
+		try render(WidgetConfigSheet(card: salary, reports: []) { _ in }, named: "widget-config-summary")
+		let notes = try #require(model.sheet?.cards.first { $0.id == "notes" })
+		try render(WidgetConfigSheet(card: notes, reports: []) { _ in }, named: "widget-config-text")
 	}
 
 	@Test func standardReports() async throws {
@@ -63,14 +74,15 @@ struct ReportScreenshotTests {
 		await model.load()
 		await model.show(.custom(id: "spending"))
 		try render(CustomReportsScreen(workspace: workspace, model: model), named: "custom-report", size: CGSize(width: 1200, height: 820))
-		model.edit()
-		model.draft?.totalMode = false
-		model.draft?.graphType = "StackedBarGraph"
+		await model.edit()
+		model.draft?.settings.totalMode = false
+		model.draft?.settings.graphType = "StackedBarGraph"
+		model.draft?.conditions = [ReportCondition(field: "category", op: "isNot", value: "Rent"), ReportCondition(field: "amount", op: "gt", value: "20.00")]
 		await model.refreshPreview()
-		try render(CustomReportsScreen(workspace: workspace, model: model), named: "custom-report-editing", size: CGSize(width: 1300, height: 900))
-		model.draft?.balanceType = .budgeted
-		await model.refreshPreview()
-		try render(CustomReportsScreen(workspace: workspace, model: model), named: "custom-report-open-in-actual", size: CGSize(width: 1300, height: 900))
+		try render(CustomReportsScreen(workspace: workspace, model: model), named: "custom-report-editing", size: CGSize(width: 1340, height: 1000))
+		model.cancelEditing()
+		await model.startNew()
+		try render(CustomReportsScreen(workspace: workspace, model: model), named: "custom-report-new", size: CGSize(width: 1340, height: 1000))
 	}
 
 	@Test func drilldown() async throws {

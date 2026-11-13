@@ -207,6 +207,39 @@ final class CoreBudgetSession: BudgetSession {
 		return try await Core.cancellable { try await session.dashboards(today: today, cancel: $0) }
 	}
 
+	/// The dashboard and report-filter contract hasn't landed, so the core
+	/// draws what it can and the editing actions stay hidden.
+	let canEditDashboards = false
+
+	func dashboardSheets(today: String) async throws -> [DashboardSheet] {
+		try await dashboards(today: today).map(DashboardSheet.init)
+	}
+
+	func addWidget(page: String, kind: WidgetKind, x: Int64, y: Int64, width: Int64, height: Int64, config: WidgetConfig) async throws -> String {
+		throw Self.notYet
+	}
+
+	func removeWidget(_ id: String) async throws { throw Self.notYet }
+	func setWidgetConfig(_ id: String, _ config: WidgetConfig) async throws { throw Self.notYet }
+	func createDashboard(named name: String) async throws -> String { throw Self.notYet }
+	func renameDashboard(_ id: String, to name: String) async throws { throw Self.notYet }
+	func deleteDashboard(_ id: String) async throws { throw Self.notYet }
+	func createReport(_ draft: ReportDraft) async throws -> String { throw Self.notYet }
+
+	func reportDraft(_ id: String) async throws -> ReportDraft {
+		ReportDraft(settings: try await customReport(id, today: WorkspaceModel.today()).settings)
+	}
+
+	func previewReport(_ draft: ReportDraft, today: String) async throws -> CustomReportView {
+		try await previewCustomReport(draft.settings, today: today)
+	}
+
+	func saveReport(_ draft: ReportDraft) async throws {
+		try await perform(.saveCustomReport(settings: draft.settings))
+	}
+
+	private static let notYet = FfiError.Invalid(message: "This Veritas build can't change dashboards yet.")
+
 	func perform(_ command: Command) async throws {
 		let session = session
 		_ = try await Core.run { try session.perform(command: command) }

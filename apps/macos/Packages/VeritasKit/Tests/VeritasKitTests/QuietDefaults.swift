@@ -31,6 +31,18 @@ extension BudgetSession {
 	func customReport(_ id: String, today: String) async throws -> CustomReportView { throw FfiError.Cancelled }
 	func previewCustomReport(_ settings: CustomReportSettings, today: String) async throws -> CustomReportView { throw FfiError.Cancelled }
 	func dashboards(today: String) async throws -> [DashboardPage] { [] }
+	var canEditDashboards: Bool { false }
+	func dashboardSheets(today: String) async throws -> [DashboardSheet] { try await dashboards(today: today).map(DashboardSheet.init) }
+	func addWidget(page: String, kind: WidgetKind, x: Int64, y: Int64, width: Int64, height: Int64, config: WidgetConfig) async throws -> String { "" }
+	func removeWidget(_ id: String) async throws {}
+	func setWidgetConfig(_ id: String, _ config: WidgetConfig) async throws {}
+	func createDashboard(named name: String) async throws -> String { "" }
+	func renameDashboard(_ id: String, to name: String) async throws {}
+	func deleteDashboard(_ id: String) async throws {}
+	func reportDraft(_ id: String) async throws -> ReportDraft { ReportDraft(settings: try await customReport(id, today: "").settings) }
+	func previewReport(_ draft: ReportDraft, today: String) async throws -> CustomReportView { try await previewCustomReport(draft.settings, today: today) }
+	func saveReport(_ draft: ReportDraft) async throws { try await perform(.saveCustomReport(settings: draft.settings)) }
+	func createReport(_ draft: ReportDraft) async throws -> String { "" }
 }
 
 extension BudgetLibrary {
