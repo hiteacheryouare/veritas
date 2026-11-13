@@ -92,9 +92,11 @@ Why the unusual rows:
 
 | User answer | Category used | Resulting kind |
 |---|---|---|
-| Loan/debt payment | the one `debt_principal` category (created in a "Debt" group if none exists; if several, ask) | `debt_principal` |
-| Saving/investing | a `savings` category (same rule) | `savings_contribution` |
+| Loan/debt payment | the one visible `debt_principal` category (created in a "Debt" group if none exists; if several, ask) | `debt_principal` |
+| Saving/investing | a visible `savings` category (same rule) | `savings_contribution` |
 | Other | a category the user picks | kind of that category (row 8 or 9) |
+
+"Visible" means the category is live, not hidden, not archived, and not in a hidden group. A hidden or archived category keeps its kind (CLS-3.2) and its history, but it is not offered for new money. If the only matching category is hidden, the answer is the same as having none: Veritas offers to create one. Example: one hidden `savings` category and no other gives "none", so the prompt offers a new one, and the hidden one stays as it was.
 
 Resolved in P0.4: Actual keeps the category on mixed pairs and clears it on same-side pairs (`transfer.ts:24-45`). No server check requires a category on on->off transfers. Only the Close Account modal does (`desktop-client/src/components/modals/CloseAccountModal.tsx:33-40`, `docs/actual-format.md` §4.2). Uncategorized on->off transfers exist in real files, which is why row 10 exists. PLAN R-XFER-4's "which Actual requires to carry a category" is wrong and needs correcting.
 
