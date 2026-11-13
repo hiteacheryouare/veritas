@@ -1,6 +1,8 @@
 use veritas_domain::{BudgetData, CoreError, GoalId, Money, YearMonth};
 use veritas_engine::{Envelope, EnvelopeSheet};
-use veritas_session::goals::{self, ClosePreview, GoalState as CoreState, GoalView};
+use veritas_session::goals::{
+	self, ClosePreview, GoalPace as CorePace, GoalState as CoreState, GoalView,
+};
 
 use crate::Month;
 use crate::budget::envelope;
@@ -13,6 +15,13 @@ pub enum GoalState {
 	/// "Reached → Spent": no suggestion or ETA until reopened or re-targeted.
 	ReachedSpent,
 	Closed,
+}
+
+/// "On track for March" or "Behind, needs $410 a month" (FC-6, DEBT-8.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum GoalPace {
+	OnTrack { eta_month: Month },
+	Behind { needed_monthly: i64 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -40,6 +49,9 @@ pub struct GoalSummary {
 	pub suggested_monthly: Option<i64>,
 	/// Budget months through the target month, this one included.
 	pub months_left: Option<u32>,
+	/// Active goals with a target date only, by FC-6's on-track rule, so the
+	/// card agrees with the forecast's goal ETA.
+	pub pace: Option<GoalPace>,
 	/// When it was last reached; kept through a re-target (D71).
 	pub reached_month: Option<Month>,
 	pub closed_month: Option<Month>,
@@ -114,6 +126,14 @@ impl From<GoalView> for GoalSummary {
 			spent: view.spent.minor(),
 			suggested_monthly: view.suggestion.map(|s| s.monthly.minor()),
 			months_left: view.suggestion.map(|s| s.months_left),
+			pace: view.pace.map(|pace| match pace {
+				CorePace::OnTrack { eta_month } => GoalPace::OnTrack {
+					eta_month: eta_month.into(),
+				},
+				CorePace::Behind { needed_monthly } => GoalPace::Behind {
+					needed_monthly: needed_monthly.minor(),
+				},
+			}),
 			reached_month: goal.reached_month.map(Month::from),
 			closed_month: goal.closed_month.map(Month::from),
 			later_budget: month_amounts(view.later_budget),

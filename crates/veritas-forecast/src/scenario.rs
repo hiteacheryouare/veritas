@@ -3,6 +3,7 @@ use veritas_domain::{
 	AccountId, Cadence, CategoryId, CivilDate, CoreError, GoalId, IncomeDelta, Money, Scenario,
 	ScenarioChange, ScenarioEvent, YearMonth,
 };
+use veritas_reports::Period;
 use veritas_rules::Recurrence;
 
 use crate::math::{round_half_away, to_money};
@@ -50,65 +51,101 @@ pub fn cadence_dates(
 	Ok(dates)
 }
 
-/// Checks a scenario before it overlays anything. A what-if is about the
-/// future: a one-time change dated before `today` is rejected, not moved.
-pub fn validate(scenario: &Scenario, today: CivilDate) -> Result<(), CoreError> {
-	let invalid = |text: &str| Err(CoreError::Invalid(format!("{}: {text}", scenario.name)));
+/// Checks a stored scenario before it overlays anything. Events dated in
+/// the past are kept (D67): they are skipped and listed, never an error.
+pub fn validate(scenario: &Scenario) -> Result<(), CoreError> {
 	for event in &scenario.events {
-		let (start, end) = match &event.change {
-			ScenarioChange::OneTime { date, .. } => {
-				if *date < today {
-					return invalid("a one-time change can't be dated before today");
-				}
-				continue;
-			}
-			ScenarioChange::OneTimeTransfer {
-				date,
-				from,
-				to,
-				amount,
-			} => {
-				if *date < today {
-					return invalid("a one-time change can't be dated before today");
-				}
-				if from == to {
-					return invalid("a transfer needs two different accounts");
-				}
-				if *amount <= Money::ZERO {
-					return invalid("a transfer moves a positive amount");
-				}
-				continue;
-			}
-			ScenarioChange::Recurring {
-				start,
-				end_month,
-				cadence,
-				..
-			} => {
-				if matches!(cadence, Cadence::EveryMonths(0) | Cadence::EveryWeeks(0)) {
-					return invalid("a recurring change repeats at least every 1 month or week");
-				}
-				(start.year_month(), *end_month)
-			}
-			ScenarioChange::CategoryPercent {
-				start_month,
-				end_month,
-				..
-			}
-			| ScenarioChange::IncomeChange {
-				start_month,
-				end_month,
-				..
-			}
-			| ScenarioChange::GoalContribution {
-				start_month,
-				end_month,
-				..
-			} => (*start_month, *end_month),
-		};
-		if end.is_some_and(|end| end < start) {
-			return invalid("a change ends before it starts");
+		check(&event.change)
+			.map_err(|text| CoreError::Invalid(format!("{}: {text}", scenario.name)))?;
+	}
+	Ok(())
+}
+
+/// Checks a change a user is about to add: on top of [`validate`], a new
+/// entry dated in the past is refused (FC-2, D67).
+pub fn validate_new(change: &ScenarioChange, today: CivilDate) -> Result<(), CoreError> {
+	check(change).map_err(CoreError::Invalid)?;
+	if in_the_past(change, today)? {
+		return Err(CoreError::Invalid(
+			"a what-if can't be dated before today".to_owned(),
+		));
+	}
+	Ok(())
+}
+
+/// D67's "in the past": a one-time change dated before today, a recurring
+/// change whose last occurrence is before today, or a percent, income or
+/// goal change that ended before the current month.
+pub fn in_the_past(change: &ScenarioChange, today: CivilDate) -> Result<bool, CoreError> {
+	let ended = |end: Option<YearMonth>| end.is_some_and(|end| end < today.year_month());
+	Ok(match change {
+		ScenarioChange::OneTime { date, .. } | ScenarioChange::OneTimeTransfer { date, .. } => {
+			*date < today
 		}
+		ScenarioChange::Recurring {
+			start,
+			end_month: Some(end),
+			cadence,
+			..
+		} => {
+			let last = Period::month(*end).last();
+			cadence_dates(*cadence, *start, last)?
+				.last()
+				.is_none_or(|last| *last < today)
+		}
+		ScenarioChange::Recurring {
+			end_month: None, ..
+		} => false,
+		ScenarioChange::CategoryPercent { end_month, .. }
+		| ScenarioChange::IncomeChange { end_month, .. }
+		| ScenarioChange::GoalContribution { end_month, .. } => ended(*end_month),
+	})
+}
+
+fn check(change: &ScenarioChange) -> Result<(), String> {
+	let invalid = |text: &str| Err(text.to_owned());
+	let (start, end) = match change {
+		ScenarioChange::OneTime { .. } => return Ok(()),
+		ScenarioChange::OneTimeTransfer {
+			from, to, amount, ..
+		} => {
+			if from == to {
+				return invalid("a transfer needs two different accounts");
+			}
+			if *amount <= Money::ZERO {
+				return invalid("a transfer moves a positive amount");
+			}
+			return Ok(());
+		}
+		ScenarioChange::Recurring {
+			start,
+			end_month,
+			cadence,
+			..
+		} => {
+			if matches!(cadence, Cadence::EveryMonths(0) | Cadence::EveryWeeks(0)) {
+				return invalid("a recurring change repeats at least every 1 month or week");
+			}
+			(start.year_month(), *end_month)
+		}
+		ScenarioChange::CategoryPercent {
+			start_month,
+			end_month,
+			..
+		}
+		| ScenarioChange::IncomeChange {
+			start_month,
+			end_month,
+			..
+		}
+		| ScenarioChange::GoalContribution {
+			start_month,
+			end_month,
+			..
+		} => (*start_month, *end_month),
+	};
+	if end.is_some_and(|end| end < start) {
+		return invalid("a change ends before it starts");
 	}
 	Ok(())
 }

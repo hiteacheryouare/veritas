@@ -82,15 +82,16 @@ pub fn suggestion(
 }
 
 /// DEBT-8.2: an active goal whose available reaches its target in month M
-/// becomes reached. Spending afterwards never reverts it. Returns the goal to
-/// store, or `None` when nothing changes.
+/// becomes reached. Spending afterwards never reverts it. The first reached
+/// month is kept through a re-target and a second reach (D71). Returns the
+/// goal to store, or `None` when nothing changes.
 pub fn check_reached(sheet: &EnvelopeSheet, goal: &Goal, month: YearMonth) -> Option<Goal> {
 	if goal.status != GoalStatus::Active || available(sheet, &goal.category, month) < goal.target {
 		return None;
 	}
 	Some(Goal {
 		status: GoalStatus::Reached,
-		reached_month: Some(month),
+		reached_month: goal.reached_month.or(Some(month)),
 		..goal.clone()
 	})
 }
@@ -110,11 +111,13 @@ pub fn first_reached_month(
 		.find(|m| available(sheet, &goal.category, *m) >= goal.target)
 }
 
-/// DEBT-8.2 Reopen: back to reached if it ever was, else active. The caller
-/// also unhides the category.
-pub fn reopen(goal: &Goal) -> Goal {
+/// DEBT-8.2 Reopen: the status follows what the envelope holds now, with the
+/// same test as active to reached: `reached` when `available` (this month)
+/// is at least the target, else `active`. `reached_month` is untouched. The
+/// caller also unhides the category.
+pub fn reopen(goal: &Goal, available: Money) -> Goal {
 	Goal {
-		status: if goal.reached_month.is_some() {
+		status: if available >= goal.target {
 			GoalStatus::Reached
 		} else {
 			GoalStatus::Active
@@ -188,7 +191,9 @@ pub fn close(
 
 /// D36: the target as Actual's long-term goal. The category note keeps one
 /// `#goal <amount>` line (replacing an existing one), and every created month
-/// from `from` on gets `goal = target`, `long_goal = 1`.
+/// from `from` on gets `goal = target`, `long_goal = 1`. The amount is in
+/// major units at the currency's places (CLS-12.3): 150000 yen is
+/// `#goal 150000`.
 pub fn target_writes(
 	budget: &BudgetData,
 	sheet: &EnvelopeSheet,
@@ -201,7 +206,13 @@ pub fn target_writes(
 			"A goal's target has to be more than zero.".to_owned(),
 		));
 	}
-	let line = format!("#goal {target}");
+	let places = budget
+		.format
+		.currency_code
+		.as_deref()
+		.and_then(veritas_domain::currency)
+		.map_or(2, |currency| currency.decimal_places);
+	let line = format!("#goal {}", major_units(target, places));
 	let existing = budget
 		.notes
 		.get(category.as_str())
@@ -247,6 +258,23 @@ pub fn target_writes(
 		holds: Vec::new(),
 		notes: vec![(category.as_str().to_owned(), text)],
 	})
+}
+
+/// `minor` as plain decimal text with `places` decimals and no grouping.
+fn major_units(amount: Money, places: u8) -> String {
+	let minor = amount.minor();
+	let sign = if minor < 0 { "-" } else { "" };
+	let magnitude = minor.unsigned_abs();
+	let scale = 10u64.pow(u32::from(places.min(18)));
+	if places == 0 {
+		return format!("{sign}{magnitude}");
+	}
+	format!(
+		"{sign}{}.{:0width$}",
+		magnitude / scale,
+		magnitude % scale,
+		width = usize::from(places)
+	)
 }
 
 /// Actual reads a template line from its first `#`, case-sensitively

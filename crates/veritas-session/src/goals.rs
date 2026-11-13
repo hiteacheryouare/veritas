@@ -24,6 +24,16 @@ pub enum GoalState {
 	Closed,
 }
 
+/// Whether an active goal with a target date gets there in time, by FC-6's
+/// on-track rule, the one the forecast's goal ETA uses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GoalPace {
+	/// The median pace's ETA is not after the target month.
+	OnTrack { eta_month: YearMonth },
+	/// Later, or no ETA at all: DEBT-8.1's monthly amount gets there.
+	Behind { needed_monthly: Money },
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct GoalView {
 	pub goal: Goal,
@@ -35,6 +45,8 @@ pub struct GoalView {
 	pub spent: Money,
 	/// Active and reached goals with a target date only.
 	pub suggestion: Option<Suggestion>,
+	/// Active goals with a target date only.
+	pub pace: Option<GoalPace>,
 	/// A closed goal's budget in months after it closed (GOAL-10).
 	pub later_budget: Vec<(YearMonth, Money)>,
 	/// A closed goal whose envelope moved after it closed (GOAL-6).
@@ -65,13 +77,19 @@ pub fn goals(data: &BudgetData, sheet: &EnvelopeSheet) -> Result<Vec<GoalView>, 
 		let spent = spent(sheet, &goal.category)?;
 		let state = match goal.status {
 			GoalStatus::Active => GoalState::Active,
-			GoalStatus::Reached if spent > Money::ZERO => GoalState::ReachedSpent,
+			GoalStatus::Reached if available < goal.target => GoalState::ReachedSpent,
 			GoalStatus::Reached => GoalState::Reached,
 			GoalStatus::Closed => GoalState::Closed,
 		};
+		// A reached goal, spent or not, gets no suggestion and no ETA (D66,
+		// GOAL-10, FC-5, FC-6).
 		let suggestion = match state {
-			GoalState::Active | GoalState::Reached => engine::suggestion(sheet, goal, month)?,
-			GoalState::ReachedSpent | GoalState::Closed => None,
+			GoalState::Active => engine::suggestion(sheet, goal, month)?,
+			GoalState::Reached | GoalState::ReachedSpent | GoalState::Closed => None,
+		};
+		let pace = match suggestion {
+			Some(suggestion) => Some(pace(data, goal, month, available, suggestion)?),
+			None => None,
 		};
 		let (later_budget, new_activity) = match (goal.status, goal.closed_month) {
 			(GoalStatus::Closed, Some(closed)) => (
@@ -93,6 +111,7 @@ pub fn goals(data: &BudgetData, sheet: &EnvelopeSheet) -> Result<Vec<GoalView>, 
 				available,
 				spent,
 				suggestion,
+				pace,
 				later_budget,
 				new_activity,
 			},
@@ -104,6 +123,24 @@ pub fn goals(data: &BudgetData, sheet: &EnvelopeSheet) -> Result<Vec<GoalView>, 
 			.then_with(|| x.name.cmp(&y.name))
 	});
 	Ok(views.into_iter().map(|(_, view)| view).collect())
+}
+
+fn pace(
+	data: &BudgetData,
+	goal: &Goal,
+	month: YearMonth,
+	available: Money,
+	suggestion: Suggestion,
+) -> Result<GoalPace, CoreError> {
+	use veritas_forecast::EtaStatus;
+	let eta = veritas_forecast::goal_eta(data, &goal.id, month, available, None)?;
+	Ok(match (eta.on_track, eta.status) {
+		(Some(true), EtaStatus::Eta { month, .. }) => GoalPace::OnTrack { eta_month: month },
+		(Some(true), _) => GoalPace::OnTrack { eta_month: month },
+		_ => GoalPace::Behind {
+			needed_monthly: suggestion.monthly,
+		},
+	})
 }
 
 pub fn close_preview(
@@ -204,16 +241,13 @@ pub fn close_goal(
 	let closing = engine::close(&editor, sheet, goal, month, release_to)?;
 	let mut writes = closing.writes;
 	if also_move_later {
+		// One move per later month, each with its movement note (GOAL-7,
+		// GOAL-10). A negative amount moves the other way.
 		for (later, amount) in later_budget(data, sheet, &goal.category, month) {
 			extend(
 				&mut writes,
-				editor.set_budget(later, &goal.category, Money::ZERO)?,
+				editor.move_budget(later, amount, &goal.category, release_to)?,
 			);
-			if let Envelope::Category(destination) = release_to {
-				let total =
-					Money::from_minor(editor.budgeted(later, destination)).checked_add(amount)?;
-				extend(&mut writes, editor.set_budget(later, destination, total)?);
-			}
 		}
 	}
 	let mut planned = rows(data, &writes);
@@ -222,13 +256,19 @@ pub fn close_goal(
 	Ok(planned)
 }
 
-/// DEBT-8.2 Reopen: back to reached or active, and shown again.
-pub fn reopen_goal(data: &BudgetData, id: &GoalId) -> Result<Vec<Row>, CoreError> {
+/// DEBT-8.2 Reopen: reached if the envelope holds the target this month, else
+/// active, and shown again.
+pub fn reopen_goal(
+	data: &BudgetData,
+	sheet: &EnvelopeSheet,
+	id: &GoalId,
+) -> Result<Vec<Row>, CoreError> {
 	let goal = live_goal(data, id)?;
 	if goal.status != GoalStatus::Closed {
 		return Err(CoreError::Invalid("This goal isn't closed.".to_owned()));
 	}
-	let mut planned = vec![Row::Goal(engine::reopen(goal))];
+	let available = available(sheet, &goal.category, sheet.today().year_month());
+	let mut planned = vec![Row::Goal(engine::reopen(goal, available))];
 	planned.extend(categories::set_category_hidden(
 		data,
 		&goal.category,
@@ -237,8 +277,8 @@ pub fn reopen_goal(data: &BudgetData, id: &GoalId) -> Result<Vec<Row>, CoreError
 	Ok(planned)
 }
 
-/// D71: a new target on the same goal. It goes back to active, keeps when it
-/// was last reached, and is shown again if it was closed.
+/// D71: a new target on the same goal. It goes back to active and keeps when
+/// it was first reached. A closed goal is reopened first (DEBT-8.2).
 pub fn retarget_goal(
 	data: &BudgetData,
 	sheet: &EnvelopeSheet,
@@ -247,6 +287,11 @@ pub fn retarget_goal(
 	target_date: Option<CivilDate>,
 ) -> Result<Vec<Row>, CoreError> {
 	let goal = live_goal(data, id)?;
+	if goal.status == GoalStatus::Closed {
+		return Err(CoreError::Invalid(
+			"Reopen this goal before giving it a new target.".to_owned(),
+		));
+	}
 	let writes = engine::target_writes(
 		data,
 		sheet,
@@ -259,22 +304,8 @@ pub fn retarget_goal(
 		target,
 		target_date,
 		status: GoalStatus::Active,
-		closed_month: None,
-		released_to: None,
-		released: None,
 		..goal.clone()
 	}));
-	if data
-		.categories
-		.get(&goal.category)
-		.is_some_and(|c| c.hidden)
-	{
-		planned.extend(categories::set_category_hidden(
-			data,
-			&goal.category,
-			false,
-		)?);
-	}
 	Ok(planned)
 }
 

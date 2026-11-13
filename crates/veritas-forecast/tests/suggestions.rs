@@ -576,3 +576,30 @@ fn debt_8_1_a_sheet_without_next_month_is_an_error_not_zero_carry() {
 		Err(veritas_domain::CoreError::Invalid(_))
 	));
 }
+
+#[test]
+fn goal_10_a_spent_goal_is_not_nagged() {
+	let mut book = laptop_book(&[("2026-12", 25000)]);
+	book.budgeted("2027-02", "New laptop", 4000);
+	book.goal("laptop", "New laptop", 150000, Some("2027-06-15"))
+		.status = veritas_domain::GoalStatus::Reached;
+	let spent = eta(&book, 2000, None);
+	assert_eq!(spent.status, EtaStatus::Spent);
+	assert_eq!(spent.text(), "Reached → Spent");
+	assert_eq!(eta(&book, 150000, None).text(), "Reached");
+	let laptop = item(&suggest(&book, "2027-01-20", &[]), "New laptop").clone();
+	assert_eq!(laptop.amount, None);
+	assert_eq!(laptop.basis, Basis::GoalReached);
+	assert_eq!(laptop.reason, "New laptop: reached, keeping $40");
+}
+
+#[test]
+fn goal_10_a_re_targeted_goal_suggests_again() {
+	let mut book = laptop_book(&[("2026-12", 25000)]);
+	book.goal("laptop", "New laptop", 150000, Some("2027-06-15"))
+		.status = veritas_domain::GoalStatus::Reached;
+	book.goal("laptop-2", "New laptop", 60000, Some("2027-06-15"));
+	let laptop = item(&suggest(&book, "2027-01-20", &[]), "New laptop").clone();
+	assert_eq!(laptop.basis, Basis::Goal);
+	assert_eq!(laptop.amount, Some(cents(12000)));
+}
