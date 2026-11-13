@@ -453,6 +453,20 @@ fn references(data: &BudgetData, findings: &mut Findings) {
 		}
 	}
 
+	for widget in data.widgets.values().filter(|row| !row.tombstone) {
+		if let Some(page) = &widget.page {
+			let exists = data.dashboard_pages.get(page).map(|page| page.tombstone);
+			reference(
+				findings,
+				"dashboard",
+				widget.id.as_str(),
+				"dashboard page",
+				page.as_str(),
+				exists,
+			);
+		}
+	}
+
 	// Veritas's own rows may outlive what Actual deletes.
 	for row_category in data.category_meta.keys() {
 		let exists = category(row_category.as_str()).map(|_| false);

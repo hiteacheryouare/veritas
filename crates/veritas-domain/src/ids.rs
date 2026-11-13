@@ -40,4 +40,5 @@ id!(
 	CustomReportId,
 	DashboardPageId,
 	WidgetId,
+	ScenarioEventId,
 );

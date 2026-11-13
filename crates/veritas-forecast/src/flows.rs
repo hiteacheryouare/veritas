@@ -1,5 +1,6 @@
 use veritas_domain::{
 	AccountId, BudgetData, CategoryId, CivilDate, CoreError, Money, ScheduleId, SplitRole,
+	YearMonth,
 };
 
 use crate::math::{median, round_half_away, round_half_up, to_money};
@@ -101,6 +102,21 @@ impl ScheduleAmount {
 	}
 }
 
+/// A payment date where the payment is below interest plus escrow. The
+/// uncovered part is not recorded (DEBT-2.6); the screen warns (DEBT-2.2).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Shortfall {
+	pub date: CivilDate,
+	pub loan: AccountId,
+	pub uncovered: Money,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LoanSplit {
+	pub flows: Vec<KnownFlow>,
+	pub shortfalls: Vec<Shortfall>,
+}
+
 /// A loan payment schedule to expand into known flows (FC-2).
 #[derive(Clone, Debug, PartialEq)]
 pub struct LoanPayment {
@@ -129,6 +145,23 @@ impl LoanPayment {
 	/// and escrow are booked up to what the payment covers, and the loan
 	/// balance moves only by principal.
 	pub fn flows(&self, dates: &[CivilDate]) -> Result<Vec<KnownFlow>, CoreError> {
+		Ok(self.split(dates)?.flows)
+	}
+
+	/// The same flows plus the dates where the payment doesn't cover interest
+	/// and escrow, which the screen warns about (FC-2, DEBT-2.2).
+	pub fn split(&self, dates: &[CivilDate]) -> Result<LoanSplit, CoreError> {
+		self.split_from(dates, None)
+	}
+
+	/// `split` when part of the first month is already paid: FC-2 starts
+	/// that month from today's balance plus the principal already paid, and
+	/// books only the month's interest not yet booked.
+	pub fn split_from(
+		&self,
+		dates: &[CivilDate],
+		so_far: Option<MonthSoFar>,
+	) -> Result<LoanSplit, CoreError> {
 		let payment = self.payment.minor();
 		let escrow = self.escrow.minor();
 		if payment < 0 || escrow < 0 {
@@ -139,65 +172,105 @@ impl LoanPayment {
 		}
 		let mut outstanding = self.outstanding.minor().max(0);
 		let mut flows = Vec::new();
-		for date in dates {
+		let mut shortfalls = Vec::new();
+		let mut start = 0;
+		while let Some(first) = dates.get(start) {
 			if outstanding == 0 {
 				break;
 			}
-			let interest = match self.rate_bps {
-				Some(rate) => i64::try_from(round_half_up(
-					i128::from(outstanding) * i128::from(rate),
-					120_000,
-				))
-				.map_err(|_| CoreError::Overflow)?,
-				None => self.last_interest.minor(),
-			}
-			.max(0);
-			let paid_interest = interest.min(payment);
-			let paid_escrow = escrow.min(payment - paid_interest);
-			let principal = (payment - paid_interest - paid_escrow).min(outstanding);
-			outstanding = outstanding
-				.checked_sub(principal)
-				.ok_or(CoreError::Overflow)?;
-			let flow = |account: &AccountId,
-			            amount: i64,
-			            kind: FlowKind,
-			            category: &Option<CategoryId>,
-			            name: String| KnownFlow {
-				date: *date,
-				account: account.clone(),
-				amount: Money::from_minor(-amount),
-				kind,
-				category: category.clone(),
-				schedule: None,
-				name,
-				certainty: Certainty::Exact,
-			};
-			for (amount, category) in [
-				(paid_interest, &self.interest_category),
-				(paid_escrow, &self.escrow_category),
-			] {
-				if amount > 0 {
+			let month = first.year_month();
+			let count = dates[start..]
+				.iter()
+				.take_while(|date| date.year_month() == month)
+				.count();
+			let shares = self.month_interest(outstanding, month, count, so_far)?;
+			for (date, interest) in dates[start..start + count].iter().zip(shares) {
+				if outstanding == 0 {
+					break;
+				}
+				let owed = interest.checked_add(escrow).ok_or(CoreError::Overflow)?;
+				if payment < owed {
+					shortfalls.push(Shortfall {
+						date: *date,
+						loan: self.loan.clone(),
+						uncovered: Money::from_minor(owed - payment),
+					});
+				}
+				let paid_interest = interest.min(payment);
+				let paid_escrow = escrow.min(payment - paid_interest);
+				let principal = (payment - paid_interest - paid_escrow).min(outstanding);
+				outstanding = outstanding
+					.checked_sub(principal)
+					.ok_or(CoreError::Overflow)?;
+				let flow = |amount: i64, kind: FlowKind, category: &Option<CategoryId>| KnownFlow {
+					date: *date,
+					account: self.from.clone(),
+					amount: Money::from_minor(-amount),
+					kind,
+					category: category.clone(),
+					schedule: None,
+					name: self.name.clone(),
+					certainty: Certainty::Exact,
+				};
+				for (amount, category) in [
+					(paid_interest, &self.interest_category),
+					(paid_escrow, &self.escrow_category),
+				] {
+					if amount > 0 {
+						flows.push(flow(amount, FlowKind::Expense, category));
+					}
+				}
+				if principal > 0 {
 					flows.push(flow(
-						&self.from,
-						amount,
-						FlowKind::Expense,
-						category,
-						self.name.clone(),
+						principal,
+						FlowKind::Transfer {
+							counterpart: self.loan.clone(),
+						},
+						&self.principal_category,
 					));
 				}
 			}
-			if principal > 0 {
-				flows.push(flow(
-					&self.from,
-					principal,
-					FlowKind::Transfer {
-						counterpart: self.loan.clone(),
-					},
-					&self.principal_category,
-					self.name.clone(),
-				));
-			}
+			start += count;
 		}
-		Ok(flows)
+		Ok(LoanSplit { flows, shortfalls })
 	}
+
+	/// FC-2: interest accrues per calendar month and is shared among that
+	/// month's `count` payments, leftover cents to the earliest. With no rate
+	/// each payment repeats the last payment's interest.
+	fn month_interest(
+		&self,
+		outstanding: i64,
+		month: YearMonth,
+		count: usize,
+		so_far: Option<MonthSoFar>,
+	) -> Result<Vec<i64>, CoreError> {
+		let Some(rate) = self.rate_bps else {
+			return Ok(vec![self.last_interest.minor().max(0); count]);
+		};
+		let this_month = so_far.filter(|so_far| so_far.month == month);
+		let start = match this_month {
+			Some(so_far) => outstanding
+				.checked_add(so_far.principal.minor())
+				.ok_or(CoreError::Overflow)?,
+			None => outstanding,
+		};
+		let total = i64::try_from(round_half_up(i128::from(start) * i128::from(rate), 120_000))
+			.map_err(|_| CoreError::Overflow)?;
+		let booked = this_month.map_or(0, |so_far| so_far.interest.minor());
+		let total = total.checked_sub(booked).ok_or(CoreError::Overflow)?.max(0);
+		let n = i64::try_from(count)
+			.map_err(|_| CoreError::Overflow)?
+			.max(1);
+		let (share, extra) = (total / n, total % n);
+		Ok((0..n).map(|k| share + i64::from(k < extra)).collect())
+	}
+}
+
+/// What a loan has already been paid in the month a split starts in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MonthSoFar {
+	pub month: YearMonth,
+	pub interest: Money,
+	pub principal: Money,
 }
