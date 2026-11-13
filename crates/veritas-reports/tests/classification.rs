@@ -133,6 +133,68 @@ fn cls8_c7_unmarked_on_to_off_category_counts_as_spending_until_reviewed() {
 }
 
 #[test]
+fn cls4_2_review_count_is_the_classifiers_row_8_grouped_by_category() {
+	let mut book = master_book();
+	book.category("Car Loan", "Debt", None)
+		.category("Old Loan", "Debt", None);
+	book.transfer("L1", "CHK", "CAR", "2027-01-10", -32_000)
+		.in_category("Car Loan");
+	book.transfer("L2", "CHK", "CAR", "2027-02-10", -32_000)
+		.in_category("Car Loan");
+	book.row("U", "CHK", "2027-01-11", -5_000)
+		.in_category("Car Loan")
+		.payee = Some(Book::transfer_payee("CAR"));
+	book.row("M", "CHK", "2027-01-12", -50_000)
+		.in_category("Car Loan")
+		.transfer = Some(TransactionId::new("Mm"));
+	book.row("Mm", "CAR", "2027-01-12", 49_000).transfer = Some(TransactionId::new("M"));
+	book.parent("P", "CHK", "2027-01-13", -1_000).tombstone = true;
+	book.transfer("P1", "CHK", "CAR", "2027-01-13", -1_000)
+		.in_category("Car Loan")
+		.child_of("P");
+	book.transfer("O", "CHK", "CAR", "2027-01-14", -2_000)
+		.in_category("Old Loan");
+	book.budget
+		.categories
+		.get_mut(&cat("Old Loan"))
+		.unwrap()
+		.tombstone = true;
+
+	let classification = book.classify();
+	let review = classification.categories_to_review(&book.budget);
+	assert_eq!(
+		review.get(&cat("Car Loan")),
+		Some(&3),
+		"L1, L2 and the unpaired U; not M, whose link isn't a CLS-1 pair, nor P1 under a deleted parent"
+	);
+	assert_eq!(
+		review.get(&cat("Old Loan")),
+		Some(&1),
+		"a category deleted with no target still counts as spending, so it still needs a kind"
+	);
+	assert_eq!(review.len(), 2);
+	for id in ["M", "P1"] {
+		assert!(
+			classification
+				.get(&TransactionId::new(id))
+				.is_none_or(|row| row.decision != Decision::CapitalizedExpense),
+			"{id}"
+		);
+	}
+
+	book.meta("Car Loan", CategoryKind::DebtPrincipal);
+	let classification = book.classify();
+	assert_eq!(
+		classification
+			.categories_to_review(&book.budget)
+			.into_keys()
+			.collect::<Vec<_>>(),
+		[cat("Old Loan")],
+		"answered once per category"
+	);
+}
+
+#[test]
 fn cls8_c8_same_side_transfer_changes_no_flow_total() {
 	let mut book = master_book();
 	book.transfer("V", "CHK", "VISA", "2027-01-10", -7_500);

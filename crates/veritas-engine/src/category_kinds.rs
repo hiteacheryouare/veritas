@@ -1,12 +1,11 @@
-//! Category kinds from docs/finance/classification.md CLS-3 and CLS-4: which
-//! kind a category may be given, where a loan payment's principal or a
-//! savings move should be filed, and which categories the one-time kind
-//! wizard should ask about. The effective kind itself is
-//! `BudgetData::category_kind`, shared with reports and forecast.
+//! Category kinds from docs/finance/classification.md CLS-3 and CLS-4.1:
+//! which kind a category may be given, and where a loan payment's principal
+//! or a savings move should be filed. The effective kind itself is
+//! `BudgetData::category_kind`, shared with reports and forecast. The
+//! CLS-4.2 review count is `Classification::categories_to_review` in
+//! veritas-reports, so it counts exactly what the classifier decides.
 
-use std::collections::BTreeMap;
-
-use veritas_domain::{BudgetData, CategoryId, CategoryKind, CategoryMeta, CoreError, Transaction};
+use veritas_domain::{BudgetData, CategoryId, CategoryKind, CategoryMeta, CoreError, GoalStatus};
 
 /// The `veritas_category_meta` row to store for a category.
 #[derive(Clone, Debug, PartialEq)]
@@ -41,7 +40,10 @@ pub fn set_category_kind(
 			"This is an expense category in Actual. Use a category from an income group for income.".to_owned(),
 		));
 	}
-	let is_goal = budget.goals.values().any(|goal| goal.category == *category);
+	let is_goal = budget
+		.goals
+		.values()
+		.any(|goal| goal.category == *category && goal.status != GoalStatus::Closed);
 	if is_goal && kind != CategoryKind::Expense {
 		return Err(CoreError::Invalid(
 			"A goal's envelope is always an expense category. Close the goal first to use it for something else.".to_owned(),
@@ -96,53 +98,4 @@ pub fn kind_target(budget: &BudgetData, kind: CategoryKind) -> Result<KindTarget
 		1 => KindTarget::One(matching.remove(0)),
 		_ => KindTarget::Several(matching),
 	})
-}
-
-/// CLS-4.2: expense categories with no stored kind that carry on↔off
-/// transfers, which reports count as spending until the user says what they
-/// are. Each comes with how many such transfers it has, for the review count.
-pub fn categories_to_review(budget: &BudgetData) -> BTreeMap<CategoryId, usize> {
-	let mut counts = BTreeMap::new();
-	for transaction in budget.transactions.values() {
-		let Some(category) = on_to_off_category(budget, transaction) else {
-			continue;
-		};
-		let unset = budget
-			.category_meta
-			.get(category)
-			.and_then(|m| m.kind)
-			.is_none();
-		let expense = budget
-			.categories
-			.get(category)
-			.is_some_and(|c| !c.is_income);
-		if unset && expense {
-			*counts.entry(category.clone()).or_insert(0) += 1;
-		}
-	}
-	counts
-}
-
-/// The category of an alive on-budget leg whose alive partner is off budget.
-fn on_to_off_category<'a>(
-	budget: &'a BudgetData,
-	transaction: &'a Transaction,
-) -> Option<&'a CategoryId> {
-	if transaction.tombstone {
-		return None;
-	}
-	let partner = budget.transactions.get(transaction.transfer.as_ref()?)?;
-	if partner.tombstone {
-		return None;
-	}
-	let off_budget = |t: &Transaction| budget.accounts.get(&t.account).map(|a| a.off_budget);
-	if off_budget(transaction)? || !off_budget(partner)? {
-		return None;
-	}
-	let category = budget.resolve_category(transaction.category.as_ref()?)?;
-	budget
-		.categories
-		.get(category)
-		.filter(|c| !c.tombstone)
-		.map(|c| &c.id)
 }
