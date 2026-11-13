@@ -1,5 +1,6 @@
 //! Open and close, the single-writer lock, the command bus with undo and redo, change events, snapshots and backups.
 
+pub mod accounts;
 mod background;
 mod backup;
 mod budgets;
@@ -10,12 +11,15 @@ mod fsio;
 pub mod goals;
 mod lock;
 mod overview;
+pub mod payees;
+pub mod register;
 mod retention;
 mod session;
 mod shared;
 mod sheet;
 mod snapshot;
 mod store;
+pub mod transactions;
 pub mod writes;
 
 pub use backup::write_backup;

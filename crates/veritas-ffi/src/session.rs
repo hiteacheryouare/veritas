@@ -6,6 +6,10 @@ use veritas_session::{
 	Backend, CancelToken, ChangeSet, Session as CoreSession, SessionOptions, SharedSession,
 };
 
+use crate::accounts::{
+	AccountList, PayeeDetail, PayeeMemory, Reconciliation, RegisterFilter, RegisterPage,
+	RegisterRow, RegisterScope, RegisterSort,
+};
 use crate::blocking::{CancelToken as CancelHandle, run};
 use crate::budget::BudgetMonth;
 use crate::commands::Command;
@@ -184,6 +188,43 @@ impl<B: Backend> Core<B> {
 				tax_bucket: history.tax_bucket,
 			})
 		})
+	}
+
+	pub(crate) fn accounts(&self) -> Result<AccountList, FfiError> {
+		self.call(|session| crate::accounts::account_list(session.data()?))
+	}
+
+	pub(crate) fn register(
+		&self,
+		scope: &RegisterScope,
+		filter: &RegisterFilter,
+		sort: RegisterSort,
+		offset: u64,
+		limit: u64,
+	) -> Result<RegisterPage, FfiError> {
+		self.call(|session| {
+			crate::accounts::register_page(session.data()?, scope, filter, sort, offset, limit)
+		})
+	}
+
+	pub(crate) fn register_row(&self, id: &str) -> Result<RegisterRow, FfiError> {
+		self.call(|session| crate::accounts::register_row(session.data()?, id))
+	}
+
+	pub(crate) fn payees(&self) -> Result<Vec<PayeeDetail>, FfiError> {
+		self.call(|session| Ok(crate::accounts::payee_list(session.data()?)))
+	}
+
+	pub(crate) fn payee_memory(&self, payee: &str) -> Result<Option<PayeeMemory>, FfiError> {
+		self.call(|session| Ok(crate::accounts::payee_memory(session.data()?, payee)))
+	}
+
+	pub(crate) fn reconciliation(
+		&self,
+		account: &str,
+		statement: i64,
+	) -> Result<Reconciliation, FfiError> {
+		self.call(|session| crate::accounts::reconciliation(session.data()?, account, statement))
 	}
 
 	pub(crate) fn goals(&self, today: &str) -> Result<Vec<GoalSummary>, FfiError> {
@@ -404,6 +445,51 @@ impl Session {
 	/// move first.
 	pub fn category_history(&self, category_id: String) -> Result<CategoryHistory, FfiError> {
 		self.core.category_history(&category_id)
+	}
+
+	/// Every live account with its balances, note and last reconcile, and the
+	/// account groups (R-ACC-1).
+	pub fn accounts(&self) -> Result<AccountList, FfiError> {
+		self.core.accounts()
+	}
+
+	/// One page of the register (R-ACC-2). `offset` rows in, at most `limit`.
+	/// The running balance is set for one account in Actual's order with no
+	/// filter.
+	pub fn register(
+		&self,
+		scope: RegisterScope,
+		filter: RegisterFilter,
+		sort: RegisterSort,
+		offset: u64,
+		limit: u64,
+	) -> Result<RegisterPage, FfiError> {
+		self.core.register(&scope, &filter, sort, offset, limit)
+	}
+
+	/// One row as the register shows it, to refresh it after a `Change`.
+	pub fn register_row(&self, transaction_id: String) -> Result<RegisterRow, FfiError> {
+		self.core.register_row(&transaction_id)
+	}
+
+	/// Every live payee by name, transfer payees under their account's name.
+	pub fn payees(&self) -> Result<Vec<PayeeDetail>, FfiError> {
+		self.core.payees()
+	}
+
+	/// D38: the category and amount of the payee's most recent row, for quick
+	/// entry. `nil` for a payee with no rows.
+	pub fn payee_memory(&self, payee_id: String) -> Result<Option<PayeeMemory>, FfiError> {
+		self.core.payee_memory(&payee_id)
+	}
+
+	/// The reconcile sheet's numbers for a statement balance (R-ACC-3).
+	pub fn reconciliation(
+		&self,
+		account_id: String,
+		statement_balance: i64,
+	) -> Result<Reconciliation, FfiError> {
+		self.core.reconciliation(&account_id, statement_balance)
 	}
 
 	/// Every goal, in budget order, as of `today` (`YYYY-MM-DD`).
