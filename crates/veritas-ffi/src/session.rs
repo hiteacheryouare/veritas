@@ -3321,4 +3321,56 @@ mod tests {
 		let (_, source, other) = theirs(&actual_reads(&second, &today).unwrap());
 		assert_eq!((source, other), edited, "after the edit");
 	}
+
+	#[test]
+	fn a_schedule_linked_on_the_savings_leg_is_written_back_as_actual_does() {
+		// transfer.ts:81-85: a rule on the savings side links the leg, and
+		// Actual puts the same schedule on the checking row.
+		let (_, today) = this_month();
+		let (scratch, base, checking, savings, _) = two_account_base("link-back-oracle");
+		let linked = scratch.0.join("linked.zip");
+		let ops = serde_json::json!([
+			{"op": "createSchedule", "id": "savings-plan", "name": "Savings plan", "amount": 999_999, "date": "2030-01-01"},
+			{"op": "createRule", "id": "link-savings", "conditions": [{"field": "account", "op": "is", "value": savings}],
+			 "actions": [{"op": "link-schedule", "value": "savings-plan"}]},
+		]);
+		if !actual_apply(&base, ops, &linked, &today) {
+			return;
+		}
+		let core = imported_from(&scratch, &linked, "veritas");
+		let mut draft = typed(&checking, -10_000);
+		draft.payee_id = Some(transfer_payee_of(&core, &savings));
+		let id = add(&core, draft);
+		let source = row(&core, &id);
+		let leg = row(&core, source.transfer.as_ref().unwrap().as_str());
+		let ours = (
+			source.schedule.as_ref().map(|s| s.as_str().to_owned()),
+			leg.schedule.as_ref().map(|s| s.as_str().to_owned()),
+		);
+		assert_eq!(
+			ours,
+			(
+				Some("savings-plan".to_owned()),
+				Some("savings-plan".to_owned())
+			)
+		);
+
+		let out = scratch.0.join("actual.zip");
+		let ops = serde_json::json!([{"op": "addTransactions", "account": checking, "transactions": [
+			{"date": "2026-11-12", "amount": -10_000, "payee": {"transferTo": savings}}
+		]}]);
+		assert!(actual_apply(&linked, ops, &out, &today));
+		let dump = actual_reads(&out, &today).unwrap();
+		let rows = table(&dump, "transactions");
+		let theirs = rows
+			.iter()
+			.find(|r| r["acct"] == checking.as_str() && r["transferred_id"].is_string())
+			.unwrap();
+		let other = rows
+			.iter()
+			.find(|r| r["id"] == theirs["transferred_id"])
+			.unwrap();
+		let schedule = |r: &serde_json::Value| r["schedule"].as_str().map(str::to_owned);
+		assert_eq!((schedule(theirs), schedule(other)), ours);
+	}
 }

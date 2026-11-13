@@ -62,6 +62,9 @@ pub struct SplitLine {
 	pub payee: Option<PayeeId>,
 	pub category: Option<CategoryId>,
 	pub notes: Option<String>,
+	/// Rules never give a line a schedule. It is set only when the line's
+	/// transfer leg links one, which Actual writes back (`Transfers::link_back`).
+	pub schedule: Option<ScheduleId>,
 }
 
 /// The fields a rule reads and writes on a transaction while it runs.

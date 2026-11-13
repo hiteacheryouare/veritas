@@ -34,14 +34,23 @@ pub fn counterpart(mirror: &RuleTransaction, ruled: &RuleTransaction) -> RuleTra
 }
 
 /// One transfer leg the writer creates for a new transaction.
+///
+/// The writer runs `mirror` through `RuleBook::run`, keeps what `counterpart`
+/// keeps, and then calls `Transfers::link_back`, because Actual writes the
+/// leg's schedule onto the row or line it came from (`transfer.ts:81-85`).
+///
+/// When the leg's own run is undetermined (D60), what happens depends on who
+/// made the transaction. A row Ryan typed is saved as typed (D64): the leg is
+/// written as `mirror`, without rule effects, and marked "may need Actual".
+/// A row Veritas made, such as a schedule post, is left to Actual whole, leg
+/// and all, as any other undetermined run in that post would be.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TransferLeg {
 	/// `None` for the transaction itself, `Some(n)` for split line `n`.
 	pub line: Option<usize>,
 	/// The account the money goes to or comes from.
 	pub to: AccountId,
-	/// The other leg as Actual builds it before its rules run. Run it through
-	/// `RuleBook::run` and keep what `counterpart` keeps.
+	/// The other leg as Actual builds it before its rules run.
 	pub mirror: RuleTransaction,
 }
 
@@ -138,6 +147,26 @@ pub fn transfers(added: &RuleTransaction, budget: &BudgetData) -> Transfers {
 		}
 	}
 	Transfers { transaction, legs }
+}
+
+impl Transfers {
+	/// `matchedSchedule = leg.schedule ?? transaction.schedule`, written back
+	/// to the source only when set (`transfer.ts:81-85`). `kept` is the leg as
+	/// `counterpart` returned it. A split line's mirror has no schedule, so a
+	/// line gets one only from the leg's rules.
+	pub fn link_back(&mut self, leg: &TransferLeg, kept: &RuleTransaction) {
+		let Some(schedule) = kept.schedule.clone() else {
+			return;
+		};
+		match leg.line {
+			None => self.transaction.schedule = Some(schedule),
+			Some(n) => {
+				if let Some(line) = self.transaction.splits.get_mut(n) {
+					line.schedule = Some(schedule);
+				}
+			}
+		}
+	}
 }
 
 /// `isEmptyRuleTarget`: null, `''`, `0` and `false` are fields a rule may fill.
@@ -358,6 +387,7 @@ mod tests {
 			payee: Some(PayeeId::new(payee)),
 			category: Some(CategoryId::new(category)),
 			notes: Some("monthly".into()),
+			schedule: None,
 		};
 		let mut paycheck = entered();
 		paycheck.amount = Money::from_minor(-3_000);
@@ -427,6 +457,57 @@ mod tests {
 	}
 
 	#[test]
+	fn a_schedule_the_savings_leg_links_is_written_back_to_where_it_came_from() {
+		// transfer.ts:81-85: a rule on the savings side links the leg to the
+		// transfer's schedule, and Actual puts it on the source row or line.
+		let budget = transfer_budget();
+		let linked = |mirror: &RuleTransaction| RuleTransaction {
+			schedule: Some(ScheduleId::new("to-savings")),
+			..mirror.clone()
+		};
+		let mut plain = entered();
+		plain.payee = Some(PayeeId::new("to-savings"));
+		let mut sent = transfers(&plain, &budget);
+		let leg = sent.legs[0].clone();
+		sent.link_back(&leg, &counterpart(&leg.mirror, &linked(&leg.mirror)));
+		assert_eq!(
+			sent.transaction.schedule,
+			Some(ScheduleId::new("to-savings"))
+		);
+
+		let mut paycheck = entered();
+		paycheck.payee = None;
+		paycheck.splits = vec![
+			crate::action::SplitLine {
+				amount: Money::from_minor(-1000),
+				payee: Some(PayeeId::new("cafe")),
+				category: None,
+				notes: None,
+				schedule: None,
+			},
+			crate::action::SplitLine {
+				amount: Money::from_minor(-250),
+				payee: Some(PayeeId::new("to-savings")),
+				category: None,
+				notes: None,
+				schedule: None,
+			},
+		];
+		let mut sent = transfers(&paycheck, &budget);
+		let leg = sent.legs[0].clone();
+		assert_eq!(leg.mirror.schedule, None, "a line's mirror has no schedule");
+		sent.link_back(&leg, &counterpart(&leg.mirror, &leg.mirror));
+		assert_eq!(sent.transaction.splits[1].schedule, None, "nothing linked");
+		sent.link_back(&leg, &counterpart(&leg.mirror, &linked(&leg.mirror)));
+		assert_eq!(
+			sent.transaction.splits[1].schedule,
+			Some(ScheduleId::new("to-savings"))
+		);
+		assert_eq!(sent.transaction.splits[0].schedule, None);
+		assert_eq!(sent.transaction.schedule, None);
+	}
+
+	#[test]
 	fn a_split_from_rules_fills_a_new_row_but_keeps_its_payee() {
 		let mut ruled = entered();
 		ruled.payee = None;
@@ -435,6 +516,7 @@ mod tests {
 			payee: Some(PayeeId::new("cafe")),
 			category: Some(CategoryId::new("dining")),
 			notes: None,
+			schedule: None,
 		}];
 		let merged = merge_manual_entry(&entered(), &ruled, &[]);
 		assert_eq!(merged.splits, ruled.splits);

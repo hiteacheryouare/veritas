@@ -356,6 +356,7 @@ fn split(parent: &mut RuleTransaction, actions: &[&Action]) -> Result<(), &'stat
 		payee,
 		category,
 		notes: None,
+		schedule: None,
 	};
 	let mut lines = if parent.splits.is_empty() {
 		let first = line(parent.payee.take(), parent.category.clone());
