@@ -9,6 +9,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use veritas_domain::{CoreError, YearMonth};
 
+pub use blocking::CancelToken;
 pub use commands::Command;
 pub use records::{
 	AccountGroup, AccountGroupSummary, AccountSummary, AuditCheck, AuditFinding, BackupInfo,

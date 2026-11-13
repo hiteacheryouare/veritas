@@ -19,8 +19,8 @@ use std::task::{Context, Poll, Wake, Waker};
 use std::thread::Thread;
 
 use veritas_ffi::{
-	FfiError, NewAccount, NewAccountKind, NewBudgetOptions, NumberFormat, NumberStyle, Session,
-	evaluate_amount, list_budgets, parse_month,
+	CancelToken, FfiError, NewAccount, NewAccountKind, NewBudgetOptions, NumberFormat, NumberStyle,
+	Session, evaluate_amount, list_budgets, parse_month,
 };
 
 /// Actual's `MAX_SAFE_NUMBER` (loot-core/src/shared/util.ts), the largest
@@ -145,6 +145,7 @@ fn create(
 		directory,
 		usd(),
 		options,
+		CancelToken::new(),
 	))
 }
 
@@ -177,7 +178,7 @@ fn opening_a_folder_that_holds_no_budget_is_a_typed_error_that_changes_nothing()
 		("random bytes for db.sqlite", garbage.display().to_string()),
 		("an empty db.sqlite", truncated.display().to_string()),
 	] {
-		assert_typed(what, block_on(Session::open(directory)));
+		assert_typed(what, block_on(Session::open(directory, CancelToken::new())));
 	}
 
 	let after: Vec<_> = tree(scratch.path())
@@ -249,7 +250,10 @@ fn importing_something_that_is_not_an_actual_export_leaves_no_budget_behind() {
 			format!("{}/..", scratch.path().display()),
 		),
 	] {
-		assert_typed(what, block_on(Session::import_actual_zip(zip, into)));
+		assert_typed(
+			what,
+			block_on(Session::import_actual_zip(zip, into, CancelToken::new())),
+		);
 		assert_eq!(tree(scratch.path()), before, "{what} left something behind");
 	}
 }
@@ -381,7 +385,8 @@ fn a_budget_set_up_at_actuals_largest_amounts_exports_with_those_balances() {
 	assert_eq!(by_name("Underwater"), -ACTUAL_MAX_AMOUNT);
 
 	let zip = scratch.path().join("Household.zip");
-	let findings = block_on(session.export_actual_zip(zip.display().to_string())).unwrap();
+	let findings =
+		block_on(session.export_actual_zip(zip.display().to_string(), CancelToken::new())).unwrap();
 	assert!(findings.is_empty(), "{findings:?}");
 	session.close().unwrap();
 	let Some(actual) = actual_reads(&zip) else {
