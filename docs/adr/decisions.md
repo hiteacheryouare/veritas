@@ -303,7 +303,7 @@ Every decision behind Veritas, so no question gets asked twice. D1–D24 are PLA
 
 ### D60. What does the session write when a rule can't run in Veritas?
 - **Options:** apply the rest and record the note / write nothing from that run and show the note
-- **Decision:** When any rule in a run is undetermined, the session writes nothing from that run and shows the note; this replaces "apply the rest and record the note". The transaction, and any payee a rule would have made, is left for Actual. `RunOutcome.transaction` is `None` for such a run, and a schedule plan moves a bill with such a run into `SchedulePlan.left`, with none of its posts, writes or new payees, and leaves out the `lastScheduleRun` update.
+- **Decision:** When any rule in a run is undetermined, the session writes nothing from that run and shows the note; this replaces "apply the rest and record the note". The transaction, and any payee a rule would have made, is left for Actual. `RunOutcome.transaction` is `None` for such a run, and a schedule plan moves a bill with such a run into `SchedulePlan.left`, with none of its posts, writes or new payees, and leaves out the `lastScheduleRun` update. (Narrowed by D64: a hand-typed row is saved as typed.)
 - **Date:** 2026-11-11
 
 ### D61. Sidebar group label and new-budget account types
@@ -355,3 +355,8 @@ Every decision behind Veritas, so no question gets asked twice. D1–D24 are PLA
 - **Options:** approve / approve with changes / rework
 - **Decision:** Ryan approved the Settings › Backups, Integrity report (findings, clean, refused import) and Open budget copy and layout as shown in the 2026-11-12 screenshots, along with the plain integrity-finding names.
 - **Date:** 2026-11-12
+
+### D71. Re-targeting a reached goal
+- **Options:** a new goal row / the same goal goes back to active / refuse
+- **Decision:** Re-targeting sets the new target (and date) on the same goal and puts it back to `active`. Its first `reached_month` is kept as history, so Wrapped counts the goal once, in the year it was first reached. This amends R-GOAL-3: a re-target is the one way a reached goal returns to active. The store keeps one `veritas_goal` row per category, which is why a second row was not an option.
+- **Date:** 2026-11-13
