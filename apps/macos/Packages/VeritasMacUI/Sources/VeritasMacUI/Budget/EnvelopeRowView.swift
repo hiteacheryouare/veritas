@@ -192,7 +192,7 @@ struct EnvelopeRowView: View {
 	/// R-BUD-5: deleting an envelope with history archives it instead.
 	private var archiveMessage: String {
 		guard case .archive(let transactions, let months, _) = removal else { return "" }
-		return "It has \(DeleteMovingHistorySheet.count(transactions, "transaction")) and budget in \(DeleteMovingHistorySheet.count(months, "month")), so Veritas archives it instead of deleting it. It's hidden, and its history stays in reports."
+		return "It has \(DeleteMovingHistorySheet.count(transactions, "transaction")) and budget in \(DeleteMovingHistorySheet.count(months, "month")). Archive hides it from the budget."
 	}
 
 	/// design/interaction.md: rows read as a sentence.

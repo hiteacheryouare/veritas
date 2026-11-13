@@ -68,7 +68,7 @@ struct DeleteMovingHistorySheet: View {
 		VStack(alignment: .leading, spacing: Spacing.s4) {
 			Text("Delete \(envelope.name) and move its history?")
 				.font(.text(.title, weight: .semibold))
-			Text("Its \(Self.count(transactions, "transaction")) and its budget in \(Self.count(budgetedMonths, "month")) move to the envelope you choose. Actual can't undo this.")
+			Text("Its \(Self.count(transactions, "transaction")) and its budget in \(Self.count(budgetedMonths, "month")) move to the envelope you choose.")
 				.fixedSize(horizontal: false, vertical: true)
 			GroupedRows {
 				LabeledRow("Move to") {
