@@ -2,7 +2,7 @@
 //! the way `Action.exec` does (reference/actual/packages/loot-core/src/server/rules/action.ts).
 
 use serde_json::Value;
-use veritas_domain::{AccountId, CategoryId, CivilDate, Money, PayeeId, ScheduleId};
+use veritas_domain::{AccountId, CategoryId, CivilDate, CoreError, Money, PayeeId, ScheduleId};
 
 use crate::condition::{Field, Gap};
 use crate::js;
@@ -87,14 +87,16 @@ pub struct RuleTransaction {
 }
 
 impl RuleTransaction {
-	/// `recalculateSplit`'s error: what the lines leave of the parent's amount.
-	pub fn split_difference(&self) -> Option<Money> {
+	/// `recalculateSplit`'s error: what the lines leave of the parent's
+	/// amount, `None` when they add up. `Overflow` for lines whose total
+	/// doesn't fit (only possible with lines Veritas didn't build).
+	pub fn split_difference(&self) -> Result<Option<Money>, CoreError> {
 		if self.splits.is_empty() {
-			return None;
+			return Ok(None);
 		}
-		let total: i64 = self.splits.iter().map(|line| line.amount.minor()).sum();
-		let difference = self.amount.minor() - total;
-		(difference != 0).then_some(Money::from_minor(difference))
+		let total = Money::checked_sum(self.splits.iter().map(|line| line.amount))?;
+		let difference = self.amount.checked_sub(total)?;
+		Ok((difference != Money::ZERO).then_some(difference))
 	}
 }
 

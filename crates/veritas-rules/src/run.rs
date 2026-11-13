@@ -300,9 +300,7 @@ impl RuleBook {
 							if new_payee {
 								return Err("a split while naming a new payee, which Actual stores wrongly".into());
 							}
-							split(&mut next, &lines).ok_or_else(|| {
-								"split lines numbered past the end, which make Actual stop with an error".to_string()
-							})?;
+							split(&mut next, &lines).map_err(str::to_owned)?;
 						}
 						if new_payee {
 							next.payee = match next_name.as_deref().filter(|name| !name.is_empty())
@@ -349,7 +347,10 @@ impl RuleBook {
 /// is dropped at the end, even on a transaction that was already split, as
 /// in Actual. `None` is a rule Actual would crash on (a line number that
 /// skips ahead).
-fn split(parent: &mut RuleTransaction, actions: &[&Action]) -> Option<()> {
+fn split(parent: &mut RuleTransaction, actions: &[&Action]) -> Result<(), &'static str> {
+	const PAST_THE_END: &str =
+		"split lines numbered past the end, which make Actual stop with an error";
+	const TOO_LARGE: &str = "split amounts too large to work out exactly";
 	let line = |payee: Option<PayeeId>, category: Option<CategoryId>| SplitLine {
 		amount: Money::ZERO,
 		payee,
@@ -363,7 +364,7 @@ fn split(parent: &mut RuleTransaction, actions: &[&Action]) -> Option<()> {
 		parent.splits.clone()
 	};
 	for action in actions {
-		let index = usize::try_from(action.split()).ok()?;
+		let index = usize::try_from(action.split()).map_err(|_| PAST_THE_END)?;
 		if index >= lines.len() {
 			let payee = lines
 				.last()
@@ -371,23 +372,31 @@ fn split(parent: &mut RuleTransaction, actions: &[&Action]) -> Option<()> {
 				.or_else(|| parent.payee.clone());
 			lines.push(line(payee, parent.category.clone()));
 		}
-		action.apply_to_line(lines.get_mut(index)?);
+		action.apply_to_line(lines.get_mut(index).ok_or(PAST_THE_END)?);
 	}
+	// Actual works in JS numbers, exact only up to 2^53, so anything past
+	// that is left to Actual rather than rounded or wrapped.
 	let left = |lines: &[SplitLine]| {
-		parent.amount.minor() - lines.iter().map(|l| l.amount.minor()).sum::<i64>()
+		let total = Money::checked_sum(lines.iter().map(|l| l.amount)).ok()?;
+		parent
+			.amount
+			.checked_sub(total)
+			.ok()
+			.filter(|left| safe(*left))
 	};
-	let after_fixed = left(&lines) as f64;
+	let to_money = |x: f64| {
+		let rounded = js::math_round(x);
+		(rounded.abs() <= MAX_SAFE_INTEGER as f64).then(|| Money::from_minor(rounded as i64))
+	};
+	let after_fixed = left(&lines).ok_or(TOO_LARGE)?.minor() as f64;
 	let mut remainders = Vec::new();
 	for action in actions {
-		let index = usize::try_from(action.split()).ok()?;
+		let index = usize::try_from(action.split()).map_err(|_| PAST_THE_END)?;
 		match action {
 			Action::SplitAmount {
 				method: SplitMethod::FixedPercent(percent),
 				..
-			} => {
-				lines[index].amount =
-					Money::from_minor(js::math_round(after_fixed * (percent / 100.0)) as i64);
-			}
+			} => lines[index].amount = to_money(after_fixed * (percent / 100.0)).ok_or(TOO_LARGE)?,
 			Action::SplitAmount {
 				method: SplitMethod::Remainder,
 				..
@@ -396,16 +405,30 @@ fn split(parent: &mut RuleTransaction, actions: &[&Action]) -> Option<()> {
 		}
 	}
 	if let Some(last) = remainders.iter().copied().max() {
-		let share =
-			Money::from_minor(js::math_round(left(&lines) as f64 / remainders.len() as f64) as i64);
+		let rest = left(&lines).ok_or(TOO_LARGE)?;
+		let share = to_money(rest.minor() as f64 / remainders.len() as f64).ok_or(TOO_LARGE)?;
 		for index in &remainders {
 			lines[*index].amount = share;
 		}
-		lines[last].amount = Money::from_minor(lines[last].amount.minor() + left(&lines));
+		let rounding = left(&lines).ok_or(TOO_LARGE)?;
+		lines[last].amount = lines[last]
+			.amount
+			.checked_add(rounding)
+			.map_err(|_| TOO_LARGE)?;
+	}
+	if lines.iter().any(|line| !safe(line.amount)) {
+		return Err(TOO_LARGE);
 	}
 	lines.remove(0);
 	parent.splits = lines;
-	Some(())
+	Ok(())
+}
+
+/// `Number.MAX_SAFE_INTEGER`.
+const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
+
+fn safe(amount: Money) -> bool {
+	amount.minor().abs() <= MAX_SAFE_INTEGER
 }
 
 /// What `Condition.eval` reads for `field` on the object `runRules` builds:
@@ -638,7 +661,7 @@ mod tests {
 		txn.payee = Some(PayeeId::new("amazon"));
 		let outcome = run(&budget, &txn);
 		assert_eq!(amounts(&outcome), [1000, -521, -2344, -2345]);
-		assert_eq!(outcome.partial.split_difference(), None);
+		assert_eq!(outcome.partial.split_difference().unwrap(), None);
 		assert_eq!(
 			outcome.partial.payee, None,
 			"the parent loses its payee to the lines"
@@ -674,7 +697,11 @@ mod tests {
 		let outcome = run(&budget, &transaction("split me"));
 		assert_eq!(amounts(&outcome), [-100]);
 		assert_eq!(
-			outcome.partial.split_difference().map(Money::minor),
+			outcome
+				.partial
+				.split_difference()
+				.unwrap()
+				.map(Money::minor),
 			Some(-4110)
 		);
 	}
@@ -714,6 +741,27 @@ mod tests {
 		let named = run(&budget, &transaction("split me"));
 		assert_eq!(named.undetermined.len(), 1);
 		assert!(named.reasons[&RuleId::new("named")].contains("new payee"));
+	}
+
+	#[test]
+	fn split_amounts_past_what_actual_can_count_are_undetermined() {
+		// A percentage of an enormous fixed amount would overflow i64 (R-REL-7).
+		let mut budget = budget();
+		split_rule(
+			&mut budget,
+			"huge",
+			RuleStage::Default,
+			json!([
+				line(1, "fixed-amount", json!(9_007_199_254_740_991_i64)),
+				line(2, "fixed-percent", json!(1e20)),
+				line(3, "remainder", Value::Null),
+			]),
+		);
+		let outcome = run(&budget, &transaction("split me"));
+		assert_eq!(outcome.undetermined, [RuleId::new("huge")]);
+		assert_eq!(outcome.transaction, None);
+		assert!(outcome.reasons[&RuleId::new("huge")].contains("too large"));
+		assert!(outcome.partial.splits.is_empty());
 	}
 
 	#[test]
