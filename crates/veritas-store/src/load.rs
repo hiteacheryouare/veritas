@@ -7,8 +7,8 @@ use veritas_domain::{
 	BudgetData, BudgetType, Category, CategoryGroup, CategoryGroupId, CategoryId, CategoryKind,
 	CategoryMeta, CivilDate, ConditionsOp, CoreError, CustomReportId, CustomReportRow,
 	DashboardPage, DashboardPageId, FormatPrefs, Goal, GoalId, GoalStatus, Money, Payee, PayeeId,
-	Rule, RuleId, RuleStage, Schedule, ScheduleId, SplitRole, Tag, TagId, Transaction,
-	TransactionId, TransactionMeta, Widget, WidgetId,
+	Rule, RuleId, RuleStage, Schedule, ScheduleId, ScheduleJsonPaths, ScheduleMeta, SplitRole, Tag,
+	TagId, Transaction, TransactionId, TransactionMeta, Widget, WidgetId,
 };
 
 use crate::cells::{
@@ -401,6 +401,25 @@ fn load_tables(conn: &Connection) -> Result<Loaded, CoreError> {
 
 	each_row(
 		conn,
+		"schedules_json_paths",
+		"SELECT schedule_id, payee, account, amount, date FROM schedules_json_paths",
+		&mut skipped,
+		|row| {
+			let schedule =
+				ScheduleId::new(required_text(at(row, 0)?, "the row names no schedule")?);
+			let paths = ScheduleJsonPaths {
+				payee: text(at(row, 1)?)?,
+				account: text(at(row, 2)?)?,
+				amount: text(at(row, 3)?)?,
+				date: text(at(row, 4)?)?,
+			};
+			data.schedule_json_paths.insert(schedule, paths);
+			Ok(())
+		},
+	)?;
+
+	each_row(
+		conn,
 		"tags",
 		"SELECT id, tag, color, description, hidden, tombstone FROM tags",
 		&mut skipped,
@@ -731,6 +750,23 @@ fn load_veritas_tables(
 					needs_actual: text(at(row, 2)?)?,
 				};
 				data.transaction_meta.insert(transaction, meta);
+				Ok(())
+			},
+		)?;
+	}
+
+	if table_exists(conn, "veritas_schedule_meta")? {
+		each_row(
+			conn,
+			"veritas_schedule_meta",
+			"SELECT schedule_id, paused FROM veritas_schedule_meta",
+			skipped,
+			|row| {
+				let schedule = ScheduleId::new(id(row, 0)?);
+				let meta = ScheduleMeta {
+					paused: flag(at(row, 1)?),
+				};
+				data.schedule_meta.insert(schedule, meta);
 				Ok(())
 			},
 		)?;

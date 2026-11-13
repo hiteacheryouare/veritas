@@ -6,8 +6,9 @@ use rusqlite::{OptionalExtension, Transaction as SqlTransaction, params_from_ite
 use veritas_domain::{
 	Account, AccountGroup, AccountId, AccountKind, AccountMeta, BudgetCell, BudgetType, Category,
 	CategoryGroup, CategoryId, CategoryKind, CategoryMeta, CivilDate, CoreError, CustomReportRow,
-	DashboardPage, Goal, GoalStatus, Money, Payee, PayeeId, Rule, RuleStage, Schedule, SplitRole,
-	Tag, Transaction, TransactionId, TransactionMeta, Widget, YearMonth,
+	DashboardPage, Goal, GoalStatus, Money, Payee, PayeeId, Rule, RuleStage, Schedule, ScheduleId,
+	ScheduleJsonPaths, ScheduleMeta, SplitRole, Tag, Transaction, TransactionId, TransactionMeta,
+	Widget, YearMonth,
 };
 
 use crate::connection::storage;
@@ -248,6 +249,10 @@ fn transaction_meta_columns(row: &TransactionMeta) -> Columns {
 		("adjustment", flag(row.adjustment)),
 		("needs_actual", text(row.needs_actual.as_deref())),
 	]
+}
+
+fn schedule_meta_columns(row: &ScheduleMeta) -> Columns {
+	vec![("paused", flag(row.paused))]
 }
 
 fn goal_columns(row: &Goal) -> Columns {
@@ -667,19 +672,7 @@ impl<'conn> Writer<'conn> {
 			return Ok(());
 		}
 		let next = date(after.next_date);
-		let existing: Option<(String, Option<i64>)> = self
-			.tx
-			.query_row(
-				&format!(
-					"SELECT id, base_next_date_ts FROM schedules_next_date WHERE schedule_id = ?1 \
-					 ORDER BY {NEXT_DATE_PICK} LIMIT 1"
-				),
-				[&id],
-				|row| Ok((row.get(0)?, row.get(1)?)),
-			)
-			.optional()
-			.map_err(storage)?;
-		match existing {
+		match self.next_date_row(&id)? {
 			Some((row_id, Some(base_ts))) => self
 				.tx
 				.execute(
@@ -699,32 +692,126 @@ impl<'conn> Writer<'conn> {
 					.map(|_| ())
 					.map_err(storage)
 			}
-			None => {
-				let row_id: String = self
-					.tx
-					.query_row(
-						"SELECT lower(substr(h, 1, 8) || '-' || substr(h, 9, 4) || '-4' || substr(h, 14, 3) || '-' || \
-						 substr('89ab', 1 + (abs(random()) % 4), 1) || substr(h, 18, 3) || '-' || substr(h, 21, 12)) \
-						 FROM (SELECT hex(randomblob(16)) AS h)",
-						[],
-						|row| row.get(0),
-					)
-					.map_err(storage)?;
-				let now = Value::Integer(now_ms());
-				self.insert(
-					"schedules_next_date",
-					&[("id", owned(&row_id))],
-					&vec![
-						("schedule_id", owned(&id)),
-						("local_next_date", next.clone()),
-						("local_next_date_ts", now.clone()),
-						("base_next_date", next),
-						("base_next_date_ts", now),
-					],
-					Nulls::Skip,
-				)
-			}
+			None => self.insert_next_date(&id, next),
 		}
+	}
+
+	/// The `schedules_next_date` row `v_schedules` reads, with its base timestamp.
+	fn next_date_row(&self, schedule: &str) -> Result<Option<(String, Option<i64>)>, CoreError> {
+		self.tx
+			.query_row(
+				&format!(
+					"SELECT id, base_next_date_ts FROM schedules_next_date WHERE schedule_id = ?1 \
+					 ORDER BY {NEXT_DATE_PICK} LIMIT 1"
+				),
+				[schedule],
+				|row| Ok((row.get(0)?, row.get(1)?)),
+			)
+			.optional()
+			.map_err(storage)
+	}
+
+	/// `createSchedule`'s row: local and base both hold the date, stamped now.
+	fn insert_next_date(&self, schedule: &str, next: Value) -> Result<(), CoreError> {
+		let row_id: String = self
+			.tx
+			.query_row(
+				"SELECT lower(substr(h, 1, 8) || '-' || substr(h, 9, 4) || '-4' || substr(h, 14, 3) || '-' || \
+				 substr('89ab', 1 + (abs(random()) % 4), 1) || substr(h, 18, 3) || '-' || substr(h, 21, 12)) \
+				 FROM (SELECT hex(randomblob(16)) AS h)",
+				[],
+				|row| row.get(0),
+			)
+			.map_err(storage)?;
+		let now = Value::Integer(now_ms());
+		self.insert(
+			"schedules_next_date",
+			&[("id", owned(&row_id))],
+			&vec![
+				("schedule_id", owned(schedule)),
+				("local_next_date", next.clone()),
+				("local_next_date_ts", now.clone()),
+				("base_next_date", next),
+				("base_next_date_ts", now),
+			],
+			Nulls::Skip,
+		)
+	}
+
+	/// `setNextDate({reset: true})` (`schedules/app.ts:266-279`): the base pair
+	/// takes the date and a new timestamp, so `v_schedules` reads the base.
+	pub fn put_next_date_reset(
+		&mut self,
+		schedule: &ScheduleId,
+		before: Option<Option<CivilDate>>,
+		after: Option<Option<CivilDate>>,
+	) -> Result<(), CoreError> {
+		let Some(after) = after else {
+			return Ok(());
+		};
+		if before == Some(after) {
+			return Ok(());
+		}
+		let next = date(after);
+		match self.next_date_row(schedule.as_str())? {
+			Some((row_id, _)) => self
+				.tx
+				.execute(
+					"UPDATE schedules_next_date SET base_next_date = ?1, base_next_date_ts = ?2 WHERE id = ?3",
+					params_from_iter([&next, &Value::Integer(now_ms()), &owned(&row_id)]),
+				)
+				.map(|_| ())
+				.map_err(storage),
+			None => self.insert_next_date(schedule.as_str(), next),
+		}
+	}
+
+	/// `onRuleUpdate`'s row, upserted on its four columns so any column a
+	/// later Actual adds survives (decision 4).
+	pub fn put_schedule_json_paths(
+		&mut self,
+		schedule: &ScheduleId,
+		before: Option<&ScheduleJsonPaths>,
+		after: Option<&ScheduleJsonPaths>,
+	) -> Result<(), CoreError> {
+		let Some(after) = after else {
+			return Ok(());
+		};
+		if before == Some(after) {
+			return Ok(());
+		}
+		self.tx
+			.execute(
+				"INSERT INTO schedules_json_paths (schedule_id, payee, account, amount, date) \
+				 VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT (schedule_id) DO UPDATE SET \
+				 payee = excluded.payee, account = excluded.account, amount = excluded.amount, \
+				 date = excluded.date",
+				params_from_iter([
+					owned(schedule.as_str()),
+					text(after.payee.as_deref()),
+					text(after.account.as_deref()),
+					text(after.amount.as_deref()),
+					text(after.date.as_deref()),
+				]),
+			)
+			.map(|_| ())
+			.map_err(storage)
+	}
+
+	pub fn put_schedule_meta(
+		&mut self,
+		schedule: &ScheduleId,
+		before: Option<&ScheduleMeta>,
+		after: Option<&ScheduleMeta>,
+	) -> Result<(), CoreError> {
+		self.put_veritas(
+			"veritas_schedule_meta",
+			"schedule_id",
+			schedule.as_str(),
+			before,
+			after,
+			schedule_meta_columns,
+		)
 	}
 
 	pub fn put_tag(&mut self, before: Option<&Tag>, after: Option<&Tag>) -> Result<(), CoreError> {

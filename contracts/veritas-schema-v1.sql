@@ -57,6 +57,13 @@ CREATE TABLE IF NOT EXISTS veritas_transaction_meta (
 	needs_actual TEXT
 );
 
+-- R-BILL-3: Pause and End are both Actual's Complete (completed = 1). paused only
+-- picks the label the bill screen shows for a completed bill; it never changes what posts.
+CREATE TABLE IF NOT EXISTS veritas_schedule_meta (
+	schedule_id TEXT PRIMARY KEY,
+	paused INTEGER NOT NULL DEFAULT 0 CHECK (paused IN (0, 1))
+);
+
 -- docs/finance/tax-buckets.md TAX-1: which Actual tags mean which bucket.
 CREATE TABLE IF NOT EXISTS veritas_tax_tag (
 	tag TEXT PRIMARY KEY,

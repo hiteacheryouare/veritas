@@ -96,13 +96,7 @@ pub struct BillView {
 /// `schedules_json_paths`: where each schedule condition sits in the rule's
 /// conditions. The store upserts these four columns by `schedule_id`, never
 /// with `INSERT OR REPLACE` (decision 4).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct JsonPaths {
-	pub payee: Option<String>,
-	pub account: Option<String>,
-	pub amount: Option<String>,
-	pub date: Option<String>,
-}
+pub type JsonPaths = veritas_domain::ScheduleJsonPaths;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScheduleRule {

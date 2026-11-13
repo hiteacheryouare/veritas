@@ -213,7 +213,7 @@ fn adopting_adds_the_veritas_tables_and_leaves_migrations_alone() {
 			&raw,
 			"SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name LIKE 'veritas\\_%' ESCAPE '\\'"
 		),
-		8
+		9
 	);
 	assert_eq!(
 		count(

@@ -501,6 +501,17 @@ fn references(data: &BudgetData, findings: &mut Findings) {
 			exists,
 		);
 	}
+	for schedule in data.schedule_meta.keys() {
+		let exists = data.schedules.get(schedule).map(|_| false);
+		reference(
+			findings,
+			"veritas_schedule_meta",
+			schedule.as_str(),
+			"schedule",
+			schedule.as_str(),
+			exists,
+		);
+	}
 	for goal in data.goals.values() {
 		let id = goal.id.as_str();
 		reference(
