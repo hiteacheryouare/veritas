@@ -1,5 +1,7 @@
 use veritas_domain::{Account, AccountId, BudgetData, CategoryId, CoreError, Note, Row};
 
+use veritas_engine::EnvelopeSheet;
+
 use crate::Month;
 use crate::budget::{edit, envelope, money};
 
@@ -57,13 +59,29 @@ pub enum Command {
 
 impl veritas_session::Command for Command {
 	fn plan(&self, data: &BudgetData) -> Result<Vec<Row>, CoreError> {
+		let sheet = EnvelopeSheet::compute(data, today(data))?;
+		self.plan_with_sheet(data, &sheet)
+	}
+
+	fn reads_sheet(&self) -> bool {
+		!matches!(
+			self,
+			Command::RenameAccount { .. } | Command::SetCategoryNote { .. }
+		)
+	}
+
+	fn plan_with_sheet(
+		&self,
+		data: &BudgetData,
+		sheet: &EnvelopeSheet,
+	) -> Result<Vec<Row>, CoreError> {
 		match self {
 			Command::RenameAccount { account_id, name } => rename_account(data, account_id, name),
 			Command::SetBudget {
 				month,
 				category_id,
 				amount,
-			} => edit(data, *month, |editor, month| {
+			} => edit(data, sheet, *month, |editor, month| {
 				editor.set_budget(month, &live_category(data, category_id)?, money(*amount))
 			}),
 			Command::MoveBudget {
@@ -71,28 +89,35 @@ impl veritas_session::Command for Command {
 				amount,
 				from_category_id,
 				to_category_id,
-			} => edit(data, *month, |editor, month| match from_category_id {
-				Some(from) => editor.move_budget(
-					month,
-					money(*amount),
-					&live_category(data, from)?,
-					&envelope(to_category_id),
-				),
-				None => match to_category_id {
-					Some(to) => {
-						editor.fund_from_to_budget(month, money(*amount), &live_category(data, to)?)
-					}
-					None => Err(CoreError::Invalid(
-						"Choose an envelope to move budget to or from.".to_owned(),
-					)),
+			} => edit(
+				data,
+				sheet,
+				*month,
+				|editor, month| match from_category_id {
+					Some(from) => editor.move_budget(
+						month,
+						money(*amount),
+						&live_category(data, from)?,
+						&envelope(to_category_id),
+					),
+					None => match to_category_id {
+						Some(to) => editor.fund_from_to_budget(
+							month,
+							money(*amount),
+							&live_category(data, to)?,
+						),
+						None => Err(CoreError::Invalid(
+							"Choose an envelope to move budget to or from.".to_owned(),
+						)),
+					},
 				},
-			}),
+			),
 			Command::CoverOverspending {
 				month,
 				category_id,
 				from_category_id,
 				amount,
-			} => edit(data, *month, |editor, month| {
+			} => edit(data, sheet, *month, |editor, month| {
 				editor.cover_overspending(
 					month,
 					&live_category(data, category_id)?,
@@ -100,21 +125,23 @@ impl veritas_session::Command for Command {
 					amount.map(money),
 				)
 			}),
-			Command::HoldForNextMonth { month, amount } => edit(data, *month, |editor, month| {
-				editor
-					.hold_for_next_month(month, money(*amount))?
-					.ok_or_else(|| {
-						CoreError::Invalid("There's nothing in To Budget to hold.".to_owned())
-					})
-			}),
-			Command::ResetHold { month } => {
-				edit(data, *month, |editor, month| Ok(editor.reset_hold(month)))
+			Command::HoldForNextMonth { month, amount } => {
+				edit(data, sheet, *month, |editor, month| {
+					editor
+						.hold_for_next_month(month, money(*amount))?
+						.ok_or_else(|| {
+							CoreError::Invalid("There's nothing in To Budget to hold.".to_owned())
+						})
+				})
 			}
+			Command::ResetHold { month } => edit(data, sheet, *month, |editor, month| {
+				Ok(editor.reset_hold(month))
+			}),
 			Command::SetCarryover {
 				month,
 				category_id,
 				carryover,
-			} => edit(data, *month, |editor, month| {
+			} => edit(data, sheet, *month, |editor, month| {
 				editor.set_carryover(month, &live_category(data, category_id)?, *carryover)
 			}),
 			Command::SetCategoryNote { category_id, text } => {
@@ -174,4 +201,15 @@ fn rename_account(data: &BudgetData, account_id: &str, name: &str) -> Result<Vec
 		name: name.to_owned(),
 		..account.clone()
 	})])
+}
+
+/// The sheet's date when a command runs outside a session, as tests do: the
+/// latest month the budget touches, so every month it has is covered.
+fn today(data: &BudgetData) -> veritas_domain::CivilDate {
+	data.budget_cells
+		.keys()
+		.map(|(month, _)| month.first_day())
+		.chain(data.transactions.values().map(|t| t.date))
+		.max()
+		.unwrap_or_else(|| veritas_domain::CivilDate::from(chrono::NaiveDate::default()))
 }

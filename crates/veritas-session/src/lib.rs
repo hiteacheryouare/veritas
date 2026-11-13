@@ -11,6 +11,7 @@ mod overview;
 mod retention;
 mod session;
 mod shared;
+mod sheet;
 mod snapshot;
 mod store;
 

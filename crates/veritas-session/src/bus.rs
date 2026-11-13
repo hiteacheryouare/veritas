@@ -6,12 +6,28 @@ use veritas_domain::{
 };
 
 use crate::lock::WriterLock;
+use veritas_engine::EnvelopeSheet;
+
 use crate::snapshot::SnapshotReason;
 
 /// A user action. `plan` validates against the loaded budget and returns the
 /// rows that should exist afterwards, without touching anything.
 pub trait Command {
 	fn plan(&self, data: &BudgetData) -> Result<Vec<Row>, CoreError>;
+
+	/// Commands that read Actual's envelope sheet say so, and the session plans
+	/// them with its cached sheet through `plan_with_sheet`.
+	fn reads_sheet(&self) -> bool {
+		false
+	}
+
+	fn plan_with_sheet(
+		&self,
+		data: &BudgetData,
+		_sheet: &EnvelopeSheet,
+	) -> Result<Vec<Row>, CoreError> {
+		self.plan(data)
+	}
 
 	/// Bulk edits and rule applies return a reason, and the session snapshots
 	/// the budget before running them.
@@ -198,6 +214,13 @@ impl<S: Store> CommandBus<S> {
 	pub fn perform<C: Command + ?Sized>(&mut self, command: &C) -> Result<ChangeSet, CoreError> {
 		self.ensure_writable()?;
 		let rows = command.plan(&self.data)?;
+		self.perform_rows(rows)
+	}
+
+	/// Writes rows a command already planned, as one transaction and one undo
+	/// step.
+	pub fn perform_rows(&mut self, rows: Vec<Row>) -> Result<ChangeSet, CoreError> {
+		self.ensure_writable()?;
 		let changes = transact(
 			&mut self.data,
 			&mut self.store,

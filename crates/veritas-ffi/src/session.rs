@@ -171,7 +171,12 @@ impl<B: Backend> Core<B> {
 	}
 
 	pub(crate) fn budget_month(&self, month: Month, today: &str) -> Result<BudgetMonth, FfiError> {
-		self.call(|session| crate::budget::budget_month(session.data()?, month, today))
+		self.call(|session| {
+			let today = crate::budget::civil_date(today)?;
+			session.with_sheet(today, |data, sheet| {
+				crate::budget::budget_month(data, sheet, month)
+			})
+		})
 	}
 
 	pub(crate) fn export_actual_zip(

@@ -72,7 +72,7 @@ pub struct BudgetMonth {
 }
 
 /// `YYYY-MM-DD`, the local civil date the app passes as today.
-fn civil_date(text: &str) -> Result<CivilDate, CoreError> {
+pub(crate) fn civil_date(text: &str) -> Result<CivilDate, CoreError> {
 	let invalid = || CoreError::Invalid(format!("{text} isn't a date."));
 	let mut parts = text.splitn(3, '-').map(str::parse::<u32>);
 	match (parts.next(), parts.next(), parts.next()) {
@@ -89,11 +89,10 @@ pub(crate) fn year_month(month: Month) -> Result<YearMonth, CoreError> {
 
 pub(crate) fn budget_month(
 	data: &BudgetData,
+	sheet: &EnvelopeSheet,
 	month: Month,
-	today: &str,
 ) -> Result<BudgetMonth, CoreError> {
 	let month = year_month(month)?;
-	let sheet = EnvelopeSheet::compute(data, civil_date(today)?)?;
 	let (Some(&first), Some(&last)) = (sheet.months().first(), sheet.months().last()) else {
 		return Err(CoreError::Invalid(
 			"This budget has no months yet.".to_owned(),
@@ -195,16 +194,26 @@ pub(crate) fn envelope(id: &Option<String>) -> Envelope {
 
 /// Runs a budget edit against a sheet that covers `month`. Values in a month
 /// don't depend on later ones, so the sheet stops there.
+/// Plans a budget action against the session's cached sheet. A month the
+/// sheet doesn't cover, beyond the months Actual has created as of today, gets
+/// a sheet of its own.
 pub(crate) fn edit(
 	data: &BudgetData,
+	sheet: &EnvelopeSheet,
 	month: Month,
 	write: impl FnOnce(&BudgetEditor<'_>, YearMonth) -> Result<BudgetWrites, CoreError>,
 ) -> Result<Vec<Row>, CoreError> {
 	let month = year_month(month)?;
-	let sheet = EnvelopeSheet::compute(data, month.first_day())?;
+	let own;
+	let sheet = if sheet.months().contains(&month) {
+		sheet
+	} else {
+		own = EnvelopeSheet::compute(data, month.first_day())?;
+		&own
+	};
 	let format =
 		EngineFormat::from_preference(data.format.number_format.as_deref().unwrap_or("comma-dot"));
-	let editor = BudgetEditor::new(data, &sheet, format, data.format.hide_fraction);
+	let editor = BudgetEditor::new(data, sheet, format, data.format.hide_fraction);
 	let writes = write(&editor, month)?;
 	Ok(rows(data, &writes))
 }
