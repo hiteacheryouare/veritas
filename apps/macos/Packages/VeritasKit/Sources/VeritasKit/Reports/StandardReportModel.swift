@@ -132,21 +132,22 @@ public final class StandardReportModel {
 		[
 			ReportRow(id: "assets", title: "Assets", values: netWorth.map(\.assets)),
 			ReportRow(id: "liabilities", title: "Liabilities", values: netWorth.map(\.liabilities)),
-			ReportRow(id: "netWorth", title: "Net worth", values: netWorth.map(\.netWorth), isTotal: true,
-				tones: netWorth.map { $0.netWorth < 0 ? .overspent : .neutral })
+			ReportRow(id: "netWorth", title: "Net worth", values: netWorth.map(\.netWorth), isTotal: true)
 		]
 	}
 
-	/// Fred's compact Cash flow (ST-6): the always-shown lines, plus the
+	/// The compact Cash flow (ST-10.7): the always-shown lines, plus the
 	/// reconciling ones only when they aren't zero, so the column still adds
-	/// up on its face. The last column is the whole range.
+	/// up on its face. The last column is the whole range. Only a negative
+	/// Net Profit or Net cash flow takes the overspent tone (ST-10.4).
 	public var cashFlowRows: [ReportRow] {
 		guard let total = cashFlowTotal else { return [] }
 		let columns = cashFlow + [total]
 		func row(_ id: String, _ title: String, isTotal: Bool = false, _ value: (CashFlowColumn) -> Int64) -> ReportRow {
 			let values = columns.map(value)
+			let canLose = id == "netProfit" || id == "netCashFlow"
 			return ReportRow(id: id, title: title, values: values, isTotal: isTotal,
-				tones: isTotal ? values.map { $0 < 0 ? .overspent : .neutral } : nil)
+				tones: canLose ? values.map { $0 < 0 ? .overspent : .neutral } : nil)
 		}
 		let optional = { (row: ReportRow) in row.values.contains { $0 != 0 } ? row : nil }
 		let unreviewed = optional(row("unreviewed", "Unreviewed transfers") { $0.unreviewedTransfers.total })

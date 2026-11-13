@@ -17,7 +17,7 @@ final class ReportsJourneyTests: XCTestCase {
 		august.click()
 		let sheet = app.descendants(matching: .any)["sheet.drilldown"]
 		XCTAssertTrue(sheet.waitForExistence(timeout: 5))
-		XCTAssertEqual(sheet.staticTexts["drilldown.count"].label, "47 transactions")
+		XCTAssertEqual(text(sheet.staticTexts["drilldown.count"]), "47 transactions")
 		attachScreenshot(of: app, named: "drilldown")
 		sheet.buttons["Done"].click()
 		XCTAssertTrue(sheet.waitForDisappearance())
@@ -39,7 +39,6 @@ final class ReportsJourneyTests: XCTestCase {
 	@MainActor
 	func testASankeyNodeOpensItsTransactions() {
 		let app = openReport("sankey")
-		app.segmentedControls["sankey.range"].buttons["Month"].click()
 		app.screen("sankey").typeKey(.leftArrow, modifierFlags: .command)
 		let dining = app.buttons["sankey.node.category.dining"]
 		XCTAssertTrue(dining.waitForExistence(timeout: 5))
@@ -48,7 +47,7 @@ final class ReportsJourneyTests: XCTestCase {
 		dining.click()
 		let sheet = app.descendants(matching: .any)["sheet.drilldown"]
 		XCTAssertTrue(sheet.waitForExistence(timeout: 5))
-		XCTAssertEqual(sheet.staticTexts["drilldown.count"].label, "14 transactions")
+		XCTAssertEqual(text(sheet.staticTexts["drilldown.count"]), "11 transactions")
 	}
 
 	@MainActor
@@ -56,8 +55,8 @@ final class ReportsJourneyTests: XCTestCase {
 		let app = openReport("dashboard")
 		let future = app.descendants(matching: .any)["widget.future"]
 		XCTAssertTrue(future.waitForExistence(timeout: 5))
-		XCTAssertTrue(future.staticTexts["Open in Actual"].exists)
-		app.buttons["dashboard.edit"].click()
+		XCTAssertTrue(present(future.descendants(matching: .any)["openInActual"], in: app), "the unknown widget is an Open in Actual placeholder")
+		app.descendants(matching: .any)["dashboard.edit"].click()
 		let worth = app.descendants(matching: .any)["widget.worth"]
 		let before = worth.frame
 		app.buttons["widget.worth.move-down"].click()
@@ -78,15 +77,16 @@ final class ReportsJourneyTests: XCTestCase {
 		attachScreenshot(of: app, named: "custom-report-editing")
 		app.buttons["customReport.save"].click()
 		XCTAssertTrue(name.waitForDisappearance())
-		XCTAssertTrue(app.buttons["reports.custom.spending"].label.contains("Where it went"))
+		XCTAssertTrue(waitUntil { self.text(app.buttons["reports.custom.spending"]).contains("Where it went") }, text(app.buttons["reports.custom.spending"]))
 	}
 
 	@MainActor
 	func testTheStandardReportsAreOneClickAway() {
 		let app = openReport("customReports")
-		for (button, table) in [("cashFlow", "standard.cashFlow"), ("netWorth", "standard.netWorth"), ("incomeVsExpense", "standard.incomeVsExpense")] {
-			app.buttons["reports.standard.\(button)"].click()
-			XCTAssertTrue(app.descendants(matching: .any)[table].waitForExistence(timeout: 5), table)
+		for (report, row) in [("cashFlow", "standard.cashFlow.0.opening"), ("netWorth", "standard.netWorth.netWorth"), ("incomeVsExpense", "standard.incomeVsExpense.netProfit")] {
+			app.buttons["reports.standard.\(report)"].click()
+			XCTAssertTrue(present(app.descendants(matching: .any)["report.\(report)"], in: app), report)
+			XCTAssertTrue(app.descendants(matching: .any)[row].firstMatch.exists, row)
 		}
 		app.buttons["reports.standard.spendingByCategory"].click()
 		XCTAssertTrue(app.descendants(matching: .any)["spending.total"].waitForExistence(timeout: 5))
@@ -104,6 +104,23 @@ final class ReportsJourneyTests: XCTestCase {
 			XCTAssertTrue(app.screen(page).waitForExistence(timeout: 5))
 		}
 		return app
+	}
+
+	/// SwiftUI puts a combined element's text in `value` rather than `label`.
+	private func text(_ element: XCUIElement) -> String {
+		element.label.isEmpty ? (element.value as? String ?? "") : element.label
+	}
+
+	/// Waits for `element`; when it never shows, the hierarchy is attached as evidence.
+	@MainActor
+	private func present(_ element: XCUIElement, in app: XCUIApplication) -> Bool {
+		if element.waitForExistence(timeout: 5) { return true }
+		let tree = XCTAttachment(string: app.debugDescription)
+		tree.name = "hierarchy when \(element) was missing"
+		tree.lifetime = .keepAlways
+		add(tree)
+		attachScreenshot(of: app, named: "missing")
+		return false
 	}
 
 	private func waitUntil(_ condition: @escaping () -> Bool) -> Bool {

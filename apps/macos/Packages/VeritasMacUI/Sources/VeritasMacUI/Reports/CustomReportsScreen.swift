@@ -41,9 +41,9 @@ struct CustomReportsScreen: View {
 				.padding(.bottom, Spacing.s6)
 				.frame(maxWidth: .infinity, alignment: .leading)
 			}
-			if model.draft != nil {
+			if let draft = model.draft {
 				Divider()
-				CustomReportEditor(model: model)
+				CustomReportEditor(model: model, draft: draft)
 					.frame(width: 300)
 			}
 		}
@@ -323,91 +323,102 @@ private struct CustomReportTable: View {
 /// Actual's report settings, previewed as they change. Filters stay as
 /// Actual wrote them.
 private struct CustomReportEditor: View {
-	@Bindable var model: CustomReportsModel
-	@State private var fixedFirst = Month(year: 2026, month: 1)
-	@State private var fixedLast = Month(year: 2026, month: 1)
+	let model: CustomReportsModel
+	@State private var draft: CustomReportSettings
+	@State private var fixedFirst: Month
+	@State private var fixedLast: Month
+
+	init(model: CustomReportsModel, draft: CustomReportSettings) {
+		self.model = model
+		_draft = State(initialValue: draft)
+		_fixedFirst = State(initialValue: Month(date: draft.startDate) ?? Month(year: 2026, month: 1))
+		_fixedLast = State(initialValue: Month(date: draft.endDate) ?? Month(year: 2026, month: 1))
+	}
 
 	var body: some View {
-		if let draft = Binding($model.draft) {
-			Form {
-				Section {
-					TextField("Name", text: draft.name)
-						.accessibilityIdentifier("customReport.name")
-					Picker("Show", selection: draft.totalMode) {
-						Text("Totals").tag(true)
-						Text("Over time").tag(false)
-					}
-					.accessibilityIdentifier("customReport.mode")
-					Picker("Group by", selection: draft.groupBy) {
-						ForEach([ReportGrouping.category, .group, .payee, .account, .interval], id: \.self) { Text($0.title).tag($0) }
-					}
-					.accessibilityIdentifier("customReport.groupBy")
-					Picker("Balance", selection: draft.balanceType) {
-						ForEach([ReportBalanceKind.payment, .deposit, .net, .netPayment, .netDeposit], id: \.self) { Text($0.title).tag($0) }
-					}
-					.accessibilityIdentifier("customReport.balance")
-					Picker("Interval", selection: draft.interval) {
-						ForEach([ReportIntervalUnit.daily, .weekly, .monthly, .yearly], id: \.self) { Text($0.title).tag($0) }
-					}
-					Picker("Sort", selection: draft.sortBy) {
-						ForEach([ReportSortOrder.descending, .ascending, .name, .budget], id: \.self) { Text($0.title).tag($0) }
-					}
-					Picker("Graph", selection: Binding(get: { ReportGraph(draft.wrappedValue.graphType) }, set: { draft.wrappedValue.graphType = $0.rawValue })) {
-						ForEach(ReportGraph.allCases.filter { draft.wrappedValue.totalMode ? $0.drawsTotals : true }, id: \.self) { Text($0.title).tag($0) }
-					}
-					.accessibilityIdentifier("customReport.graph")
+		Form {
+			Section {
+				TextField("Name", text: $draft.name)
+					.accessibilityIdentifier("customReport.name")
+				Picker("Show", selection: $draft.totalMode) {
+					Text("Totals").tag(true)
+					Text("Over time").tag(false)
 				}
-				Section("Dates") {
-					Picker("Range", selection: Binding(get: { draft.wrappedValue.dateStatic ? "" : (draft.wrappedValue.dateRange ?? "") }, set: { name in
-						if name.isEmpty {
-							model.setFixedRange(first: fixedFirst, last: fixedLast)
-						} else {
-							model.setLiveRange(name)
-						}
-					})) {
-						ForEach(ReportDateRanges.names, id: \.self) { Text($0).tag($0) }
-						Text("Fixed dates").tag("")
-					}
-					.accessibilityIdentifier("customReport.range")
-					if draft.wrappedValue.dateStatic {
-						MonthRow(title: "From", month: $fixedFirst) { model.setFixedRange(first: fixedFirst, last: fixedLast) }
-						MonthRow(title: "To", month: $fixedLast) { model.setFixedRange(first: fixedFirst, last: fixedLast) }
-					}
+				.accessibilityIdentifier("customReport.mode")
+				Picker("Group by", selection: $draft.groupBy) {
+					ForEach([ReportGrouping.category, .group, .payee, .account, .interval], id: \.self) { Text($0.title).tag($0) }
 				}
-				Section("Options") {
-					Toggle("Show empty rows", isOn: draft.showEmpty)
-					Toggle("Show off-budget accounts", isOn: draft.showOffBudget)
-					Toggle("Show hidden categories", isOn: draft.showHidden)
-					Toggle("Show uncategorized", isOn: draft.showUncategorized)
-					Toggle("Include the current interval", isOn: draft.includeCurrent)
-					Toggle("Trim empty intervals", isOn: draft.trimIntervals)
-					if draft.wrappedValue.conditionCount > 0 {
-						Text(draft.wrappedValue.conditionCount == 1 ? "1 filter, edited in Actual" : "\(draft.wrappedValue.conditionCount) filters, edited in Actual")
-							.foregroundStyle(.textSecondary)
-					}
+				.accessibilityIdentifier("customReport.groupBy")
+				Picker("Balance", selection: $draft.balanceType) {
+					ForEach([ReportBalanceKind.payment, .deposit, .net, .netPayment, .netDeposit], id: \.self) { Text($0.title).tag($0) }
 				}
-				Section {
-					HStack {
-						Button("Cancel", role: .cancel) { model.cancelEditing() }
-							.keyboardShortcut(.cancelAction)
-						Spacer()
-						Button("Save report") { Task { await model.save() } }
-							.keyboardShortcut(.defaultAction)
-							.disabled(draft.wrappedValue.name.trimmingCharacters(in: .whitespaces).isEmpty)
-							.accessibilityIdentifier("customReport.save")
+				.accessibilityIdentifier("customReport.balance")
+				Picker("Interval", selection: $draft.interval) {
+					ForEach([ReportIntervalUnit.daily, .weekly, .monthly, .yearly], id: \.self) { Text($0.title).tag($0) }
+				}
+				Picker("Sort", selection: $draft.sortBy) {
+					ForEach([ReportSortOrder.descending, .ascending, .name, .budget], id: \.self) { Text($0.title).tag($0) }
+				}
+				Picker("Graph", selection: Binding(get: { ReportGraph(draft.graphType) }, set: { draft.graphType = $0.rawValue })) {
+					ForEach(ReportGraph.allCases.filter { draft.totalMode ? $0.drawsTotals : true }, id: \.self) { Text($0.title).tag($0) }
+				}
+				.accessibilityIdentifier("customReport.graph")
+			}
+			Section("Dates") {
+				Picker("Range", selection: Binding(get: { draft.dateStatic ? "" : (draft.dateRange ?? "") }, set: { name in
+					if name.isEmpty {
+						model.setFixedRange(first: fixedFirst, last: fixedLast)
+					} else {
+						model.setLiveRange(name)
 					}
+					draft = model.draft ?? draft
+				})) {
+					ForEach(ReportDateRanges.names, id: \.self) { Text($0).tag($0) }
+					Text("Fixed dates").tag("")
+				}
+				.accessibilityIdentifier("customReport.range")
+				if draft.dateStatic {
+					MonthRow(title: "From", month: $fixedFirst) { applyFixed() }
+					MonthRow(title: "To", month: $fixedLast) { applyFixed() }
 				}
 			}
-			.formStyle(.grouped)
-			.onAppear {
-				fixedFirst = Month(date: draft.wrappedValue.startDate) ?? fixedFirst
-				fixedLast = Month(date: draft.wrappedValue.endDate) ?? fixedLast
+			Section("Options") {
+				Toggle("Show empty rows", isOn: $draft.showEmpty)
+				Toggle("Show off-budget accounts", isOn: $draft.showOffBudget)
+				Toggle("Show hidden categories", isOn: $draft.showHidden)
+				Toggle("Show uncategorized", isOn: $draft.showUncategorized)
+				Toggle("Include the current interval", isOn: $draft.includeCurrent)
+				Toggle("Trim empty intervals", isOn: $draft.trimIntervals)
+				if draft.conditionCount > 0 {
+					Text(draft.conditionCount == 1 ? "1 filter, edited in Actual" : "\(draft.conditionCount) filters, edited in Actual")
+						.foregroundStyle(.textSecondary)
+				}
 			}
-			.onChange(of: model.draft) {
-				Task { await model.refreshPreview() }
+			Section {
+				HStack {
+					Button("Cancel", role: .cancel) { model.cancelEditing() }
+						.keyboardShortcut(.cancelAction)
+					Spacer()
+					Button("Save report") { Task { await model.save() } }
+						.keyboardShortcut(.defaultAction)
+						.disabled(draft.name.trimmingCharacters(in: .whitespaces).isEmpty)
+						.accessibilityIdentifier("customReport.save")
+				}
 			}
-			.containerIdentifier("customReport.editor")
 		}
+		.formStyle(.grouped)
+		.onChange(of: draft) {
+			guard model.draft != nil else { return }
+			model.draft = draft
+			Task { await model.refreshPreview() }
+		}
+		.containerIdentifier("customReport.editor")
+	}
+
+	private func applyFixed() {
+		model.draft = draft
+		model.setFixedRange(first: fixedFirst, last: fixedLast)
+		draft = model.draft ?? draft
 	}
 }
 

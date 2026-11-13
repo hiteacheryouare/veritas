@@ -32,7 +32,7 @@ final class StubReports: @unchecked Sendable {
 		Category(id: "internet", name: "Internet", group: "housing", groupName: "Housing and utilities", october: 7_000, rows: 1),
 		Category(id: "phone", name: "Phone", group: "housing", groupName: "Housing and utilities", october: 4_500, rows: 1),
 		Category(id: "groceries", name: "Groceries", group: "everyday", groupName: "Everyday", october: 64_012, rows: 9),
-		Category(id: "dining", name: "Dining out", group: "everyday", groupName: "Everyday", october: 40_138, rows: 14),
+		Category(id: "dining", name: "Dining out", group: "everyday", groupName: "Everyday", october: 40_138, rows: 11),
 		Category(id: "gas", name: "Gas", group: "everyday", groupName: "Everyday", october: 22_100, rows: 5),
 		Category(id: "household", name: "Household", group: "everyday", groupName: "Everyday", october: 14_000, rows: 4),
 		Category(id: "gifts", name: "Gifts", group: "personal", groupName: "Personal", october: 85_000, rows: 3),

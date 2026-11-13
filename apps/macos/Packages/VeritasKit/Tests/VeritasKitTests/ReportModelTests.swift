@@ -306,10 +306,20 @@ struct StandardReportTests {
 		#expect(quiet.cashFlowRows.last?.values == [300, 250, 250])
 		#expect(quiet.cashFlowHeadings == ["Oct", "Nov", "6 months"])
 
+		let tones = Dictionary(uniqueKeysWithValues: quiet.cashFlowRows.map { ($0.id.split(separator: ".").last.map(String.init) ?? $0.id, $0.tones) })
+		#expect(tones["netCashFlow"] == [.neutral, .overspent, .neutral], "ST-10.4: a negative Net cash flow is a loss")
+		#expect(tones["closing"]?.allSatisfy { $0 == .neutral } == true, "a balance is never a loss")
+
 		session.flows[1] = ReportSamples.flow(Month(year: 2026, month: 11), opening: 300, closing: 250, unreviewed: 40)
 		let busy = await open(.cashFlow)
 		#expect(busy.cashFlowRows.map(\.title).contains("Unreviewed transfers"))
 		#expect(busy.cashFlowRows.map(\.title).contains("Change in budget cash from operations"))
+	}
+
+	@Test func aNegativeNetWorthKeepsTheNeutralTone() async {
+		let model = await open(.netWorth)
+		#expect(model.netWorthRows.allSatisfy { $0.tones.allSatisfy { $0 == .neutral } })
+		#expect(model.netWorthRows.map(\.title) == ["Assets", "Liabilities", "Net worth"])
 	}
 
 	@Test func spendingByCategoryKeepsRefundsAndAddsUpToExpenses() async {

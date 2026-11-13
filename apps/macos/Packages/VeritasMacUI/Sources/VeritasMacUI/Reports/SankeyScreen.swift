@@ -48,7 +48,7 @@ struct SankeyScreen: View {
 		.focusEffectDisabled()
 		.focused($hasKeyFocus)
 		.defaultFocus($hasKeyFocus, true)
-		.focusedValue(\.budgetMonths, BudgetMonthActions(
+		.focusedSceneValue(\.budgetMonths, BudgetMonthActions(
 			canGoBack: true,
 			canGoForward: model.canGoForward,
 			previous: { Task { await model.previous() } },

@@ -51,7 +51,7 @@ struct NetProfitScreen: View {
 		.focusEffectDisabled()
 		.focused($hasKeyFocus)
 		.defaultFocus($hasKeyFocus, true)
-		.focusedValue(\.budgetMonths, BudgetMonthActions(
+		.focusedSceneValue(\.budgetMonths, BudgetMonthActions(
 			canGoBack: true,
 			canGoForward: model.canGoForward,
 			previous: { Task { await model.previous() } },
@@ -235,8 +235,7 @@ private struct NetProfitTable: View {
 		.padding(.vertical, Spacing.s1)
 		.background(.surfaceGrouped, in: .rect(cornerRadius: Radius.section))
 		.overlay { RoundedRectangle(cornerRadius: Radius.section).strokeBorder(Color.edgeGrouped) }
-		.accessibilityElement(children: .contain)
-		.accessibilityIdentifier("netProfit.table")
+		.containerIdentifier("netProfit.table")
 	}
 
 	@ViewBuilder private func title(_ row: NetProfitRow) -> some View {

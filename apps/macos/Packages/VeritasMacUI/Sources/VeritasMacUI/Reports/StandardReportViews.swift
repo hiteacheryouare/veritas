@@ -100,6 +100,11 @@ struct RowsTable: View {
 	let id: String
 
 	var body: some View {
+		VStack(spacing: 0) { grid }
+			.containerIdentifier(id)
+	}
+
+	private var grid: some View {
 		Grid(alignment: .trailing, horizontalSpacing: 0, verticalSpacing: 0) {
 			GridRow {
 				Text("").gridColumnAlignment(.leading)
@@ -129,15 +134,12 @@ struct RowsTable: View {
 					}
 				}
 				.frame(minHeight: 38)
-				.accessibilityElement(children: .combine)
 				.accessibilityIdentifier("\(id).\(row.id)")
 			}
 		}
 		.padding(.vertical, Spacing.s1)
 		.background(.surfaceGrouped, in: .rect(cornerRadius: Radius.section))
 		.overlay { RoundedRectangle(cornerRadius: Radius.section).strokeBorder(Color.edgeGrouped) }
-		.accessibilityElement(children: .contain)
-		.accessibilityIdentifier(id)
 	}
 }
 

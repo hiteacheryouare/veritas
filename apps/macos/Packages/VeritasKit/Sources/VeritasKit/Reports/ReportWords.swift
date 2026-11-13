@@ -1,10 +1,10 @@
 import VeritasCore
 
-/// Report copy as Fred ruled it for the Gate 1 screens (docs/finance/statements.md
-/// ST-1 and ST-8, CLS-1 "Hidden and archived"). Labels never filter anything out.
+/// Report copy, as docs/finance/statements.md ST-10 has it. Labels never filter
+/// anything out.
 public enum ReportWords {
 	public static let uncategorized = "Uncategorized (needs review)"
-	public static let unreviewedNote = "No category. Positive means money left. Not in Net cash flow."
+	public static let unreviewedNote = "No category. Positive means money left, negative means money came in. Not in Net cash flow."
 	public static let unallocatedCaption = "Income not yet spent, saved or paid toward debt"
 	public static let unallocatedAction = "Show income and outflow totals"
 	public static let shortfallCaption = "Money drawn from earlier balances"
