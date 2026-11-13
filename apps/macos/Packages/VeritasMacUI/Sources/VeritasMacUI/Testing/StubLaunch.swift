@@ -121,6 +121,7 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 	]
 	private var keep = Retention(hourly: 48, daily: 30, monthly: 12, operationDays: 30)
 	private let budget = StubBudget()
+	private let reports = StubReports()
 
 	init(readOnly: ReadOnlyKind?, hasFindings: Bool = false, backupFails: Bool = false) {
 		self.readOnly = readOnly
@@ -217,8 +218,23 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 
 	func perform(_ command: Command) async throws {
 		if let readOnly { throw FfiError.ReadOnly(reason: readOnly) }
-		try budget.perform(command)
+		switch command {
+		case .saveCustomReport(let settings): try reports.save(settings)
+		case .placeWidget(let id, let x, let y, let width, let height): try reports.place(id, x: x, y: y, width: width, height: height)
+		default: try budget.perform(command)
+		}
 	}
+
+	func netProfit(first: Month, last: Month) async throws -> NetProfitReport { reports.netProfit(first: first, last: last) }
+	func netWorth(first: Month, last: Month) async throws -> [NetWorthMonth] { reports.netWorth(first: first, last: last) }
+	func cashFlow(first: Month, last: Month) async throws -> [CashFlowColumn] { reports.cashFlow(first: first, last: last) }
+	func cashFlowStatement(first: String, last: String) async throws -> CashFlowColumn { reports.cashFlowStatement(first: first, last: last) }
+	func sankey(first: String, last: String) async throws -> SankeyReport { reports.sankey(first: first, last: last) }
+	func reportTransactions(_ drill: ReportDrill) async throws -> [ReportTransaction] { reports.transactions(drill) }
+	func customReports() async throws -> [CustomReportItem] { reports.customReports() }
+	func customReport(_ id: String, today: String) async throws -> CustomReportView { try reports.customReport(id) }
+	func previewCustomReport(_ settings: CustomReportSettings, today: String) async throws -> CustomReportView { StubReports.view(settings) }
+	func dashboards(today: String) async throws -> [DashboardPage] { reports.dashboards() }
 }
 #endif
 

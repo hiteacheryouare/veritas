@@ -187,6 +187,20 @@ public final class WorkspaceModel {
 		}
 	}
 
+	/// A report read against the open budget. A failure is shown here and
+	/// comes back as `nil`; a cancelled read, as a screen moves on, is quiet.
+	public func report<T: Sendable>(_ read: @Sendable (any BudgetSession) async throws -> T) async -> T? {
+		guard let session else { return nil }
+		do {
+			return try await read(session)
+		} catch FfiError.Cancelled {
+			return nil
+		} catch {
+			present(error, isRefresh: true)
+			return nil
+		}
+	}
+
 	/// D62: a code Actual doesn't know uses 2 places.
 	private func decimalPlaces(for code: String?) async -> UInt8 {
 		guard let code, let currencies = try? await library.currencies() else { return 2 }

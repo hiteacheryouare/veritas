@@ -21,6 +21,16 @@ extension BudgetSession {
 	func categoryHistory(_ categoryID: String) async throws -> CategoryHistory {
 		CategoryHistory(transactions: 0, budgetedMonths: 0, taxBucket: nil)
 	}
+	func netProfit(first: Month, last: Month) async throws -> NetProfitReport { throw FfiError.Cancelled }
+	func netWorth(first: Month, last: Month) async throws -> [NetWorthMonth] { [] }
+	func cashFlow(first: Month, last: Month) async throws -> [CashFlowColumn] { [] }
+	func cashFlowStatement(first: String, last: String) async throws -> CashFlowColumn { throw FfiError.Cancelled }
+	func sankey(first: String, last: String) async throws -> SankeyReport { throw FfiError.Cancelled }
+	func reportTransactions(_ drill: ReportDrill) async throws -> [ReportTransaction] { [] }
+	func customReports() async throws -> [CustomReportItem] { [] }
+	func customReport(_ id: String, today: String) async throws -> CustomReportView { throw FfiError.Cancelled }
+	func previewCustomReport(_ settings: CustomReportSettings, today: String) async throws -> CustomReportView { throw FfiError.Cancelled }
+	func dashboards(today: String) async throws -> [DashboardPage] { [] }
 }
 
 extension BudgetLibrary {

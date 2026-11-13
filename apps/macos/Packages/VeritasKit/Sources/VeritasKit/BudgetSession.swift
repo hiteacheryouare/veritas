@@ -113,6 +113,24 @@ public protocol BudgetSession: AnyObject, Sendable {
 	func goalClosePreview(_ goalID: String, releaseTo: String?, today: String) async throws -> GoalClosePreview
 	/// Whether a category has history, which turns delete into Archive (R-BUD-5).
 	func categoryHistory(_ categoryID: String) async throws -> CategoryHistory
+
+	/// Net Profit for each month in the range and for the whole range (R-REP-2).
+	func netProfit(first: Month, last: Month) async throws -> NetProfitReport
+	/// Assets, liabilities and net worth at each month's end (R-REP-5).
+	func netWorth(first: Month, last: Month) async throws -> [NetWorthMonth]
+	/// One Cash Flow Statement per month (R-REP-5).
+	func cashFlow(first: Month, last: Month) async throws -> [CashFlowColumn]
+	/// One Cash Flow Statement for an inclusive date range (R-REP-7).
+	func cashFlowStatement(first: String, last: String) async throws -> CashFlowColumn
+	/// Inclusive `YYYY-MM-DD` dates (R-REP-6).
+	func sankey(first: String, last: String) async throws -> SankeyReport
+	/// The rows behind one report number.
+	func reportTransactions(_ drill: ReportDrill) async throws -> [ReportTransaction]
+	func customReports() async throws -> [CustomReportItem]
+	func customReport(_ id: String, today: String) async throws -> CustomReportView
+	/// What edited settings would show, without saving.
+	func previewCustomReport(_ settings: CustomReportSettings, today: String) async throws -> CustomReportView
+	func dashboards(today: String) async throws -> [DashboardPage]
 }
 
 /// The budgets in the app's budgets folder: new ones, Actual imports and reopened ones.

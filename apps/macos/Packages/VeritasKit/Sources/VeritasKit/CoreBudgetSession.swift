@@ -157,6 +157,56 @@ final class CoreBudgetSession: BudgetSession {
 		return try await Core.run { try session.categoryHistory(categoryId: categoryID) }
 	}
 
+	func netProfit(first: Month, last: Month) async throws -> NetProfitReport {
+		let session = session
+		return try await Core.cancellable { try await session.netProfit(first: first, last: last, cancel: $0) }
+	}
+
+	func netWorth(first: Month, last: Month) async throws -> [NetWorthMonth] {
+		let session = session
+		return try await Core.cancellable { try await session.netWorth(first: first, last: last, cancel: $0) }
+	}
+
+	func cashFlow(first: Month, last: Month) async throws -> [CashFlowColumn] {
+		let session = session
+		return try await Core.cancellable { try await session.cashFlow(first: first, last: last, cancel: $0) }
+	}
+
+	func cashFlowStatement(first: String, last: String) async throws -> CashFlowColumn {
+		let session = session
+		return try await Core.cancellable { try await session.cashFlowStatement(first: first, last: last, cancel: $0) }
+	}
+
+	func sankey(first: String, last: String) async throws -> SankeyReport {
+		let session = session
+		return try await Core.cancellable { try await session.sankey(first: first, last: last, cancel: $0) }
+	}
+
+	func reportTransactions(_ drill: ReportDrill) async throws -> [ReportTransaction] {
+		let session = session
+		return try await Core.cancellable { try await session.reportTransactions(drill: drill, cancel: $0) }
+	}
+
+	func customReports() async throws -> [CustomReportItem] {
+		let session = session
+		return try await Core.run { try session.customReports() }
+	}
+
+	func customReport(_ id: String, today: String) async throws -> CustomReportView {
+		let session = session
+		return try await Core.cancellable { try await session.customReport(id: id, today: today, cancel: $0) }
+	}
+
+	func previewCustomReport(_ settings: CustomReportSettings, today: String) async throws -> CustomReportView {
+		let session = session
+		return try await Core.cancellable { try await session.previewCustomReport(settings: settings, today: today, cancel: $0) }
+	}
+
+	func dashboards(today: String) async throws -> [DashboardPage] {
+		let session = session
+		return try await Core.cancellable { try await session.dashboards(today: today, cancel: $0) }
+	}
+
 	func perform(_ command: Command) async throws {
 		let session = session
 		_ = try await Core.run { try session.perform(command: command) }
