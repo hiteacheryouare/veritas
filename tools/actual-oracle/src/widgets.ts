@@ -94,6 +94,25 @@ export const widgetData = async ({ internal }: ActualSession, requests: WidgetRe
 				granularity: meta?.granularity ?? 'monthly'
 			});
 			return { start, end, data: await run(spreadsheet) };
+		},
+		'budget-analysis-card': async ({ meta }) => {
+			const { createBudgetAnalysisSpreadsheet } = await loadSource(`${REPORTS}/spreadsheets/budget-analysis-spreadsheet.ts`);
+			const timeFrame = meta?.timeFrame ?? {
+				start: months.subMonths(months.currentMonth(), 5),
+				end: months.currentMonth(),
+				mode: 'sliding-window'
+			};
+			const [startMonth, endMonth] = ranges.calculateTimeRange(timeFrame);
+			const startDate = months.monthFromDate(startMonth) + '-01';
+			const endDate = months.getMonthEnd(months.monthFromDate(endMonth) + '-01');
+			const spreadsheet = createBudgetAnalysisSpreadsheet({
+				conditions: meta?.conditions,
+				conditionsOp: meta?.conditionsOp,
+				startDate,
+				endDate,
+				showHiddenCategories: meta?.showHiddenCategories ?? false
+			});
+			return { start: startDate, end: endDate, data: await run(spreadsheet) };
 		}
 	};
 

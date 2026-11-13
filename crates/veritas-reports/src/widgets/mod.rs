@@ -3,11 +3,13 @@
 //! Every function reads the widget's `meta` as Actual stores it.
 
 mod age_of_money;
+mod budget_analysis;
 mod calendar;
 mod summary;
 mod time_frame;
 
 pub use age_of_money::{AgeOfMoney, AgePoint, Granularity, Trend, age_of_money};
+pub use budget_analysis::{BudgetAnalysis, BudgetAnalysisMonth, budget_analysis};
 pub use calendar::{CalendarDay, CalendarMonth, calendar};
 pub use summary::{SummaryContent, SummaryData, summary};
 pub use time_frame::{TimeRange, calculate_time_range};

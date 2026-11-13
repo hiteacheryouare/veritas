@@ -10,7 +10,9 @@ use chrono::NaiveDate;
 use serde_json::{Value, json};
 use support::actual::{fixture, oracle};
 use veritas_domain::BudgetData;
-use veritas_reports::{Granularity, Json, Trend, age_of_money, calendar, summary};
+use veritas_domain::CivilDate;
+use veritas_engine::EnvelopeSheet;
+use veritas_reports::{Granularity, Json, Trend, age_of_money, budget_analysis, calendar, summary};
 
 const ORACLE_TODAY: &str = "2026-11-09";
 
@@ -282,6 +284,99 @@ fn d73_age_of_money_card_matches_actual() {
 			"currentAge": ours.current_age,
 			"trend": trend,
 			"insufficientData": ours.insufficient_data,
+		});
+		assert_eq!(&ours, data, "{value}");
+	}
+}
+
+fn group(budget: &BudgetData, name: &str) -> String {
+	budget
+		.category_groups
+		.values()
+		.find(|group| group.name == name)
+		.map(|group| group.id.to_string())
+		.unwrap()
+}
+
+#[test]
+fn d73_budget_analysis_card_matches_actual() {
+	let budget = fixture("all-features");
+	let sheet = EnvelopeSheet::compute(&budget, CivilDate::new(2026, 11, 9).unwrap()).unwrap();
+	let groceries = category(&budget, "Groceries");
+	let dining = category(&budget, "Dining Out");
+	let everyday = group(&budget, "Everyday");
+	let year = json!({"start": "2025-10", "end": "2027-02", "mode": "static"});
+	let mut metas = vec![
+		json!(null),
+		json!({"timeFrame": year}),
+		json!({"timeFrame": year, "showHiddenCategories": true}),
+	];
+	for (conditions, op) in [
+		(
+			json!([{"field": "category", "op": "is", "value": groceries, "type": "id"}]),
+			"and",
+		),
+		(
+			json!([{"field": "category", "op": "oneOf", "value": [groceries, dining], "type": "id"}]),
+			"and",
+		),
+		(
+			json!([{"field": "category", "op": "notOneOf", "value": [groceries], "type": "id"}]),
+			"and",
+		),
+		(
+			json!([{"field": "category_group", "op": "is", "value": everyday, "type": "id"}, {"field": "category", "op": "isNot", "value": dining, "type": "id"}]),
+			"and",
+		),
+		(
+			json!([{"field": "category_group", "op": "contains", "value": "BILL", "type": "id"}, {"field": "category", "op": "is", "value": groceries, "type": "id"}]),
+			"or",
+		),
+		(
+			json!([{"field": "category", "op": "doesNotContain", "value": "fund", "type": "id"}]),
+			"and",
+		),
+		(
+			json!([{"field": "category", "op": "matches", "value": "^g", "type": "id"}]),
+			"and",
+		),
+		(
+			json!([{"field": "amount", "op": "gt", "value": 0, "type": "number"}]),
+			"and",
+		),
+	] {
+		metas.push(json!({"timeFrame": year, "conditions": conditions, "conditionsOp": op, "showHiddenCategories": true}));
+	}
+	let cases: Vec<(String, &str, Value)> = metas
+		.into_iter()
+		.enumerate()
+		.map(|(index, meta)| (format!("analysis-{index}"), "budget-analysis-card", meta))
+		.collect();
+	let ours: Vec<_> = cases
+		.iter()
+		.map(|(_, _, value)| {
+			budget_analysis(&budget, &sheet, meta(value).as_ref(), today()).unwrap()
+		})
+		.collect();
+	let Some(theirs) = theirs("all-features", &cases, "0") else {
+		return;
+	};
+	for ((id, _, value), ours) in cases.iter().zip(ours) {
+		let data = &theirs[id.as_str()]["data"];
+		let ours = json!({
+			"intervalData": ours.months.iter().map(|month| json!({
+				"date": month.month.to_string(),
+				"budgeted": month.budgeted.minor(),
+				"spent": month.spent.minor(),
+				"balance": month.balance.minor(),
+				"overspendingAdjustment": month.overspending_adjustment.minor(),
+			})).collect::<Vec<_>>(),
+			"startDate": ours.start.to_string(),
+			"endDate": ours.end.to_string(),
+			"totalBudgeted": ours.total_budgeted.minor(),
+			"totalSpent": ours.total_spent.minor(),
+			"totalOverspendingAdjustment": ours.total_overspending_adjustment.minor(),
+			"finalOverspendingAdjustment": ours.final_overspending_adjustment.minor(),
 		});
 		assert_eq!(&ours, data, "{value}");
 	}
