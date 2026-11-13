@@ -23,8 +23,8 @@ pub use condition::{
 	Op, parse_date_value,
 };
 pub use posting::{
-	LeftBill, NextDateWrite, Posting, SchedulePlan, ScheduleWrite, advance_schedules, complete,
-	counts_as_paid, pay, post_now, restart, skip,
+	LeftBill, LeftBy, NextDateWrite, Posting, SchedulePlan, ScheduleWrite, advance_schedules,
+	complete, counts_as_paid, pay, post_now, restart, skip,
 };
 pub use recur::{Frequency, RecurError, Recurrence, WeekendSolveMode};
 pub use rule::{Item, ParsedRule, RuleSupport};
@@ -34,5 +34,6 @@ pub use schedule::{
 	status, upcoming_days, validate_schedule_date,
 };
 pub use trigger::{
-	ManualEntry, added_transaction, counterpart, manual_entry, may_need_actual, merge_manual_entry,
+	ManualEntry, TransferLeg, Transfers, added_transaction, counterpart, manual_entry,
+	may_need_actual, merge_manual_entry, transfers,
 };
