@@ -24,6 +24,16 @@ pub enum GoalState {
 	Closed,
 }
 
+/// Whether an active goal with a target date gets there in time, by FC-6's
+/// on-track rule, the one the forecast's goal ETA uses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GoalPace {
+	/// The median pace's ETA is not after the target month.
+	OnTrack { eta_month: YearMonth },
+	/// Later, or no ETA at all: DEBT-8.1's monthly amount gets there.
+	Behind { needed_monthly: Money },
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct GoalView {
 	pub goal: Goal,
@@ -35,6 +45,8 @@ pub struct GoalView {
 	pub spent: Money,
 	/// Active and reached goals with a target date only.
 	pub suggestion: Option<Suggestion>,
+	/// Active goals with a target date only.
+	pub pace: Option<GoalPace>,
 	/// A closed goal's budget in months after it closed (GOAL-10).
 	pub later_budget: Vec<(YearMonth, Money)>,
 	/// A closed goal whose envelope moved after it closed (GOAL-6).
@@ -75,6 +87,10 @@ pub fn goals(data: &BudgetData, sheet: &EnvelopeSheet) -> Result<Vec<GoalView>, 
 			GoalState::Active => engine::suggestion(sheet, goal, month)?,
 			GoalState::Reached | GoalState::ReachedSpent | GoalState::Closed => None,
 		};
+		let pace = match suggestion {
+			Some(suggestion) => Some(pace(data, goal, month, available, suggestion)?),
+			None => None,
+		};
 		let (later_budget, new_activity) = match (goal.status, goal.closed_month) {
 			(GoalStatus::Closed, Some(closed)) => (
 				later_budget(data, sheet, &goal.category, closed),
@@ -95,6 +111,7 @@ pub fn goals(data: &BudgetData, sheet: &EnvelopeSheet) -> Result<Vec<GoalView>, 
 				available,
 				spent,
 				suggestion,
+				pace,
 				later_budget,
 				new_activity,
 			},
@@ -106,6 +123,24 @@ pub fn goals(data: &BudgetData, sheet: &EnvelopeSheet) -> Result<Vec<GoalView>, 
 			.then_with(|| x.name.cmp(&y.name))
 	});
 	Ok(views.into_iter().map(|(_, view)| view).collect())
+}
+
+fn pace(
+	data: &BudgetData,
+	goal: &Goal,
+	month: YearMonth,
+	available: Money,
+	suggestion: Suggestion,
+) -> Result<GoalPace, CoreError> {
+	use veritas_forecast::EtaStatus;
+	let eta = veritas_forecast::goal_eta(data, &goal.id, month, available, None)?;
+	Ok(match (eta.on_track, eta.status) {
+		(Some(true), EtaStatus::Eta { month, .. }) => GoalPace::OnTrack { eta_month: month },
+		(Some(true), _) => GoalPace::OnTrack { eta_month: month },
+		_ => GoalPace::Behind {
+			needed_monthly: suggestion.monthly,
+		},
+	})
 }
 
 pub fn close_preview(

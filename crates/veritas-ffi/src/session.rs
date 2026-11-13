@@ -2062,4 +2062,146 @@ mod tests {
 		assert_eq!(goal_cell["goal"].as_i64(), Some(100_000));
 		assert_eq!(goal_cell["long_goal"].as_i64(), Some(1));
 	}
+
+	fn month(year: i32, month: u32) -> Month {
+		Month { year, month }
+	}
+
+	/// A goal with budget in August through October 2026 (the complete months
+	/// before November), November's budget, and spending from it if any.
+	fn paced_goal(
+		target: i64,
+		due: Option<&str>,
+		history: &[i64],
+		november: i64,
+		spent_in_october: i64,
+	) -> crate::GoalSummary {
+		let (_scratch, core) = imported("goal-pace");
+		let id = new_goal(&core, "New laptop", target, due);
+		let category = goal_of(&core, &id).category_id;
+		let months = [month(2026, 8), month(2026, 9), month(2026, 10)];
+		for (month, amount) in months[3 - history.len()..].iter().zip(history) {
+			budget(&core, *month, &category, *amount);
+		}
+		if spent_in_october != 0 {
+			let account = data(&core)
+				.accounts
+				.values()
+				.find(|a| !a.tombstone && !a.off_budget && !a.closed)
+				.unwrap()
+				.id
+				.clone();
+			let spending = veritas_domain::Transaction {
+				id: veritas_domain::TransactionId::new("goal-spending"),
+				account,
+				date: veritas_domain::CivilDate::new(2026, 10, 20).unwrap(),
+				amount: veritas_domain::Money::from_minor(-spent_in_october),
+				payee: None,
+				imported_payee: None,
+				category: Some(veritas_domain::CategoryId::new(category.as_str())),
+				notes: None,
+				cleared: true,
+				reconciled: false,
+				split: veritas_domain::SplitRole::None,
+				transfer: None,
+				schedule: None,
+				starting_balance: false,
+				sort_order: 1.0,
+				tombstone: false,
+			};
+			core.call(|session| {
+				session.perform(&Rows(vec![veritas_domain::Row::Transaction(spending)]))?;
+				Ok(())
+			})
+			.unwrap();
+		}
+		budget(&core, NOVEMBER, &category, november);
+		goal_of(&core, &id)
+	}
+
+	#[test]
+	fn the_goal_card_paces_by_fc6_like_the_forecast() {
+		// FC-6 E-1 to E-6, moved to November 2026 as the current month.
+		use crate::GoalPace::{Behind, OnTrack};
+		// E-1: available 112000, contributions 25000, 25000, 20000: remaining
+		// 38000, pace 25000, 2 months: January 2027.
+		let e1 = paced_goal(
+			150_000,
+			Some("2027-01-31"),
+			&[25_000, 25_000, 20_000],
+			42_000,
+			0,
+		);
+		assert_eq!(e1.available, 112_000);
+		assert_eq!(
+			e1.pace,
+			Some(OnTrack {
+				eta_month: month(2027, 1)
+			})
+		);
+		// The same goal due in December is behind and needs DEBT-8.1's
+		// monthly amount: carry 70000, remaining 80000 over 2 months.
+		let late = paced_goal(
+			150_000,
+			Some("2026-12-31"),
+			&[25_000, 25_000, 20_000],
+			42_000,
+			0,
+		);
+		assert_eq!(
+			late.pace,
+			Some(Behind {
+				needed_monthly: 40_000
+			})
+		);
+		// E-2: contributions 30000, 20000, 10000: the median 20000 still gives
+		// 2 months.
+		let e2 = paced_goal(
+			150_000,
+			Some("2027-01-31"),
+			&[30_000, 20_000, 10_000],
+			52_000,
+			0,
+		);
+		assert_eq!(
+			e2.pace,
+			Some(OnTrack {
+				eta_month: month(2027, 1)
+			})
+		);
+		// E-3: nothing added: no ETA, so behind.
+		let e3 = paced_goal(150_000, Some("2027-04-30"), &[0, 0, 0], 0, 0);
+		assert_eq!(
+			e3.pace,
+			Some(Behind {
+				needed_monthly: 25_000
+			})
+		);
+		// E-4: available 150000 is reached: no pace.
+		let e4 = paced_goal(150_000, Some("2027-04-30"), &[50_000, 50_000, 50_000], 0, 0);
+		assert_eq!((e4.state, e4.pace), (crate::GoalState::Reached, None));
+		// E-5: one month of history at 25000.
+		let e5 = paced_goal(150_000, Some("2027-04-30"), &[25_000], 25_000, 0);
+		assert_eq!(
+			e5.pace,
+			Some(OnTrack {
+				eta_month: month(2027, 3)
+			})
+		);
+		// E-6: budgeted 25000, available 25000, pace 25000, due April 2027:
+		// remaining 125000 over 5 months lands on the target month, and the
+		// suggestion agrees at 25000.
+		let e6 = paced_goal(150_000, Some("2027-04-15"), &[25_000], 25_000, 25_000);
+		assert_eq!(e6.available, 25_000);
+		assert_eq!(
+			e6.pace,
+			Some(OnTrack {
+				eta_month: month(2027, 4)
+			})
+		);
+		assert_eq!(e6.suggested_monthly, Some(25_000));
+		// No target date: no pace.
+		let undated = paced_goal(150_000, None, &[25_000], 25_000, 0);
+		assert_eq!(undated.pace, None);
+	}
 }
