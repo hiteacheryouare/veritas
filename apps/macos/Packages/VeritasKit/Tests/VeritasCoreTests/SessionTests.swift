@@ -187,7 +187,7 @@ private final class Recorder: ChangeListener, @unchecked Sendable {
 	let categoryId = try #require(category.entities.first { $0.kind == .category }?.id)
 	#expect(
 		try session.categoryHistory(categoryId: categoryId)
-			== CategoryHistory(transactions: 0, budgetedMonths: 0))
+			== CategoryHistory(transactions: 0, budgetedMonths: 0, taxBucket: nil))
 	_ = try session.perform(command: .deleteCategory(categoryId: categoryId))
 
 	_ = try session.goals(today: today)
@@ -210,6 +210,10 @@ private final class Recorder: ChangeListener, @unchecked Sendable {
 		command: .closeGoal(goalId: goalId, releaseToCategoryId: nil, alsoMoveLater: false))
 	#expect(try session.goals(today: today).first { $0.id == goalId }?.state == .closed)
 
+	#expect(throws: FfiError.self) {
+		try session.perform(command: .retargetGoal(goalId: goalId, target: 150_000, targetDate: nil))
+	}
+	_ = try session.perform(command: .reopenGoal(goalId: goalId))
 	_ = try session.perform(command: .retargetGoal(goalId: goalId, target: 150_000, targetDate: nil))
 	let retargeted = try #require(try session.goals(today: today).first { $0.id == goalId })
 	#expect(retargeted.state == .active)

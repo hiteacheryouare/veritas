@@ -181,6 +181,7 @@ impl<B: Backend> Core<B> {
 			Ok(CategoryHistory {
 				transactions: history.transactions as u64,
 				budgeted_months: history.budgeted_months as u64,
+				tax_bucket: history.tax_bucket,
 			})
 		})
 	}
@@ -785,6 +786,13 @@ mod tests {
 		let (scratch, core) = imported("shell");
 		let overview = core.overview().unwrap();
 		assert!(overview.budget_name.is_some());
+		let format = overview.number_format.clone().unwrap();
+		let prefs = data(&core).format;
+		assert_eq!(
+			format.currency,
+			prefs.currency_code.filter(|c| !c.is_empty())
+		);
+		assert_eq!(format.hide_decimals, prefs.hide_fraction);
 		assert_eq!(overview.groups.len(), 4);
 		assert!(
 			overview
@@ -1518,7 +1526,8 @@ mod tests {
 			core.category_history(&id).unwrap(),
 			crate::CategoryHistory {
 				transactions: 0,
-				budgeted_months: 0
+				budgeted_months: 0,
+				tax_bucket: None,
 			}
 		);
 		core.perform(Command::DeleteCategory {
@@ -1724,8 +1733,8 @@ mod tests {
 		budget(&core, NOVEMBER, &category, 10_000);
 		assert_eq!(
 			goal_of(&core, &id).state,
-			crate::GoalState::Reached,
-			"it only moves forward"
+			crate::GoalState::ReachedSpent,
+			"it stays reached, and now holds less than its target"
 		);
 		core.undo().unwrap();
 		core.undo().unwrap();
@@ -1748,42 +1757,66 @@ mod tests {
 	}
 
 	#[test]
-	fn a_reached_goal_that_was_spent_reads_reached_then_spent_with_no_suggestion() {
-		// D66, DEBT-8 Status. The fixture's categories with spending stand in
-		// for a laptop bought from the goal.
+	fn a_reached_goal_reads_spent_only_once_it_holds_less_than_its_target() {
+		// DEBT-8.2, GOAL-10, FC-5, FC-6 with Fred's examples: overfunded to
+		// 200000 on a 150000 target, 40000 spent, still holds 160000: Reached.
+		// Budget moved away below the target: Reached → Spent. Neither gets a
+		// suggestion or an ETA.
 		let (_scratch, core) = imported("goal-spent");
-		let before = data(&core);
-		let spent_from = before
-			.categories
+		let id = new_goal(&core, "New laptop", 150_000, Some("2027-06-30"));
+		let category = goal_of(&core, &id).category_id;
+		budget(&core, NOVEMBER, &category, 200_000);
+		let reached = goal_of(&core, &id);
+		assert_eq!(reached.state, crate::GoalState::Reached);
+		assert_eq!(
+			(reached.suggested_monthly, reached.months_left),
+			(None, None)
+		);
+
+		let account = data(&core)
+			.accounts
 			.values()
-			.find(|c| {
-				!c.tombstone
-					&& !c.is_income && core.category_history(c.id.as_str()).unwrap().transactions > 0
-			})
+			.find(|a| !a.tombstone && !a.off_budget && !a.closed)
 			.unwrap()
 			.id
 			.clone();
-		let goal = veritas_domain::Goal {
-			id: veritas_domain::GoalId::new("spent"),
-			category: spent_from,
-			target: veritas_domain::Money::from_minor(1),
-			target_date: Some(veritas_domain::CivilDate::new(2027, 6, 1).unwrap()),
-			icon: None,
-			color: None,
-			status: veritas_domain::GoalStatus::Reached,
-			reached_month: veritas_domain::YearMonth::new(2026, 1).ok(),
-			closed_month: None,
-			released_to: None,
-			released: None,
+		let bought = veritas_domain::Transaction {
+			id: veritas_domain::TransactionId::new("laptop-bought"),
+			account,
+			date: veritas_domain::CivilDate::new(2026, 11, 10).unwrap(),
+			amount: veritas_domain::Money::from_minor(-40_000),
+			payee: None,
+			imported_payee: None,
+			category: Some(veritas_domain::CategoryId::new(category.as_str())),
+			notes: None,
+			cleared: true,
+			reconciled: false,
+			split: veritas_domain::SplitRole::None,
+			transfer: None,
+			schedule: None,
+			starting_balance: false,
+			sort_order: 1.0,
+			tombstone: false,
 		};
 		core.call(|session| {
-			session.perform(&Rows(vec![veritas_domain::Row::Goal(goal)]))?;
+			session.perform(&Rows(vec![veritas_domain::Row::Transaction(bought)]))?;
 			Ok(())
 		})
 		.unwrap();
-		let spent = goal_of(&core, "spent");
+		let after_spending = goal_of(&core, &id);
+		assert_eq!(after_spending.available, 160_000);
+		assert_eq!(after_spending.state, crate::GoalState::Reached);
+		assert_eq!(after_spending.spent, 40_000);
+
+		core.perform(Command::MoveBudget {
+			month: NOVEMBER,
+			amount: 50_000,
+			from_category_id: Some(category.clone()),
+			to_category_id: None,
+		})
+		.unwrap();
+		let spent = goal_of(&core, &id);
 		assert_eq!(spent.state, crate::GoalState::ReachedSpent);
-		assert!(spent.spent > 0);
 		assert_eq!((spent.suggested_monthly, spent.months_left), (None, None));
 	}
 
@@ -1864,6 +1897,13 @@ mod tests {
 		.unwrap();
 		assert!(goal_of(&core, &id).later_budget.is_empty());
 		assert_eq!(budgeted(&core, DECEMBER, &category), 0);
+		let december_note = data(&core).notes["budget-2026-12"]
+			.clone()
+			.unwrap_or_default();
+		assert!(
+			december_note.contains("New laptop"),
+			"GOAL-7: the later move writes its movement note: {december_note:?}"
+		);
 		assert_eq!(
 			budgeted(&core, DECEMBER, &destination),
 			dest_december + 30_000
@@ -1896,8 +1936,8 @@ mod tests {
 	}
 
 	#[test]
-	fn reopening_and_retargeting_keep_the_same_goal() {
-		// DEBT-8.2 Reopen, D71.
+	fn reopening_follows_the_money_and_retargeting_keeps_the_first_reach() {
+		// DEBT-8.2 Reopen and Re-target, R-13, D71.
 		let (scratch, core) = imported("goal-reopen");
 		let id = new_goal(&core, "New laptop", 50_000, None);
 		let category = goal_of(&core, &id).category_id;
@@ -1915,21 +1955,31 @@ mod tests {
 			also_move_later: false,
 		})
 		.unwrap();
+		assert!(
+			matches!(
+				core.perform(Command::RetargetGoal {
+					goal_id: id.clone(),
+					target: 80_000,
+					target_date: None,
+				}),
+				Err(FfiError::Invalid { .. })
+			),
+			"a closed goal is reopened first"
+		);
+
 		core.perform(Command::ReopenGoal {
 			goal_id: id.clone(),
 		})
 		.unwrap();
 		let reopened = goal_of(&core, &id);
-		assert_eq!(reopened.state, crate::GoalState::Reached);
+		assert_eq!(
+			(reopened.state, reopened.available, reopened.reached_month),
+			(crate::GoalState::Active, 0, Some(NOVEMBER)),
+			"R-13: the money was released, so it comes back active"
+		);
 		let category_id = veritas_domain::CategoryId::new(category.as_str());
 		assert!(!data(&core).categories[&category_id].hidden);
 
-		core.perform(Command::CloseGoal {
-			goal_id: id.clone(),
-			release_to_category_id: None,
-			also_move_later: false,
-		})
-		.unwrap();
 		core.perform(Command::RetargetGoal {
 			goal_id: id.clone(),
 			target: 80_000,
@@ -1940,13 +1990,11 @@ mod tests {
 		assert_eq!(retargeted.state, crate::GoalState::Active);
 		assert_eq!(retargeted.target, 80_000);
 		assert_eq!(retargeted.reached_month, Some(NOVEMBER), "kept as history");
-		assert_eq!(retargeted.closed_month, None);
 		assert_eq!(
 			(retargeted.months_left, retargeted.suggested_monthly),
 			(Some(4), Some(20_000))
 		);
 		let after = data(&core);
-		assert!(!after.categories[&category_id].hidden);
 		assert_eq!(
 			after.notes[category.as_str()].as_deref(),
 			Some("#goal 800.00")
@@ -1957,6 +2005,12 @@ mod tests {
 		let reopened =
 			Core::<veritas_store::Store>::open(&scratch.budget(), &CancelToken::default()).unwrap();
 		assert_eq!(goal_of(&reopened, &id), retargeted);
+		budget(&reopened, NOVEMBER, &category, 80_000);
+		let again = goal_of(&reopened, &id);
+		assert_eq!(
+			(again.state, again.reached_month),
+			(crate::GoalState::Reached, Some(NOVEMBER))
+		);
 	}
 
 	#[test]

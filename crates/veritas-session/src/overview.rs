@@ -32,8 +32,8 @@ pub struct OverviewAccount {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Overview {
 	pub budget_name: Option<String>,
-	/// `None` until veritas-store loads Actual's preferences; the shell then
-	/// uses Actual's defaults.
+	/// The budget's preferences, with Actual's defaults filled in. Always set;
+	/// the option is kept so the record's shape doesn't change.
 	pub number_format: Option<NumberFormat>,
 	pub groups: Vec<OverviewGroup>,
 }

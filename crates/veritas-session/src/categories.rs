@@ -268,10 +268,13 @@ pub fn archive_category(
 /// What a category has that a plain delete would lose. Actual forces a
 /// transfer when it has transactions or any non-zero budget
 /// (budget/app.ts:494-521).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CategoryHistory {
 	pub transactions: usize,
 	pub budgeted_months: usize,
+	/// For the TAX-8 warning when the history moves to a category with a
+	/// different bucket.
+	pub tax_bucket: Option<String>,
 }
 
 impl CategoryHistory {
@@ -297,6 +300,10 @@ pub fn category_history(data: &BudgetData, id: &CategoryId) -> Result<CategoryHi
 	Ok(CategoryHistory {
 		transactions,
 		budgeted_months,
+		tax_bucket: data
+			.category_meta
+			.get(id)
+			.and_then(|meta| meta.tax_bucket.clone()),
 	})
 }
 
