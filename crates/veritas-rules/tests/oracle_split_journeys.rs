@@ -751,7 +751,7 @@ fn a_typed_row_survives_an_undetermined_rule_untouched() {
 	assert_eq!(saved.transaction, with_tip, "saved exactly as typed");
 	let note = saved.note.unwrap();
 	assert!(
-		note.contains("Run rules") && note.contains("a template action"),
+		note.contains("Run Rules") && note.contains("a template action"),
 		"{note}"
 	);
 

@@ -1,7 +1,7 @@
 //! Where rules run and how their result is merged (docs/actual-format.md §6.2).
 //! Rules run on new transactions only: manual entry, imports and bank sync,
 //! schedule posts, transfer counterparts, the reconciliation adjustment and
-//! the "Run rules" action. Editing an existing transaction never runs them.
+//! the "Run Rules" action. Editing an existing transaction never runs them.
 
 use veritas_domain::AccountId;
 
@@ -157,7 +157,7 @@ pub struct ManualEntry {
 /// is saved exactly as typed with no rule effects and marked "may need
 /// Actual": D60's "write nothing" covers what rules would have written, never
 /// what he typed. Actual never runs rules on an existing transaction by
-/// itself, so the note points to its "Run rules" action.
+/// itself, so the note points to its "Run Rules" action.
 pub fn manual_entry(
 	entered: &RuleTransaction,
 	outcome: &RunOutcome,
@@ -178,7 +178,7 @@ pub fn manual_entry(
 			ManualEntry {
 				transaction: entered.clone(),
 				note: Some(format!(
-					"Saved as you typed it. {rules} couldn't run here{why}. To apply {them}, select this transaction in Actual and choose Run rules."
+					"Saved as you typed it. {rules} couldn't run here{why}. To apply {them}, select this transaction in Actual and choose Run Rules."
 				)),
 			}
 		}
@@ -311,7 +311,7 @@ mod tests {
 		assert_eq!(
 			saved.note.as_deref(),
 			Some(
-				"Saved as you typed it. 1 rule couldn't run here (a template action). To apply it, select this transaction in Actual and choose Run rules."
+				"Saved as you typed it. 1 rule couldn't run here (a template action). To apply it, select this transaction in Actual and choose Run Rules."
 			)
 		);
 
