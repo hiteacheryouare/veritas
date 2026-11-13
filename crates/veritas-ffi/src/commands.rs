@@ -220,8 +220,10 @@ pub enum Command {
 		transaction_id: String,
 	},
 	/// A copy dated the same, uncleared, with its own transfer counterpart.
+	/// `new_id` picks the copy's id, as `TransactionDraft.id` does.
 	DuplicateTransaction {
 		transaction_id: String,
+		new_id: Option<String>,
 	},
 	/// Reconciled rows are skipped; split lines follow their parent.
 	SetCleared {
@@ -625,9 +627,13 @@ impl Command {
 			Command::DeleteTransaction { transaction_id } => {
 				transactions::delete(data, &TransactionId::new(transaction_id.as_str()))
 			}
-			Command::DuplicateTransaction { transaction_id } => transactions::duplicate(
+			Command::DuplicateTransaction {
+				transaction_id,
+				new_id,
+			} => transactions::duplicate(
 				data,
 				&TransactionId::new(transaction_id.as_str()),
+				new_id.as_deref().map(TransactionId::new),
 				Some(&RuleBook::new(data)),
 				now_ms(),
 			)

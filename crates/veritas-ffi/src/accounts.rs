@@ -128,6 +128,9 @@ pub struct RegisterPage {
 /// `payeeId`, or `payeeName`, reused case-insensitively or created.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct TransactionDraft {
+	/// For `addTransaction`, the new row's id if the app picks it (a UUID),
+	/// so it can select the row; `nil` lets the core pick. Ignored by an edit.
+	pub id: Option<String>,
 	pub account_id: String,
 	pub date: String,
 	pub amount: i64,
@@ -231,8 +234,8 @@ fn date(text: &Option<String>) -> Result<Option<veritas_domain::CivilDate>, Core
 	text.as_deref().map(civil_date).transpose()
 }
 
-pub(crate) fn register_page(
-	data: &BudgetData,
+pub(crate) fn register_page<S: veritas_session::Backend>(
+	session: &mut veritas_session::Session<S>,
 	scope: &RegisterScope,
 	filter: &RegisterFilter,
 	sort: RegisterSort,
@@ -273,7 +276,7 @@ pub(crate) fn register_page(
 	};
 	let offset = usize::try_from(offset).unwrap_or(usize::MAX);
 	let limit = usize::try_from(limit).unwrap_or(usize::MAX);
-	let page = register::page(data, &scope, &filter, sort, offset, limit)?;
+	let page = session.register_page(&scope, &filter, sort, offset, limit)?;
 	Ok(RegisterPage {
 		total: page.total as u64,
 		rows: page.rows.into_iter().map(RegisterRow::from).collect(),
@@ -367,6 +370,7 @@ pub(crate) fn draft(
 	Ok((
 		rows,
 		Draft {
+			id: input.id.as_deref().map(TransactionId::new),
 			account: AccountId::new(input.account_id.as_str()),
 			date: civil_date(&input.date)?,
 			amount: Money::from_minor(input.amount),

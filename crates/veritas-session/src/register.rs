@@ -187,12 +187,13 @@ fn line(data: &BudgetData, row: &Transaction) -> Line {
 	}
 }
 
-fn row_model(data: &BudgetData, row: &Transaction) -> Result<RegisterRow, CoreError> {
+fn row_model(
+	data: &BudgetData,
+	row: &Transaction,
+	children: &[&Transaction],
+) -> Result<RegisterRow, CoreError> {
 	let lines: Vec<Line> = if row.split == SplitRole::Parent {
-		children(data, &row.id)
-			.into_iter()
-			.map(|child| line(data, child))
-			.collect()
+		children.iter().map(|child| line(data, child)).collect()
 	} else {
 		Vec::new()
 	};
@@ -311,6 +312,48 @@ fn matches(data: &BudgetData, filter: &Filter, row: &Transaction, lines: &[&Tran
 	true
 }
 
+/// The register's rows in order, with running balances when they apply: the
+/// part of a page that reads every row. The session keeps one between
+/// commits so scrolling only builds the rows it shows (R-PERF-3).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Index {
+	pub scope: Scope,
+	pub filter: Filter,
+	pub sort: Sort,
+	ids: Vec<TransactionId>,
+	balances: Vec<Money>,
+	lines: std::collections::HashMap<TransactionId, Vec<TransactionId>>,
+}
+
+impl Index {
+	pub fn answers(&self, scope: &Scope, filter: &Filter, sort: Sort) -> bool {
+		self.scope == *scope && self.filter == *filter && self.sort == sort
+	}
+
+	pub fn page(&self, data: &BudgetData, offset: usize, limit: usize) -> Result<Page, CoreError> {
+		let mut rows = Vec::new();
+		for (index, id) in self.ids.iter().enumerate().skip(offset).take(limit) {
+			let Some(found) = data.transactions.get(id) else {
+				continue;
+			};
+			let lines: Vec<&Transaction> = self
+				.lines
+				.get(id)
+				.into_iter()
+				.flatten()
+				.filter_map(|line| data.transactions.get(line))
+				.collect();
+			let mut model = row_model(data, found, &lines)?;
+			model.running_balance = self.balances.get(index).copied();
+			rows.push(model);
+		}
+		Ok(Page {
+			total: self.ids.len(),
+			rows,
+		})
+	}
+}
+
 /// One page of the register: `offset` rows in, at most `limit` long.
 pub fn page(
 	data: &BudgetData,
@@ -320,6 +363,15 @@ pub fn page(
 	offset: usize,
 	limit: usize,
 ) -> Result<Page, CoreError> {
+	index(data, scope, filter, sort)?.page(data, offset, limit)
+}
+
+pub fn index(
+	data: &BudgetData,
+	scope: &Scope,
+	filter: &Filter,
+	sort: Sort,
+) -> Result<Index, CoreError> {
 	let mut lines_of: std::collections::HashMap<&TransactionId, Vec<&Transaction>> =
 		std::collections::HashMap::new();
 	if !filter.is_empty() {
@@ -380,26 +432,57 @@ pub fn page(
 			}
 		}
 	}
-	let total = rows.len();
 	let running = matches!(scope, Scope::Account(_)) && filter.is_empty() && sort == Sort::DEFAULT;
 	let mut balances = Vec::new();
 	if running {
-		let window_end = offset.saturating_add(limit).min(total);
 		let mut balance = Money::ZERO;
 		for row in rows.iter().rev() {
 			balance = balance.checked_add(row.amount)?;
 			balances.push(balance);
 		}
 		balances.reverse();
-		balances.truncate(window_end);
 	}
-	let mut page = Vec::new();
-	for (index, row) in rows.iter().enumerate().skip(offset).take(limit) {
-		let mut model = row_model(data, row)?;
-		model.running_balance = balances.get(index).copied();
-		page.push(model);
+	Ok(Index {
+		scope: scope.clone(),
+		filter: filter.clone(),
+		sort,
+		lines: line_index(data, &rows),
+		ids: rows.into_iter().map(|row| row.id.clone()).collect(),
+		balances,
+	})
+}
+
+/// Each listed split's live lines in Actual's order, from one pass.
+fn line_index(
+	data: &BudgetData,
+	rows: &[&Transaction],
+) -> std::collections::HashMap<TransactionId, Vec<TransactionId>> {
+	let parents: std::collections::HashSet<&TransactionId> = rows
+		.iter()
+		.filter(|row| row.split == SplitRole::Parent)
+		.map(|row| &row.id)
+		.collect();
+	let mut lines: std::collections::HashMap<TransactionId, Vec<&Transaction>> = Default::default();
+	if !parents.is_empty() {
+		for row in data.transactions.values().filter(|row| !row.tombstone) {
+			if let SplitRole::Child { parent } = &row.split
+				&& parents.contains(parent)
+			{
+				lines.entry(parent.clone()).or_default().push(row);
+			}
+		}
 	}
-	Ok(Page { total, rows: page })
+	lines
+		.into_iter()
+		.map(|(parent, mut children)| {
+			children.sort_by(|a, b| {
+				b.sort_order
+					.total_cmp(&a.sort_order)
+					.then_with(|| a.id.cmp(&b.id))
+			});
+			(parent, children.into_iter().map(|c| c.id.clone()).collect())
+		})
+		.collect()
 }
 
 /// One row, as the register shows it, for refreshing after an edit.
@@ -412,5 +495,5 @@ pub fn row(data: &BudgetData, id: &TransactionId) -> Result<RegisterRow, CoreErr
 			entity: "transaction",
 			id: id.to_string(),
 		})?;
-	row_model(data, found)
+	row_model(data, found, &children(data, id))
 }

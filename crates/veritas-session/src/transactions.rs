@@ -20,6 +20,9 @@ use veritas_rules::{
 /// amounts must add up to `amount` (edge case 6).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Draft {
+	/// For a new row, the id the app chose for it, as Actual's client makes
+	/// ids; `None` makes one. Ignored by an edit.
+	pub id: Option<TransactionId>,
 	pub account: AccountId,
 	pub date: CivilDate,
 	pub amount: Money,
@@ -194,7 +197,13 @@ pub fn add(
 		}
 	}
 	let with_payees = crate::writes::applied(data, &rows);
-	let mut planned = write_new(&with_payees, &entry.transaction, Some(book), now_ms)?;
+	let mut planned = write_new(
+		&with_payees,
+		draft.id.clone(),
+		&entry.transaction,
+		Some(book),
+		now_ms,
+	)?;
 	if let Some(note) = &entry.note {
 		planned.rows.push(meta(&planned.id, note));
 	}
@@ -216,7 +225,7 @@ pub fn insert(
 	now_ms: f64,
 ) -> Result<Planned, CoreError> {
 	check(data, draft)?;
-	write_new(data, &ruled(draft), book, now_ms)
+	write_new(data, draft.id.clone(), &ruled(draft), book, now_ms)
 }
 
 fn new_payee(id: &PayeeId, name: &str) -> Payee {
@@ -245,12 +254,21 @@ fn meta(id: &TransactionId, note: &str) -> Row {
 /// row or each split line with a transfer payee.
 fn write_new(
 	data: &BudgetData,
+	id: Option<TransactionId>,
 	added: &RuleTransaction,
 	book: Option<&RuleBook>,
 	now_ms: f64,
 ) -> Result<Planned, CoreError> {
 	let Transfers { transaction, legs } = transfers(added, data);
-	let id = new_transaction_id();
+	let id = match id {
+		Some(id) if data.transactions.contains_key(&id) => {
+			return Err(CoreError::Invalid(format!(
+				"A transaction with id {id} already exists."
+			)));
+		}
+		Some(id) => id,
+		None => new_transaction_id(),
+	};
 	let off = off_budget(data, &transaction.account);
 	let cleared = transaction.cleared.unwrap_or(true);
 	let reconciled = transaction.reconciled.unwrap_or(false);
@@ -607,6 +625,7 @@ pub fn delete(data: &BudgetData, id: &TransactionId) -> Result<Vec<Row>, CoreErr
 pub fn draft_of(data: &BudgetData, id: &TransactionId) -> Result<Draft, CoreError> {
 	let top = top_level(data, id)?;
 	Ok(Draft {
+		id: None,
 		account: top.account.clone(),
 		date: top.date,
 		amount: top.amount,
@@ -633,11 +652,13 @@ pub fn draft_of(data: &BudgetData, id: &TransactionId) -> Result<Draft, CoreErro
 pub fn duplicate(
 	data: &BudgetData,
 	id: &TransactionId,
+	new_id: Option<TransactionId>,
 	book: Option<&RuleBook>,
 	now_ms: f64,
 ) -> Result<Planned, CoreError> {
 	let mut draft = draft_of(data, id)?;
 	draft.cleared = false;
+	draft.id = new_id;
 	for line in &mut draft.splits {
 		line.id = None;
 	}

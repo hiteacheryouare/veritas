@@ -347,6 +347,7 @@ pub fn close_account(
 	})?;
 	let with_closed = crate::writes::applied(data, &rows);
 	let draft = Draft {
+		id: None,
 		account: id.clone(),
 		date: today,
 		amount: balance.checked_neg()?,

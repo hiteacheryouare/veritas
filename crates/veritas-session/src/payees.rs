@@ -226,6 +226,7 @@ pub fn reconcile_adjustment(
 		));
 	}
 	let draft = Draft {
+		id: None,
 		account: account.clone(),
 		date: today,
 		amount: difference,
