@@ -7,8 +7,6 @@
 //! Actual sorts by amount sign, not by category: a refund is money in. That
 //! is Actual's own number for Actual's card (D73), not a CLS-* reading.
 
-use std::cmp::Reverse;
-
 use chrono::{Datelike, Days, NaiveDate};
 use veritas_domain::{Account, BudgetData, CoreError, Money, Transaction};
 
@@ -258,16 +256,15 @@ pub fn age_of_money(
 	}
 	// AQL's default order for transactions breaks date ties, and the stable
 	// sort by date keeps it.
-	let order = |row: &&Transaction| {
-		(
-			row.date.naive(),
-			row.starting_balance,
-			Reverse(OrderedSort(row.sort_order)),
-			row.id.clone(),
-		)
+	let order = |a: &&Transaction, b: &&Transaction| {
+		a.date
+			.cmp(&b.date)
+			.then(a.starting_balance.cmp(&b.starting_balance))
+			.then(b.sort_order.total_cmp(&a.sort_order))
+			.then_with(|| a.id.cmp(&b.id))
 	};
-	income.sort_by_key(order);
-	expenses.sort_by_key(order);
+	income.sort_by(order);
+	expenses.sort_by(order);
 
 	let mut buckets: Vec<(NaiveDate, i64)> = income
 		.iter()
@@ -352,22 +349,4 @@ pub fn age_of_money(
 		trend,
 		insufficient_data,
 	})
-}
-
-/// `sort_order` as SQLite orders a REAL column.
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct OrderedSort(f64);
-
-impl Eq for OrderedSort {}
-
-impl PartialOrd for OrderedSort {
-	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-		Some(self.cmp(other))
-	}
-}
-
-impl Ord for OrderedSort {
-	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-		self.0.total_cmp(&other.0)
-	}
 }
