@@ -175,7 +175,7 @@ struct Fields<'a> {
 	account: Option<&'a AccountId>,
 }
 
-fn is_row(budget: &BudgetData, transaction: &Transaction) -> bool {
+pub(crate) fn is_row(budget: &BudgetData, transaction: &Transaction) -> bool {
 	!transaction.tombstone
 		&& match &transaction.split {
 			SplitRole::None => true,

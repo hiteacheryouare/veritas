@@ -13,6 +13,8 @@
 
 `eval` and `arithmetic-vectors` can't use the bundle: `@actual-app/api` tree-shakes `evalArithmetic` and `currencyToAmount` away. They import the pinned, unmodified `packages/loot-core/src/shared/arithmetic.ts` and `util.ts` from `reference/actual` (or `ACTUAL_REFERENCE_DIR`) through a module hook that adds the `.ts` extension and resolves `date-fns` from the oracle's own `node_modules` (`src/reference.ts`). They refuse to run, naming `cargo xtask reference`, when that checkout is missing or isn't at the manifest's commit. `npm test` checks that `arithmetic-vectors` reproduces the committed file and skips those tests when the checkout is missing.
 
+`widgets <zip> <requests.json>` runs Actual's own dashboard card code from the same checkout: each request is `{id, type, meta, firstDayOfWeekIdx}`, and the oracle resolves the card's time range with `calculateTimeRange` and runs the card's spreadsheet from `packages/desktop-client/src/components/reports`. The hook resolves `@actual-app/core/*` and the `#` aliases through the checkout's own `package.json` files, every other package from the oracle's `node_modules`, and swaps the client connection for `src/shims/connection.ts`, which forwards each `send` to the open Actual session. Output is canonical JSON with dates as `yyyy-MM-dd` and non-integer numbers as their JS text, so readers that round a float's last digit can't make a false mismatch. A card that throws comes back as `{error}`.
+
 All commands also take `--today <YYYY-MM-DD>` (default `2026-11-09`) and `--seed <n>` (default `1`).
 
 ## Running it

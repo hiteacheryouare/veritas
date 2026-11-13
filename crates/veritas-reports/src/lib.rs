@@ -17,6 +17,7 @@ mod sankey;
 mod standard;
 mod statements;
 mod tax;
+mod widgets;
 
 pub use balances::{AccountBalance, Side, account_balances, net_worth};
 pub use classify::{
@@ -45,4 +46,8 @@ pub use statements::{
 pub use tax::{
 	Bucket, BucketTotal, Direction, Source, TaxRow, TaxSummary, detail_csv, extract_tags,
 	summary_csv, tax_summary,
+};
+pub use widgets::{
+	CalendarDay, CalendarMonth, SummaryContent, SummaryData, TimeRange, calculate_time_range,
+	calendar, summary,
 };

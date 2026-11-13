@@ -57,19 +57,47 @@ export const verifiedReference = (dir = referenceDir()): Pin => {
 
 let hooksFor: string | null = null;
 
+// Report code calls the server through this module; the oracle swaps in one
+// that forwards to the running Actual session (see widgets.ts).
+const SHIMS: Record<string, string> = {
+	'@actual-app/core/platform/client/connection': pathToFileURL(resolve(import.meta.dirname, 'shims/connection.ts')).href
+};
+
+const isBare = (specifier: string) => !/^(\.|\/|#|node:|file:|data:)/.test(specifier);
+
 const installHooks = (dir: string) => {
 	if (hooksFor === dir) {
 		return;
 	}
 	hooksFor = dir;
 	const sourceUrl = pathToFileURL(dir).href;
+	const lootCorePackage = pathToFileURL(join(dir, 'packages/loot-core/package.json')).href;
+	const components = join(dir, 'packages/desktop-client/src/components');
 	registerHooks({
 		resolve: (specifier, context, nextResolve) => {
 			const fromSource = context.parentURL?.startsWith(sourceUrl) ?? false;
-			if (fromSource && (specifier === 'date-fns' || specifier.startsWith('date-fns/'))) {
+			if (!fromSource) {
+				return nextResolve(specifier, context);
+			}
+			if (SHIMS[specifier]) {
+				return { url: SHIMS[specifier], shortCircuit: true };
+			}
+			// The checkout has no node_modules, so Actual's own packages resolve
+			// through their package.json, and every other package through the
+			// oracle's pinned dependencies.
+			if (specifier.startsWith('@actual-app/core/')) {
+				return nextResolve(specifier, { ...context, parentURL: lootCorePackage });
+			}
+			if (isBare(specifier)) {
 				return nextResolve(specifier, { ...context, parentURL: ORACLE_PACKAGE });
 			}
-			if (fromSource && specifier.startsWith('.') && !specifier.endsWith('.ts')) {
+			if (specifier.startsWith('#components/')) {
+				const candidate = join(components, `${specifier.slice('#components/'.length)}.ts`);
+				if (existsSync(candidate)) {
+					return { url: pathToFileURL(candidate).href, shortCircuit: true };
+				}
+			}
+			if (specifier.startsWith('.') && !specifier.endsWith('.ts')) {
 				const candidate = new URL(`${specifier}.ts`, context.parentURL);
 				if (existsSync(fileURLToPath(candidate))) {
 					return { url: candidate.href, shortCircuit: true };
@@ -82,6 +110,14 @@ const installHooks = (dir: string) => {
 				? nextLoad(url, { ...context, format: 'module-typescript' })
 				: nextLoad(url, context)
 	});
+};
+
+// Imports one of Actual's own source modules, by its path inside the checkout.
+export const loadSource = async (path: string, given = referenceDir()): Promise<any> => {
+	verifiedReference(given);
+	const dir = realpathSync(given);
+	installHooks(dir);
+	return import(pathToFileURL(join(dir, path)).href);
 };
 
 export const loadArithmetic = async (given = referenceDir()): Promise<ActualArithmetic> => {

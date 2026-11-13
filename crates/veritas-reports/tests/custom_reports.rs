@@ -7,17 +7,11 @@
 
 mod support;
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use chrono::NaiveDate;
 use serde_json::{Value, json};
+use support::actual::{fixture, oracle};
 use support::*;
-use veritas_domain::{
-	BudgetData, CustomReportId, CustomReportRow, DashboardPage, DashboardPageId, Money, Widget,
-	WidgetId,
-};
+use veritas_domain::{BudgetData, CustomReportId, CustomReportRow, Money};
 use veritas_reports::{
 	BalanceType, CustomReport, GroupBy, Json, QueryRow, SortBy, WidgetContent, WidgetType,
 	dashboards, evaluate_report, place_widget, report_range, report_rows,
@@ -25,114 +19,12 @@ use veritas_reports::{
 
 const ORACLE_TODAY: &str = "2026-11-09";
 
-static NEXT: AtomicU64 = AtomicU64::new(0);
-
-fn root() -> PathBuf {
-	Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
-}
-
 fn today() -> NaiveDate {
 	NaiveDate::parse_from_str(ORACLE_TODAY, "%Y-%m-%d").unwrap()
 }
 
-fn text(row: &rusqlite::Row, name: &str) -> Option<String> {
-	row.get::<_, Option<String>>(name).unwrap()
-}
-
-fn int(row: &rusqlite::Row, name: &str) -> Option<i64> {
-	row.get::<_, Option<i64>>(name).unwrap()
-}
-
-/// all-features loaded the way the app loads it, plus the report and
-/// dashboard tables, which veritas-store does not read yet.
 fn all_features() -> BudgetData {
-	let scratch = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
-		"reports-af-{}-{}",
-		std::process::id(),
-		NEXT.fetch_add(1, Ordering::Relaxed)
-	));
-	let _ = std::fs::remove_dir_all(&scratch);
-	let veritas_interop::ImportOutcome::Imported(imported) = veritas_interop::import_actual_zip(
-		&root().join("fixtures/synthetic/all-features.zip"),
-		&scratch,
-	)
-	.unwrap() else {
-		panic!("all-features imports cleanly");
-	};
-	let mut store =
-		veritas_store::Store::open(&imported.db_path, veritas_store::Access::ReadWrite).unwrap();
-	store.adopt().unwrap();
-	let mut budget = store.load().unwrap().data;
-	drop(store);
-	let conn = rusqlite::Connection::open(&imported.db_path).unwrap();
-	let mut reports = conn.prepare("SELECT * FROM custom_reports").unwrap();
-	let mut rows = reports.query([]).unwrap();
-	while let Some(row) = rows.next().unwrap() {
-		let report = CustomReportRow {
-			id: CustomReportId::new(text(row, "id").unwrap()),
-			name: text(row, "name"),
-			start_date: text(row, "start_date"),
-			end_date: text(row, "end_date"),
-			date_static: int(row, "date_static"),
-			date_range: text(row, "date_range"),
-			mode: text(row, "mode"),
-			group_by: text(row, "group_by"),
-			balance_type: text(row, "balance_type"),
-			show_empty: int(row, "show_empty"),
-			show_offbudget: int(row, "show_offbudget"),
-			show_hidden: int(row, "show_hidden"),
-			show_uncategorized: int(row, "show_uncategorized"),
-			selected_categories: text(row, "selected_categories"),
-			graph_type: text(row, "graph_type"),
-			conditions: text(row, "conditions"),
-			conditions_op: text(row, "conditions_op"),
-			metadata: text(row, "metadata"),
-			interval: text(row, "interval"),
-			color_scheme: text(row, "color_scheme"),
-			tombstone: int(row, "tombstone") == Some(1),
-			include_current: int(row, "include_current"),
-			sort_by: text(row, "sort_by"),
-			trim_intervals: int(row, "trim_intervals"),
-			show_trend_lines: int(row, "show_trend_lines"),
-		};
-		budget.custom_reports.insert(report.id.clone(), report);
-	}
-	let mut pages = conn
-		.prepare("SELECT id, name, tombstone FROM dashboard_pages")
-		.unwrap();
-	let mut rows = pages.query([]).unwrap();
-	while let Some(row) = rows.next().unwrap() {
-		let id = DashboardPageId::new(text(row, "id").unwrap());
-		budget.dashboard_pages.insert(
-			id.clone(),
-			DashboardPage {
-				id,
-				name: text(row, "name"),
-				tombstone: int(row, "tombstone") == Some(1),
-			},
-		);
-	}
-	let mut widgets = conn.prepare("SELECT * FROM dashboard").unwrap();
-	let mut rows = widgets.query([]).unwrap();
-	while let Some(row) = rows.next().unwrap() {
-		let id = WidgetId::new(text(row, "id").unwrap());
-		budget.widgets.insert(
-			id.clone(),
-			Widget {
-				id,
-				kind: text(row, "type"),
-				width: int(row, "width"),
-				height: int(row, "height"),
-				x: int(row, "x"),
-				y: int(row, "y"),
-				meta: text(row, "meta"),
-				page: text(row, "dashboard_page_id").map(DashboardPageId::new),
-				tombstone: int(row, "tombstone") == Some(1),
-			},
-		);
-	}
-	let _ = std::fs::remove_dir_all(&scratch);
-	budget
+	fixture("all-features")
 }
 
 fn live_reports(budget: &BudgetData) -> Vec<CustomReport> {
@@ -167,39 +59,9 @@ fn sorted(values: Vec<Value>) -> Vec<String> {
 	keys
 }
 
-/// `report-rows` from the oracle, or `None` when it isn't installed. CI sets
-/// VERITAS_REQUIRE_ORACLE, so there a missing oracle fails instead.
+/// `report-rows` from the oracle, or `None` when it isn't installed.
 fn oracle_rows(requests: &Value) -> Option<Value> {
-	let oracle = root().join("tools/actual-oracle");
-	if !oracle.join("node_modules").exists() {
-		assert!(
-			std::env::var_os("VERITAS_REQUIRE_ORACLE").is_none(),
-			"VERITAS_REQUIRE_ORACLE is set but tools/actual-oracle/node_modules is missing"
-		);
-		eprintln!("skipping the custom report oracle comparison: run `cargo xtask oracle setup`");
-		return None;
-	}
-	let file = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
-		"report-rows-{}-{}.json",
-		std::process::id(),
-		NEXT.fetch_add(1, Ordering::Relaxed)
-	));
-	std::fs::write(&file, requests.to_string()).unwrap();
-	let output = Command::new("node")
-		.current_dir(&oracle)
-		.args(["src/main.ts", "report-rows"])
-		.arg(root().join("fixtures/synthetic/all-features.zip"))
-		.arg(&file)
-		.args(["--today", ORACLE_TODAY])
-		.output()
-		.expect("node runs");
-	let _ = std::fs::remove_file(&file);
-	assert!(
-		output.status.success(),
-		"the oracle failed: {}",
-		String::from_utf8_lossy(&output.stderr)
-	);
-	Some(serde_json::from_slice(&output.stdout).unwrap())
+	oracle("report-rows", "all-features", requests, ORACLE_TODAY)
 }
 
 #[test]
@@ -272,7 +134,7 @@ where
 	T: 'a,
 {
 	items
-		.map(|item| pick(item))
+		.map(pick)
 		.find(|(item, _)| *item == name)
 		.map(|(_, id)| id)
 		.unwrap_or_else(|| panic!("all-features has {name}"))

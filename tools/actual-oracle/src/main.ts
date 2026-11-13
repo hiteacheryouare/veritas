@@ -11,6 +11,7 @@ import { applyOps, parseOpFile } from './ops.ts';
 import { arithmeticVectors } from './arithmeticVectors.ts';
 import { loadArithmetic } from './reference.ts';
 import { reportRows } from './reportRows.ts';
+import { widgetData } from './widgets.ts';
 import { fixtureSpecs } from './specs/index.ts';
 
 const USAGE = `Usage:
@@ -21,8 +22,9 @@ const USAGE = `Usage:
   node src/main.ts eval <cases.json> [--out <file>]
   node src/main.ts arithmetic-vectors [--out <file>]
   node src/main.ts report-rows <zip> <requests.json> [--out <file>]
+  node src/main.ts widgets <zip> <requests.json> [--out <file>]
 
-eval and arithmetic-vectors run Actual's arithmetic from the pinned source in
+eval, arithmetic-vectors and widgets run Actual's own code from the pinned source in
 reference/actual (or ACTUAL_REFERENCE_DIR), because the bundle doesn't ship it.
 
 Shared options:
@@ -206,6 +208,13 @@ const main = async () => {
 			return reportRows(session, requests);
 		});
 		writeCanonicalTo(rows, values.out);
+	} else if (command === 'widgets' && args.length === 2) {
+		const requests = JSON.parse(readFileSync(args[1], 'utf8'));
+		const data = await withActual(determinism, async session => {
+			await session.api.importBudget(readFileSync(args[0]));
+			return widgetData(session, requests);
+		});
+		writeCanonicalTo(data, values.out);
 	} else if (command === 'generate' && args.length === 1) {
 		await generate(determinism, args[0], values.out ?? resolve(FIXTURE_DIR, `${args[0]}.zip`));
 	} else {

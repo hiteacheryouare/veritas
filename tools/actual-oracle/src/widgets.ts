@@ -1,0 +1,101 @@
+import type { CanonicalValue } from './canonicalJson.ts';
+import type { ActualSession } from './environment.ts';
+import { loadSource } from './reference.ts';
+import { connectTo } from './shims/connection.ts';
+
+// One dashboard card, as the dashboard stores it.
+export interface WidgetRequest {
+	id: string;
+	type: string;
+	meta: any;
+	firstDayOfWeekIdx?: string;
+}
+
+const REPORTS = 'packages/desktop-client/src/components/reports';
+
+const day = (date: Date) => {
+	const pad = (n: number) => String(n).padStart(2, '0');
+	return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+};
+
+// Dates become yyyy-MM-dd, and numbers that aren't integers become their JS
+// text, since JSON readers may round a float's last digit.
+const plain = (value: unknown): CanonicalValue => {
+	if (value instanceof Date) {
+		return day(value);
+	}
+	if (typeof value === 'number' && !Number.isInteger(value)) {
+		return String(value);
+	}
+	if (Array.isArray(value)) {
+		return value.map(plain);
+	}
+	if (value && typeof value === 'object') {
+		return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, plain(entry)]));
+	}
+	return (value ?? null) as CanonicalValue;
+};
+
+// Runs a spreadsheet the way useReport does: it calls back with its data.
+const run = async (spreadsheet: (sheet: unknown, setData: (data: unknown) => void) => Promise<void>) => {
+	let data: unknown = null;
+	await spreadsheet(null, result => {
+		data = result;
+	});
+	return data;
+};
+
+// The numbers each card shows, from Actual's own card and spreadsheet code
+// for the same meta, as of the oracle's fixed today.
+export const widgetData = async ({ internal }: ActualSession, requests: WidgetRequest[]) => {
+	connectTo((name, args) => internal.send(name, args));
+	const months = await loadSource('packages/loot-core/src/shared/months.ts');
+	const ranges = await loadSource(`${REPORTS}/reportRanges.ts`);
+	const latest = await internal.send('get-latest-transaction');
+	const latestDay = latest ? latest.date : months.currentDay();
+	const fullRange = (meta: any) =>
+		ranges.calculateTimeRange(
+			meta?.timeFrame,
+			{ start: months.dayFromDate(months.currentMonth()), end: months.currentDay(), mode: 'full' },
+			latestDay
+		);
+
+	const cards: Record<string, (request: WidgetRequest) => Promise<unknown>> = {
+		'summary-card': async ({ meta }) => {
+			const { summarySpreadsheet } = await loadSource(`${REPORTS}/spreadsheets/summary-spreadsheet.ts`);
+			const [start, end] = fullRange(meta);
+			let content = { type: 'sum' };
+			if (meta?.content) {
+				try {
+					content = JSON.parse(meta.content);
+				} catch {
+					content = { type: 'sum' };
+				}
+			}
+			return { start, end, data: await run(summarySpreadsheet(start, end, meta?.conditions, meta?.conditionsOp, content, undefined)) };
+		},
+		'calendar-card': async ({ meta, firstDayOfWeekIdx }) => {
+			const { calendarSpreadsheet } = await loadSource(`${REPORTS}/spreadsheets/calendar-spreadsheet.ts`);
+			const [start, end] = fullRange(meta);
+			return {
+				start,
+				end,
+				data: await run(calendarSpreadsheet(start, end, meta?.conditions, meta?.conditionsOp, firstDayOfWeekIdx))
+			};
+		}
+	};
+
+	const results: Record<string, CanonicalValue> = {};
+	for (const request of requests) {
+		const card = cards[request.type];
+		if (!card) {
+			throw new Error(`The oracle has no card for ${request.type}`);
+		}
+		try {
+			results[request.id] = plain(await card(request));
+		} catch (error) {
+			results[request.id] = { error: (error as Error).message };
+		}
+	}
+	return results;
+};
