@@ -158,7 +158,7 @@ Priority: **P0** = required for the first daily-driver release (v1, end of Phase
 |---|---|---|
 | R-GOAL-1 | Create a goal with name, target amount, optional target date and optional icon/color. Veritas suggests a monthly contribution: (target − available) ÷ months left. | P0 |
 | R-GOAL-2 | A goal is an envelope: a real Actual category in a "Goals" group. Its progress is that envelope's available balance. | P0 |
-| R-GOAL-3 | Lifecycle: `active → reached → closed`. Spending on the goal means categorizing the purchase to the goal's category. | P0 |
+| R-GOAL-3 | Lifecycle: `active → reached → closed`. Spending on the goal means categorizing the purchase to the goal's category. A re-target returns a reached goal to active (D71). | P0 |
 | R-GOAL-4 | **Close goal** releases any leftover (positive or negative) to an envelope Ryan picks, as a budget move in the current month, never as a transaction. It then hides the category. It never deletes, merges or re-categorizes anything. | P0 |
 | R-GOAL-5 | Closed goals stay visible in all reports, Sankey, Wrapped and a Goal Archive, with their spend history ("New laptop: $1,480 spent, closed Mar 2027"). | P0 |
 | R-GOAL-6 | Goals survive a round trip. In Actual a goal is a normal (possibly hidden) category. Actual can hold the target amount natively (a `#goal <amount>` note line, `goal_def` with `template_settings.source = 'ui'`, or per-month `zero_budgets.goal`/`long_goal = 1` rows, which are the only thing its display reads), but it has no target date, and it shows goal progress only behind the experimental `goalTemplatesEnabled` flag. The date lives in `veritas_*`. Whether Veritas also writes the target natively is an open question for Ryan (see docs/actual-format.md). | P0 |

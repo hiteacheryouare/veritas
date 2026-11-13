@@ -66,6 +66,11 @@ impl Store {
 					)));
 				}
 				conn.busy_timeout(BUSY_TIMEOUT).map_err(storage)?;
+				// On macOS a plain fsync leaves writes in the drive's cache, where a
+				// power cut loses them. F_FULLFSYNC flushes the cache, for commits
+				// and for checkpoints (R-REL-1).
+				conn.execute_batch("PRAGMA fullfsync = ON; PRAGMA checkpoint_fullfsync = ON;")
+					.map_err(storage)?;
 				// Every open, because a restored snapshot comes back in DELETE mode.
 				let mode: String = conn
 					.query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))

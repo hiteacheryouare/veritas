@@ -1130,7 +1130,6 @@ fn rules_veritas_cannot_run_are_read_only_untouched_and_never_half_applied() {
 		[
 			"venmo template",
 			"rent increase formula",
-			"costco split",
 			"amazon with order note"
 		]
 		.into_iter()
@@ -1178,7 +1177,6 @@ fn rules_veritas_cannot_run_are_read_only_untouched_and_never_half_applied() {
 	for (label, rule) in [
 		("venmo", "venmo template"),
 		("rent", "rent increase formula"),
-		("costco run", "costco split"),
 		("amazon", "amazon with order note"),
 	] {
 		assert!(
@@ -1197,14 +1195,38 @@ fn rules_veritas_cannot_run_are_read_only_untouched_and_never_half_applied() {
 		undetermined["amazon"].1.category, None,
 		"the plain half of a rule with a template must not be applied on its own"
 	);
+	// Split rules run in Veritas now: the cleanup names the payee, then the
+	// split moves it onto the lines and leaves the parent without one.
+	let costco = &undetermined["costco run"].1;
+	assert_eq!(costco.payee, None);
+	let lines: Vec<(i64, Option<&str>, Option<&str>)> = costco
+		.splits
+		.iter()
+		.map(|line| {
+			(
+				line.amount.minor(),
+				line.category.as_ref().map(CategoryId::as_str),
+				line.payee.as_ref().map(PayeeId::as_str),
+			)
+		})
+		.collect();
+	let groceries = category("Groceries");
+	let shopping = category("Shopping");
+	let costco_payee = payee("Costco");
 	assert_eq!(
-		undetermined["costco run"]
-			.1
-			.payee
-			.as_ref()
-			.map(PayeeId::as_str),
-		Some(payee("Costco").as_str()),
-		"the supported cleanup before a split rule still runs"
+		lines,
+		[
+			(
+				-10_740,
+				Some(groceries.as_str()),
+				Some(costco_payee.as_str())
+			),
+			(
+				-10_740,
+				Some(shopping.as_str()),
+				Some(costco_payee.as_str())
+			)
+		]
 	);
 
 	let actual_row = |label: &str| {

@@ -201,3 +201,33 @@ Flows are integer cents. Zero-value nodes and flows are omitted.
 | X-10 Paycheck with splits | CLS-10 example C-16 | Sources: Paycheck 400000. Outflows: Taxes and deductions 115600 (by category group), Savings 50000, Unallocated 234400 = `net_cash_flow` |
 | X-6 Empty range | No income, no spending | No nodes, no flows, no error |
 | X-7 Split row | Split parent -10000 with children Groceries -7000, Dining -3000 | Groceries 7000, Dining 3000 |
+
+## ST-9 Sidebar account groups
+
+The sidebar is navigation, not a statement. It never feeds a total, and ST-2 still decides the balance sheet side by the balance sign on date D. The two can disagree about an account and both are right: ST-2 answers "what is this account worth on that date", ST-9 answers "where do I find this account".
+
+- **ST-9.1 Liability for placement.** In order, first match wins:
+  1. `veritas_account_meta.kind = Liability`: liability. `kind = Asset`: asset. An explicit kind is never overridden.
+  2. Kind unset and any of `loan_rate_bps`, `loan_payment`, `lender` is set: liability.
+  3. Kind unset and the balance as of today is below zero: liability.
+  4. Otherwise: asset.
+- **ST-9.2 Group.** On-budget asset: Cash. On-budget liability: Credit. Off-budget asset: Investments & Other assets (D61), which holds investments, retirement accounts, property and every other off-budget asset. Off-budget liability: Loans. The on-budget flag is Actual's `offbudget` flag (CLS-1). An on-budget savings account is Cash.
+- **ST-9.3 Stability.** Placement uses the balance only in rule 3 of ST-9.1. An account with kind set, or with loan fields, never changes group when its balance crosses zero.
+- **ST-9.4 Closed and deleted.** A closed account stays in its group, flagged closed. A tombstoned account with no live rows is omitted. A tombstoned account with live rows follows ST-2 (labeled `deleted`, history kept).
+- **ST-9.5 Overdrawn checking.** A checking account with kind unset and a negative balance is listed under Credit by ST-9.1 rule 3. The UI offers "Set account type" so the user can pin it as Asset, which returns it to Cash and keeps it there.
+- **ST-9.6 Balance shown.** Cents, Actual's sign (liabilities negative), as of today, from `account_balances`. Group subtotals are plain integer sums and need no rounding.
+
+Examples (made-up):
+
+| Case | Inputs | Group |
+|---|---|---|
+| G-1 Checking | on-budget, kind unset, +120000 | Cash |
+| G-2 Card | on-budget, kind Liability, -45000 | Credit |
+| G-3 Card overpaid | on-budget, kind Liability, +2000 | Credit (stable) |
+| G-4 Overdrawn checking | on-budget, kind unset, -1500 | Credit, "Set account type" offered |
+| G-5 Overdrawn, pinned | on-budget, kind Asset, -1500 | Cash |
+| G-6 Brokerage | off-budget, kind unset, +900000 | Investments & Other assets |
+| G-7 Mortgage | off-budget, kind Liability, -25000000, lender set | Loans |
+| G-8 Car loan, on-budget | on-budget, kind unset, loan_rate_bps 600, +0 | Credit (loan fields) |
+| G-9 Closed card | closed, kind Liability, 0 | Credit, flagged closed |
+| G-10 Zero-balance new account | on-budget, kind unset, 0, no loan fields | Cash |

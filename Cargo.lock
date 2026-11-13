@@ -1337,10 +1337,14 @@ dependencies = [
 name = "veritas-ffi"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "serde_json",
  "thiserror",
  "uniffi",
  "veritas-domain",
+ "veritas-engine",
  "veritas-session",
+ "veritas-store",
 ]
 
 [[package]]
@@ -1397,8 +1401,10 @@ name = "veritas-session"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "criterion",
  "proptest",
  "rusqlite",
+ "serde_json",
  "veritas-domain",
  "veritas-engine",
  "veritas-forecast",

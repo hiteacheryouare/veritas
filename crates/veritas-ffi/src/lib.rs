@@ -1,8 +1,23 @@
 //! The only surface the apps see: commands, queries and the change-event stream, exported through UniFFI.
 
+mod blocking;
+mod commands;
+mod records;
+mod session;
+
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use veritas_domain::{CoreError, ReadOnlyReason, YearMonth};
+use veritas_domain::{CoreError, YearMonth};
+
+pub use blocking::CancelToken;
+pub use commands::Command;
+pub use records::{
+	AccountGroup, AccountGroupSummary, AccountSummary, AuditCheck, AuditFinding, BackupInfo,
+	BudgetListing, Change, Currency, EntityKind, EntityRef, NewAccount, NewAccountKind,
+	NewBudgetOptions, NumberFormat, NumberStyle, Overview, Retention, SessionState, SnapshotInfo,
+	SnapshotKind,
+};
+pub use session::{ChangeListener, Session};
 
 uniffi::setup_scaffolding!();
 
@@ -51,13 +66,7 @@ impl From<CoreError> for FfiError {
 			},
 			CoreError::Invalid(message) => FfiError::Invalid { message },
 			CoreError::ReadOnly(reason) => FfiError::ReadOnly {
-				reason: match reason {
-					ReadOnlyReason::NewerActualVersion => ReadOnlyKind::NewerActualVersion,
-					ReadOnlyReason::TrackingBudget => ReadOnlyKind::TrackingBudget,
-					ReadOnlyReason::OpenElsewhere => ReadOnlyKind::OpenElsewhere,
-					ReadOnlyReason::AuditFailed => ReadOnlyKind::AuditFailed,
-					ReadOnlyReason::NewerVeritasSchema => ReadOnlyKind::NewerVeritasSchema,
-				},
+				reason: reason.into(),
 			},
 			CoreError::UpgradeInActualFirst { required } => {
 				FfiError::UpgradeInActualFirst { required }
@@ -77,7 +86,7 @@ impl From<CoreError> for FfiError {
 
 /// Every export runs through here, so a bug in the core becomes an
 /// `Internal` error the app can show instead of a crash (R-REL-7).
-fn guard<T>(call: impl FnOnce() -> Result<T, CoreError>) -> Result<T, FfiError> {
+pub(crate) fn guard<T>(call: impl FnOnce() -> Result<T, CoreError>) -> Result<T, FfiError> {
 	match catch_unwind(AssertUnwindSafe(call)) {
 		Ok(result) => result.map_err(FfiError::from),
 		Err(payload) => {
@@ -104,6 +113,52 @@ pub fn core_version() -> Result<String, FfiError> {
 	guard(|| Ok(env!("CARGO_PKG_VERSION").to_owned()))
 }
 
+/// Every budget folder in `budgets_dir`, most recently opened first.
+#[uniffi::export]
+pub fn list_budgets(budgets_dir: String) -> Result<Vec<BudgetListing>, FfiError> {
+	guard(|| {
+		veritas_session::list_budgets(std::path::Path::new(&budgets_dir))
+			.map(|budgets| budgets.iter().map(BudgetListing::from).collect())
+	})
+}
+
+/// Actual's currencies, in its order, for setup's currency picker.
+#[uniffi::export]
+pub fn currencies() -> Result<Vec<Currency>, FfiError> {
+	guard(|| {
+		Ok(veritas_domain::CURRENCIES
+			.iter()
+			.map(Currency::from)
+			.collect())
+	})
+}
+
+/// Evaluates what was typed in an amount field, arithmetic included, the
+/// way Actual does (R-BUD-3): `12.50+3` is 1550 cents. `style` decides which
+/// separator is the decimal point. Text that isn't a storable amount comes
+/// back as `Invalid` with a message to show beside the field, and the field
+/// keeps its old value (D37).
+#[uniffi::export]
+pub fn evaluate_amount(text: String, style: NumberStyle) -> Result<i64, FfiError> {
+	use veritas_engine::{NumberFormat as EngineFormat, Rejection, commit_amount};
+	guard(|| {
+		let format =
+			EngineFormat::from_preference(veritas_domain::NumberStyle::from(style).actual_value());
+		let edit = commit_amount(veritas_domain::Money::ZERO, &text, format);
+		match edit.rejection {
+			None => Ok(edit.amount.minor()),
+			Some(Rejection::Empty) => Err(CoreError::Invalid("Enter an amount.".to_owned())),
+			Some(Rejection::NotAnAmount) => Err(CoreError::Invalid(
+				"That isn't an amount. Use numbers and + - * /.".to_owned(),
+			)),
+			Some(Rejection::NotFinite) => Err(CoreError::Invalid(
+				"That doesn't work out to an amount. Check for a division by zero.".to_owned(),
+			)),
+			Some(Rejection::TooLarge) => Err(CoreError::Overflow),
+		}
+	})
+}
+
 #[uniffi::export]
 pub fn parse_month(text: String) -> Result<Month, FfiError> {
 	guard(|| {
@@ -125,6 +180,40 @@ mod tests {
 			Err(FfiError::Internal { message }) => assert!(message.contains("index out of bounds")),
 			other => panic!("expected an internal error, got {other:?}"),
 		}
+	}
+
+	#[test]
+	fn the_currency_list_is_actuals() {
+		let all = currencies().unwrap();
+		assert_eq!(all.len(), 55);
+		let usd = all.iter().find(|currency| currency.code == "USD").unwrap();
+		assert_eq!((usd.symbol.as_str(), usd.decimal_places), ("$", 2));
+		assert!(usd.symbol_first);
+		let rupee = all.iter().find(|currency| currency.code == "INR").unwrap();
+		assert_eq!(rupee.number_format, NumberStyle::CommaDotIn);
+	}
+
+	#[test]
+	fn amount_fields_evaluate_arithmetic_like_actual() {
+		// R-BUD-3
+		let evaluate = |text: &str, style| evaluate_amount(text.to_owned(), style);
+		assert_eq!(evaluate("12.50+3", NumberStyle::CommaDot).unwrap(), 1_550);
+		assert_eq!(evaluate("1,234.5", NumberStyle::CommaDot).unwrap(), 123_450);
+		assert_eq!(evaluate("1.234,5", NumberStyle::DotComma).unwrap(), 123_450);
+		assert_eq!(evaluate("-20*3", NumberStyle::CommaDot).unwrap(), -6_000);
+		for bad in ["", "   ", "abc", "1/0"] {
+			assert!(
+				matches!(
+					evaluate(bad, NumberStyle::CommaDot),
+					Err(FfiError::Invalid { .. })
+				),
+				"{bad:?}"
+			);
+		}
+		assert!(matches!(
+			evaluate("99999999999999999999", NumberStyle::CommaDot),
+			Err(FfiError::Overflow)
+		));
 	}
 
 	#[test]
