@@ -273,6 +273,19 @@ pub fn reopen_goal(
 	if goal.status != GoalStatus::Closed {
 		return Err(CoreError::Invalid("This goal isn't closed.".to_owned()));
 	}
+	// CLS-3.3: a goal is an expense envelope, and reopening never flips the
+	// kind back.
+	let kind = match data.category_kind(&goal.category) {
+		veritas_domain::CategoryKind::Expense => None,
+		veritas_domain::CategoryKind::DebtPrincipal => Some("debt principal"),
+		veritas_domain::CategoryKind::Savings => Some("savings"),
+		veritas_domain::CategoryKind::Income => Some("income"),
+	};
+	if let Some(kind) = kind {
+		return Err(CoreError::Invalid(format!(
+			"This category is now a {kind} category. Change it back to an expense category to reopen this goal."
+		)));
+	}
 	let available = available(sheet, &goal.category, sheet.today().year_month());
 	let mut planned = vec![Row::Goal(engine::reopen(goal, available))];
 	planned.extend(categories::set_category_hidden(

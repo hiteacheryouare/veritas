@@ -3039,4 +3039,60 @@ mod tests {
 			Some(budget.to_budget)
 		);
 	}
+
+	#[test]
+	fn a_closed_goal_whose_category_changed_kind_reopens_only_as_an_expense() {
+		// CLS-3.3: reopening never flips the kind.
+		let (_scratch, core) = imported("goal-kind");
+		let id = new_goal(&core, "New laptop", 50_000, None);
+		let category = veritas_domain::CategoryId::new(goal_of(&core, &id).category_id.as_str());
+		core.perform(Command::CloseGoal {
+			goal_id: id.clone(),
+			release_to_category_id: None,
+			also_move_later: false,
+		})
+		.unwrap();
+		let set_kind = |kind| {
+			let meta = veritas_domain::CategoryMeta {
+				kind: Some(kind),
+				..data(&core).category_meta.get(&category).cloned().unwrap_or(
+					veritas_domain::CategoryMeta {
+						kind: None,
+						tax_bucket: None,
+						archived_on: None,
+					},
+				)
+			};
+			core.call(|session| {
+				session.perform(&Rows(vec![veritas_domain::Row::CategoryMeta(
+					veritas_domain::CategoryMetaRow {
+						category: category.clone(),
+						meta,
+					},
+				)]))?;
+				Ok(())
+			})
+			.unwrap();
+		};
+		set_kind(veritas_domain::CategoryKind::Savings);
+		match core.perform(Command::ReopenGoal {
+			goal_id: id.clone(),
+		}) {
+			Err(FfiError::Invalid { message }) => assert_eq!(
+				message,
+				"This category is now a savings category. Change it back to an expense category to reopen this goal."
+			),
+			other => panic!("{other:?}"),
+		}
+		assert_eq!(
+			data(&core).category_kind(&category),
+			veritas_domain::CategoryKind::Savings
+		);
+		set_kind(veritas_domain::CategoryKind::Expense);
+		core.perform(Command::ReopenGoal {
+			goal_id: id.clone(),
+		})
+		.unwrap();
+		assert_eq!(goal_of(&core, &id).state, crate::GoalState::Active);
+	}
 }
