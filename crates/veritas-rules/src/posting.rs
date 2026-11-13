@@ -58,13 +58,26 @@ pub struct Posting {
 	pub applied: Vec<RuleId>,
 }
 
+/// What asked for the posting a bill was left over.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LeftBy {
+	/// The daily service, on an auto-post bill that is due or missed.
+	/// Actual's own service posts it on its next open, which is why the plan
+	/// then leaves out `ScheduleRunDone`.
+	Service,
+	/// Ryan marking the bill Paid.
+	Paid,
+	/// "Post transaction" or "Post transaction today".
+	PostNow,
+}
+
 /// A bill Veritas leaves to Actual (D60): one of its occurrences met a rule
 /// Veritas can't run, so the plan holds none of this bill's posts, writes or
-/// new payees from this turn. Actual posts it the next time it opens the
-/// budget, which is why the plan then leaves out `ScheduleRunDone`.
+/// new payees from this turn.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LeftBill {
 	pub schedule: ScheduleId,
+	pub by: LeftBy,
 	/// The occurrence as far as Veritas's rules got, for showing only.
 	pub partial: RuleTransaction,
 	pub undetermined: Vec<RuleId>,
@@ -89,9 +102,20 @@ impl LeftBill {
 		} else {
 			format!(" ({})", reasons.join("; "))
 		};
-		format!(
-			"Veritas left this bill for Actual: {rules} couldn't run here{why}. Actual posts it the next time it opens this budget."
-		)
+		// Only the service's own case gets posted by Actual without a hand:
+		// a Paid or a Post now on any bill, or on an auto-post bill that isn't
+		// due yet, waits for Ryan in Actual.
+		match self.by {
+			LeftBy::Service => format!(
+				"Veritas left this bill for Actual: {rules} couldn't run here{why}. Actual posts it the next time it opens this budget."
+			),
+			LeftBy::Paid => format!(
+				"Veritas didn't record this payment: {rules} couldn't run here{why}. Enter the payment in Actual instead."
+			),
+			LeftBy::PostNow => format!(
+				"Veritas didn't post this bill: {rules} couldn't run here{why}. Use Post transaction on it in Actual instead."
+			),
+		}
 	}
 }
 
@@ -111,7 +135,8 @@ struct Facts<'a> {
 	payee: Option<PayeeId>,
 	account: Option<AccountId>,
 	/// `None` when the amount isn't whole cents.
-	amount: Option<i64>,
+	/// Why Veritas can't hold it when it isn't whole cents or can't be read.
+	amount: Result<i64, &'static str>,
 	raw_date: Option<Value>,
 	date: Option<DateValue>,
 	date_op_is: bool,
@@ -149,7 +174,13 @@ fn facts<'a>(schedule: &'a Schedule, budget: &BudgetData) -> Option<Facts<'a>> {
 		schedule,
 		payee,
 		account,
-		amount: scheduled_amount(value(slots.amount).as_ref()),
+		amount: {
+			let raw = value(slots.amount);
+			scheduled_amount(raw.as_ref()).ok_or(match raw {
+				Some(Value::Number(_)) => "a bill amount that isn't whole cents",
+				_ => "a bill amount Veritas can't read",
+			})
+		},
 		raw_date,
 		date,
 		date_op_is,
@@ -209,6 +240,7 @@ struct Planner<'a> {
 	budget: &'a BudgetData,
 	payees: &'a mut dyn PayeeDirectory,
 	plan: SchedulePlan,
+	by: LeftBy,
 }
 
 impl Planner<'_> {
@@ -227,7 +259,7 @@ impl Planner<'_> {
 		let draft = RuleTransaction {
 			account: account.clone(),
 			date,
-			amount: amount.or(scheduled).unwrap_or(Money::ZERO),
+			amount: amount.or(scheduled.ok()).unwrap_or(Money::ZERO),
 			payee: facts.payee.clone(),
 			category: None,
 			notes: None,
@@ -239,16 +271,14 @@ impl Planner<'_> {
 			splits: Vec::new(),
 			is_child: false,
 		};
-		if amount.is_none() && scheduled.is_none() {
+		if let (None, Err(problem)) = (amount, scheduled) {
 			let rule = facts.schedule.rule.clone();
 			return Err(Box::new(LeftBill {
 				schedule: facts.schedule.id.clone(),
+				by: self.by,
 				partial: draft,
 				undetermined: vec![rule.clone()],
-				reasons: BTreeMap::from([(
-					rule,
-					"a bill amount that isn't whole cents".to_owned(),
-				)]),
+				reasons: BTreeMap::from([(rule, problem.to_owned())]),
 			}));
 		}
 		let outcome = self.book.run(&draft, self.budget, self.payees);
@@ -262,6 +292,7 @@ impl Planner<'_> {
 				}
 				return Err(Box::new(LeftBill {
 					schedule: facts.schedule.id.clone(),
+					by: self.by,
 					partial,
 					undetermined: outcome.undetermined,
 					reasons: outcome.reasons,
@@ -382,6 +413,7 @@ pub fn advance_schedules(
 		budget,
 		payees,
 		plan: SchedulePlan::default(),
+		by: LeftBy::Service,
 	};
 	for schedule in budget
 		.schedules
@@ -501,6 +533,7 @@ pub fn post_now(
 		budget,
 		payees,
 		plan: SchedulePlan::default(),
+		by: LeftBy::PostNow,
 	};
 	if let Err(left) = planner.post(&facts, date, None) {
 		planner.plan.left.push(*left);
@@ -533,6 +566,7 @@ pub fn pay(
 		budget,
 		payees,
 		plan: SchedulePlan::default(),
+		by: LeftBy::Paid,
 	};
 	if let Err(left) = planner.post(&facts, date, Some(amount)) {
 		planner.plan.left.push(*left);
@@ -818,6 +852,58 @@ mod tests {
 		assert_eq!(
 			left.note(),
 			"Veritas left this bill for Actual: 1 rule couldn't run here (a template action). Actual posts it the next time it opens this budget."
+		);
+	}
+
+	#[test]
+	fn the_note_for_a_left_bill_says_what_happens_next() {
+		// A Paid or Post now that meets a rule Veritas can't run isn't posted by
+		// Actual on its own, unlike the daily service's case.
+		let mut budget = budget_with(&bill(monthly(), false), "2026-12-15");
+		add_rule(
+			&mut budget,
+			"template",
+			serde_json::json!([{"op": "lt", "field": "amount", "value": 0}]),
+			serde_json::json!([{"op": "set", "field": "notes", "value": "", "options": {"template": "{{date}}"}}]),
+		);
+		let book = RuleBook::new(&budget);
+		let id = ScheduleId::new("rent");
+		let mut payees = BudgetPayees::new(&budget, || PayeeId::new("made"));
+		let paid = pay(
+			&book,
+			&budget,
+			&mut payees,
+			&id,
+			Money::from_minor(-150_000),
+			day("2026-12-14"),
+		)
+		.unwrap();
+		assert!(paid.posts.is_empty() && paid.writes.is_empty());
+		assert_eq!(paid.left[0].by, LeftBy::Paid);
+		assert_eq!(
+			paid.left[0].note(),
+			"Veritas didn't record this payment: 1 rule couldn't run here (a template action). Enter the payment in Actual instead."
+		);
+		let posted = post_now(&book, &budget, &mut payees, &id, None).unwrap();
+		assert_eq!(posted.left[0].by, LeftBy::PostNow);
+		assert!(
+			posted.left[0]
+				.note()
+				.ends_with("Use Post transaction on it in Actual instead.")
+		);
+	}
+
+	#[test]
+	fn an_amount_veritas_cannot_read_says_so() {
+		let mut budget = budget_with(&bill(monthly(), true), "2026-10-15");
+		let rule = budget.rules.get_mut(&RuleId::new("rule")).unwrap();
+		rule.conditions_json = rule.conditions_json.replace("-150000", "\"lots\"");
+		let book = RuleBook::new(&budget);
+		let mut payees = BudgetPayees::new(&budget, || PayeeId::new("made"));
+		let plan = advance_schedules(&book, &budget, &mut payees, day("2026-10-15"));
+		assert_eq!(
+			plan.left[0].reasons[&RuleId::new("rule")],
+			"a bill amount Veritas can't read"
 		);
 	}
 
