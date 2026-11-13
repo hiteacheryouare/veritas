@@ -2255,7 +2255,7 @@ mod tests {
 				eta_month: month(2027, 1)
 			})
 		);
-		// E-3: contributions 0, 0, 0: "No ETA: nothing is being added".
+		// E-3, E-14: contributions 0, 0, 0: "No ETA: nothing is being added".
 		let e3 = paced_goal(150_000, Some("2027-04-30"), &[0, 0, 0], 0, 0);
 		assert_eq!(
 			e3.pace,
@@ -2263,7 +2263,8 @@ mod tests {
 				needed_monthly: 25_000
 			})
 		);
-		// A brand-new goal: no complete month of history, "No ETA yet".
+		// E-13: a brand-new goal, no complete month of history, needs 25000 a
+		// month: "No ETA yet".
 		let new = paced_goal(150_000, Some("2027-04-30"), &[], 25_000, 0);
 		assert_eq!(
 			new.pace,
