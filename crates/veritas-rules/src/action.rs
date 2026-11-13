@@ -30,6 +30,38 @@ pub enum Action {
 	PrependNotes(String),
 	AppendNotes(String),
 	DeleteTransaction,
+	/// `set-split-amount`. On split 0, the transaction itself, only a fixed
+	/// amount does anything (`action.ts:201-242`).
+	SplitAmount {
+		split: u32,
+		method: SplitMethod,
+	},
+	/// An action on split line `split`, numbered from 1 as Actual stores
+	/// `options.splitIndex`.
+	InSplit {
+		split: u32,
+		action: Box<Action>,
+	},
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SplitMethod {
+	FixedAmount(Money),
+	/// A percentage of what the fixed amounts leave.
+	FixedPercent(f64),
+	/// An equal share of what the fixed amounts and percentages leave.
+	Remainder,
+}
+
+/// One child of a split, as rules build it. The session stores it the way
+/// `makeSplitTransaction` does (`sync.ts:45-58`): the parent's account, date,
+/// cleared and reconciled, and `sort_order` 0, −1, −2… in this order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SplitLine {
+	pub amount: Money,
+	pub payee: Option<PayeeId>,
+	pub category: Option<CategoryId>,
+	pub notes: Option<String>,
 }
 
 /// The fields a rule reads and writes on a transaction while it runs.
@@ -47,6 +79,23 @@ pub struct RuleTransaction {
 	pub reconciled: Option<bool>,
 	pub schedule: Option<ScheduleId>,
 	pub deleted: bool,
+	/// A split's lines; a transaction with any is a split parent.
+	pub splits: Vec<SplitLine>,
+	/// A split child run on its own, as the "Run rules" action can. Split
+	/// actions skip it (`rule.ts:118-121`).
+	pub is_child: bool,
+}
+
+impl RuleTransaction {
+	/// `recalculateSplit`'s error: what the lines leave of the parent's amount.
+	pub fn split_difference(&self) -> Option<Money> {
+		if self.splits.is_empty() {
+			return None;
+		}
+		let total: i64 = self.splits.iter().map(|line| line.amount.minor()).sum();
+		let difference = self.amount.minor() - total;
+		(difference != 0).then_some(Money::from_minor(difference))
+	}
 }
 
 fn rejected<T>(reason: impl Into<String>) -> Result<T, Gap> {
@@ -86,16 +135,62 @@ impl Action {
 		if field == Some(Field::Account) && !js::truthy(value) {
 			return rejected("field cannot be empty: account");
 		}
-		if op == "set-split-amount" || js::truthy(option("splitIndex")) {
-			return unsupported("a split action");
+		let split = match option("splitIndex") {
+			index if !js::truthy(index) => 0,
+			Some(index) => js::integer(index)
+				.and_then(|n| u32::try_from(n).ok())
+				.ok_or_else(|| Gap::Unsupported("a split line number that isn't whole".into()))?,
+			None => 0,
+		};
+		if op == "set-split-amount" {
+			let method = match option("method").and_then(Value::as_str) {
+				Some("fixed-amount") => match value.and_then(js::integer) {
+					Some(amount) => SplitMethod::FixedAmount(Money::from_minor(amount)),
+					None => return unsupported("a fixed split amount that isn't whole cents"),
+				},
+				Some("fixed-percent") => match value.and_then(Value::as_f64) {
+					Some(percent) => SplitMethod::FixedPercent(percent),
+					None => return unsupported("a split percentage that isn't a number"),
+				},
+				Some("remainder") => SplitMethod::Remainder,
+				Some("formula") => return unsupported("a formula split amount"),
+				_ => return unsupported("a split amount without a known method"),
+			};
+			return Ok(Action::SplitAmount { split, method });
 		}
+		let action = Self::parse_plain(op, field, value, option("template"), option("formula"))?;
+		if split == 0 {
+			return Ok(action);
+		}
+		match action {
+			Action::Set(
+				SetField::Payee(_)
+				| SetField::Category(_)
+				| SetField::Notes(_)
+				| SetField::Amount(_),
+			)
+			| Action::PrependNotes(_)
+			| Action::AppendNotes(_) => Ok(Action::InSplit {
+				split,
+				action: Box::new(action),
+			}),
+			_ => unsupported("an action Veritas can't run on a split line"),
+		}
+	}
 
+	fn parse_plain(
+		op: &str,
+		field: Option<Field>,
+		value: Option<&Value>,
+		template: Option<&Value>,
+		formula: Option<&Value>,
+	) -> Result<Action, Gap> {
 		match op {
 			"set" => {
-				if js::truthy(option("formula")) {
+				if js::truthy(formula) {
 					return unsupported("a formula action");
 				}
-				if js::truthy(option("template")) {
+				if js::truthy(template) {
 					return unsupported("a template action");
 				}
 				let Some(field) = field else {
@@ -143,6 +238,40 @@ impl Action {
 					*id = AccountId::new(target);
 				}
 			}
+			Action::InSplit { action, .. } => action.migrate_ids(map),
+			_ => {}
+		}
+	}
+
+	/// The split line an action belongs to; 0 is the transaction itself.
+	pub fn split(&self) -> u32 {
+		match self {
+			Action::SplitAmount { split, .. } | Action::InSplit { split, .. } => *split,
+			_ => 0,
+		}
+	}
+
+	/// `Action.exec` on a split line.
+	pub(crate) fn apply_to_line(&self, line: &mut SplitLine) {
+		let wrap = |notes: Option<String>, text: &str, before: bool| {
+			Some(match notes.filter(|n| !n.is_empty()) {
+				Some(notes) if before => format!("{text}{notes}"),
+				Some(notes) => format!("{notes}{text}"),
+				None => text.to_owned(),
+			})
+		};
+		match self {
+			Action::InSplit { action, .. } => action.apply_to_line(line),
+			Action::SplitAmount {
+				method: SplitMethod::FixedAmount(amount),
+				..
+			} => line.amount = *amount,
+			Action::Set(SetField::Payee(payee)) => line.payee = payee.clone(),
+			Action::Set(SetField::Category(category)) => line.category = category.clone(),
+			Action::Set(SetField::Notes(notes)) => line.notes = notes.clone(),
+			Action::Set(SetField::Amount(amount)) => line.amount = *amount,
+			Action::PrependNotes(text) => line.notes = wrap(line.notes.take(), text, true),
+			Action::AppendNotes(text) => line.notes = wrap(line.notes.take(), text, false),
 			_ => {}
 		}
 	}
@@ -177,7 +306,11 @@ impl Action {
 					});
 			}
 			Action::DeleteTransaction => transaction.deleted = true,
-			Action::SetPayeeName(_) => {}
+			Action::SplitAmount {
+				method: SplitMethod::FixedAmount(amount),
+				..
+			} => transaction.amount = *amount,
+			Action::SetPayeeName(_) | Action::SplitAmount { .. } | Action::InSplit { .. } => {}
 		}
 	}
 }
@@ -237,6 +370,8 @@ mod tests {
 			reconciled: None,
 			schedule: None,
 			deleted: false,
+			splits: Vec::new(),
+			is_child: false,
 		}
 	}
 
@@ -295,8 +430,8 @@ mod tests {
 		for item in [
 			json!({"op": "set", "field": "notes", "value": "", "options": {"template": "{{imported_payee}}"}}),
 			json!({"op": "set", "field": "amount", "value": 0, "options": {"formula": "=BALANCE_OF(\"x\")"}}),
-			json!({"op": "set-split-amount", "value": 500, "options": {"splitIndex": 1, "method": "fixed-amount"}}),
-			json!({"op": "set", "field": "category", "value": "food", "options": {"splitIndex": 2}}),
+			json!({"op": "set-split-amount", "value": null, "options": {"splitIndex": 1, "method": "formula", "formula": "=1"}}),
+			json!({"op": "set", "field": "cleared", "value": true, "options": {"splitIndex": 2}}),
 			json!({"op": "set", "field": "amount", "value": 12.5}),
 		] {
 			assert!(matches!(gap(item.clone()), Gap::Unsupported(_)), "{item}");
