@@ -10,6 +10,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use veritas_domain::{CoreError, YearMonth};
 
+pub use blocking::CancelToken;
 pub use budget::{BudgetMonth, EnvelopeGroup, EnvelopeRow, MoneyTone};
 pub use commands::Command;
 pub use records::{

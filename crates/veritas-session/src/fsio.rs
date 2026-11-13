@@ -21,6 +21,19 @@ pub(crate) fn sync_file(path: &Path) -> Result<(), CoreError> {
 		.map_err(io_error("flush", path))
 }
 
+/// Flushes every file directly in `dir`, then `dir` itself, so a folder that
+/// is about to be renamed into place holds whole files after a power cut.
+pub(crate) fn sync_folder(dir: &Path) -> Result<(), CoreError> {
+	for entry in fs::read_dir(dir).map_err(io_error("read", dir))? {
+		let path = entry.map_err(io_error("read", dir))?.path();
+		if path.is_file() {
+			sync_file(&path)?;
+		}
+	}
+	sync_dir(dir);
+	Ok(())
+}
+
 /// Makes a rename durable. Some filesystems refuse to fsync a directory, and
 /// by then the rename has already happened, so a refusal isn't a failure.
 pub(crate) fn sync_dir(dir: &Path) {

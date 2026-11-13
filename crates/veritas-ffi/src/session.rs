@@ -6,7 +6,7 @@ use veritas_session::{
 	Backend, CancelToken, ChangeSet, Session as CoreSession, SessionOptions, SharedSession,
 };
 
-use crate::blocking::run;
+use crate::blocking::{CancelToken as CancelHandle, run};
 use crate::budget::BudgetMonth;
 use crate::commands::Command;
 use crate::records::NewBudgetOptions;
@@ -304,40 +304,49 @@ impl Session {
 impl Session {
 	/// Opens a budget folder. It is usable as soon as this returns, while the
 	/// full integrity check finishes in the background. The work runs off the
-	/// caller's thread; cancelling the task closes the budget again.
+	/// caller's thread; cancelling `cancel` closes the budget again.
 	#[uniffi::constructor]
-	pub async fn open(directory: String) -> Result<Arc<Session>, FfiError> {
-		run(move |cancel| Core::open(&directory, cancel))
+	pub async fn open(
+		directory: String,
+		cancel: Arc<CancelHandle>,
+	) -> Result<Arc<Session>, FfiError> {
+		run(&cancel, move |cancel| Core::open(&directory, cancel))
 			.await
 			.map(Session::wrap)
 	}
 
 	/// Starts a brand-new budget in `directory`, which must not exist yet, and
 	/// opens it (R-IO-0). It is built aside and renamed into place, so
-	/// cancelling the task before then leaves nothing behind.
+	/// cancelling `cancel` before then leaves nothing behind.
 	#[uniffi::constructor]
 	pub async fn create_budget(
 		name: String,
 		directory: String,
 		format: NumberFormat,
 		options: NewBudgetOptions,
+		cancel: Arc<CancelHandle>,
 	) -> Result<Arc<Session>, FfiError> {
-		run(move |cancel| Core::create_budget(&name, &directory, &format, &options, cancel))
-			.await
-			.map(Session::wrap)
+		run(&cancel, move |cancel| {
+			Core::create_budget(&name, &directory, &format, &options, cancel)
+		})
+		.await
+		.map(Session::wrap)
 	}
 
 	/// Copies an Actual export into `into_directory`, which must not exist
-	/// yet, then opens it. The zip itself is only read, and cancelling the
-	/// task before the copy is in place leaves nothing behind.
+	/// yet, then opens it. The zip itself is only read, and cancelling
+	/// `cancel` before the copy is in place leaves nothing behind.
 	#[uniffi::constructor]
 	pub async fn import_actual_zip(
 		zip: String,
 		into_directory: String,
+		cancel: Arc<CancelHandle>,
 	) -> Result<Arc<Session>, FfiError> {
-		run(move |cancel| Core::import_actual_zip(&zip, &into_directory, cancel))
-			.await
-			.map(Session::wrap)
+		run(&cancel, move |cancel| {
+			Core::import_actual_zip(&zip, &into_directory, cancel)
+		})
+		.await
+		.map(Session::wrap)
 	}
 
 	pub fn state(&self) -> Result<SessionState, FfiError> {
@@ -364,9 +373,13 @@ impl Session {
 	/// Writes an Actual zip to `to` (R-IO-2), snapshotting a writable budget
 	/// first. SQLite damage refuses it with `AuditFailed`. Other audit
 	/// findings come back with the export.
-	pub async fn export_actual_zip(&self, to: String) -> Result<Vec<AuditFinding>, FfiError> {
+	pub async fn export_actual_zip(
+		&self,
+		to: String,
+		cancel: Arc<CancelHandle>,
+	) -> Result<Vec<AuditFinding>, FfiError> {
 		let core = self.core.clone();
-		run(move |cancel| core.export_actual_zip(&to, cancel)).await
+		run(&cancel, move |cancel| core.export_actual_zip(&to, cancel)).await
 	}
 
 	/// The folder `back_up_now` writes to. Swift starts security-scoped
@@ -1056,5 +1069,170 @@ mod tests {
 			}),
 			Err(FfiError::NotFound { .. })
 		));
+	}
+
+	fn entries(dir: &Path) -> Vec<String> {
+		let mut names: Vec<String> = std::fs::read_dir(dir)
+			.unwrap()
+			.map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+			.collect();
+		names.sort();
+		names
+	}
+
+	/// Runs `work` while another thread cancels it after `delay`, the way
+	/// Swift cancels the task when the user closes the setup sheet.
+	fn cancelled_after<T>(
+		delay: std::time::Duration,
+		work: impl FnOnce(&CancelToken) -> Result<T, FfiError>,
+	) -> Result<T, FfiError> {
+		let cancel = CancelToken::default();
+		let canceller = {
+			let cancel = cancel.clone();
+			std::thread::spawn(move || {
+				std::thread::sleep(delay);
+				cancel.cancel();
+			})
+		};
+		let result = work(&cancel);
+		canceller.join().unwrap();
+		result
+	}
+
+	#[test]
+	fn cancelling_a_create_or_import_at_any_moment_leaves_a_whole_budget_or_nothing() {
+		// R-REL-7, PLAN §6.6: a cancel either wins, and the folder is as it was,
+		// or lands after the rename, and the budget is whole and free to open.
+		use crate::{NewAccount, NewAccountKind, NewBudgetOptions, NumberFormat, NumberStyle};
+		let format = NumberFormat {
+			currency: Some("USD".to_owned()),
+			style: NumberStyle::CommaDot,
+			hide_decimals: false,
+		};
+		let options = NewBudgetOptions {
+			retirement_401k: true,
+			hsa: true,
+			accounts: vec![NewAccount {
+				name: "Checking".to_owned(),
+				kind: NewAccountKind::Checking,
+				starting_balance: 120_000,
+			}],
+		};
+		let create = |into: &str, cancel: &CancelToken| {
+			Core::<veritas_store::Store>::create_budget(
+				"Household",
+				into,
+				&format,
+				&options,
+				cancel,
+			)
+		};
+		let import = |into: &str, cancel: &CancelToken| {
+			Core::<veritas_store::Store>::import_actual_zip(&small_zip(), into, cancel)
+		};
+		let mut outcomes = std::collections::BTreeMap::new();
+
+		for (what, start) in [
+			(
+				"create",
+				&create as &dyn Fn(&str, &CancelToken) -> Result<Core<_>, FfiError>,
+			),
+			("import", &import),
+		] {
+			let timing = Scratch::new("cancel-timing");
+			let began = std::time::Instant::now();
+			start(&timing.budget(), &CancelToken::default()).unwrap();
+			let takes = began.elapsed();
+
+			for step in 0..24u32 {
+				let scratch = Scratch::new("cancel");
+				let delay = takes * step / 16;
+				match cancelled_after(delay, |cancel| start(&scratch.budget(), cancel)) {
+					Err(FfiError::Cancelled) => {
+						assert_eq!(
+							entries(&scratch.0),
+							Vec::<String>::new(),
+							"{what} at {delay:?}"
+						);
+						*outcomes.entry((what, "cancelled")).or_insert(0) += 1;
+					}
+					Ok(core) => {
+						assert_eq!(entries(&scratch.0), ["budget"], "{what} at {delay:?}");
+						assert_eq!(core.state().unwrap().read_only, None);
+						core.close().unwrap();
+						let reopened = Core::<veritas_store::Store>::open(
+							&scratch.budget(),
+							&CancelToken::default(),
+						)
+						.unwrap();
+						assert_eq!(
+							reopened.state().unwrap().read_only,
+							None,
+							"{what} at {delay:?}"
+						);
+						reopened
+							.call(|session| {
+								session.wait_for_open_check();
+								Ok(())
+							})
+							.unwrap();
+						assert_eq!(reopened.audit_report().unwrap(), Some(Vec::new()));
+						*outcomes.entry((what, "finished")).or_insert(0) += 1;
+					}
+					Err(other) => panic!("{what} cancelled at {delay:?}: {other:?}"),
+				}
+			}
+		}
+		eprintln!("cancel outcomes: {outcomes:?}");
+	}
+
+	#[test]
+	fn a_cancel_that_lands_after_open_finished_closes_the_budget_again() {
+		// The token is checked once the budget is open, so a late cancel still
+		// leaves no window holding the budget's lock.
+		let (scratch, core) = imported("cancel-after-open");
+		core.close().unwrap();
+		let cancel = CancelToken::default();
+		cancel.cancel();
+
+		let opened = Core::<veritas_store::Store>::open(&scratch.budget(), &cancel);
+
+		assert!(
+			matches!(opened, Err(FfiError::Cancelled)),
+			"{:?}",
+			opened.err()
+		);
+		let reopened =
+			Core::<veritas_store::Store>::open(&scratch.budget(), &CancelToken::default()).unwrap();
+		assert_eq!(reopened.state().unwrap().read_only, None);
+	}
+
+	#[test]
+	fn an_import_cancelled_mid_flight_leaves_nothing_behind() {
+		// The 100k-transaction fixture takes long enough to cancel mid-copy.
+		let scratch = Scratch::new("cancel-import");
+		let zip = Path::new(env!("CARGO_MANIFEST_DIR"))
+			.join("../../fixtures/synthetic/perf-100k.zip")
+			.display()
+			.to_string();
+		let cancel = CancelToken::default();
+		let canceller = {
+			let cancel = cancel.clone();
+			std::thread::spawn(move || {
+				std::thread::sleep(std::time::Duration::from_millis(30));
+				cancel.cancel();
+			})
+		};
+
+		let imported =
+			Core::<veritas_store::Store>::import_actual_zip(&zip, &scratch.budget(), &cancel);
+
+		canceller.join().unwrap();
+		assert!(
+			matches!(imported, Err(FfiError::Cancelled)),
+			"{:?}",
+			imported.err().map(|e| e.to_string())
+		);
+		assert_eq!(std::fs::read_dir(&scratch.0).unwrap().count(), 0);
 	}
 }

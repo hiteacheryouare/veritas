@@ -4,32 +4,62 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::task::{Context, Poll, Waker};
 
-use veritas_session::CancelToken;
+use veritas_session::CancelToken as CoreCancel;
 
 use crate::FfiError;
+
+/// Cancels long work: open, import, create and export. Swift makes one per
+/// call, passes it in, and calls `cancel()` from `withTaskCancellationHandler`.
+/// UniFFI never cancels the Rust side of an `async` call by itself, so this
+/// token is the only way work stops early.
+#[derive(Debug, Default, uniffi::Object)]
+pub struct CancelToken {
+	token: CoreCancel,
+}
+
+#[uniffi::export]
+impl CancelToken {
+	#[uniffi::constructor]
+	pub fn new() -> Arc<CancelToken> {
+		Arc::new(CancelToken::default())
+	}
+
+	/// Stops the work before its one visible step. Calling it after the work
+	/// finished, or twice, does nothing.
+	pub fn cancel(&self) {
+		self.token.cancel();
+	}
+
+	pub fn is_cancelled(&self) -> bool {
+		self.token.is_cancelled()
+	}
+}
+
+impl CancelToken {
+	pub(crate) fn core(&self) -> CoreCancel {
+		self.token.clone()
+	}
+}
 
 struct Slot<T> {
 	result: Option<Result<T, FfiError>>,
 	waker: Option<Waker>,
 }
 
-/// Blocking core work on its own thread, as a future Swift can await. When
-/// Swift cancels its task, UniFFI drops this future, and dropping it cancels
-/// the work's token.
+/// Blocking core work on its own thread, as a future Swift can await.
 pub(crate) struct Blocking<T> {
 	slot: Arc<Mutex<Slot<T>>>,
-	cancel: CancelToken,
 }
 
 pub(crate) fn run<T: Send + 'static>(
-	work: impl FnOnce(&CancelToken) -> Result<T, FfiError> + Send + 'static,
+	cancel: &CancelToken,
+	work: impl FnOnce(&CoreCancel) -> Result<T, FfiError> + Send + 'static,
 ) -> Blocking<T> {
 	let slot = Arc::new(Mutex::new(Slot {
 		result: None,
 		waker: None,
 	}));
-	let cancel = CancelToken::default();
-	let (thread_slot, thread_cancel) = (slot.clone(), cancel.clone());
+	let (thread_slot, thread_cancel) = (slot.clone(), cancel.core());
 	let spawned = std::thread::Builder::new()
 		.name("veritas-core".to_owned())
 		.spawn(move || {
@@ -51,7 +81,7 @@ pub(crate) fn run<T: Send + 'static>(
 				message: format!("couldn't start background work: {error}"),
 			}));
 	}
-	Blocking { slot, cancel }
+	Blocking { slot }
 }
 
 impl<T> Future for Blocking<T> {
@@ -69,15 +99,8 @@ impl<T> Future for Blocking<T> {
 	}
 }
 
-impl<T> Drop for Blocking<T> {
-	fn drop(&mut self) {
-		self.cancel.cancel();
-	}
-}
-
 #[cfg(test)]
 mod tests {
-	use std::sync::atomic::{AtomicBool, Ordering};
 	use std::task::Wake;
 	use std::thread::Thread;
 	use std::time::{Duration, Instant};
@@ -105,30 +128,34 @@ mod tests {
 
 	#[test]
 	fn awaiting_blocking_work_returns_its_result() {
-		assert_eq!(block_on(run(|_| Ok(42))).unwrap(), 42);
+		let token = CancelToken::new();
+		assert_eq!(block_on(run(&token, |_| Ok(42))).unwrap(), 42);
 		assert!(matches!(
-			block_on(run(|_| -> Result<(), FfiError> { panic!("a bug") })),
+			block_on(run(&token, |_| -> Result<(), FfiError> { panic!("a bug") })),
 			Err(FfiError::Internal { .. })
 		));
 	}
 
 	#[test]
-	fn dropping_the_future_cancels_the_work() {
-		let saw_cancel = Arc::new(AtomicBool::new(false));
-		let seen = saw_cancel.clone();
-		let future = run(move |cancel| {
+	fn cancelling_the_token_reaches_work_already_running() {
+		let token = CancelToken::new();
+		let future = run(&token, |cancel| {
 			let deadline = Instant::now() + Duration::from_secs(5);
 			while !cancel.is_cancelled() && Instant::now() < deadline {
 				std::thread::sleep(Duration::from_millis(1));
 			}
-			seen.store(cancel.is_cancelled(), Ordering::SeqCst);
-			Ok(())
+			Ok(cancel.is_cancelled())
 		});
-		drop(future);
-		let deadline = Instant::now() + Duration::from_secs(5);
-		while !saw_cancel.load(Ordering::SeqCst) && Instant::now() < deadline {
-			std::thread::sleep(Duration::from_millis(1));
-		}
-		assert!(saw_cancel.load(Ordering::SeqCst));
+		std::thread::sleep(Duration::from_millis(20));
+		token.cancel();
+		assert!(block_on(future).unwrap());
+		assert!(token.is_cancelled());
+	}
+
+	#[test]
+	fn finished_work_leaves_the_token_alone() {
+		let token = CancelToken::new();
+		block_on(run(&token, |_| Ok(()))).unwrap();
+		assert!(!token.is_cancelled());
 	}
 }

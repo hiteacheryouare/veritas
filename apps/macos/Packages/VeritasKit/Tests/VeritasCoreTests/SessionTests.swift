@@ -28,7 +28,8 @@ private final class Scratch {
 
 private func importSmall(into scratch: Scratch) async throws -> Session {
 	let zip = repoRoot.appending(path: "fixtures/synthetic/small.zip").path
-	return try await Session.importActualZip(zip: zip, intoDirectory: scratch.budget)
+	return try await Session.importActualZip(
+		zip: zip, intoDirectory: scratch.budget, cancel: CancelToken())
 }
 
 /// The full integrity check runs in the background after opening.
@@ -70,7 +71,7 @@ private final class Recorder: ChangeListener, @unchecked Sendable {
 @Test func aSecondWindowShowsTheOpenElsewhereBanner() async throws {
 	let scratch = try Scratch()
 	let first = try await importSmall(into: scratch)
-	let second = try await Session.open(directory: scratch.budget)
+	let second = try await Session.open(directory: scratch.budget, cancel: CancelToken())
 
 	#expect(try second.state().readOnly == .openElsewhere)
 	#expect {
@@ -89,7 +90,7 @@ private final class Recorder: ChangeListener, @unchecked Sendable {
 
 	try first.close()
 
-	#expect(try await Session.open(directory: scratch.budget).state().readOnly == nil)
+	#expect(try await Session.open(directory: scratch.budget, cancel: CancelToken()).state().readOnly == nil)
 	#expect(throws: FfiError.self) { try first.state() }
 }
 
@@ -128,7 +129,7 @@ private final class Recorder: ChangeListener, @unchecked Sendable {
 	#expect(overview.groups.map(\.group) == [.cash, .credit, .investments, .loans])
 
 	let zip = scratch.url.appending(path: "export.zip").path
-	_ = try await session.exportActualZip(to: zip)
+	_ = try await session.exportActualZip(to: zip, cancel: CancelToken())
 	#expect(FileManager.default.fileExists(atPath: zip))
 
 	let folder = scratch.url.appending(path: "Backups")
@@ -152,7 +153,8 @@ private final class Recorder: ChangeListener, @unchecked Sendable {
 		])
 
 	let session = try await Session.createBudget(
-		name: "Household", directory: scratch.budget, format: format, options: options)
+		name: "Household", directory: scratch.budget, format: format, options: options,
+		cancel: CancelToken())
 
 	#expect(try session.state().readOnly == nil)
 	let overview = try session.overview()
@@ -170,4 +172,33 @@ private final class Recorder: ChangeListener, @unchecked Sendable {
 	#expect(try evaluateAmount(text: "12.50+3", style: .commaDot) == 1_550)
 	#expect(try evaluateAmount(text: "1.234,5", style: .dotComma) == 123_450)
 	#expect(throws: FfiError.self) { try evaluateAmount(text: "abc", style: .commaDot) }
+}
+
+/// What VeritasKit's wrapper does: the Swift task's cancellation reaches the
+/// core through the token, because UniFFI never cancels the Rust side itself.
+private func importCancellably(zip: String, into directory: String) async throws -> Session {
+	let token = CancelToken()
+	return try await withTaskCancellationHandler {
+		try await Session.importActualZip(zip: zip, intoDirectory: directory, cancel: token)
+	} onCancel: {
+		token.cancel()
+	}
+}
+
+@Test func cancellingAnImportMidFlightLeavesNothingBehind() async throws {
+	let scratch = try Scratch()
+	let zip = repoRoot.appending(path: "fixtures/synthetic/perf-100k.zip").path
+	let task = Task { try await importCancellably(zip: zip, into: scratch.budget) }
+	try await Task.sleep(for: .milliseconds(20))
+
+	task.cancel()
+
+	await #expect {
+		_ = try await task.value
+	} throws: { error in
+		guard case FfiError.Cancelled = error else { return false }
+		return true
+	}
+	let left = try FileManager.default.contentsOfDirectory(atPath: scratch.url.path)
+	#expect(left.isEmpty, "left behind: \(left)")
 }
