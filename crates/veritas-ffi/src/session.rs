@@ -2122,7 +2122,7 @@ mod tests {
 	#[test]
 	fn the_goal_card_paces_by_fc6_like_the_forecast() {
 		// FC-6 E-1 to E-6, moved to November 2026 as the current month.
-		use crate::GoalPace::{Behind, OnTrack};
+		use crate::GoalPace::{Behind, NoHistory, NotAdding, OnTrack};
 		// E-1: available 112000, contributions 25000, 25000, 20000: remaining
 		// 38000, pace 25000, 2 months: January 2027.
 		let e1 = paced_goal(
@@ -2169,11 +2169,19 @@ mod tests {
 				eta_month: month(2027, 1)
 			})
 		);
-		// E-3: nothing added: no ETA, so behind.
+		// E-3: contributions 0, 0, 0: "No ETA: nothing is being added".
 		let e3 = paced_goal(150_000, Some("2027-04-30"), &[0, 0, 0], 0, 0);
 		assert_eq!(
 			e3.pace,
-			Some(Behind {
+			Some(NotAdding {
+				needed_monthly: 25_000
+			})
+		);
+		// A brand-new goal: no complete month of history, "No ETA yet".
+		let new = paced_goal(150_000, Some("2027-04-30"), &[], 25_000, 0);
+		assert_eq!(
+			new.pace,
+			Some(NoHistory {
 				needed_monthly: 25_000
 			})
 		);
