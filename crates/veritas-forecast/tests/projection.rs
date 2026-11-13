@@ -529,11 +529,20 @@ fn r_fc_2_what_ifs_count_from_today_and_reject_the_past() {
 			amount: cents(-7000),
 		}],
 	);
-	let result =
-		Forecaster::new(&book.budget)
-			.unwrap()
-			.project(date(TODAY), &fc_3_flows(), Some(&past));
-	assert!(matches!(result, Err(CoreError::Invalid(_))));
+	let kept = project(&book, &fc_3_flows(), Some(&past));
+	let baseline = project(&book, &fc_3_flows(), None);
+	assert_eq!(
+		kept.months, baseline.months,
+		"D67: a stored past event is left out"
+	);
+	assert_eq!(kept.in_the_past, [past.events[0].id.clone()]);
+	assert!(
+		matches!(
+			veritas_forecast::validate_new(&past.events[0].change, date(TODAY)),
+			Err(CoreError::Invalid(_))
+		),
+		"D67: only a new past entry is refused"
+	);
 }
 
 #[test]
@@ -931,7 +940,6 @@ fn fc_3_a_planned_asset_purchase_is_a_one_time_transfer() {
 	for (from, to, on, amount) in [
 		("CHK", "CHK", "2027-03-10", 100),
 		("CHK", "CAR", "2027-03-10", 0),
-		("CHK", "CAR", "2027-01-14", 100),
 	] {
 		let bad = scenario(
 			"Bad",
@@ -947,6 +955,47 @@ fn fc_3_a_planned_asset_purchase_is_a_one_time_transfer() {
 			Err(CoreError::Invalid(_))
 		));
 	}
+	let earlier = ScenarioChange::OneTimeTransfer {
+		date: date("2027-01-14"),
+		from: acct("CHK"),
+		to: acct("CAR"),
+		amount: cents(100),
+	};
+	assert!(veritas_forecast::validate_new(&earlier, date(TODAY)).is_err());
+}
+
+#[test]
+fn d67_every_kind_of_change_can_be_in_the_past() {
+	let today = date(TODAY);
+	let past = |change: ScenarioChange| veritas_forecast::in_the_past(&change, today).unwrap();
+	assert!(past(ScenarioChange::Recurring {
+		start: date("2026-06-01"),
+		end_month: Some(ym("2026-12")),
+		cadence: Cadence::EveryMonths(1),
+		account: acct("CHK"),
+		category: None,
+		amount: cents(100),
+	}));
+	assert!(!past(ScenarioChange::Recurring {
+		start: date("2026-06-01"),
+		end_month: Some(ym("2027-01")),
+		cadence: Cadence::EveryWeeks(1),
+		account: acct("CHK"),
+		category: None,
+		amount: cents(100),
+	}));
+	assert!(past(ScenarioChange::CategoryPercent {
+		category: cat("Groceries"),
+		percent_bp: 100,
+		start_month: ym("2026-01"),
+		end_month: Some(ym("2026-12")),
+	}));
+	assert!(!past(ScenarioChange::GoalContribution {
+		goal: GoalId::new("laptop"),
+		amount: cents(100),
+		start_month: ym("2026-01"),
+		end_month: Some(ym("2027-01")),
+	}));
 }
 
 #[test]
