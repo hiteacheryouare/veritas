@@ -143,9 +143,10 @@ Carry excludes this month's own budgeted amount, so following the suggestion doe
 `active` -> `reached` -> `closed`. The state is stored and only moves forward.
 
 - **active to reached.** After every command that can change the goal's `available` (budget edit, move, transaction in or out of the category), Veritas checks `available >= target` for the current month and, if true, sets `reached` and `reached_month = M` in the same SQLite transaction (R-REL-1). Imported goals with no stored state are backfilled once: `reached_month` is the first month-end where Actual's `available >= target`.
-- **Spending never reverts it.** Buying the laptop for 148000 drops `available` to 2000, but status stays `reached` and the card reads "Reached → Spent" (PLAN section 10).
+- **Spending never reverts it.** Buying the laptop for 148000 drops `available` to 2000, but status stays `reached` and the card reads "Reached → Spent" (PLAN section 10). **Spent** means status `reached` with `available < target`. A spent goal gets no refill suggestion and no ETA (D66, GOAL-10). With `available >= target` the card reads "Reached".
 - **closed.** Set by Close goal (DEBT-8.3), from `active` or `reached`.
-- **Reopen.** Sets status to `reached` if `reached_month` is set, else `active`, and unhides the category. Nothing else.
+- **Reopen.** Sets status to `reached` if `reached_month` is set, else `active`, and unhides the category. Nothing else. A reopened goal that was reached and is still spent keeps reading "Reached → Spent" and gets no suggestion, because status never moves back.
+- **Re-target.** Status only moves forward, so a goal that was reached is not set back to `active`. Re-targeting means the user gives the category a new goal with a new target (and, optionally, a date): a new `veritas_goal` row in `active`, from the current month. The old goal keeps its `reached_month` and still counts once in Wrapped for the year it was reached. The new goal gets suggestions and an ETA like any active goal (DEBT-8.1, FC-6).
 
 Actual representation (Ryan's choice at Gate 0): Veritas writes a note line `#goal <amount>` on the category, in major units with at most two decimals and no thousands separator (for 150000 cents: `#goal 1500.00`; Actual's grammar `goal-template.pegjs:29,90,96` per `docs/actual-format.md`), and writes `zero_budgets.goal` = target in cents with `long_goal` = 1 for the current month and each later month Veritas creates. Rules: only one `#goal` line per category; Actual's template apply nulls `goal_def` for categories whose notes lack the line, so Veritas keeps the line when it edits notes; Actual shows progress only behind its experimental goal-templates flag; target dates exist only in `veritas_goal`. Closing a goal leaves the note line and the existing rows untouched.
 
@@ -161,7 +162,7 @@ Let `M` be the current budget month and `L` the goal's **available** at the end 
 
 Rules:
 
-- **GOAL-1** Closing never writes, edits, deletes, re-categorizes or re-files a transaction. The only writes are budget amounts of month M (the two budget cells), the goal status and the category's `hidden` flag. A diff of `transactions` before and after is empty.
+- **GOAL-1** Closing never writes, edits, deletes, re-categorizes or re-files a transaction. The only writes are budget amounts of month M (the two budget cells), the goal status and the category's `hidden` flag, plus the later months' budget cells only when the user checks GOAL-10's "Also move those". A diff of `transactions` before and after is empty.
 - **GOAL-2** Budget amounts may go negative as a result (e.g. goal budgeted 0 in M and `L = 2000` makes it -2000). Actual's `setBudget` does not clamp (`actions.ts:126-153`). VERIFY in P0.4 against the oracle that no later step rejects negative budgeted amounts.
 - **GOAL-3** A negative release can overspend the chosen envelope. Veritas does not block it. The sheet shows "Dining will be $X over" before confirmation and offers to pick a different envelope.
 - **GOAL-4** Months before `M` keep their budget amounts. Months after `M` start from available 0 for the goal, so nothing carries.
@@ -170,6 +171,11 @@ Rules:
 - **GOAL-7** The move writes Actual's usual movement note, as `transferCategory` does (`addMovementNotes`, `actions.ts:669-675`), so Actual shows the same history. WS-ENGINE owns parity.
 - **GOAL-8** Releasing an overspent goal against To Budget (`L < 0`, source To Budget) is allowed and unclamped: goal budgeted amount `+= |L|`, To Budget falls by `|L|` and may go negative (overbudgeted, which Actual carries forward). Actual's own helpers clamp to To Budget or write a junk row, so Veritas writes the budget cell directly and the movement note (GOAL-7). The sheet warns "To Budget will be $X over" before confirmation, as in GOAL-3. The goal always ends at available 0.
 - **GOAL-9** The `reached_month` backfill for imported goals scans months up to and including the current month only: the first month whose available is at least the target (the current month counts as soon as it is). Budget amounts planned for future months never mark a goal reached.
+- **GOAL-10** (D66) **A spent goal is not nagged, and closing shows later budget.**
+  - A goal with status `reached` and `available < target` reads "Reached → Spent". It has no refill suggestion (FC-5 reads "{Goal}: reached, keeping ${current budgeted}") and no ETA (FC-6). It gets them again only as a new goal after a re-target (DEBT-8.2).
+  - Before the user confirms Close goal, the sheet lists the goal category's budgeted amounts in months after `M`: "{Goal} has {total} budgeted in {n} later months. It stays in the hidden envelope unless you move it." Months whose budgeted amount is 0 are not counted.
+  - An unchecked option, "Also move those to {destination}", makes one budget move per later month with a non-zero amount, in the same command and SQLite transaction as the close, using the same destination and Actual's `transferCategory` semantics (GOAL-7 movement note per move): for each later month `m` with budgeted amount `b`, goal budgeted `-= b` and destination budgeted `+= b`. To Budget as destination only lowers the goal's cell. A negative `b` moves the other way. No transaction is touched (GOAL-1 still holds: these are budget cells).
+  - Left unchecked, only month `M` is written (GOAL-1), and each later month with a non-zero amount in the closed goal's envelope shows the flag "Closed goal has budget". The flag goes away when the amount is 0. Nothing else changes.
 
 Worked examples (all in month M, one goal "New laptop", target 150000):
 
@@ -183,3 +189,7 @@ Worked examples (all in month M, one goal "New laptop", target 150000):
 | R-6 Last year's report | Goal spending 148000 in 2027, closed 2027-03 | 2027 Net Profit still shows the 148000 expense in the goal's category, labeled closed |
 | R-7 Over-saved | Budgeted 160000, bought 148000, available 12000 | Release 12000 |
 | R-8 Late activity | After closing, -1000 categorized to the goal | No new move. Goal shows the notice (GOAL-6) |
+| R-9 Later months, left unchecked | Close in March 2027. Vacation (target 150000) has leftover 2000, released to "General Savings" (30000 in March). April, May and June each have 25000 budgeted in Vacation | March: Vacation -2000, General Savings 32000. April to June stay at 25000 each, 75000 in three later months, and each shows "Closed goal has budget". To Budget in those months is 25000 lower each than if Vacation were empty |
+| R-10 Later months, "Also move those" checked | Same as R-9, checked | April, May and June: Vacation 25000 -> 0, General Savings +25000 each (75000 in total across the three months), one movement note per move, goal flags gone. March is as in R-9. No transaction is touched |
+| R-11 Later months to To Budget | Same as R-9, destination To Budget, checked | April to June: Vacation 25000 -> 0. To Budget in each month rises 25000 by Actual's math. No other envelope changes |
+| R-12 Reached then spent | Target 150000. Reached in February, then 148000 is spent, `available` 2000 | The card reads "Reached → Spent". No suggestion, no ETA. The user sets a new target of 80000: a new active goal, suggestion `ceil((80000 - carry) / months_left)` as usual. The old goal still counts once in that year's Wrapped |

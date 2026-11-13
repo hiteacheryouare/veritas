@@ -298,5 +298,5 @@ Every decision behind Veritas, so no question gets asked twice. D1–D24 are PLA
 
 ### D60. What does the session write when a rule can't run in Veritas?
 - **Options:** apply the rest and record the note / write nothing from that run and show the note
-- **Decision:** When any rule in a run is undetermined, the session writes nothing from that run and shows the note; this replaces "apply the rest and record the note". The transaction, and any payee a rule would have made, is left for Actual. `RunOutcome.transaction` is `None` for such a run, and `SchedulePlan::left_to_actual` lists the bills it affects.
+- **Decision:** When any rule in a run is undetermined, the session writes nothing from that run and shows the note; this replaces "apply the rest and record the note". The transaction, and any payee a rule would have made, is left for Actual. `RunOutcome.transaction` is `None` for such a run, and `SchedulePlan::left_to_actual` lists the bills it affects. (Narrowed by D64: a hand-typed row is saved as typed.)
 - **Date:** 2026-11-11
