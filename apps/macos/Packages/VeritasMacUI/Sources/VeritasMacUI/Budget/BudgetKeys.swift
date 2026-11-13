@@ -25,9 +25,9 @@ enum BudgetKeys {
 	}
 }
 
-/// The Budget screen's month stepping, published while the screen has focus
-/// so Go › Previous Month and Next Month (⌘← ⌘→) are on only then. A text
-/// field with focus keeps those keys for its caret.
+/// A screen's month stepping, published for its window, so Go › Previous
+/// Month and Next Month (⌘← ⌘→) work wherever focus is. In a text field
+/// those keys still move the caret (VeritasCommands).
 struct BudgetMonthActions {
 	let canGoBack: Bool
 	let canGoForward: Bool

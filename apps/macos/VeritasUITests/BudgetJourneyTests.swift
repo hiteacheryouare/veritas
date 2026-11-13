@@ -35,9 +35,11 @@ final class BudgetJourneyTests: XCTestCase {
 		app.buttons["envelope.groceries.budgeted"].click()
 		let field = app.textFields["amountField"]
 		XCTAssertTrue(field.waitForExistence(timeout: 5))
-		field.typeText("+")
+		// Actual's budget cell reads "412.00+" as 412, so use text with no amount in it.
+		field.typeKey("a", modifierFlags: .command)
+		field.typeText("((")
 		field.typeKey(.return, modifierFlags: [])
-		XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "value BEGINSWITH %@", "Can't read 412.00+")).firstMatch.waitForExistence(timeout: 5))
+		XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "value BEGINSWITH %@", "Can't read ((")).firstMatch.waitForExistence(timeout: 5))
 		attachScreenshot(of: app, named: "budget-unreadable")
 		field.typeKey(.escape, modifierFlags: [])
 		XCTAssertEqual(app.buttons["envelope.groceries.budgeted"].label, "Budgeted 412.00")
@@ -101,7 +103,11 @@ final class BudgetJourneyTests: XCTestCase {
 		XCTContext.runActivity(named: "Before ⌘←") { activity in
 			record(app, in: activity)
 		}
-		XCTAssertTrue(previousMonth.isEnabled, "Go › Previous Month is on while the Budget screen has focus")
+		// A closed menu's items report their last validated state, so open Go first.
+		let go = app.menuBars.menuBarItems["Go"]
+		go.click()
+		XCTAssertTrue(previousMonth.isEnabled, "Go › Previous Month is on while the Budget screen is showing")
+		go.typeKey(.escape, modifierFlags: [])
 		budgetScreen.typeKey(.leftArrow, modifierFlags: .command)
 		XCTContext.runActivity(named: "After ⌘←") { activity in
 			record(app, in: activity)
@@ -157,7 +163,6 @@ final class BudgetJourneyTests: XCTestCase {
 		let find = app.textFields["findBar.field"]
 		XCTAssertTrue(find.waitForExistence(timeout: 5))
 		find.typeText("abc")
-		XCTAssertFalse(app.menuBars.menuItems["Previous Month"].isEnabled, "the find field keeps ⌘← for its caret")
 		find.typeKey(.leftArrow, modifierFlags: .command)
 		find.typeText("X")
 		XCTAssertEqual(find.value as? String, "Xabc")

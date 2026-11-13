@@ -9,6 +9,19 @@ struct VeritasCommands: Commands {
 
 	private var isOpen: Bool { model?.phase == .open }
 
+	/// ⌘← and ⌘→ step the month wherever focus is in the window, except in a
+	/// text field, where they move the caret to the line's ends as usual, and
+	/// in a sheet, which is about something else.
+	private func step(back: Bool) {
+		let window = NSApp.keyWindow
+		if let editor = window?.firstResponder as? NSTextView {
+			if back { editor.moveToLeftEndOfLine(nil) } else { editor.moveToRightEndOfLine(nil) }
+			return
+		}
+		guard window?.sheetParent == nil else { return }
+		if back { budgetMonths?.previous() } else { budgetMonths?.next() }
+	}
+
 	var body: some Commands {
 		CommandGroup(replacing: .appSettings) {
 			Button("Settings…") { model?.go(to: .screen(.settings)) }
@@ -69,10 +82,10 @@ struct VeritasCommands: Commands {
 					.disabled(!isOpen)
 			}
 			Divider()
-			Button("Previous Month") { budgetMonths?.previous() }
+			Button("Previous Month") { step(back: true) }
 				.keyboardShortcut(.leftArrow, modifiers: .command)
 				.disabled(budgetMonths?.canGoBack != true)
-			Button("Next Month") { budgetMonths?.next() }
+			Button("Next Month") { step(back: false) }
 				.keyboardShortcut(.rightArrow, modifiers: .command)
 				.disabled(budgetMonths?.canGoForward != true)
 			Divider()

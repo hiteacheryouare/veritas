@@ -145,16 +145,35 @@ final class GoalsAndEnvelopesJourneyTests: XCTestCase {
 	}
 
 	@MainActor
-	func testAddingAGroupAndDraggingAnEnvelope() {
+	func testAddingAGroupAndMovingAnEnvelopeUp() {
 		let app = openBudget()
-		app.buttons["budget.newGroup"].click()
+		let newGroup = app.buttons["budget.newGroup"]
+		let budget = app.screen("budget")
+		scroll(budget, until: newGroup, by: -600)
+		newGroup.click()
 		nameAndSave(app, "Kids")
 		XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'group.group-'")).firstMatch.waitForExistence(timeout: 5))
+		scroll(budget, until: app.descendants(matching: .any)["envelope.groceries"], by: 600)
 		let household = app.descendants(matching: .any)["envelope.household"]
 		let groceries = app.descendants(matching: .any)["envelope.groceries"]
-		household.press(forDuration: 0.5, thenDragTo: groceries)
+		household.rightClick()
+		for _ in 0..<3 {
+			app.menuItems["Move Up"].click()
+			household.rightClick()
+		}
+		XCTAssertFalse(app.menuItems["Move Up"].isEnabled, "Household is first in its group")
+		app.typeKey(.escape, modifierFlags: [])
 		XCTAssertTrue(waitUntil { household.frame.minY < groceries.frame.minY }, "Household now sits above Groceries")
 		attachScreenshot(of: app, named: "envelope-dragged")
+	}
+
+	/// The window may be shorter than the Budget screen; bring `element` into view.
+	@MainActor
+	private func scroll(_ view: XCUIElement, until element: XCUIElement, by delta: CGFloat) {
+		for _ in 0..<6 where !element.isHittable {
+			view.scroll(byDeltaX: 0, deltaY: delta)
+		}
+		XCTAssertTrue(element.isHittable, "scrolled \(element) into view")
 	}
 
 	@MainActor

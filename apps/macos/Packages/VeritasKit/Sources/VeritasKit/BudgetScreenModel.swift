@@ -239,6 +239,27 @@ public final class BudgetScreenModel {
 		await run(.moveCategory(categoryId: id, groupId: groupID, beforeCategoryId: beforeID))
 	}
 
+	/// The envelope's place among its group's visible envelopes, for Move Up
+	/// and Move Down: the keyboard and menu way to reorder (R-BUD-5).
+	private func position(of id: String) -> (group: EnvelopeGroup, index: Int)? {
+		for group in groups {
+			if let index = group.envelopes.firstIndex(where: { $0.id == id }) { return (group, index) }
+		}
+		return nil
+	}
+
+	public func canMoveEnvelope(_ id: String, by step: Int) -> Bool {
+		guard let (group, index) = position(of: id) else { return false }
+		return group.envelopes.indices.contains(index + step)
+	}
+
+	public func moveEnvelope(_ id: String, by step: Int) async {
+		guard let (group, index) = position(of: id), group.envelopes.indices.contains(index + step) else { return }
+		let after = index + step + (step > 0 ? 1 : 0)
+		let before = group.envelopes.indices.contains(after) ? group.envelopes[after].id : nil
+		await moveEnvelope(id, to: group.id, before: before)
+	}
+
 	public func createGroup(named name: String) async -> Bool {
 		await run(.createCategoryGroup(name: name))
 	}
