@@ -109,6 +109,9 @@ pub struct ScheduleRule {
 	pub conditions_json: String,
 	pub actions_json: String,
 	pub json_paths: JsonPaths,
+	/// Clear `lastScheduleRun` so the service runs again today, as Actual's
+	/// `createSchedule` does for an auto-post bill (`app.ts:389`).
+	pub clears_schedule_run: bool,
 }
 
 /// What saving a bill over an existing schedule writes.
@@ -121,6 +124,9 @@ pub struct EditedRule {
 	/// The account or date changed, so the next date is recomputed from
 	/// today with a reset write (`app.ts:461-477`).
 	pub reset_next_date: Option<Option<CivilDate>>,
+	/// Clear `lastScheduleRun`, as `updateSchedule` does when the bill
+	/// auto-posts (`app.ts:484-489`).
+	pub clears_schedule_run: bool,
 }
 
 fn invalid(message: impl Into<String>) -> CoreError {
@@ -396,6 +402,7 @@ impl Bill {
 			json_paths: json_paths(&conditions_json),
 			conditions_json,
 			actions_json: write_array(actions),
+			clears_schedule_run: self.posts_transaction,
 		}
 	}
 
@@ -469,6 +476,7 @@ impl Bill {
 			conditions_json,
 			actions_json,
 			reset_next_date,
+			clears_schedule_run: self.posts_transaction,
 		})
 	}
 
@@ -859,6 +867,19 @@ mod tests {
 		let edited = cheaper.edit_rule(&rule, day("2026-11-09")).unwrap();
 		assert_eq!(edited.reset_next_date, None);
 		assert_eq!(edited.actions_json, None);
+		assert!(
+			edited.clears_schedule_run,
+			"saving an auto-post bill lets the service run again today"
+		);
+		let mut manual = cheaper.clone();
+		manual.posts_transaction = false;
+		assert!(
+			!manual
+				.edit_rule(&rule, day("2026-11-09"))
+				.unwrap()
+				.clears_schedule_run
+		);
+		assert!(rent().new_rule(&ScheduleId::new("s")).clears_schedule_run);
 	}
 
 	#[test]
