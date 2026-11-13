@@ -52,7 +52,7 @@ Rules:
 
 - **CLS-3.1** Actual wins on the income/expense axis. If `is_income = 1`, the effective kind is `income` whatever the metadata says. If `is_income = 0` and metadata says `income`, the effective kind is `expense`. Both cases set `kind_conflict` (the envelope math in Actual does not change).
 - **CLS-3.2** Hidden or archived categories keep their kind. Hiding never reclassifies history (R-REP-3).
-- **CLS-3.3** A goal category is an `expense` category. Spending on a goal is spending. Contributions to a goal are budget moves, not transactions, so they never appear here.
+- **CLS-3.3** A goal category is an `expense` category. Spending on a goal is spending. Contributions to a goal are budget moves, not transactions, so they never appear here. While a goal is open (`active` or `reached`) its category's kind cannot be changed to anything but `expense`. A closed goal's category may be given another kind, because closing ends the goal's hold on it, and a kind change never rewrites history (CLS-3.2). **Reopen after a kind change:** reopening a goal whose category is no longer `expense` is refused with "This category is now a {kind} category. Change it back to an expense category to reopen this goal." Veritas never flips the kind itself on reopen, because the kind decides how every past and future row of that category is classified (CLS-4 rows 8 to 14). Re-targeting a closed goal is refused for the same reason (DEBT-8.2). Example: Vacation is closed, then set to `savings`. Past spending on it stays classified as it was. Reopen is refused until the user sets the category back to `expense`.
 - **CLS-3.4** No guessing from names. Existing Actual data with no metadata gets the defaults above and nothing else.
 
 ## CLS-4 Decision table
