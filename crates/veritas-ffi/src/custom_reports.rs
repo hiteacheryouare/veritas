@@ -398,9 +398,10 @@ fn report_name(
 	}
 	// Actual's `reportNameExists` compares names exactly, so "Spending" and
 	// "spending" can live side by side.
-	let taken = budget.custom_reports.values().any(|row| {
-		!row.tombstone && Some(&row.id) != except && row.name.as_deref() == Some(name)
-	});
+	let taken = budget
+		.custom_reports
+		.values()
+		.any(|row| !row.tombstone && Some(&row.id) != except && row.name.as_deref() == Some(name));
 	if taken {
 		return Err(CoreError::Invalid(format!(
 			"There's already a report named {name}."
