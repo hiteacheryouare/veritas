@@ -17,6 +17,7 @@ use veritas_engine::EnvelopeSheet;
 use crate::Month;
 use crate::budget::{civil_date, edit, envelope, money};
 use crate::custom_reports::{self, CustomReportSettings};
+use crate::rules::{self, RuleDraft, RuleSource};
 
 /// A user action. Each one is a single transaction and a single undo step.
 /// Workstreams add commands through `contract` PRs.
@@ -332,6 +333,28 @@ pub enum Command {
 		bill_id: String,
 		dated_today: bool,
 	},
+	/// A rule from the sentence editor, stored as Actual's API stores it
+	/// (R-RULE-2). The id is the `rule` entity in the `Change`.
+	CreateRule {
+		draft: RuleDraft,
+	},
+	/// Parts the draft leaves unchanged keep their stored text. A bill's rule,
+	/// or one shown as "Edit in Actual", answers `Invalid`.
+	EditRule {
+		rule_id: String,
+		draft: RuleDraft,
+	},
+	/// `Invalid` while a bill (schedule) uses the rule, as in Actual.
+	DeleteRule {
+		rule_id: String,
+	},
+	/// "Apply to existing": runs only the rule's actions on the chosen rows,
+	/// overwriting what's there, with the transfer hooks. The session snapshots
+	/// first. A rule Veritas can't run here answers `Invalid` and writes nothing.
+	ApplyRule {
+		source: RuleSource,
+		transaction_ids: Vec<String>,
+	},
 }
 
 impl veritas_session::Command for Command {
@@ -351,6 +374,7 @@ impl veritas_session::Command for Command {
 			Command::SetCleared {
 				transaction_ids, ..
 			} if transaction_ids.len() > 1 => Some(SnapshotReason::BulkEdit),
+			Command::ApplyRule { .. } => Some(SnapshotReason::RuleApply),
 			_ => None,
 		}
 	}
@@ -845,6 +869,13 @@ impl Command {
 			Command::SkipBill { bill_id } => {
 				bills::skip_bill(data, &ScheduleId::new(bill_id.as_str()))
 			}
+			Command::CreateRule { draft } => rules::create(data, draft),
+			Command::EditRule { rule_id, draft } => rules::edit(data, rule_id, draft),
+			Command::DeleteRule { rule_id } => rules::delete(data, rule_id),
+			Command::ApplyRule {
+				source,
+				transaction_ids,
+			} => rules::apply(data, source, transaction_ids, now_ms()),
 			_ => Err(CoreError::Internal(
 				"a budget command was planned without the envelope sheet".to_owned(),
 			)),

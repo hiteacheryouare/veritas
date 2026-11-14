@@ -608,7 +608,7 @@ impl Session {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
 	use std::path::{Path, PathBuf};
 	use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -618,7 +618,7 @@ mod tests {
 	use crate::ReadOnlyKind;
 	use crate::records::EntityKind;
 
-	struct Scratch(PathBuf);
+	pub(crate) struct Scratch(pub(crate) PathBuf);
 
 	impl Scratch {
 		fn new(label: &str) -> Self {
@@ -923,7 +923,7 @@ mod tests {
 	/// Runs Actual's own API on a zip (tools/actual-oracle `dump`) with its
 	/// clock pinned to `today`: it imports the budget and reports what Actual
 	/// computes. `None` without the oracle, unless CI requires it.
-	fn actual_reads(zip: &Path, today: &str) -> Option<serde_json::Value> {
+	pub(crate) fn actual_reads(zip: &Path, today: &str) -> Option<serde_json::Value> {
 		let oracle = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/actual-oracle");
 		if !oracle.join("node_modules").exists() {
 			assert!(
@@ -1196,7 +1196,7 @@ mod tests {
 	}
 
 	/// A fixed today keeps the month range stable.
-	fn this_month() -> (Month, String) {
+	pub(crate) fn this_month() -> (Month, String) {
 		(
 			Month {
 				year: 2026,
@@ -1403,7 +1403,7 @@ mod tests {
 		));
 	}
 
-	fn data(core: &Core<veritas_store::Store>) -> veritas_domain::BudgetData {
+	pub(crate) fn data(core: &Core<veritas_store::Store>) -> veritas_domain::BudgetData {
 		core.call(|session| Ok(session.data()?.clone())).unwrap()
 	}
 
@@ -1841,7 +1841,7 @@ mod tests {
 		);
 	}
 
-	struct Rows(Vec<veritas_domain::Row>);
+	pub(crate) struct Rows(pub(crate) Vec<veritas_domain::Row>);
 
 	impl veritas_session::Command for Rows {
 		fn plan(
@@ -2442,7 +2442,7 @@ mod tests {
 			.unwrap()
 	}
 
-	fn transfer_payee_of(core: &Core<veritas_store::Store>, account: &str) -> String {
+	pub(crate) fn transfer_payee_of(core: &Core<veritas_store::Store>, account: &str) -> String {
 		core.payees()
 			.unwrap()
 			.into_iter()
@@ -2451,7 +2451,7 @@ mod tests {
 			.id
 	}
 
-	fn typed(account: &str, amount: i64) -> crate::TransactionDraft {
+	pub(crate) fn typed(account: &str, amount: i64) -> crate::TransactionDraft {
 		static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 		let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 		crate::TransactionDraft {
@@ -2468,14 +2468,14 @@ mod tests {
 		}
 	}
 
-	fn add(core: &Core<veritas_store::Store>, draft: crate::TransactionDraft) -> String {
+	pub(crate) fn add(core: &Core<veritas_store::Store>, draft: crate::TransactionDraft) -> String {
 		let id = draft.id.clone().unwrap();
 		core.perform(Command::AddTransaction { transaction: draft })
 			.unwrap();
 		id
 	}
 
-	fn row(core: &Core<veritas_store::Store>, id: &str) -> veritas_domain::Transaction {
+	pub(crate) fn row(core: &Core<veritas_store::Store>, id: &str) -> veritas_domain::Transaction {
 		data(core).transactions[&veritas_domain::TransactionId::new(id)].clone()
 	}
 
@@ -3288,7 +3288,17 @@ mod tests {
 
 	/// Runs Actual's own ops on `zip` (tools/actual-oracle `apply`) into `out`.
 	/// `false` without the oracle, unless CI requires it.
-	fn actual_apply(zip: &Path, ops: serde_json::Value, out: &Path, today: &str) -> bool {
+	pub(crate) fn actual_apply(
+		zip: &Path,
+		ops: serde_json::Value,
+		out: &Path,
+		today: &str,
+	) -> bool {
+		actual_apply_text(zip, &ops.to_string(), out, today)
+	}
+
+	/// `actual_apply` with the ops as JSON text, for ops whose key order matters.
+	pub(crate) fn actual_apply_text(zip: &Path, ops: &str, out: &Path, today: &str) -> bool {
 		let oracle = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/actual-oracle");
 		if !oracle.join("node_modules").exists() {
 			assert!(
@@ -3298,11 +3308,7 @@ mod tests {
 			return false;
 		}
 		let file = out.with_extension("ops.json");
-		std::fs::write(
-			&file,
-			serde_json::json!({"version": 1, "ops": ops}).to_string(),
-		)
-		.unwrap();
+		std::fs::write(&file, format!(r#"{{"version":1,"ops":{ops}}}"#)).unwrap();
 		let output = std::process::Command::new("node")
 			.current_dir(&oracle)
 			.arg("src/main.ts")
@@ -3322,13 +3328,15 @@ mod tests {
 		true
 	}
 
-	fn table<'a>(dump: &'a serde_json::Value, name: &str) -> &'a Vec<serde_json::Value> {
+	pub(crate) fn table<'a>(dump: &'a serde_json::Value, name: &str) -> &'a Vec<serde_json::Value> {
 		dump["tables"][name]["rows"].as_array().unwrap()
 	}
 
 	/// A Veritas budget with two open accounts, exported as the base both
 	/// sides start from.
-	fn two_account_base(label: &str) -> (Scratch, std::path::PathBuf, String, String, String) {
+	pub(crate) fn two_account_base(
+		label: &str,
+	) -> (Scratch, std::path::PathBuf, String, String, String) {
 		use crate::NewAccountKind::{Checking, Savings};
 		let (scratch, core) = imported(label);
 		let checking = new_account(&core, "Everyday", Checking, 0);
@@ -3341,7 +3349,11 @@ mod tests {
 		(scratch, base, checking, savings, category)
 	}
 
-	fn imported_from(scratch: &Scratch, zip: &Path, name: &str) -> Core<veritas_store::Store> {
+	pub(crate) fn imported_from(
+		scratch: &Scratch,
+		zip: &Path,
+		name: &str,
+	) -> Core<veritas_store::Store> {
 		Core::<veritas_store::Store>::import_actual_zip(
 			&zip.display().to_string(),
 			&scratch.0.join(name).display().to_string(),

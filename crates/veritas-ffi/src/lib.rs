@@ -9,6 +9,7 @@ mod custom_reports;
 mod goals;
 mod records;
 mod reports;
+mod rules;
 mod session;
 #[cfg(test)]
 mod test_support;
@@ -47,6 +48,11 @@ pub use reports::{
 	NetWorthMonth, OwnersEquity, ReportCategory, ReportDrill, ReportLabels, ReportLine,
 	ReportSection, ReportTransaction, SankeyFlow, SankeyNode, SankeyNodeKey, SankeyNodeKind,
 	SankeyReport, SheetAccount, SheetSection, TaxBucket, TaxBucketTotal, TaxDetailRow, TaxSummary,
+};
+pub use rules::{
+	RuleAccess, RuleAction, RuleActionOp, RuleChangedField, RuleCondition, RuleConditionOp,
+	RuleConditionsOp, RuleDraft, RuleField, RuleFieldChange, RuleMatch, RuleSentence, RuleSource,
+	RuleStage, RuleValue,
 };
 pub use session::{ChangeListener, Session};
 
