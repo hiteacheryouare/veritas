@@ -96,8 +96,8 @@ Why the unusual rows:
 
 | User answer | Category used | Resulting kind |
 |---|---|---|
-| Loan/debt payment | the one visible `debt_principal` category (created in a "Debt" group if none exists; if several, ask) | `debt_principal` |
-| Saving/investing | a visible `savings` category (same rule) | `savings_contribution` |
+| Loan/debt payment | the one visible `debt_principal` category (if none exists, created in a live, visible, non-income group named "Savings and Debt" if there is one, else in a group named "Debt", reusing or creating it; names match case-insensitively; if several, ask) | `debt_principal` |
+| Saving/investing | a visible `savings` category (if none exists, created in the same "Savings and Debt" group if there is one, else in a group named "Savings", same matching) | `savings_contribution` |
 | Other | a category the user picks | kind of that category (row 8 or 9) |
 
 "Visible" means the category is live, not hidden, not archived, and not in a hidden group. A hidden or archived category keeps its kind (CLS-3.2) and its history, but it is not offered for new money. If the only matching category is hidden, the answer is the same as having none: Veritas offers to create one. Example: one hidden `savings` category and no other gives "none", so the prompt offers a new one, and the hidden one stays as it was.
