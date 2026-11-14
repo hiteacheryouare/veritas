@@ -11,6 +11,19 @@ pub(crate) fn text(value: ValueRef<'_>) -> Cell<Option<String>> {
 	}
 }
 
+/// A JSON column as text. Never refuses the row: Veritas only carries the
+/// value, and a number is JSON too.
+pub(crate) fn json_text(value: ValueRef<'_>) -> Option<String> {
+	match value {
+		ValueRef::Null => None,
+		ValueRef::Integer(n) => Some(n.to_string()),
+		ValueRef::Real(x) => Some(x.to_string()),
+		ValueRef::Text(bytes) | ValueRef::Blob(bytes) => {
+			Some(String::from_utf8_lossy(bytes).into_owned())
+		}
+	}
+}
+
 pub(crate) fn required_text(value: ValueRef<'_>, missing: &'static str) -> Cell<String> {
 	text(value)?.ok_or(missing)
 }
