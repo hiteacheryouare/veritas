@@ -36,6 +36,62 @@ final class AccountsJourneyTests: XCTestCase {
 	}
 
 	@MainActor
+	func testMovingMoneyOutOfTheBudgetAsksWhatItsFor() {
+		// R-XFER-1, R-XFER-4
+		let app = openChecking()
+		app.buttons["register.moveMoney"].click()
+		let sheet = app.descendants(matching: .any)["sheet.moveMoney"]
+		XCTAssertTrue(sheet.waitForExistence(timeout: 5))
+		sheet.popUpButtons["moveMoney.to"].click()
+		app.menuItems.matching(NSPredicate(format: "title BEGINSWITH 'Brokerage'")).firstMatch.click()
+		let amount = sheet.textFields["amountField"].firstMatch
+		amount.click()
+		amount.typeKey("a", modifierFlags: .command)
+		amount.typeText("500\t")
+		XCTAssertTrue(waitUntil { self.text(sheet.descendants(matching: .any)["moveMoney.to.balance"]).contains("32,300.00") }, "the To account shows its balance after the move")
+		XCTAssertFalse(sheet.buttons["moveMoney.save"].isEnabled, "money leaving the budget waits for an answer")
+		sheet.radioButtons["Saving or investing"].click()
+		sheet.popUpButtons["purpose.envelope"].click()
+		app.menuItems["Investments"].click()
+		XCTAssertTrue(sheet.buttons["moveMoney.save"].isEnabled)
+		attachScreenshot(of: app, named: "move-money-purpose")
+		sheet.buttons["moveMoney.save"].click()
+		XCTAssertTrue(sheet.waitForDisappearance())
+		XCTAssertTrue(app.tables["register.table"].staticTexts["→ To Brokerage"].waitForExistence(timeout: 5))
+	}
+
+	@MainActor
+	func testPayingTheLoanSplitsPrincipalAndInterest() {
+		// R-DEBT-2, DEBT-3: filled from the last payment.
+		let app = openChecking()
+		app.buttons["register.moveMoney"].click()
+		let sheet = app.descendants(matching: .any)["sheet.moveMoney"]
+		XCTAssertTrue(sheet.waitForExistence(timeout: 5))
+		sheet.popUpButtons["moveMoney.to"].click()
+		app.menuItems.matching(NSPredicate(format: "title BEGINSWITH 'Car loan'")).firstMatch.click()
+		let principal = sheet.staticTexts["moveMoney.principal"]
+		XCTAssertTrue(waitUntil { self.text(principal) == "331.80" }, text(principal))
+		XCTAssertTrue(sheet.staticTexts["moveMoney.estimate"].exists)
+		attachScreenshot(of: app, named: "move-money-loan")
+		sheet.buttons["moveMoney.save"].click()
+		XCTAssertTrue(sheet.waitForDisappearance())
+		XCTAssertTrue(app.tables["register.table"].staticTexts["Lakeshore Credit Union"].waitForExistence(timeout: 5))
+	}
+
+	@MainActor
+	func testEditingATransferOpensMoveMoney() {
+		// R-XFER-3
+		let app = openChecking()
+		let table = app.tables["register.table"]
+		XCTAssertTrue(table.staticTexts["→ To Savings"].waitForExistence(timeout: 5))
+		table.staticTexts["→ To Savings"].firstMatch.doubleClick()
+		let sheet = app.descendants(matching: .any)["sheet.moveMoney"]
+		XCTAssertTrue(sheet.waitForExistence(timeout: 5))
+		XCTAssertEqual(sheet.buttons["moveMoney.save"].title, "Save")
+		sheet.buttons["Cancel"].click()
+	}
+
+	@MainActor
 	func testDuplicatingAndDeletingFromTheRowMenu() {
 		let app = openChecking()
 		let search = app.textFields["register.search"]

@@ -42,6 +42,7 @@ struct AccountRegisterScreen: View {
 					Label("Move money", systemImage: "arrow.left.arrow.right")
 				}
 				.disabled(register.isReadOnly)
+				.accessibilityIdentifier("register.moveMoney")
 				Button {
 					editing = TransactionEditorModel(workspace: workspace, accountID: accountID)
 				} label: {
