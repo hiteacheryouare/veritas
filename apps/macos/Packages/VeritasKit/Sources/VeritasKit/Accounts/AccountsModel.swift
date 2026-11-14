@@ -8,6 +8,8 @@ import VeritasCore
 @Observable
 public final class AccountsModel {
 	public private(set) var list: AccountList?
+	/// Off-budget accounts the core treats as loans, with their terms (R-DEBT-1).
+	public private(set) var loans: [String: LoanTerms] = [:]
 
 	@ObservationIgnored let workspace: WorkspaceModel
 
@@ -20,6 +22,19 @@ public final class AccountsModel {
 
 	public func load() async {
 		if let list = await workspace.report({ try await $0.accounts() }) { self.list = list }
+		guard workspace.canPlanTransfers else { return }
+		var found: [String: LoanTerms] = [:]
+		for account in offBudget {
+			let id = account.id
+			if let terms = await workspace.report({ try await $0.loanTerms(id) }) ?? nil { found[id] = terms }
+		}
+		loans = found
+	}
+
+	public var canSetLoanTerms: Bool { workspace.canPlanTransfers }
+
+	public func loanTermsEditor(_ terms: LoanTerms? = nil) -> LoanTermsModel {
+		LoanTermsModel(workspace: workspace, terms: terms)
 	}
 
 	public var onBudget: [AccountDetail] { list?.accounts.filter { !$0.closed && !$0.offBudget } ?? [] }
@@ -32,8 +47,10 @@ public final class AccountsModel {
 	}
 
 	@discardableResult
-	public func create(name: String, kind: NewAccountKind, startingBalance: Int64) async -> Bool {
-		await run(.createAccount(account: NewAccount(name: name, kind: kind, startingBalance: startingBalance)))
+	public func create(name: String, kind: NewAccountKind, startingBalance: Int64, loan: LoanTerms? = nil) async -> Bool {
+		let account = NewAccount(name: name, kind: kind, startingBalance: startingBalance)
+		guard let loan else { return await run(.createAccount(account: account)) }
+		return await workspace.change { try await $0.createAccount(account, loan: loan) } != nil
 	}
 
 	@discardableResult

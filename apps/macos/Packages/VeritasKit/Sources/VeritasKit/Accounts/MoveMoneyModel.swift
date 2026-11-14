@@ -95,6 +95,17 @@ public final class MoveMoneyModel: Identifiable {
 			if let category = leg?.categoryId { purpose.categoryID = category }
 		}
 		if canPlan { await purpose.load(envelopes: envelopes) }
+		await startFromLoan()
+	}
+
+	/// Opened on a loan's register, Move money pays the loan (R-DEBT-2).
+	private func startFromLoan() async {
+		guard isNew, canPlan, toID == nil else { return }
+		let loanID = fromID
+		guard await workspace.report({ try await $0.loanTerms(loanID) }) ?? nil != nil else { return }
+		let defaults = await workspace.report { try await $0.loanPaymentDefaults(loanID, today: WorkspaceModel.today()) }
+		toID = loanID
+		fromID = defaults?.fromAccountId ?? accounts.first { !$0.offBudget }?.id ?? loanID
 	}
 
 	public func typeAmount(_ text: String) {

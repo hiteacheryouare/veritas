@@ -13,6 +13,7 @@ struct AccountsScreen: View {
 	@State private var renaming: AccountDetail?
 	@State private var noting: AccountDetail?
 	@State private var closing: AccountDetail?
+	@State private var loanTerms: (account: AccountDetail, model: LoanTermsModel)?
 
 	init(workspace: WorkspaceModel, model: AccountsModel? = nil) {
 		self.workspace = workspace
@@ -53,6 +54,12 @@ struct AccountsScreen: View {
 		.sheet(isPresented: $isCreating) { NewAccountSheet(model: model) }
 		.sheet(isPresented: $isManagingPayees) { PayeesSheet(model: PayeesModel(workspace: workspace)) }
 		.sheet(item: $closing) { CloseAccountSheet(model: model, account: $0) }
+		.sheet(item: Binding(get: { loanTerms?.model }, set: { if $0 == nil { loanTerms = nil } })) { terms in
+			LoanTermsSheet(name: loanTerms?.account.name ?? "", terms: terms) {
+				guard let id = loanTerms?.account.id else { return false }
+				return await terms.save(to: id)
+			}
+		}
 		.popover(item: $renaming) { account in
 			NamePrompt(title: "Rename account", action: "Rename", name: account.name) { name in
 				await model.rename(account.id, to: name)
@@ -111,6 +118,9 @@ struct AccountsScreen: View {
 			Divider()
 			Button(account.offBudget ? "Move On Budget" : "Move Off Budget") {
 				Task { await model.setOffBudget(account.id, !account.offBudget) }
+			}
+			if let terms = model.loans[account.id] {
+				Button("Loan Details…") { loanTerms = (account, model.loanTermsEditor(terms)) }
 			}
 			Button("Close Account…") { closing = account }
 		} else {
@@ -190,6 +200,9 @@ private struct NewAccountSheet: View {
 	@State private var name = ""
 	@State private var kind = NewAccountKind.checking
 	@State private var balance = AmountFieldModel(amount: 0, style: .commaDot, reader: CoreAmountReader())
+	@State private var loan: LoanTermsModel?
+
+	private var isLoan: Bool { model.canSetLoanTerms && [.loan, .mortgage].contains(kind) }
 	@Environment(\.dismiss) private var dismiss
 
 	var body: some View {
@@ -218,6 +231,12 @@ private struct NewAccountSheet: View {
 						.frame(width: 120)
 				}
 			}
+			if isLoan, let loan {
+				LoanTermsRows(terms: loan)
+			}
+			if let problem = loan?.problem, isLoan {
+				Text(problem).foregroundStyle(Color.moneyOverspent)
+			}
 			HStack {
 				Spacer()
 				Button("Cancel", role: .cancel) { dismiss() }
@@ -225,7 +244,12 @@ private struct NewAccountSheet: View {
 				Button("Add Account") {
 					Task {
 						guard let amount = await balance.commit() else { return }
-						if await model.create(name: name.trimmingCharacters(in: .whitespaces), kind: kind, startingBalance: amount) { dismiss() }
+						var terms: LoanTerms?
+						if isLoan, let loan {
+							guard let typed = await loan.terms() else { return }
+							terms = typed
+						}
+						if await model.create(name: name.trimmingCharacters(in: .whitespaces), kind: kind, startingBalance: amount, loan: terms) { dismiss() }
 					}
 				}
 				.buttonStyle(.borderedProminent)
@@ -236,6 +260,7 @@ private struct NewAccountSheet: View {
 		}
 		.padding(Spacing.s5)
 		.frame(width: 460)
+		.task { loan = model.loanTermsEditor() }
 		.containerIdentifier("sheet.newAccount")
 	}
 }

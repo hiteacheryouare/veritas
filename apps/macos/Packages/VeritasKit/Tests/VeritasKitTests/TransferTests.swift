@@ -80,6 +80,18 @@ final class TransferFakeSession: BudgetSession, @unchecked Sendable {
 		return LoanPaymentPreview(principal: principal, outstanding: 980_000, estimate: 8_003, rateBps: 980, problem: principal < 0 ? .interestAbovePayment(shortBy: -principal) : nil)
 	}
 	func recordLoanPayment(_ payment: LoanPaymentDraft) async throws { payments.append(payment) }
+	var loans: [String: LoanTerms] = ["carloan": LoanTerms(rateBps: 980, payment: 41_200, paymentDay: 12, lender: "Lakeshore Credit Union")]
+	var created: [(NewAccount, LoanTerms?)] = []
+	func loanTerms(_ accountID: String) async throws -> LoanTerms? { loans[accountID] }
+	func setLoanTerms(_ accountID: String, _ terms: LoanTerms) async throws { loans[accountID] = terms }
+	func createAccount(_ account: NewAccount, loan: LoanTerms?) async throws -> String {
+		created.append((account, loan))
+		return "new"
+	}
+	func evaluateRate(_ text: String, style: NumberStyle) async throws -> Int64 {
+		guard let value = Decimal(string: text.replacing("%", with: "")) else { throw FfiError.Invalid(message: "rate") }
+		return NSDecimalNumber(decimal: value * 100).int64Value
+	}
 
 	static func transfer(_ id: String, account: String, other: String, amount: Int64, counterpart: String?, category: String? = nil) -> RegisterRow {
 		RegisterRow(
@@ -219,6 +231,36 @@ struct TransferTests {
 		#expect(payment?.interest == 8_020)
 		#expect(payment?.principalCategoryId == "carloan-cat")
 		#expect(payment?.interestCategoryId == "interest")
+	}
+
+	@Test func movingMoneyFromALoansRegisterPaysTheLoan() async {
+		session.defaults = LoanPaymentDefaults(fromAccountId: "savings")
+		let model = MoveMoneyModel(workspace: await workspace(), fromID: "carloan", reader: FakeAmounts.reader)
+		await model.load()
+		#expect(model.toID == "carloan")
+		#expect(model.fromID == "savings")
+	}
+
+	@Test func aNewLoanKeepsItsTermsAndTheyCanBeChangedLater() async {
+		// R-DEBT-1
+		let accounts = AccountsModel(workspace: await workspace())
+		await accounts.load()
+		#expect(accounts.loans.keys.sorted() == ["carloan"])
+		let terms = accounts.loanTermsEditor()
+		terms.rateText = "6.25"
+		terms.paymentDay = 3
+		terms.lender = "  Harbor Bank "
+		let typed = await terms.terms()
+		#expect(typed == LoanTerms(rateBps: 625, payment: nil, paymentDay: 3, lender: "Harbor Bank"))
+		#expect(await accounts.create(name: "Mortgage", kind: .mortgage, startingBalance: 31_000_000, loan: typed))
+		#expect(session.created.first?.1?.rateBps == 625)
+
+		let existing = accounts.loanTermsEditor(accounts.loans["carloan"])
+		#expect(existing.rateText == "9.80")
+		#expect(existing.lender == "Lakeshore Credit Union")
+		existing.rateText = "abc"
+		#expect(await existing.save(to: "carloan") == false)
+		#expect(existing.problem == "Can't read abc as a rate.")
 	}
 
 	@Test func interestAboveThePaymentCantBeSaved() async {

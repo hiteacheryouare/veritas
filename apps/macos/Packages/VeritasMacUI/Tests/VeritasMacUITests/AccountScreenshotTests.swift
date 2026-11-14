@@ -76,6 +76,14 @@ struct AccountScreenshotTests {
 		try render(MoveMoneySheet(model: plain), named: "move-money", settle: 0.6)
 	}
 
+	@Test func loanTerms() async throws {
+		let workspace = await workspace()
+		let accounts = AccountsModel(workspace: workspace)
+		await accounts.load()
+		let terms = accounts.loanTermsEditor(accounts.loans["carloan"])
+		try render(LoanTermsSheet(name: "Car loan", terms: terms) { true }, named: "loan-terms", settle: 0.6)
+	}
+
 	@Test func reconcile() async throws {
 		let workspace = await workspace()
 		let model = ReconcileModel(workspace: workspace, accountID: "checking")
