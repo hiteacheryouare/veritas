@@ -191,6 +191,12 @@ fn load_tables(conn: &Connection) -> Result<Loaded, CoreError> {
 				last_reconciled: match at(row, 7)? {
 					ValueRef::Text(bytes) => Some(String::from_utf8_lossy(bytes).into_owned()),
 					ValueRef::Integer(ms) => Some(ms.to_string()),
+					// The column is TEXT, so SQLite stores numbers as text;
+					// a file whose column lost that affinity still loads.
+					ValueRef::Real(ms) if ms.fract() == 0.0 && ms.abs() < 9.0e15 => {
+						Some(format!("{}", ms as i64))
+					}
+					ValueRef::Real(ms) => Some(ms.to_string()),
 					_ => None,
 				},
 			};
