@@ -561,4 +561,6 @@ fn r_rep_4_dashboards_keep_unknown_widgets_as_placeholders() {
 		(Some(9), Some(3), Some(3))
 	);
 	assert_eq!(WidgetType::Sankey.minimum_size(), (3, 3));
+	let pulled_back = place_widget(placeholder, -2, -1, 1, 1).unwrap();
+	assert_eq!((pulled_back.x, pulled_back.y), (Some(0), Some(0)));
 }

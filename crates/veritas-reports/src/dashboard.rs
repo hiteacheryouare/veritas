@@ -210,14 +210,9 @@ pub fn place_widget(
 		.map_or((1, 1), WidgetType::minimum_size);
 	let width = width.clamp(min_width, GRID_COLUMNS);
 	let height = height.max(min_height);
-	if y < 0 || x < 0 {
-		return Err(CoreError::Invalid(
-			"a widget can't sit above or left of the grid".to_owned(),
-		));
-	}
 	Ok(Widget {
-		x: Some(x.min(GRID_COLUMNS - width)),
-		y: Some(y),
+		x: Some(x.clamp(0, GRID_COLUMNS - width)),
+		y: Some(y.max(0)),
 		width: Some(width),
 		height: Some(height),
 		..widget.clone()

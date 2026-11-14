@@ -3,9 +3,10 @@ use std::fmt::Debug;
 
 use crate::{
 	Account, AccountGroup, AccountGroupId, AccountId, AccountMeta, BudgetCell, BudgetData,
-	Category, CategoryGroup, CategoryGroupId, CategoryId, CategoryMeta, Goal, GoalId, Money, Payee,
-	PayeeId, Rule, RuleId, Schedule, ScheduleId, Tag, TagId, Transaction, TransactionId,
-	TransactionMeta, YearMonth,
+	Category, CategoryGroup, CategoryGroupId, CategoryId, CategoryMeta, CustomReportId,
+	CustomReportRow, DashboardPage, DashboardPageId, Goal, GoalId, Money, Payee, PayeeId, Rule,
+	RuleId, Schedule, ScheduleId, Tag, TagId, Transaction, TransactionId, TransactionMeta, Widget,
+	WidgetId, YearMonth,
 };
 
 /// One row a subscriber may need to refetch after a commit.
@@ -30,6 +31,9 @@ pub enum EntityRef {
 	TransactionMeta(TransactionId),
 	TaxTag(String),
 	Goal(GoalId),
+	CustomReport(CustomReportId),
+	DashboardPage(DashboardPageId),
+	Widget(WidgetId),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -155,12 +159,20 @@ macro_rules! rows {
 	($($variant:ident($ty:ty)),* $(,)?) => {
 		/// A row a command wants to exist after it runs.
 		#[derive(Clone, Debug, PartialEq)]
+		#[expect(
+			clippy::large_enum_variant,
+			reason = "a custom report row is large, and rows only live for one command"
+		)]
 		pub enum Row {
 			$($variant($ty),)*
 		}
 
 		/// What a store writes: one row, before and after.
 		#[derive(Clone, Debug, PartialEq)]
+		#[expect(
+			clippy::large_enum_variant,
+			reason = "a custom report row is large, and changes only live for one command and its undo step"
+		)]
 		pub enum Change {
 			$($variant(Delta<$ty>),)*
 		}
@@ -243,6 +255,9 @@ rows!(
 	TransactionMeta(TransactionMetaRow),
 	TaxTag(TaxTag),
 	Goal(Goal),
+	CustomReport(CustomReportRow),
+	DashboardPage(DashboardPage),
+	Widget(Widget),
 );
 
 fn put<K: Ord + Clone, V>(map: &mut BTreeMap<K, V>, key: &K, value: Option<V>) {
@@ -299,7 +314,36 @@ tombstoned!(
 	Rule in rules by RuleId,
 	Schedule in schedules by ScheduleId,
 	Tag in tags by TagId,
+	DashboardPage in dashboard_pages by DashboardPageId,
+	Widget in widgets by WidgetId,
 );
+
+impl Record for CustomReportRow {
+	type Key = CustomReportId;
+
+	fn key(&self) -> CustomReportId {
+		self.id.clone()
+	}
+
+	fn read(data: &BudgetData, key: &CustomReportId) -> Option<Self> {
+		data.custom_reports.get(key).cloned()
+	}
+
+	fn write(data: &mut BudgetData, key: &CustomReportId, value: Option<Self>) {
+		put(&mut data.custom_reports, key, value);
+	}
+
+	fn retired(created: &Self) -> Retired<Self> {
+		Retired::Becomes(CustomReportRow {
+			tombstone: true,
+			..created.clone()
+		})
+	}
+
+	fn entity(key: &CustomReportId) -> EntityRef {
+		EntityRef::CustomReport(key.clone())
+	}
+}
 
 impl Record for BudgetCell {
 	type Key = (YearMonth, CategoryId);

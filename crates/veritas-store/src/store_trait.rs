@@ -77,6 +77,13 @@ impl StoreTransaction for Writer<'_> {
 				delta.after.as_ref().map(|row| row.bucket.as_str()),
 			),
 			Change::Goal(delta) => self.put_goal(delta.before.as_ref(), delta.after.as_ref()),
+			Change::CustomReport(delta) => {
+				self.put_custom_report(delta.before.as_ref(), delta.after.as_ref())
+			}
+			Change::DashboardPage(delta) => {
+				self.put_dashboard_page(delta.before.as_ref(), delta.after.as_ref())
+			}
+			Change::Widget(delta) => self.put_widget(delta.before.as_ref(), delta.after.as_ref()),
 		}
 	}
 
