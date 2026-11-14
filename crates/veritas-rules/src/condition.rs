@@ -76,6 +76,37 @@ impl Field {
 		})
 	}
 
+	/// The name Actual stores, which is the internal column name for the
+	/// renamed fields (`serializeConditionsOrActions`, transaction-rules.ts:84-121).
+	pub fn stored(self) -> &'static str {
+		match self {
+			Field::ImportedPayee => "imported_description",
+			Field::Payee => "description",
+			Field::PayeeName => "payee_name",
+			Field::Account => "acct",
+			Field::Category => "category",
+			Field::CategoryGroup => "category_group",
+			Field::Notes => "notes",
+			Field::Amount => "amount",
+			Field::Date => "date",
+			Field::Cleared => "cleared",
+			Field::Reconciled => "reconciled",
+			Field::Transfer => "transfer",
+			Field::Parent => "parent",
+		}
+	}
+
+	/// `FIELD_TYPES` (`shared/rules.ts:62-97`), as `serialize` writes `type`.
+	pub fn type_name(self) -> &'static str {
+		match self.kind() {
+			FieldKind::Text => "string",
+			FieldKind::Id => "id",
+			FieldKind::Number => "number",
+			FieldKind::Date => "date",
+			FieldKind::Boolean => "boolean",
+		}
+	}
+
 	pub fn kind(self) -> FieldKind {
 		match self {
 			Field::ImportedPayee | Field::PayeeName | Field::Notes => FieldKind::Text,
@@ -137,9 +168,32 @@ impl Op {
 		})
 	}
 
+	pub fn stored(self) -> &'static str {
+		match self {
+			Op::Is => "is",
+			Op::IsNot => "isNot",
+			Op::Contains => "contains",
+			Op::DoesNotContain => "doesNotContain",
+			Op::Matches => "matches",
+			Op::OneOf => "oneOf",
+			Op::NotOneOf => "notOneOf",
+			Op::HasTags => "hasTags",
+			Op::HasAnyTag => "hasAnyTag",
+			Op::IsApprox => "isapprox",
+			Op::IsBetween => "isbetween",
+			Op::Gt => "gt",
+			Op::Gte => "gte",
+			Op::Lt => "lt",
+			Op::Lte => "lte",
+			Op::OnBudget => "onBudget",
+			Op::OffBudget => "offBudget",
+			Op::And => "and",
+		}
+	}
+
 	/// `isValidOp` (`shared/rules.ts:99-108`): the type's ops, minus the
 	/// field's disallowed ones, plus its internal ones.
-	fn valid_for(self, field: Field) -> bool {
+	pub(crate) fn valid_for(self, field: Field) -> bool {
 		use Op::*;
 		let by_kind = match field.kind() {
 			FieldKind::Date => matches!(self, Is | IsApprox | Gt | Gte | Lt | Lte),
@@ -615,7 +669,7 @@ fn parse_number(op: Op, value: Option<&Value>) -> Result<ConditionValue, Gap> {
 
 /// `extractTagsForFilter` (`shared/tags.ts:7-19`): runs of characters that
 /// are neither `#` nor whitespace, each given one `#`, without repeats.
-fn extract_tags(value: &str) -> Vec<String> {
+pub(crate) fn extract_tags(value: &str) -> Vec<String> {
 	let mut tags: Vec<String> = Vec::new();
 	for token in value.split(|c: char| c == '#' || js::is_js_whitespace(c)) {
 		if token.is_empty() {
@@ -630,7 +684,7 @@ fn extract_tags(value: &str) -> Vec<String> {
 }
 
 /// The regex `(?<!#)<tag>([\s#]|$)` from `Condition.eval`, matched by hand.
-fn has_tag(text: &str, tag: &str) -> bool {
+pub(crate) fn has_tag(text: &str, tag: &str) -> bool {
 	let mut from = 0;
 	while let Some(found) = text[from..].find(tag) {
 		let at = from + found;
