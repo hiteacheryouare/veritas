@@ -166,6 +166,21 @@ final class BudgetJourneyTests: XCTestCase {
 		attachScreenshot(of: app, named: "budget-goals-and-hidden")
 	}
 
+	/// design/interaction.md: typing any digit or operator on a selected row opens
+	/// its field with what was typed. Not yet run: it needs the Automation Mode prompt.
+	@MainActor
+	func testTypingPlusFortyOnASelectedEnvelopeAppendsToItsValue() {
+		XCTExpectFailure("Known bug: the first key's text opens selected, so the next key replaces it")
+		let app = openBudget()
+		app.descendants(matching: .any)["envelope.groceries"].click()
+		app.typeText("+40")
+		let field = app.textFields["amountField"]
+		XCTAssertTrue(field.waitForExistence(timeout: 5))
+		XCTAssertEqual(field.value as? String, "412.00+40")
+		field.typeKey(.return, modifierFlags: [])
+		XCTAssertTrue(waitUntil { app.buttons["envelope.groceries.budgeted"].label == "Budgeted 452.00" })
+	}
+
 	@MainActor
 	func testCommandLeftInTheFindFieldMovesTheCaret() {
 		let app = openBudget()
