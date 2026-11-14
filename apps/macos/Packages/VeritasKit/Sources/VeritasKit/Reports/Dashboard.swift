@@ -83,30 +83,8 @@ public enum WidgetKind: String, CaseIterable, Hashable, Sendable {
 	}
 }
 
-/// One filter, as Actual stores it: `{ field, op, value }`.
-public struct ReportCondition: Hashable, Sendable, Identifiable {
-	public var id = UUID()
-	public var field: String
-	public var op: String
-	public var value: String
-
-	public init(field: String, op: String, value: String) {
-		self.field = field
-		self.op = op
-		self.value = value
-	}
-
-	public static func == (lhs: ReportCondition, rhs: ReportCondition) -> Bool {
-		(lhs.field, lhs.op, lhs.value) == (rhs.field, rhs.op, rhs.value)
-	}
-
-	public func hash(into hasher: inout Hasher) {
-		hasher.combine(field)
-		hasher.combine(op)
-		hasher.combine(value)
-	}
-
-	/// The fields and operators Actual's filter editor offers for reports.
+/// The fields and operators Actual's filter editor offers for reports.
+extension ReportCondition {
 	public static let fields: [(id: String, title: String)] = [
 		("account", "Account"), ("payee", "Payee"), ("category", "Category"), ("notes", "Notes"),
 		("amount", "Amount"), ("date", "Date"), ("cleared", "Cleared"), ("reconciled", "Reconciled")
@@ -119,6 +97,19 @@ public struct ReportCondition: Hashable, Sendable, Identifiable {
 		case "cleared", "reconciled": [("is", "is")]
 		case "notes": [("is", "is"), ("contains", "contains"), ("doesNotContain", "doesn't contain")]
 		default: [("is", "is"), ("isNot", "is not"), ("contains", "contains"), ("doesNotContain", "doesn't contain")]
+		}
+	}
+
+	/// `value` is Actual's JSON as text (contract v7). The editor types plain
+	/// text, so a string is quoted; `true`, `false` and numbers stay bare.
+	public var text: String {
+		get {
+			guard let data = value.data(using: .utf8), let decoded = try? JSONDecoder().decode(String.self, from: data) else { return value }
+			return decoded
+		}
+		set {
+			let bare = newValue == "true" || newValue == "false" || (field == "amount" && Int64(newValue) != nil)
+			value = bare ? newValue : (String(data: (try? JSONEncoder().encode(newValue)) ?? Data(), encoding: .utf8) ?? "\"\"")
 		}
 	}
 }
@@ -150,21 +141,20 @@ public enum TimeFrameMode: String, CaseIterable, Hashable, Sendable {
 	}
 }
 
-public struct TimeFrame: Hashable, Sendable {
-	public var mode: TimeFrameMode
-	public var start: Month
-	public var end: Month
-
+extension WidgetTimeFrame {
 	public init(mode: TimeFrameMode, start: Month, end: Month) {
-		self.mode = mode
-		self.start = start
-		self.end = end
+		self.init(mode: mode.rawValue, start: String(start.firstDay.prefix(7)), end: String(end.firstDay.prefix(7)))
 	}
+
+	public var frameMode: TimeFrameMode { TimeFrameMode(rawValue: mode) ?? .slidingWindow }
+	public var startMonth: Month? { Month(date: start) }
+	public var endMonth: Month? { Month(date: end) }
 }
 
 public enum SummaryKind: String, CaseIterable, Hashable, Sendable {
 	case sum
 	case avgPerMonth
+	case avgPerYear
 	case avgPerTransact
 	case percentage
 
@@ -172,40 +162,25 @@ public enum SummaryKind: String, CaseIterable, Hashable, Sendable {
 		switch self {
 		case .sum: "Total"
 		case .avgPerMonth: "Average per month"
+		case .avgPerYear: "Average per year"
 		case .avgPerTransact: "Average per transaction"
 		case .percentage: "Percentage"
 		}
 	}
 }
 
-/// A widget's settings: what Actual keeps in its `meta`.
-public struct WidgetConfig: Hashable, Sendable {
-	public var name: String?
-	public var timeFrame: TimeFrame?
-	public var conditions: [ReportCondition]
-	public var conditionsOr: Bool
-	public var mode: String?
-	public var summary: SummaryKind?
-	public var content: String?
-	public var textAlign: String?
-	public var formula: String?
-	public var reportID: String?
+extension WidgetConfig {
+	public static let empty = WidgetConfig(name: nil, timeFrame: nil, conditions: [], conditionsOr: false, mode: nil, summary: nil, content: nil, textAlign: nil, formula: nil, reportId: nil)
 
-	public init(
-		name: String? = nil, timeFrame: TimeFrame? = nil, conditions: [ReportCondition] = [], conditionsOr: Bool = false,
-		mode: String? = nil, summary: SummaryKind? = nil, content: String? = nil, textAlign: String? = nil,
-		formula: String? = nil, reportID: String? = nil
-	) {
-		self.name = name
-		self.timeFrame = timeFrame
-		self.conditions = conditions
-		self.conditionsOr = conditionsOr
-		self.mode = mode
-		self.summary = summary
-		self.content = content
-		self.textAlign = textAlign
-		self.formula = formula
-		self.reportID = reportID
+	public static func showing(report id: String) -> WidgetConfig {
+		var config = empty
+		config.reportId = id
+		return config
+	}
+
+	public var summaryKind: SummaryKind {
+		get { summary.flatMap(SummaryKind.init(rawValue:)) ?? .sum }
+		set { summary = newValue.rawValue }
 	}
 }
 
@@ -254,21 +229,25 @@ public struct ForecastPoint: Hashable, Sendable {
 /// What a card draws. `pending` is a kind the core doesn't compute yet.
 public enum CardContent: Hashable, Sendable {
 	case netWorth([NetWorthMonth])
-	case cashFlow(income: Int64, expenses: Int64, netProfit: Int64)
-	case spending(month: Month, spent: Int64, compareMonth: Month, compareSpent: Int64)
+	/// `classified` is Net Profit's figures, which the core sends until the
+	/// card switches to Actual's own numbers; it decides the labels (ST-10.10).
+	case cashFlow(income: Int64, expenses: Int64, netProfit: Int64, classified: Bool)
+	case spending(month: Month, spent: Int64, compareMonth: Month, compareSpent: Int64, classified: Bool)
 	case sankey(SankeyReport)
 	case customReport(CustomReportView)
 	case markdown(String)
 	case summary(CardFigure)
-	case calendar(month: Month, days: [CalendarDay])
+	case calendar(month: Month, days: [CalendarDay], income: Int64, expenses: Int64)
 	case formula(CardFigure)
-	case crossover(months: [Month], expenses: [Int64], income: [Int64], crossover: Month?)
+	case crossover(months: [Month], expenses: [Double], income: [Double], crossover: Month?)
 	case budgetAnalysis(months: [Month], budgeted: [Int64], spent: [Int64])
 	case balanceForecast([ForecastPoint])
-	case ageOfMoney(days: Int, change: Int, series: [Int])
+	case ageOfMoney(days: Int?, trend: AgeTrend, series: [Int], insufficientData: Bool)
 	/// `endAge` is the age the success rate runs to, as Actual's card says it.
 	case monteCarlo(points: [ForecastPoint], successRate: Double?, endAge: Int?)
 	case pending
+	case missingReport
+	case problem(String)
 	case unknown
 }
 
@@ -285,10 +264,12 @@ public struct DashboardCard: Identifiable, Hashable, Sendable {
 	public var content: CardContent
 	/// The months the card covers, when it has a range.
 	public var range: ReportPeriod?
+	/// The core's minimum for the type; `nil` falls back to Actual's table.
+	public var minimum: (width: Int64, height: Int64)?
 
 	public init(
 		id: String, kind: WidgetKind?, rawKind: String, x: Int64, y: Int64, width: Int64, height: Int64,
-		config: WidgetConfig, content: CardContent, range: ReportPeriod? = nil
+		config: WidgetConfig, content: CardContent, range: ReportPeriod? = nil, minimum: (width: Int64, height: Int64)? = nil
 	) {
 		self.id = id
 		self.kind = kind
@@ -300,9 +281,23 @@ public struct DashboardCard: Identifiable, Hashable, Sendable {
 		self.config = config
 		self.content = content
 		self.range = range
+		self.minimum = minimum
 	}
 
-	public var minimumSize: (width: Int64, height: Int64) { kind?.minimumSize ?? (1, 1) }
+	public var minimumSize: (width: Int64, height: Int64) { minimum ?? kind?.minimumSize ?? (1, 1) }
+
+	public static func == (lhs: DashboardCard, rhs: DashboardCard) -> Bool {
+		lhs.id == rhs.id && lhs.rawKind == rhs.rawKind && (lhs.x, lhs.y, lhs.width, lhs.height) == (rhs.x, rhs.y, rhs.width, rhs.height)
+			&& lhs.config == rhs.config && lhs.content == rhs.content && lhs.range == rhs.range
+	}
+
+	public func hash(into hasher: inout Hasher) {
+		hasher.combine(id)
+		hasher.combine(x)
+		hasher.combine(y)
+		hasher.combine(width)
+		hasher.combine(height)
+	}
 
 	public var title: String? {
 		if let name = config.name, !name.isEmpty { return name }
@@ -327,13 +322,19 @@ public struct DashboardSheet: Identifiable, Hashable, Sendable {
 /// A custom report's settings with its filters, for the viewer and editor.
 public struct ReportDraft: Hashable, Sendable {
 	public var settings: CustomReportSettings
-	public var conditions: [ReportCondition]
-	public var conditionsOr: Bool
 
-	public init(settings: CustomReportSettings, conditions: [ReportCondition] = [], conditionsOr: Bool = false) {
+	public init(settings: CustomReportSettings) {
 		self.settings = settings
-		self.conditions = conditions
-		self.conditionsOr = conditionsOr
+	}
+
+	public var conditions: [ReportCondition] {
+		get { settings.conditions }
+		set { settings.conditions = newValue }
+	}
+
+	public var conditionsOr: Bool {
+		get { settings.conditionsOr }
+		set { settings.conditionsOr = newValue }
 	}
 }
 
@@ -347,6 +348,10 @@ extension DashboardSheet {
 extension DashboardCard {
 	init(_ widget: DashboardWidget) {
 		let kind = WidgetKind(rawValue: widget.kind)
+		func period(_ first: String, _ last: String) -> ReportPeriod? {
+			guard let first = Month(date: first), let last = Month(date: last) else { return nil }
+			return ReportPeriod(first: first, last: last)
+		}
 		var range: ReportPeriod?
 		let content: CardContent
 		switch widget.view {
@@ -354,20 +359,52 @@ extension DashboardCard {
 			content = .netWorth(points)
 			if let first = points.first, let last = points.last { range = ReportPeriod(first: first.month, last: last.month) }
 		case .cashFlow(let first, let last, let income, let expenses, let netProfit):
-			content = .cashFlow(income: income, expenses: expenses, netProfit: netProfit)
+			content = .cashFlow(income: income, expenses: expenses, netProfit: netProfit, classified: true)
 			range = ReportPeriod(first: first, last: last)
 		case .spending(let month, let spent, let compareMonth, let compareSpent):
-			content = .spending(month: month, spent: spent, compareMonth: compareMonth, compareSpent: compareSpent)
+			content = .spending(month: month, spent: spent, compareMonth: compareMonth, compareSpent: compareSpent, classified: true)
 		case .sankey(let report):
 			content = .sankey(report)
-			if let first = Month(date: report.first), let last = Month(date: report.last) { range = ReportPeriod(first: first, last: last) }
+			range = period(report.first, report.last)
 		case .customReport(let report): content = .customReport(report)
 		case .markdown(let text, _): content = .markdown(text)
-		case .openInActual: content = kind == nil ? .unknown : .pending
+		case .summary(let start, let end, let value, _, _):
+			content = .summary(Self.figure(value, percentage: widget.config.summaryKind == .percentage))
+			range = period(start, end)
+		case .calendar(let months):
+			if let shown = months.last, let month = Month(date: shown.start) {
+				let days = shown.days.map { CalendarDay(day: Int($0.date.suffix(2)) ?? 1, income: $0.income, expenses: -$0.expense) }
+				content = .calendar(month: month, days: days, income: shown.totalIncome, expenses: -shown.totalExpense)
+			} else {
+				content = .pending
+			}
+			if let first = months.first, let last = months.last { range = period(first.start, last.end) }
+		case .ageOfMoney(let start, let end, _, let points, let currentDays, let trend, let insufficientData):
+			content = .ageOfMoney(days: currentDays.map(Int.init), trend: trend, series: points.map { Int($0.days) }, insufficientData: insufficientData)
+			range = period(start, end)
+		case .budgetAnalysis(let start, let end, let months, _, _, _, _):
+			content = .budgetAnalysis(months: months.map(\.month), budgeted: months.map(\.budgeted), spent: months.map(\.spent))
+			range = period(start, end)
+		case .crossover(let start, let end, let points, let crossover, _, _, _, _, _, _, _):
+			content = .crossover(months: points.map(\.month), expenses: points.map(\.expenses), income: points.map(\.investmentIncome), crossover: crossover)
+			range = ReportPeriod(first: start, last: end)
+		case .pending:
+			content = .pending
+			if let frame = widget.config.timeFrame, let first = frame.startMonth, let last = frame.endMonth { range = ReportPeriod(first: first, last: last) }
+		case .missingReport: content = .missingReport
+		case .problem(let message): content = .problem(message)
+		case .unknown: content = .unknown
 		}
 		self.init(
 			id: widget.id, kind: kind, rawKind: widget.kind, x: widget.x, y: widget.y, width: widget.width, height: widget.height,
-			config: WidgetConfig(name: widget.name), content: content, range: range
+			config: widget.config, content: content, range: range, minimum: (widget.minWidth, widget.minHeight)
 		)
+	}
+
+	/// The summary card's value is unrounded and can be NaN or infinite, as in Actual.
+	static func figure(_ value: Double, percentage: Bool) -> CardFigure {
+		if percentage { return .percent(value) }
+		guard value.isFinite else { return .number(value) }
+		return .money(Int64(value.rounded()))
 	}
 }

@@ -264,24 +264,23 @@ final class CoreBudgetSession: BudgetSession {
 
 	private static let notYetTransfers = FfiError.Invalid(message: "This Veritas build can't plan transfers or loans yet.")
 
-	/// The dashboard and report-filter contract hasn't landed, so the core
-	/// draws what it can and the editing actions stay hidden.
-	let canEditDashboards = false
+	/// Contract v7: dashboards, widgets and report filters are editable.
+	let canEditDashboards = true
 
 	func dashboardSheets(today: String) async throws -> [DashboardSheet] {
 		try await dashboards(today: today).map(DashboardSheet.init)
 	}
 
 	func addWidget(page: String, kind: WidgetKind, x: Int64, y: Int64, width: Int64, height: Int64, config: WidgetConfig) async throws -> String {
-		throw Self.notYet
+		try await created(.widget, by: .addWidget(pageId: page, kind: kind.rawValue, x: x, y: y, width: width, height: height, config: config))
 	}
 
-	func removeWidget(_ id: String) async throws { throw Self.notYet }
-	func setWidgetConfig(_ id: String, _ config: WidgetConfig) async throws { throw Self.notYet }
-	func createDashboard(named name: String) async throws -> String { throw Self.notYet }
-	func renameDashboard(_ id: String, to name: String) async throws { throw Self.notYet }
-	func deleteDashboard(_ id: String) async throws { throw Self.notYet }
-	func createReport(_ draft: ReportDraft) async throws -> String { throw Self.notYet }
+	func removeWidget(_ id: String) async throws { try await perform(.removeWidget(widgetId: id)) }
+	func setWidgetConfig(_ id: String, _ config: WidgetConfig) async throws { try await perform(.setWidgetConfig(widgetId: id, config: config)) }
+	func createDashboard(named name: String) async throws -> String { try await created(.dashboardPage, by: .createDashboard(name: name)) }
+	func renameDashboard(_ id: String, to name: String) async throws { try await perform(.renameDashboard(pageId: id, name: name)) }
+	func deleteDashboard(_ id: String) async throws { try await perform(.deleteDashboard(pageId: id)) }
+	func createReport(_ draft: ReportDraft) async throws -> String { try await created(.customReport, by: .createCustomReport(settings: draft.settings)) }
 
 	func reportDraft(_ id: String) async throws -> ReportDraft {
 		ReportDraft(settings: try await customReport(id, today: WorkspaceModel.today()).settings)
@@ -295,7 +294,15 @@ final class CoreBudgetSession: BudgetSession {
 		try await perform(.saveCustomReport(settings: draft.settings))
 	}
 
-	private static let notYet = FfiError.Invalid(message: "This Veritas build can't change dashboards yet.")
+	/// Runs a command that makes one row and returns that row's id.
+	private func created(_ kind: EntityKind, by command: Command) async throws -> String {
+		let session = session
+		let change = try await Core.run { try session.perform(command: command) }
+		guard let id = change.entities.first(where: { $0.kind == kind })?.id else {
+			throw FfiError.Invalid(message: "The core saved it but didn't name it. Reopen the budget to see it.")
+		}
+		return id
+	}
 
 	func perform(_ command: Command) async throws {
 		let session = session

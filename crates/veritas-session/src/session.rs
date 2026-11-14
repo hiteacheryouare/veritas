@@ -114,8 +114,8 @@ pub struct Session<B: Backend> {
 	backup_folder: Option<PathBuf>,
 	last_backup: Option<BackupResult>,
 	sheet: SheetCache,
-	classification: ClassificationCache,
 	register: Option<crate::register::Index>,
+	classification: ClassificationCache,
 	/// The local date the shell last read the budget as of. It decides the
 	/// months the envelope sheet covers.
 	today: CivilDate,
@@ -156,8 +156,8 @@ impl<B: Backend> Session<B> {
 			backup_folder: None,
 			last_backup: None,
 			sheet: SheetCache::default(),
-			classification: ClassificationCache::default(),
 			register: None,
+			classification: ClassificationCache::default(),
 			today,
 		};
 		let take_snapshot = session.read_only().is_none();
@@ -444,12 +444,33 @@ impl<B: Backend> Session<B> {
 		read(bus.data(), self.classification.get(bus.data()))
 	}
 
+	/// `with_classification` plus the envelope sheet as of `today`, built
+	/// only when `sheet` asks for it.
+	pub fn with_reports<T>(
+		&mut self,
+		today: CivilDate,
+		sheet: bool,
+		read: impl FnOnce(&BudgetData, &Classification, Option<&EnvelopeSheet>) -> Result<T, CoreError>,
+	) -> Result<T, CoreError> {
+		let State::Open(bus) = &self.state else {
+			return Err(closed());
+		};
+		let data = bus.data();
+		let envelopes = if sheet {
+			self.today = today;
+			Some(self.sheet.get(data, today)?)
+		} else {
+			None
+		};
+		read(data, self.classification.get(data), envelopes)
+	}
+
 	fn after_change(&mut self, changed: &ChangeSet) {
 		self.dirty |= !changed.is_empty();
-		self.classification.refresh(changed);
 		if !changed.is_empty() {
 			self.register = None;
 		}
+		self.classification.refresh(changed);
 		if let State::Open(bus) = &self.state {
 			self.sheet.refresh(bus.data(), changed);
 		}
@@ -720,8 +741,8 @@ impl<B: Backend> Session<B> {
 
 	fn reopen(&mut self, listeners: Listeners) -> Result<(), CoreError> {
 		self.sheet.clear();
-		self.classification.clear();
 		self.register = None;
+		self.classification.clear();
 		match open_bus(&self.db, self.lock.as_ref(), listeners) {
 			Ok((bus, report)) => {
 				self.state = State::Open(Box::new(bus));

@@ -238,6 +238,12 @@ Examples: F-1 gives `Groceries $430, 6-month median`. A median of 42950 gives 43
 - **Spent goals.** A goal with status `reached` has no ETA line, whatever its `available` is (D66, GOAL-10). The card reads "Reached" when `available >= target` and "Reached → Spent" when it is below. A re-targeted goal is the same goal back at `active` and follows the rules in this section.
 - **Display** = "ETA {month}" with the range "optimistic to pessimistic month". `remaining = 0`: "Reached". No complete month of history: "No ETA yet". If the median is 0 or less: "No ETA: nothing is being added", which replaces the whole line. Otherwise, if the pessimistic pace is 0 or less, the line reads "ETA {month}, no ETA at the slowest pace": the slowest pace replaces only the range, and the median ETA stays. The checks run in that order: Reached, no history, median, then pessimistic pace. Contributions 0, 0, 0 therefore read "No ETA: nothing is being added" (E-3).
 - **On track** when the ETA month is not after the target month.
+- **Pace line on the Goals screen.** For an active goal with a target date, the screen shows one of four lines, and the shell never guesses which from the ETA text. `needed` is the DEBT-8.1 monthly suggestion, in the copy's currency (CLS-12.3).
+  - **On track:** the median-pace ETA is not after the target month. "On track for {ETA month}".
+  - **Behind:** the median-pace ETA is after the target month. "Behind: budget {needed} a month to reach it by {target month}".
+  - **No history:** no complete month of history (FC-6 "No ETA yet"). "Not enough history yet. Budget {needed} a month to reach it by {target month}". A brand-new goal is not behind, so this line is neutral.
+  - **Not adding:** the median pace is 0 or less (FC-6 "No ETA: nothing is being added"). "Nothing is being added. Budget {needed} a month to reach it by {target month}". This is the warning case.
+  - The contract carries these as four distinct states, each with `needed`. A reached, spent, closed or undated goal has no pace line.
 
 | Case | Inputs | Expected |
 |---|---|---|
@@ -253,6 +259,8 @@ Examples: F-1 gives `Groceries $430, 6-month median`. A median of 42950 gives 43
 | E-10 First cell is this month | The goal's only budget cell is the current month | No complete month of history: "No ETA yet" (unless `remaining = 0`, then "Reached") |
 | E-11 What-if in the current month reaches the target | Target 150000, `available` 100000 (so `remaining` 50000), pace 25000, current month 2027-01. Scenario adds 50000 in January | `available` plus the what-if is 150000, which reaches the target. ETA **January 2027**, the line reads "ETA January 2027", and it is not "Reached" |
 | E-12 What-if in the current month shortens the count | Target 150000, `available` 100000, `remaining` 50000, pace 15000, current month 2027-01. Scenario adds 20000 in January | Without it: ceil(50000 / 15000) = 4, **May 2027**. With it, the running total starts at 20000: February 35000, March 50000, which reaches 50000. ETA **March 2027**. The January extra is counted once |
+| E-13 Pace line, no history | A new goal: target 150000, target date June 2027, current month 2027-01, `available` 0, no complete month of history | `remaining` 150000, months left 6, `needed` = ceil(150000 / 6) = 25000. The line reads "Not enough history yet. Budget $250 a month to reach it by June 2027". It is not "Behind" |
+| E-14 Pace line, not adding | Target 150000, target date June 2027, current month 2027-01, `available` 0. The goal's budget cells are 0 in 2026-10, 2026-11 and 2026-12 | Three complete months of history with contributions 0, 0, 0, so the median is 0 and `remaining` is 150000. `needed` = ceil(150000 / 6) = 25000. The line reads "Nothing is being added. Budget $250 a month to reach it by June 2027" |
 
 ## FC-7 Backtest and error metrics
 

@@ -5,6 +5,16 @@ import VeritasKit
 
 /// Dashboards for the stub budget, with every widget type and made-up figures,
 /// editable in memory so UI tests can add, move, configure and remove.
+private func meta(
+	name: String? = nil, timeFrame: WidgetTimeFrame? = nil, conditions: [ReportCondition] = [], mode: String? = nil,
+	summary: SummaryKind? = nil, content: String? = nil, textAlign: String? = nil, formula: String? = nil, reportId: String? = nil
+) -> WidgetConfig {
+	WidgetConfig(
+		name: name, timeFrame: timeFrame, conditions: conditions, conditionsOr: false, mode: mode, summary: summary?.rawValue,
+		content: content, textAlign: textAlign, formula: formula, reportId: reportId
+	)
+}
+
 final class StubDashboards: @unchecked Sendable {
 	static let november = Month(year: 2026, month: 11)
 
@@ -15,37 +25,37 @@ final class StubDashboards: @unchecked Sendable {
 
 	init(reports: StubReports) {
 		self.reports = reports
-		let ytd = TimeFrame(mode: .yearToDate, start: Month(year: 2026, month: 1), end: Self.november)
-		let year = TimeFrame(mode: .slidingWindow, start: Month(year: 2025, month: 12), end: Self.november)
-		let six = TimeFrame(mode: .slidingWindow, start: Month(year: 2026, month: 6), end: Self.november)
+		let ytd = WidgetTimeFrame(mode: .yearToDate, start: Month(year: 2026, month: 1), end: Self.november)
+		let year = WidgetTimeFrame(mode: .slidingWindow, start: Month(year: 2025, month: 12), end: Self.november)
+		let six = WidgetTimeFrame(mode: .slidingWindow, start: Month(year: 2026, month: 6), end: Self.november)
 		let main: [(String, WidgetKind, (Int64, Int64, Int64, Int64), WidgetConfig)] = [
-			("salary", .summary, (0, 0, 4, 2), WidgetConfig(name: "Salary YTD", timeFrame: ytd, conditions: [ReportCondition(field: "category", op: "is", value: "Paycheck")], summary: .sum)),
-			("burn", .summary, (4, 0, 4, 2), WidgetConfig(name: "Average month", timeFrame: year, summary: .avgPerMonth)),
-			("rate", .formula, (8, 0, 4, 2), WidgetConfig(name: "Savings rate", formula: "=1-(SPENT/INCOME)")),
-			("worth", .netWorth, (0, 2, 6, 3), WidgetConfig(name: "Net worth", timeFrame: six, mode: "trend")),
-			("flow", .cashFlow, (6, 2, 3, 3), WidgetConfig(name: "Cash flow, this month")),
-			("spending", .spending, (9, 2, 3, 3), WidgetConfig(name: "This month against last", mode: "single-month")),
-			("calendar", .calendar, (0, 5, 4, 4), WidgetConfig(name: "Calendar")),
-			("age", .ageOfMoney, (4, 5, 4, 2), WidgetConfig(name: "Age of money", timeFrame: six)),
-			("analysis", .budgetAnalysis, (8, 5, 4, 2), WidgetConfig(name: "Budget analysis", timeFrame: six)),
-			("crossover", .crossover, (4, 7, 4, 2), WidgetConfig(name: "Crossover point")),
-			("forecast", .balanceForecast, (8, 7, 4, 2), WidgetConfig(name: "Balance forecast")),
-			("sankey", .sankey, (0, 9, 8, 3), WidgetConfig(name: "Where it went", timeFrame: TimeFrame(mode: .lastMonth, start: Month(year: 2026, month: 10), end: Month(year: 2026, month: 10)), mode: "spent")),
-			("notes", .markdown, (8, 9, 4, 2), WidgetConfig(content: "## Budget notes\n\nPay the card **in full** every month.", textAlign: "left")),
-			("future", .markdown, (8, 11, 4, 1), WidgetConfig()),
-			("montecarlo", .monteCarlo, (0, 12, 6, 2), WidgetConfig(name: "Retirement odds")),
-			("report", .customReport, (6, 12, 6, 3), WidgetConfig(reportID: "spending"))
+			("salary", .summary, (0, 0, 4, 2), meta(name: "Salary YTD", timeFrame: ytd, conditions: [ReportCondition(field: "category", op: "is", value: "\"Paycheck\"")], summary: .sum)),
+			("burn", .summary, (4, 0, 4, 2), meta(name: "Average month", timeFrame: year, summary: .avgPerMonth)),
+			("rate", .formula, (8, 0, 4, 2), meta(name: "Savings rate", formula: "=1-(SPENT/INCOME)")),
+			("worth", .netWorth, (0, 2, 6, 3), meta(name: "Net worth", timeFrame: six, mode: "trend")),
+			("flow", .cashFlow, (6, 2, 3, 3), meta(name: "Cash flow, this month")),
+			("spending", .spending, (9, 2, 3, 3), meta(name: "This month against last", mode: "single-month")),
+			("calendar", .calendar, (0, 5, 4, 4), meta(name: "Calendar")),
+			("age", .ageOfMoney, (4, 5, 4, 2), meta(name: "Age of money", timeFrame: six)),
+			("analysis", .budgetAnalysis, (8, 5, 4, 2), meta(name: "Budget analysis", timeFrame: six)),
+			("crossover", .crossover, (4, 7, 4, 2), meta(name: "Crossover point")),
+			("forecast", .balanceForecast, (8, 7, 4, 2), meta(name: "Balance forecast")),
+			("sankey", .sankey, (0, 9, 8, 3), meta(name: "Where it went", timeFrame: WidgetTimeFrame(mode: .lastMonth, start: Month(year: 2026, month: 10), end: Month(year: 2026, month: 10)), mode: "spent")),
+			("notes", .markdown, (8, 9, 4, 2), meta(content: "## Budget notes\n\nPay the card **in full** every month.", textAlign: "left")),
+			("future", .markdown, (8, 11, 4, 1), meta()),
+			("montecarlo", .monteCarlo, (0, 12, 6, 2), meta(name: "Retirement odds")),
+			("report", .customReport, (6, 12, 6, 3), meta(reportId: "spending"))
 		]
 		var cards = main.map { id, kind, frame, config in
 			self.card(id: id, kind: kind, frame: frame, config: config)
 		}
 		if let index = cards.firstIndex(where: { $0.id == "future" }) {
-			cards[index] = DashboardCard(id: "future", kind: nil, rawKind: "future-widget-card", x: 8, y: 11, width: 4, height: 1, config: WidgetConfig(), content: .unknown)
+			cards[index] = DashboardCard(id: "future", kind: nil, rawKind: "future-widget-card", x: 8, y: 11, width: 4, height: 1, config: .empty, content: .unknown)
 		}
 		sheets = [
 			DashboardSheet(id: "main", name: "Main", cards: cards),
 			DashboardSheet(id: "deep", name: "Deep dive", cards: [
-				card(id: "dining", kind: .summary, frame: (0, 0, 4, 2), config: WidgetConfig(name: "Dining out YTD", timeFrame: ytd, conditions: [ReportCondition(field: "category", op: "is", value: "Dining out")], summary: .sum))
+				card(id: "dining", kind: .summary, frame: (0, 0, 4, 2), config: meta(name: "Dining out YTD", timeFrame: ytd, conditions: [ReportCondition(field: "category", op: "is", value: "\"Dining out\"")], summary: .sum))
 			])
 		]
 	}
@@ -69,8 +79,10 @@ final class StubDashboards: @unchecked Sendable {
 				? ReportPeriod(first: november, last: november)
 				: ReportPeriod(first: november.adding(months: -5), last: november)
 		}
-		switch frame.mode {
-		case .fixed, .full: return ReportPeriod(first: frame.start, last: frame.end)
+		let start = frame.startMonth ?? november
+		let end = frame.endMonth ?? november
+		switch frame.frameMode {
+		case .fixed, .full: return ReportPeriod(first: start, last: end)
 		case .yearToDate: return ReportPeriod(first: Month(year: november.year, month: 1), last: november)
 		case .lastYear: return ReportPeriod(first: Month(year: november.year - 1, month: 1), last: Month(year: november.year - 1, month: 12))
 		case .lastMonth: return ReportPeriod(first: november.adding(months: -1), last: november.adding(months: -1))
@@ -78,7 +90,7 @@ final class StubDashboards: @unchecked Sendable {
 		case .currentQuarter: return ReportPeriod(first: Month(year: 2026, month: 10), last: Month(year: 2026, month: 12))
 		case .previousQuarter: return ReportPeriod(first: Month(year: 2026, month: 7), last: Month(year: 2026, month: 9))
 		case .slidingWindow:
-			let width = frame.start.months(through: frame.end)
+			let width = start.months(through: end)
 			return ReportPeriod(first: november.adding(months: -width), last: november)
 		}
 	}
@@ -88,18 +100,19 @@ final class StubDashboards: @unchecked Sendable {
 		let months = ReportPeriod(first: november.adding(months: -5), last: november).months
 		switch kind {
 		case .netWorth: return .netWorth(reports.netWorth(first: months[0], last: november))
-		case .cashFlow: return .cashFlow(income: 387_440, expenses: 310_566, netProfit: 76_874)
-		case .spending: return .spending(month: november, spent: 310_566, compareMonth: november.adding(months: -1), compareSpent: 461_844)
+		case .cashFlow: return .cashFlow(income: 387_440, expenses: 310_566, netProfit: 76_874, classified: false)
+		case .spending: return .spending(month: november, spent: 310_566, compareMonth: november.adding(months: -1), compareSpent: 461_844, classified: false)
 		case .sankey: return .sankey(reports.sankey(first: "2026-10-01", last: "2026-10-31"))
 		case .customReport:
-			let id = config.reportID ?? "spending"
+			let id = config.reportId ?? "spending"
 			return (try? reports.customReport(id)).map(CardContent.customReport) ?? .unknown
 		case .markdown: return .markdown(config.content ?? "")
 		case .summary:
-			let base: Int64 = config.conditions.isEmpty ? 2_961_80 : (config.conditions.first?.value == "Dining out" ? 1_404_20 : 48_210_55)
-			switch config.summary ?? .sum {
-			case .sum: return .summary(.money(config.conditions.first?.value == "Dining out" ? -base : base))
+			let base: Int64 = config.conditions.isEmpty ? 2_961_80 : (config.conditions.first?.text == "Dining out" ? 1_404_20 : 48_210_55)
+			switch config.summaryKind {
+			case .sum: return .summary(.money(config.conditions.first?.text == "Dining out" ? -base : base))
 			case .avgPerMonth: return .summary(.money(config.conditions.isEmpty ? -base : base / 11))
+			case .avgPerYear: return .summary(.money(config.conditions.isEmpty ? -base * 12 : base))
 			case .avgPerTransact: return .summary(.money(-4_215))
 			case .percentage: return .summary(.percent(18.4))
 			}
@@ -109,14 +122,16 @@ final class StubDashboards: @unchecked Sendable {
 				let expenses: Int64 = day > 13 ? 0 : Int64((day * 37) % 9) * 1_250
 				return CalendarDay(day: day, income: income, expenses: expenses)
 			}
-			return .calendar(month: november, days: days)
+			return .calendar(month: november, days: days, income: 387_440, expenses: 211_250)
 		case .formula: return .formula(.percent(18.4))
 		case .crossover:
 			let span = ReportPeriod(first: november, last: november.adding(months: 35)).months
+			let expenses: [Double] = span.indices.map { 380_000 + Double($0) * 900 }
+			let income: [Double] = span.indices.map { 120_000 + Double($0) * 8_200 }
 			return .crossover(
 				months: span,
-				expenses: span.indices.map { 380_000 + Int64($0) * 900 },
-				income: span.indices.map { 120_000 + Int64($0) * 8_200 },
+				expenses: expenses,
+				income: income,
 				crossover: span.last.map { $0.adding(months: 2) }
 			)
 		case .budgetAnalysis:
@@ -127,7 +142,7 @@ final class StubDashboards: @unchecked Sendable {
 				let middle = 812_440 + Int64(index) * 41_000
 				return ForecastPoint(month: month, low: middle - Int64(index) * 18_000, middle: middle, high: middle + Int64(index) * 18_000)
 			})
-		case .ageOfMoney: return .ageOfMoney(days: 41, change: 3, series: [33, 35, 36, 38, 38, 41])
+		case .ageOfMoney: return .ageOfMoney(days: 41, trend: .up, series: [33, 35, 36, 38, 38, 41], insufficientData: false)
 		case .monteCarlo:
 			let span = ReportPeriod(first: Month(year: 2027, month: 1), last: Month(year: 2046, month: 1)).months.enumerated().filter { $0.offset % 12 == 0 }.map(\.element)
 			return .monteCarlo(points: span.enumerated().map { index, month in

@@ -8,14 +8,15 @@ publish.workspace = true
 
 [dependencies]
 chrono.workspace = true
+serde_json.workspace = true
 veritas-domain = { path = "../veritas-domain" }
 veritas-engine = { path = "../veritas-engine" }
+veritas-rules = { path = "../veritas-rules" }
 
 [dev-dependencies]
 criterion.workspace = true
 proptest.workspace = true
 rusqlite.workspace = true
-serde_json.workspace = true
 veritas-interop = { path = "../veritas-interop" }
 veritas-store = { path = "../veritas-store" }
 

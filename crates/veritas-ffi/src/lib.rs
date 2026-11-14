@@ -5,6 +5,7 @@ mod blocking;
 mod budget;
 mod commands;
 mod custom_reports;
+mod dashboards;
 mod goals;
 mod records;
 mod reports;
@@ -26,9 +27,13 @@ pub use budget::{BudgetMonth, EnvelopeGroup, EnvelopeRow, MoneyTone};
 pub use commands::Command;
 pub use custom_reports::{
 	CustomReportBalances, CustomReportCell, CustomReportData, CustomReportGroup,
-	CustomReportInterval, CustomReportItem, CustomReportSettings, CustomReportView, DashboardPage,
-	DashboardWidget, PlaceholderReason, ReportBalanceKind, ReportGrouping, ReportIntervalUnit,
-	ReportSortOrder, StackedAmount, UncategorizedKind, WidgetView,
+	CustomReportInterval, CustomReportItem, CustomReportSettings, CustomReportView,
+	ReportBalanceKind, ReportCondition, ReportGrouping, ReportIntervalUnit, ReportSortOrder,
+	StackedAmount, UncategorizedKind,
+};
+pub use dashboards::{
+	AgeGranularity, AgePoint, AgeTrend, BudgetAnalysisPoint, CalendarCardMonth, CalendarDayCell,
+	CrossoverCardPoint, DashboardPage, DashboardWidget, WidgetConfig, WidgetTimeFrame, WidgetView,
 };
 pub use goals::{GoalClosePreview, GoalPace, GoalState, GoalSummary, MonthAmount};
 pub use records::{
