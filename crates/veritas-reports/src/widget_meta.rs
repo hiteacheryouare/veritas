@@ -325,7 +325,7 @@ pub fn add_widget(
 		settings.content = Some(DEFAULT_MARKDOWN.to_owned());
 	}
 	let meta = write_settings(Some(known), None, &settings)?;
-	let placed = place(Some(known), x, y, width, height)?;
+	let placed = place(Some(known), x, y, width, height);
 	Ok(Row::Widget(Widget {
 		id,
 		kind: Some(kind.to_owned()),
@@ -339,23 +339,20 @@ pub fn add_widget(
 	}))
 }
 
-/// A frame clamped to the grid and the type's minimum size.
+/// A frame clamped to the grid and the type's minimum size, as `x`, `y`,
+/// `width` and `height`. A widget dragged above or left of the grid lands
+/// on its edge.
 pub(crate) fn place(
 	kind: Option<WidgetType>,
 	x: i64,
 	y: i64,
 	width: i64,
 	height: i64,
-) -> Result<(i64, i64, i64, i64), CoreError> {
+) -> (i64, i64, i64, i64) {
 	let (min_width, min_height) = kind.map_or((1, 1), WidgetType::minimum_size);
-	if y < 0 || x < 0 {
-		return Err(CoreError::Invalid(
-			"a widget can't sit above or left of the grid".to_owned(),
-		));
-	}
 	let width = width.clamp(min_width, GRID_COLUMNS);
 	let height = height.max(min_height);
-	Ok((x.min(GRID_COLUMNS - width), y, width, height))
+	(x.clamp(0, GRID_COLUMNS - width), y.max(0), width, height)
 }
 
 pub fn set_widget_settings(

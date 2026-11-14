@@ -980,6 +980,71 @@ fn dashboards_are_listed_in_actuals_order() {
 	assert_eq!(ours(&open(&dir)), expected, "a reopen keeps the order");
 }
 
+#[test]
+fn adding_and_moving_a_widget_clamp_its_frame_the_same_way() {
+	// A frame dragged above or left of the grid, past its right edge, or
+	// below the type's minimum size lands on the grid, whether the widget is
+	// new or moved.
+	let scratch = Scratch::new("clamp");
+	let session = import(&all_features(), &scratch.join("veritas"));
+	let main = dashboards(&session, "2026-11-13")[0].id.clone();
+	let moved = created(
+		&perform(
+			&session,
+			Command::AddWidget {
+				page_id: main.clone(),
+				kind: "net-worth-card".to_owned(),
+				x: 0,
+				y: 30,
+				width: 4,
+				height: 2,
+				config: blank(),
+			},
+		),
+		EntityKind::Widget,
+	);
+	for ((x, y, width, height), expected) in [
+		((-3, -2, 1, 1), (0, 0, 3, 2)),
+		((11, -5, 4, 1), (8, 0, 4, 2)),
+		((-1, 7, 20, 5), (0, 7, 12, 5)),
+	] {
+		let added = created(
+			&perform(
+				&session,
+				Command::AddWidget {
+					page_id: main.clone(),
+					kind: "net-worth-card".to_owned(),
+					x,
+					y,
+					width,
+					height,
+					config: blank(),
+				},
+			),
+			EntityKind::Widget,
+		);
+		perform(
+			&session,
+			Command::PlaceWidget {
+				widget_id: moved.clone(),
+				x,
+				y,
+				width,
+				height,
+			},
+		);
+		let pages = dashboards(&session, "2026-11-13");
+		for id in [&added, &moved] {
+			let card = widget(&pages, id);
+			assert_eq!(
+				(card.x, card.y, card.width, card.height),
+				expected,
+				"{x}, {y}, {width}x{height}"
+			);
+		}
+	}
+}
+
 fn row_json(row: &veritas_reports::QueryRow) -> Value {
 	let id = |value: Option<String>| value.map_or(Value::Null, Value::String);
 	json!({
