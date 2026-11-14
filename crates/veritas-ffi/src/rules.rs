@@ -621,6 +621,29 @@ mod tests {
 		})
 	}
 
+	/// A createRule or updateRule op carrying a rule as Veritas stored it,
+	/// under the public field names the API takes. Actual stores items in
+	/// the order its caller gives them, with `field` renamed in place.
+	fn rule_op(op: &str, id: &str, stored: &Value) -> String {
+		let public = |text: &Value| {
+			text.as_str()
+				.unwrap()
+				.replace(r#""field":"description""#, r#""field":"payee""#)
+				.replace(
+					r#""field":"imported_description""#,
+					r#""field":"imported_payee""#,
+				)
+				.replace(r#""field":"acct""#, r#""field":"account""#)
+		};
+		format!(
+			r#"{{"op":"{op}","id":"{id}","stage":{},"conditionsOp":{},"conditions":{},"actions":{}}}"#,
+			stored["stage"],
+			stored["conditions_op"],
+			public(&stored["conditions"]),
+			public(&stored["actions"]),
+		)
+	}
+
 	#[test]
 	fn a_rule_is_created_edited_and_deleted_as_actuals_api_stores_it() {
 		// R-RULE-2 against Actual's createRule, updateRule and deleteRule on the same base.
@@ -689,28 +712,7 @@ mod tests {
 		.unwrap();
 		let after_delete = stored_rule(&core, &rule_id);
 
-		// Actual stores the items in the order the caller gives them, with
-		// `field` renamed in place, so handing it Veritas's items under their
-		// public names must store exactly Veritas's text.
-		let public = |text: &Value| {
-			text.as_str()
-				.unwrap()
-				.replace(r#""field":"description""#, r#""field":"payee""#)
-				.replace(
-					r#""field":"imported_description""#,
-					r#""field":"imported_payee""#,
-				)
-				.replace(r#""field":"acct""#, r#""field":"account""#)
-		};
-		let rule_op = |op: &str, stored: &Value| {
-			format!(
-				r#"[{{"op":"{op}","id":"{rule_id}","stage":{},"conditionsOp":{},"conditions":{},"actions":{}}}]"#,
-				stored["stage"],
-				stored["conditions_op"],
-				public(&stored["conditions"]),
-				public(&stored["actions"]),
-			)
-		};
+		let rule_op = |op: &str, stored: &Value| format!("[{}]", rule_op(op, &rule_id, stored));
 		let first = scratch.0.join("created.zip");
 		if !actual_apply_text(&base, &rule_op("createRule", &after_create), &first, &today) {
 			return;
@@ -864,6 +866,166 @@ mod tests {
 				(view(row), view(leg))
 			})
 			.collect();
+		assert_eq!(ours, theirs);
+	}
+
+	#[test]
+	fn a_split_rule_is_stored_and_applied_as_actual_does() {
+		// R-RULE-2 splits: createRule stores Veritas's text, and
+		// rule-apply-actions makes the same parent, lines and transfer leg.
+		let (_, today) = this_month();
+		let (scratch, base, checking, savings, category) = two_account_base("rule-split-oracle");
+		let seeded = scratch.0.join("seeded.zip");
+		let ops = json!([{"op": "addTransactions", "account": checking, "transactions": [
+			{"date": "2026-11-10", "amount": -10_000, "notes": "split me", "category": category}
+		]}]);
+		if !actual_apply(&base, ops, &seeded, &today) {
+			return;
+		}
+		let core = imported_from(&scratch, &seeded, "veritas");
+		let to_savings = transfer_payee_of(&core, &savings);
+		let line = |split_index, op, field, value| RuleAction {
+			op,
+			field,
+			value,
+			split_index,
+		};
+		let draft = RuleDraft {
+			stage: RuleStage::Default,
+			conditions_op: RuleConditionsOp::And,
+			conditions: vec![condition(
+				RuleField::Notes,
+				RuleConditionOp::Is,
+				RuleValue::Text {
+					text: "split me".to_owned(),
+				},
+			)],
+			actions: vec![
+				line(
+					1,
+					RuleActionOp::SetSplitAmount,
+					None,
+					RuleValue::Amount { amount: -2500 },
+				),
+				line(
+					1,
+					RuleActionOp::Set,
+					Some(RuleField::Category),
+					id(&category),
+				),
+				line(
+					2,
+					RuleActionOp::SetSplitAmount,
+					None,
+					RuleValue::Percent { percent: 50.0 },
+				),
+				line(
+					2,
+					RuleActionOp::Set,
+					Some(RuleField::Notes),
+					RuleValue::Text {
+						text: "half".to_owned(),
+					},
+				),
+				line(3, RuleActionOp::SetSplitAmount, None, RuleValue::Nothing),
+				line(
+					3,
+					RuleActionOp::Set,
+					Some(RuleField::Payee),
+					id(&to_savings),
+				),
+			],
+		};
+		let change = core.perform(Command::CreateRule { draft }).unwrap();
+		let rule_id = change
+			.entities
+			.iter()
+			.find(|entity| entity.kind == crate::EntityKind::Rule)
+			.and_then(|entity| entity.id.clone())
+			.unwrap();
+		let stored = stored_rule(&core, &rule_id);
+		let parent_id = data(&core)
+			.transactions
+			.values()
+			.find(|t| t.notes.as_deref() == Some("split me"))
+			.unwrap()
+			.id
+			.to_string();
+		let source = RuleSource::Saved {
+			rule_id: rule_id.clone(),
+		};
+		let preview = core
+			.call(|session| preview(session.data()?, &source))
+			.unwrap();
+		assert_eq!(preview.len(), 1);
+		let amounts: Vec<i64> = preview[0].split_lines.iter().map(|l| l.amount).collect();
+		assert_eq!(amounts, [-2500, -3750, -3750]);
+		core.perform(Command::ApplyRule {
+			source,
+			transaction_ids: vec![parent_id.clone()],
+		})
+		.unwrap();
+		let ours = data(&core);
+		let row = |t: &veritas_domain::Transaction| {
+			json!({
+				"amount": t.amount.minor(),
+				"description": t.payee.as_ref().map(|p| p.as_str()),
+				"category": t.category.as_ref().map(|c| c.as_str()),
+				"notes": t.notes,
+				"cleared": i64::from(t.cleared),
+				"sort_order": t.sort_order,
+				"isParent": i64::from(t.split == veritas_domain::SplitRole::Parent),
+				"isChild": i64::from(matches!(t.split, veritas_domain::SplitRole::Child { .. })),
+				"error": t.split_error,
+				"leg": t.transfer.as_ref().map(|leg| {
+					let leg = &ours.transactions[leg];
+					json!([leg.account.as_str(), leg.amount.minor(), leg.payee.as_ref().map(|p| p.as_str()), leg.notes])
+				}),
+			})
+		};
+		let parent = &ours.transactions[&TransactionId::new(parent_id.as_str())];
+		let mut lines: Vec<&veritas_domain::Transaction> = ours
+			.transactions
+			.values()
+			.filter(|t| {
+				matches!(&t.split, veritas_domain::SplitRole::Child { parent } if parent.as_str() == parent_id)
+			})
+			.collect();
+		lines.sort_by(|a, b| b.sort_order.total_cmp(&a.sort_order));
+		let ours: Vec<Value> = std::iter::once(parent).chain(lines).map(row).collect();
+
+		let out = scratch.0.join("applied.zip");
+		let ops = format!(
+			r#"[{},{{"op":"applyActions","rule":"{rule_id}","transactions":["{parent_id}"]}}]"#,
+			rule_op("createRule", &rule_id, &stored)
+		);
+		assert!(actual_apply_text(&seeded, &ops, &out, &today));
+		let dump = actual_reads(&out, &today).unwrap();
+		assert_eq!(actual_rule(&dump, &rule_id), stored);
+		let rows = table(&dump, "transactions");
+		let row = |r: &Value| {
+			let leg = rows
+				.iter()
+				.find(|leg| r["transferred_id"].is_string() && leg["id"] == r["transferred_id"]);
+			json!({
+				"amount": r["amount"], "description": r["description"], "category": r["category"],
+				"notes": r["notes"], "cleared": r["cleared"], "sort_order": r["sort_order"].as_f64(),
+				"isParent": r["isParent"], "isChild": r["isChild"], "error": r["error"],
+				"leg": leg.map(|leg| json!([leg["acct"], leg["amount"], leg["description"], leg["notes"]])),
+			})
+		};
+		let parent = rows.iter().find(|r| r["id"] == parent_id.as_str()).unwrap();
+		let mut lines: Vec<&Value> = rows
+			.iter()
+			.filter(|r| r["parent_id"] == parent_id.as_str() && r["tombstone"] == 0)
+			.collect();
+		lines.sort_by(|a, b| {
+			b["sort_order"]
+				.as_f64()
+				.unwrap()
+				.total_cmp(&a["sort_order"].as_f64().unwrap())
+		});
+		let theirs: Vec<Value> = std::iter::once(parent).chain(lines).map(row).collect();
 		assert_eq!(ours, theirs);
 	}
 }
