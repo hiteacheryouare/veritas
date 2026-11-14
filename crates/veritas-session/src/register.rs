@@ -35,11 +35,23 @@ pub struct Filter {
 	pub payee: Option<PayeeId>,
 	/// On-budget rows with no category that need one (dc/queries/index.ts:45-55).
 	pub uncategorized: bool,
+	/// Rows whose notes, or a line's notes, carry exactly this tag.
+	pub tag: Option<String>,
 }
 
 impl Filter {
 	fn is_empty(&self) -> bool {
 		*self == Filter::default()
+	}
+
+	/// Nothing but a date range, which keeps the running balance.
+	fn dates_only(&self) -> bool {
+		Filter {
+			from: None,
+			to: None,
+			..self.clone()
+		}
+		.is_empty()
 	}
 }
 
@@ -99,6 +111,9 @@ pub struct RegisterRow {
 	/// The account on the other side of a transfer, and its row.
 	pub transfer_account: Option<AccountId>,
 	pub counterpart: Option<TransactionId>,
+	/// When the other side is a split line, its split: deleting this row
+	/// deletes that whole split, so the shell confirms first (DEBT-6 A.5).
+	pub counterpart_parent: Option<TransactionId>,
 	pub lines: Vec<Line>,
 	/// A split whose lines don't add up to it, as some imported files hold:
 	/// `amount − sum(lines)`. Shown, never fixed silently (edge case 6).
@@ -107,7 +122,7 @@ pub struct RegisterRow {
 	pub schedule: Option<ScheduleId>,
 	pub needs_actual: Option<String>,
 	/// The account's balance after this row, in a single account's register
-	/// in Actual's order with no filter.
+	/// in Actual's order with no filter but a date range.
 	pub running_balance: Option<Money>,
 }
 
@@ -157,15 +172,37 @@ fn category_name(
 	}
 }
 
-/// Actual's tags are `#words` in the notes.
+/// Actual's `extractTagsFromText` (shared/tags.ts:34-48): each `#word` in
+/// the notes once, in order. A tag ends at whitespace or another `#`, and a
+/// doubled `#` escapes it.
 pub fn tags(notes: Option<&str>) -> Vec<String> {
-	notes
-		.unwrap_or_default()
-		.split_whitespace()
-		.filter_map(|word| word.strip_prefix('#'))
-		.filter(|tag| !tag.is_empty() && !tag.starts_with('#'))
-		.map(str::to_owned)
-		.collect()
+	let mut found: Vec<String> = Vec::new();
+	let text = notes.unwrap_or_default();
+	let mut previous = None;
+	let mut chars = text.char_indices().peekable();
+	while let Some((at, c)) = chars.next() {
+		if c == '#' && previous != Some('#') {
+			let start = at + 1;
+			let mut end = start;
+			while let Some(&(next_at, next)) = chars.peek() {
+				if next == '#' || next.is_whitespace() {
+					break;
+				}
+				end = next_at + next.len_utf8();
+				chars.next();
+			}
+			if end > start {
+				let tag = &text[start..end];
+				if !found.iter().any(|seen| seen == tag) {
+					found.push(tag.to_owned());
+				}
+				previous = text[..end].chars().next_back();
+				continue;
+			}
+		}
+		previous = Some(c);
+	}
+	found
 }
 
 fn line(data: &BudgetData, row: &Transaction) -> Line {
@@ -230,6 +267,7 @@ fn row_model(
 		reconciled: row.reconciled,
 		transfer_account: head.transfer_account,
 		counterpart: head.counterpart,
+		counterpart_parent: crate::transactions::counterpart_parent(data, row),
 		lines,
 		split_difference,
 		starting_balance: row.starting_balance,
@@ -268,6 +306,11 @@ fn matches(data: &BudgetData, filter: &Filter, row: &Transaction, lines: &[&Tran
 		if !hit {
 			return false;
 		}
+	}
+	if let Some(tag) = &filter.tag
+		&& !rows_and_lines().any(|r| tags(r.notes.as_deref()).iter().any(|t| t == tag))
+	{
+		return false;
 	}
 	if let Some(payee) = &filter.payee
 		&& !rows_and_lines().any(|r| payee_name(data, r.payee.as_ref()).0.as_ref() == Some(payee))
@@ -432,15 +475,22 @@ pub fn index(
 			}
 		}
 	}
-	let running = matches!(scope, Scope::Account(_)) && filter.is_empty() && sort == Sort::DEFAULT;
+	let running =
+		matches!(scope, Scope::Account(_)) && filter.dates_only() && sort == Sort::DEFAULT;
 	let mut balances = Vec::new();
-	if running {
+	if running && filter.is_empty() {
 		let mut balance = Money::ZERO;
 		for row in rows.iter().rev() {
 			balance = balance.checked_add(row.amount)?;
 			balances.push(balance);
 		}
 		balances.reverse();
+	} else if running {
+		let after = running_balances(data, scope)?;
+		balances = rows
+			.iter()
+			.map(|row| after.get(&row.id).copied().unwrap_or(Money::ZERO))
+			.collect();
 	}
 	Ok(Index {
 		scope: scope.clone(),
@@ -450,6 +500,28 @@ pub fn index(
 		ids: rows.into_iter().map(|row| row.id.clone()).collect(),
 		balances,
 	})
+}
+
+/// The balance after every row of a one-account register, over all its rows,
+/// so a date range still shows the account's real balance.
+fn running_balances(
+	data: &BudgetData,
+	scope: &Scope,
+) -> Result<std::collections::HashMap<TransactionId, Money>, CoreError> {
+	let mut rows: Vec<&Transaction> = data
+		.transactions
+		.values()
+		.filter(|row| !matches!(row.split, SplitRole::Child { .. }))
+		.filter(|row| alive(data, row) && in_scope(data, scope, row))
+		.collect();
+	rows.sort_by(|a, b| register_order(a, b));
+	let mut balance = Money::ZERO;
+	let mut after = std::collections::HashMap::with_capacity(rows.len());
+	for row in rows.iter().rev() {
+		balance = balance.checked_add(row.amount)?;
+		after.insert(row.id.clone(), balance);
+	}
+	Ok(after)
 }
 
 /// Each listed split's live lines in Actual's order, from one pass.
@@ -496,4 +568,116 @@ pub fn row(data: &BudgetData, id: &TransactionId) -> Result<RegisterRow, CoreErr
 			id: id.to_string(),
 		})?;
 	row_model(data, found, &children(data, id))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BalancePoint {
+	pub date: CivilDate,
+	pub balance: Money,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BalanceHistory {
+	/// End-of-day balances, oldest first: the range's first and last day and
+	/// each day in between with activity.
+	pub points: Vec<BalancePoint>,
+	/// `(last - first) / |first|`, or `None` when the first balance is 0.
+	pub change: Option<f64>,
+}
+
+/// An account's balance over `from..=to`, over live rows with split parents
+/// left out, as the balances in `accounts()` count them.
+pub fn balance_history(
+	data: &BudgetData,
+	account: &AccountId,
+	from: CivilDate,
+	to: CivilDate,
+) -> Result<BalanceHistory, CoreError> {
+	crate::accounts::live_account(data, account)?;
+	if from > to {
+		return Err(CoreError::Invalid(
+			"The range ends before it starts.".to_owned(),
+		));
+	}
+	let mut before = Money::ZERO;
+	let mut by_day: std::collections::BTreeMap<CivilDate, Money> = Default::default();
+	for row in data.transactions.values() {
+		if &row.account != account || row.split == SplitRole::Parent || !alive(data, row) {
+			continue;
+		}
+		if row.date < from {
+			before = before.checked_add(row.amount)?;
+		} else if row.date <= to {
+			let day = by_day.entry(row.date).or_insert(Money::ZERO);
+			*day = day.checked_add(row.amount)?;
+		}
+	}
+	by_day.entry(from).or_insert(Money::ZERO);
+	by_day.entry(to).or_insert(Money::ZERO);
+	let mut balance = before;
+	let mut points = Vec::with_capacity(by_day.len());
+	for (date, moved) in by_day {
+		balance = balance.checked_add(moved)?;
+		points.push(BalancePoint { date, balance });
+	}
+	let first = points.first().map_or(Money::ZERO, |p| p.balance);
+	let last = points.last().map_or(Money::ZERO, |p| p.balance);
+	let change = (first != Money::ZERO)
+		.then(|| (last.minor() as f64 - first.minor() as f64) / (first.minor() as f64).abs());
+	Ok(BalanceHistory { points, change })
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TagSummary {
+	pub name: String,
+	pub color: Option<String>,
+	pub hidden: bool,
+	/// Live rows whose notes carry the tag.
+	pub count: usize,
+}
+
+/// Every tag: those in Actual's `tags` table and those only written in
+/// notes, most used first, then by name.
+pub fn tag_summaries(data: &BudgetData) -> Vec<TagSummary> {
+	let mut counts: std::collections::HashMap<String, usize> = Default::default();
+	for row in data.transactions.values().filter(|row| alive(data, row)) {
+		for tag in tags(row.notes.as_deref()) {
+			*counts.entry(tag).or_default() += 1;
+		}
+	}
+	let mut summaries: Vec<TagSummary> = data
+		.tags
+		.values()
+		.filter(|tag| !tag.tombstone)
+		.map(|tag| TagSummary {
+			name: tag.name.clone(),
+			color: tag.color.clone(),
+			hidden: tag.hidden,
+			count: counts.remove(&tag.name).unwrap_or(0),
+		})
+		.collect();
+	summaries.extend(counts.into_iter().map(|(name, count)| TagSummary {
+		name,
+		color: None,
+		hidden: false,
+		count,
+	}));
+	summaries.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.name.cmp(&b.name)));
+	summaries
+}
+
+#[cfg(test)]
+mod tests {
+	use super::tags;
+
+	/// What Actual's `/(?<!#)#([^#\s]+)/g` finds in each note.
+	#[test]
+	fn tags_are_read_from_notes_as_actual_reads_them() {
+		let read = |notes: &str| tags(Some(notes));
+		assert_eq!(read("one #two ##three #four"), ["two", "four"]);
+		assert_eq!(read("#one#two"), ["one", "two"]);
+		assert_eq!(read("a#b #b"), ["b"]);
+		assert_eq!(read("## # #"), Vec::<String>::new());
+		assert_eq!(read("#café ok"), ["café"]);
+	}
 }
