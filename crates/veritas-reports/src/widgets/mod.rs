@@ -57,3 +57,23 @@ pub(crate) fn filtered_rows<'a>(
 			Err(error) => Some(Err(error)),
 		})
 }
+
+/// `filtered_rows` limited to `start..=end`, checking the date before the
+/// filter, which is the costly part.
+pub(crate) fn filtered_rows_between<'a>(
+	budget: &'a BudgetData,
+	filter: &'a TransactionFilter,
+	start: chrono::NaiveDate,
+	end: chrono::NaiveDate,
+) -> impl Iterator<Item = Result<&'a Transaction, CoreError>> + 'a {
+	budget
+		.transactions
+		.values()
+		.filter(move |row| (start..=end).contains(&row.date.naive()))
+		.filter(move |row| is_row(budget, row))
+		.filter_map(move |row| match filter.matches(budget, row) {
+			Ok(true) => Some(Ok(row)),
+			Ok(false) => None,
+			Err(error) => Some(Err(error)),
+		})
+}

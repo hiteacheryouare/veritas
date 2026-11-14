@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use chrono::{Datelike, Days, Months, NaiveDate};
 use veritas_domain::{BudgetData, CoreError, Money};
 
-use super::filtered_rows;
+use super::filtered_rows_between;
 use super::meta_filter;
 use super::summary::card_range;
 use crate::json::Json;
@@ -71,10 +71,10 @@ pub fn calendar(
 	let filter = meta_filter(meta)?;
 	let mut income: BTreeMap<NaiveDate, Money> = BTreeMap::new();
 	let mut expense: BTreeMap<NaiveDate, Money> = BTreeMap::new();
-	for row in filtered_rows(budget, &filter) {
+	for row in filtered_rows_between(budget, &filter, start, end) {
 		let row = row?;
 		let date = row.date.naive();
-		if date < start || date > end || row.amount == Money::ZERO {
+		if row.amount == Money::ZERO {
 			continue;
 		}
 		let side = if row.amount > Money::ZERO {

@@ -5,7 +5,10 @@
 use chrono::{Datelike, NaiveDate};
 use veritas_domain::{BudgetData, CoreError, Money};
 
-use super::{TimeRange, calculate_time_range, conditions_filter, filtered_rows, meta_filter};
+use super::{
+	TimeRange, calculate_time_range, conditions_filter, filtered_rows, filtered_rows_between,
+	meta_filter,
+};
 use crate::json::Json;
 use crate::report_query::{day, parse_date, transaction_date_bounds};
 
@@ -122,12 +125,8 @@ pub fn summary(
 	};
 	let mut amount = Money::ZERO;
 	let mut count = 0_u64;
-	for row in filtered_rows(budget, &filter) {
+	for row in filtered_rows_between(budget, &filter, start, end) {
 		let row = row?;
-		let date = row.date.naive();
-		if date < start || date > end {
-			continue;
-		}
 		amount = amount.checked_add(row.amount)?;
 		count += 1;
 	}
