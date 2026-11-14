@@ -101,6 +101,7 @@ fn budget() -> BudgetData {
 				starting_balance: false,
 				sort_order: t as f64,
 				tombstone: false,
+				split_error: None,
 			},
 		);
 	}

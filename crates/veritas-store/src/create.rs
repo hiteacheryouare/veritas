@@ -260,6 +260,7 @@ pub fn plan_new_account(
 			starting_balance: true,
 			sort_order: now_ms,
 			tombstone: false,
+			split_error: None,
 		}));
 	}
 	Ok(rows)

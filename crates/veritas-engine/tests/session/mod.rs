@@ -822,5 +822,6 @@ fn transaction(
 		starting_balance: false,
 		sort_order: 0.0,
 		tombstone: false,
+		split_error: None,
 	}
 }

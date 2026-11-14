@@ -126,6 +126,7 @@ impl Budget {
 				starting_balance: false,
 				sort_order: 0.0,
 				tombstone: false,
+				split_error: None,
 			},
 		);
 		self.0.transactions.get_mut(&id).unwrap()

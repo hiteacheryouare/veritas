@@ -839,7 +839,6 @@ fn quick_entry_for_a_merged_payee_uses_the_category_its_old_name_learned() {
 }
 
 #[test]
-#[ignore = "known bug on PR #56: learn_categories matches setter rules on the raw payee id, not the merged one, so it adds a second rule and the old category keeps winning"]
 fn relearning_after_a_merge_updates_the_merged_rule_as_actual_does() {
 	// §4.5: learning updates every `payee is <payee>` setter rule, matched on
 	// the mapped payee, the way Actual's in-memory rules are remapped by
@@ -913,6 +912,170 @@ fn relearning_after_a_merge_updates_the_merged_rule_as_actual_does() {
 	);
 }
 
+#[test]
+fn a_one_of_rule_for_a_merged_payee_stops_learning_adding_another() {
+	// §4.5: no new rule is learned when a `payee oneOf […]` rule already sets
+	// the category, and Actual reads that list through payee_mapping. The
+	// list names Cafe A; once Cafe A is merged into Cafe B, Cafe B learning
+	// Groceries finds it and adds nothing.
+	let scratch = Scratch::new("merge-one-of");
+	let Some(oracle) = oracle() else {
+		return;
+	};
+	let (cafes, everyday, groceries, _) = two_cafes(&scratch, &oracle);
+	let base = scratch.join("with-rule.zip");
+	actual_apply(
+		&oracle,
+		&cafes,
+		json!([{"op": "createRule", "id": "cafes-are-groceries",
+			"conditions": [{"op": "oneOf", "field": "payee", "value": ["cafe-a"]}],
+			"actions": [{"op": "set", "field": "category", "value": groceries}]}]),
+		&base,
+		14,
+	);
+
+	let veritas = import(&scratch, &base, "veritas");
+	perform(&veritas, merge_a_into_b());
+	for day in [1, 2, 3] {
+		typed_visit(&veritas, &everyday, day, "cafe-b", Some(&groceries));
+	}
+	let ours_zip = scratch.join("veritas.zip");
+	export(&veritas, &ours_zip);
+	let ours = actual_reads(&oracle, &ours_zip);
+
+	let learned = scratch.join("actual.zip");
+	actual_apply(
+		&oracle,
+		&base,
+		json!([
+			{"op": "mergePayees", "target": "cafe-b", "merge": ["cafe-a"]},
+			{"op": "addTransactions", "account": everyday, "learnCategories": true,
+				"transactions": ([1, 2, 3].map(|day| visit(day, "cafe-b", Some(&groceries))))},
+		]),
+		&learned,
+		15,
+	);
+	let theirs = actual_reads(&oracle, &learned);
+	let rules = rules_naming(&theirs, &["cafe-a", "cafe-b"]);
+	assert_eq!(rules.len(), 1, "Actual keeps only the oneOf rule");
+	assert_eq!(rules_naming(&ours, &["cafe-a", "cafe-b"]), rules);
+}
+
+/// A split parent and its live lines, lines ordered by amount, in the
+/// columns both sides are expected to write the same.
+fn split_view(dump: &Value, notes: &str) -> Value {
+	let transactions = by_id(dump, "transactions");
+	let parent = transactions
+		.values()
+		.find(|t| t["notes"] == notes && t["isParent"] == 1 && t["tombstone"] != 1)
+		.unwrap_or_else(|| panic!("no live split with notes {notes}"));
+	let view = |row: &Value| {
+		json!({
+			"acct": row["acct"], "amount": row["amount"], "description": row["description"],
+			"category": row["category"], "cleared": row["cleared"], "reconciled": row["reconciled"],
+			"isParent": row["isParent"], "isChild": row["isChild"], "error": row["error"],
+		})
+	};
+	let mut lines: Vec<&Value> = transactions
+		.values()
+		.filter(|t| t["parent_id"] == parent["id"] && t["isChild"] == 1 && t["tombstone"] != 1)
+		.copied()
+		.collect();
+	lines.sort_by_key(|t| t["amount"].as_i64());
+	json!({"parent": view(parent), "lines": lines.into_iter().map(view).collect::<Vec<_>>()})
+}
+
+#[test]
+fn editing_a_split_in_an_off_budget_account_writes_what_actual_writes() {
+	// §4.3 with edge case 5: an off-budget row never holds a category, and
+	// that holds for split lines too. The split is added on both sides, then
+	// edited: a new total, both lines kept, and a third line sent with a
+	// category, which Actual's batch update drops for an off-budget account.
+	let scratch = Scratch::new("off-budget-split");
+	let session = import(&scratch, &small_zip(), "base");
+	let brokerage = new_account(&session, "Brokerage", NewAccountKind::Investment, 0);
+	let groceries = category(&session, "Groceries");
+	let base = scratch.join("base.zip");
+	export(&session, &base);
+	session.close().unwrap();
+
+	let veritas = import(&scratch, &base, "veritas");
+	let mut draft = entry("fees", &brokerage, "2026-11-12", -9_000);
+	draft.notes = Some("fees".to_owned());
+	draft.cleared = true;
+	draft.splits = vec![line(-6_000, Some(&groceries)), line(-3_000, None)];
+	add(&veritas, draft.clone());
+	let lines = veritas.register_row("fees".to_owned()).unwrap().lines;
+	let id_of = |amount: i64| {
+		lines
+			.iter()
+			.find(|l| l.amount == amount)
+			.map(|l| l.id.clone())
+			.unwrap()
+	};
+	draft.amount = -10_000;
+	draft.splits = vec![
+		SplitLineDraft {
+			id: Some(id_of(-6_000)),
+			..line(-6_000, None)
+		},
+		SplitLineDraft {
+			id: Some(id_of(-3_000)),
+			..line(-3_000, None)
+		},
+		line(-1_000, Some(&groceries)),
+	];
+	edit(&veritas, "fees", draft);
+	let row = veritas.register_row("fees".to_owned()).unwrap();
+	assert!(row.lines.iter().all(|l| l.category_id.is_none()));
+	let ours_zip = scratch.join("veritas.zip");
+	export(&veritas, &ours_zip);
+	let Some(oracle) = oracle() else {
+		return;
+	};
+	let ours = actual_reads(&oracle, &ours_zip);
+
+	let added = scratch.join("actual-added.zip");
+	actual_apply(
+		&oracle,
+		&base,
+		json!([{"op": "addTransactions", "account": brokerage, "transactions": [{
+			"id": "fees", "date": "2026-11-12", "amount": -9_000, "notes": "fees", "cleared": true,
+			"subtransactions": [
+				{"id": "fees-1", "amount": -6_000, "category": groceries},
+				{"id": "fees-2", "amount": -3_000},
+			],
+		}]}]),
+		&added,
+		21,
+	);
+	let edited = scratch.join("actual-edited.zip");
+	actual_apply(
+		&oracle,
+		&added,
+		json!([{"op": "updateTransaction", "id": "fees", "fields": {
+			"amount": -10_000,
+			"subtransactions": [
+				{"id": "fees-1", "amount": -6_000},
+				{"id": "fees-2", "amount": -3_000},
+				{"amount": -1_000, "category": groceries},
+			],
+		}}]),
+		&edited,
+		22,
+	);
+	let theirs = actual_reads(&oracle, &edited);
+	assert_eq!(split_view(&ours, "fees"), split_view(&theirs, "fees"));
+	assert_eq!(
+		ours["computed"]["accounts"][&brokerage],
+		theirs["computed"]["accounts"][&brokerage]
+	);
+	assert_eq!(
+		ours["computed"]["months"]["2026-11"],
+		theirs["computed"]["months"]["2026-11"]
+	);
+}
+
 const SPLIT_ERROR: &str = r#"{"type":"SplitTransactionError","version":1,"difference":-500}"#;
 
 fn stored_error(scratch: &Scratch, name: &str, id: &str) -> Option<String> {
@@ -924,7 +1087,6 @@ fn stored_error(scratch: &Scratch, name: &str, id: &str) -> Option<String> {
 }
 
 #[test]
-#[ignore = "known bug on PR #56: Veritas never writes transactions.error, so a split it rebalances keeps Actual's old SplitTransactionError"]
 fn rebalancing_an_imported_unbalanced_split_clears_the_error_actual_shows() {
 	// Edge case 6: an unbalanced split from Actual is shown with its
 	// difference. Once the user rebalances it, Actual must stop flagging it:
@@ -971,6 +1133,13 @@ fn rebalancing_an_imported_unbalanced_split_clears_the_error_actual_shows() {
 			.split_difference,
 		None
 	);
+	session.undo().unwrap();
+	assert_eq!(
+		stored_error(&scratch, "budget", "odd").as_deref(),
+		Some(SPLIT_ERROR),
+		"undo puts Actual's error back"
+	);
+	session.redo().unwrap();
 	let zip = scratch.join("fixed.zip");
 	export(&session, &zip);
 	session.close().unwrap();
