@@ -20,11 +20,11 @@ final class StubDashboards: @unchecked Sendable {
 		let six = TimeFrame(mode: .slidingWindow, start: Month(year: 2026, month: 6), end: Self.november)
 		let main: [(String, WidgetKind, (Int64, Int64, Int64, Int64), WidgetConfig)] = [
 			("salary", .summary, (0, 0, 4, 2), WidgetConfig(name: "Salary YTD", timeFrame: ytd, conditions: [ReportCondition(field: "category", op: "is", value: "Paycheck")], summary: .sum)),
-			("burn", .summary, (4, 0, 4, 2), WidgetConfig(name: "Average monthly spending", timeFrame: year, summary: .avgPerMonth)),
+			("burn", .summary, (4, 0, 4, 2), WidgetConfig(name: "Average month", timeFrame: year, summary: .avgPerMonth)),
 			("rate", .formula, (8, 0, 4, 2), WidgetConfig(name: "Savings rate", formula: "=1-(SPENT/INCOME)")),
 			("worth", .netWorth, (0, 2, 6, 3), WidgetConfig(name: "Net worth", timeFrame: six, mode: "trend")),
 			("flow", .cashFlow, (6, 2, 3, 3), WidgetConfig(name: "Cash flow, this month")),
-			("spending", .spending, (9, 2, 3, 3), WidgetConfig(name: "Monthly spending", mode: "single-month")),
+			("spending", .spending, (9, 2, 3, 3), WidgetConfig(name: "This month against last", mode: "single-month")),
 			("calendar", .calendar, (0, 5, 4, 4), WidgetConfig(name: "Calendar")),
 			("age", .ageOfMoney, (4, 5, 4, 2), WidgetConfig(name: "Age of money", timeFrame: six)),
 			("analysis", .budgetAnalysis, (8, 5, 4, 2), WidgetConfig(name: "Budget analysis", timeFrame: six)),

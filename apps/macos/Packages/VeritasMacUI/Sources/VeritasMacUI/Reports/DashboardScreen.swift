@@ -318,10 +318,15 @@ private struct WidgetHeader: View {
 	var body: some View {
 		HStack(alignment: .firstTextBaseline) {
 			VStack(alignment: .leading, spacing: 2) {
-				if let title = card.title {
-					Text(title)
-						.font(.text(.body, weight: .semibold))
-						.lineLimit(1)
+				HStack(spacing: Spacing.s1) {
+					if let title = card.title {
+						Text(title)
+							.font(.text(.body, weight: .semibold))
+							.lineLimit(1)
+					}
+					if let caption = CardWords.caption(card.kind) {
+						InfoButton(caption: caption)
+					}
 				}
 				if let range = card.range {
 					Text(range.title)
@@ -348,14 +353,17 @@ private struct WidgetHeader: View {
 			}
 		case .cashFlow(_, _, let net):
 			Signed(amount: net, format: format, weight: .semibold)
+				.accessibilityLabel("Money in less money out \(format.amount(net))")
 		case .spending(_, let spent, _, let compare):
 			Signed(amount: compare - spent, format: format, weight: .semibold)
 		case .calendar(_, let days):
 			HStack(spacing: Spacing.s2) {
 				Label(format.amount(days.reduce(0) { $0 + $1.income }), systemImage: "arrow.up")
 					.foregroundStyle(Color.moneyAvailable)
+					.accessibilityLabel("Money in \(format.amount(days.reduce(0) { $0 + $1.income }))")
 				Label(format.amount(days.reduce(0) { $0 + $1.expenses }), systemImage: "arrow.down")
 					.foregroundStyle(Color.moneyOverspent)
+					.accessibilityLabel("Money out \(format.amount(days.reduce(0) { $0 + $1.expenses }))")
 			}
 			.font(.figures(.caption, weight: .semibold))
 			.labelStyle(.titleAndIcon)
@@ -418,9 +426,14 @@ private struct WidgetBody: View {
 			.chartYAxis(.hidden)
 			.chartYScale(domain: .automatic(includesZero: false))
 		case .cashFlow(let income, let expenses, _):
-			PairBars(first: ("Income", income, Color.moneyIncomeFill), second: ("Expenses", expenses, Color.chartExpense), format: format)
+			PairBars(first: ("Money in", income, Color.moneyIncomeFill), second: ("Money out", expenses, Color.chartExpense), format: format)
 		case .spending(let month, let spent, let compareMonth, let compareSpent):
-			PairBars(first: (ReportPeriod.monthName(month), spent, Color.chartExpense), second: (ReportPeriod.monthName(compareMonth), compareSpent, Color.chartExpenseSoft), format: format)
+			VStack(alignment: .leading, spacing: Spacing.s1) {
+				Text(card.config.conditions.isEmpty ? "Everything except income categories" : "Selected rows")
+					.font(.text(.caption))
+					.foregroundStyle(.textSecondary)
+				PairBars(first: (ReportPeriod.monthName(month), spent, Color.chartExpense), second: (ReportPeriod.monthName(compareMonth), compareSpent, Color.chartExpenseSoft), format: format)
+			}
 		case .sankey(let report):
 			SankeyCanvas(report: report, format: format, compact: true) { _ in }
 		case .customReport(let report):
@@ -432,7 +445,7 @@ private struct WidgetBody: View {
 		case .crossover(let months, let expenses, let income, let crossover):
 			Chart {
 				ForEach(Array(months.enumerated()), id: \.offset) { index, month in
-					LineMark(x: .value("Month", index), y: .value("Amount", Double(expenses[index]) / 100), series: .value("Line", "Expenses"))
+					LineMark(x: .value("Month", index), y: .value("Amount", Double(expenses[index]) / 100), series: .value("Line", card.config.conditions.isEmpty ? "All non-income categories" : "Selected categories"))
 						.foregroundStyle(Color.chartExpense)
 					LineMark(x: .value("Month", index), y: .value("Amount", Double(income[index]) / 100), series: .value("Line", "Investment income"))
 						.foregroundStyle(Color.chartSavings)
@@ -633,5 +646,42 @@ struct MarkdownText: View {
 
 	static func inline(_ text: String) -> AttributedString {
 		(try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
+	}
+}
+
+/// Captions for the cards that show Actual's raw-movement numbers
+/// (docs/finance/statements.md ST-10.10). They live in the info popover only.
+enum CardWords {
+	static func caption(_ kind: WidgetKind?) -> String? {
+		switch kind {
+		case .calendar: "All money in and out of every account. Both sides of transfers and card payments count. Includes refunds. Not Net Profit."
+		case .ageOfMoney: "How old your money is when you spend it. Every deposit counts as new money, and every payment or move out of your budget accounts counts as spending."
+		case .crossover: "Every category outside the income group, including categories Veritas treats as savings or debt paydown. Not Net Profit's Expenses."
+		case .cashFlow: "Deposits and payments in your budget accounts, up to today. Leaves out transfers between accounts, including card payments and moves to savings or loans. Includes refunds, starting balances and reconciliation adjustments."
+		case .spending: "Every row in your budget accounts that is not in an income category, including rows with no category and transfers out of your budget. Refunds reduce it. Not Net Profit's Expenses."
+		default: nil
+		}
+	}
+}
+
+private struct InfoButton: View {
+	let caption: String
+	@State private var isShown = false
+
+	var body: some View {
+		Button {
+			isShown.toggle()
+		} label: {
+			Image(systemName: "info.circle")
+				.foregroundStyle(.textTertiary)
+		}
+		.buttonStyle(.borderless)
+		.accessibilityLabel("About this card")
+		.popover(isPresented: $isShown, arrowEdge: .bottom) {
+			Text(caption)
+				.fixedSize(horizontal: false, vertical: true)
+				.frame(width: 280)
+				.padding(Spacing.s3)
+		}
 	}
 }
