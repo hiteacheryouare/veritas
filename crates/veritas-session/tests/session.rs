@@ -298,7 +298,13 @@ fn importing_a_zip_opens_a_writable_budget_and_snapshots_it_first() {
 	assert_eq!(session.read_only(), None);
 	assert!(!session.data().unwrap().accounts.is_empty());
 	assert!(session.load_report().skipped.is_empty());
-	assert_eq!(reasons(&session), [SnapshotReason::Open]);
+	let mut taken = reasons(&session);
+	taken.sort_by_key(|reason| format!("{reason:?}"));
+	assert_eq!(
+		taken,
+		[SnapshotReason::Import, SnapshotReason::Open],
+		"the import's own snapshot, and the open check's"
+	);
 	assert!(matches!(acquire(&dir).unwrap(), Access::ReadOnly(_)));
 
 	session.perform(&rename("Everyday")).unwrap();
