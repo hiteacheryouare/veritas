@@ -660,6 +660,16 @@ pub fn bill_status(
 	))
 }
 
+/// The payee, account and scheduled amount the way `v_schedules` reads them,
+/// for any live schedule, even one the bill screen can't show.
+pub fn schedule_parts(
+	budget: &BudgetData,
+	id: &ScheduleId,
+) -> Option<(Option<PayeeId>, Option<AccountId>, Option<i64>)> {
+	let facts = schedule_facts(budget, id).ok()?;
+	Some((facts.payee, facts.account, facts.amount.ok()))
+}
+
 /// The bill's occurrences from `start` through `end`, weekend moves applied.
 pub fn bill_dates(
 	budget: &BudgetData,

@@ -299,6 +299,22 @@ export const opHandlers: Record<string, OpHandler> = {
 			resetNextDate: op.resetNextDate
 		});
 	},
+	// A person's next click comes later: the fixed clock only moves 1 ms per
+	// 1,000 reads, and setNextDate tells a reset from a local write by timestamp.
+	tick: async () => {
+		for (let read = 0; read < 1000; read += 1) {
+			Date.now();
+		}
+	},
+	// What the 'sync' listener does when a budget opens (schedules/app.ts:858-881),
+	// awaited here instead of left running: once a day, gated by lastScheduleRun.
+	openBudgetSchedules: async ({ internal, today }) => {
+		const prefs = await internal.send('load-prefs');
+		if (prefs?.lastScheduleRun !== today) {
+			await internal.send('schedule/force-run-service');
+			await internal.send('save-prefs', { lastScheduleRun: today });
+		}
+	},
 
 	setNote: ({ api }, op) => {
 		required(op, 'id', 'note');

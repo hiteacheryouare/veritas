@@ -2,11 +2,12 @@ use veritas_domain::{
 	Account, AccountId, BudgetData, CategoryGroupId, CategoryId, CivilDate, CoreError, GoalId,
 	Note, Row,
 };
-use veritas_domain::{AccountGroupId, PayeeId, TransactionId};
+use veritas_domain::{AccountGroupId, PayeeId, ScheduleId, TransactionId};
 use veritas_rules::RuleBook;
-use veritas_session::{accounts, categories, goals, payees, transactions, writes};
+use veritas_session::{accounts, bills, categories, goals, payees, transactions, writes};
 
 use crate::accounts::TransactionDraft;
+use crate::bills::BillDraft;
 use crate::records::NewAccount;
 
 use veritas_engine::EnvelopeSheet;
@@ -283,6 +284,52 @@ pub enum Command {
 		width: i64,
 		height: i64,
 	},
+	/// A new bill: an Actual schedule with the rule it owns, stored as
+	/// Actual's schedule editor writes them (R-BILL-1, R-BILL-4). `bill_id`
+	/// picks the new id, as `TransactionDraft.id` does; it comes back as the
+	/// `schedule` entity in the `Change`. Inputs Actual would mis-evaluate
+	/// are refused with `Invalid`.
+	CreateBill {
+		bill_id: Option<String>,
+		bill: BillDraft,
+	},
+	/// Saves the editor over a bill. Only the schedule's own conditions and
+	/// its plain amount and category actions change; the next date resets
+	/// only when the date or account did (D65).
+	EditBill {
+		bill_id: String,
+		bill: BillDraft,
+	},
+	/// Pause and End are both Actual's Complete; only the label differs.
+	PauseBill {
+		bill_id: String,
+	},
+	EndBill {
+		bill_id: String,
+	},
+	/// Actual's Restart: the next date is reset from today.
+	ResumeBill {
+		bill_id: String,
+	},
+	/// R-BILL-3 Paid: posts the bill with this amount and date, through its
+	/// rules. A date before the window Actual counts as paying the next
+	/// occurrence also moves the bill on. A rule Veritas can't run refuses it
+	/// with `Invalid` and writes nothing (D60).
+	PayBill {
+		bill_id: String,
+		amount: i64,
+		date: String,
+	},
+	/// Skips the next occurrence. A one-time bill has nothing to skip to.
+	SkipBill {
+		bill_id: String,
+	},
+	/// Actual's "Post transaction", dated the next date, or "Post transaction
+	/// today". The next date moves once the daily service sees it paid.
+	PostBillNow {
+		bill_id: String,
+		dated_today: bool,
+	},
 }
 
 impl veritas_session::Command for Command {
@@ -315,7 +362,29 @@ impl veritas_session::Command for Command {
 				| Command::AddTransaction { .. }
 				| Command::EditTransaction { .. }
 				| Command::AddReconcileAdjustment { .. }
+				| Command::CreateBill { .. }
+				| Command::EditBill { .. }
+				| Command::ResumeBill { .. }
+				| Command::PayBill { .. }
+				| Command::PostBillNow { .. }
 		)
+	}
+
+	fn clears_schedule_run(&self, data: &BudgetData) -> bool {
+		let ending = |id: &str| {
+			data.schedules
+				.get(&ScheduleId::new(id))
+				.is_some_and(|schedule| !schedule.completed)
+				&& bills::clears_schedule_run(data, &ScheduleId::new(id))
+		};
+		match self {
+			Command::CreateBill { bill, .. } | Command::EditBill { bill, .. } => bill.auto_post,
+			Command::PauseBill { bill_id } | Command::EndBill { bill_id } => ending(bill_id),
+			Command::ResumeBill { bill_id } => {
+				bills::clears_schedule_run(data, &ScheduleId::new(bill_id.as_str()))
+			}
+			_ => false,
+		}
 	}
 
 	fn plan_with_sheet(
@@ -510,6 +579,45 @@ impl veritas_session::Command for Command {
 				now_ms(),
 			)
 			.map(|planned| planned.rows),
+			Command::CreateBill { bill_id, bill } => {
+				let id = ScheduleId::new(
+					bill_id
+						.clone()
+						.unwrap_or_else(veritas_store::new_id)
+						.as_str(),
+				);
+				bills::create_bill(data, &id, &crate::bills::bill(bill)?, sheet.today())
+			}
+			Command::EditBill { bill_id, bill } => bills::edit_bill(
+				data,
+				&ScheduleId::new(bill_id.as_str()),
+				&crate::bills::bill(bill)?,
+				sheet.today(),
+			),
+			Command::ResumeBill { bill_id } => {
+				bills::resume_bill(data, &ScheduleId::new(bill_id.as_str()), sheet.today())
+			}
+			Command::PayBill {
+				bill_id,
+				amount,
+				date,
+			} => bills::pay_bill(
+				data,
+				&ScheduleId::new(bill_id.as_str()),
+				money(*amount),
+				civil_date(date)?,
+				sheet.today(),
+				now_ms(),
+			),
+			Command::PostBillNow {
+				bill_id,
+				dated_today,
+			} => bills::post_bill_now(
+				data,
+				&ScheduleId::new(bill_id.as_str()),
+				dated_today.then(|| sheet.today()),
+				now_ms(),
+			),
 			_ => self.plan_plain(data),
 		}
 	}
@@ -714,6 +822,15 @@ impl Command {
 				width,
 				height,
 			} => custom_reports::place_widget(data, widget_id, (*x, *y, *width, *height)),
+			Command::PauseBill { bill_id } => {
+				bills::end_bill(data, &ScheduleId::new(bill_id.as_str()), true)
+			}
+			Command::EndBill { bill_id } => {
+				bills::end_bill(data, &ScheduleId::new(bill_id.as_str()), false)
+			}
+			Command::SkipBill { bill_id } => {
+				bills::skip_bill(data, &ScheduleId::new(bill_id.as_str()))
+			}
 			_ => Err(CoreError::Internal(
 				"a budget command was planned without the envelope sheet".to_owned(),
 			)),

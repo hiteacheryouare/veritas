@@ -230,6 +230,17 @@ pub fn insert(
 	write_new(data, draft.id.clone(), &ruled(draft), book, now_ms)
 }
 
+/// A row a schedule posts, already through its rules, written with its
+/// transfer leg as `addTransactions` writes it (`schedules/app.ts:589-625`).
+pub fn post(
+	data: &BudgetData,
+	added: &RuleTransaction,
+	book: &RuleBook,
+	now_ms: f64,
+) -> Result<Planned, CoreError> {
+	write_new(data, None, added, Some(book), now_ms)
+}
+
 fn new_payee(id: &PayeeId, name: &str) -> Payee {
 	Payee {
 		id: id.clone(),

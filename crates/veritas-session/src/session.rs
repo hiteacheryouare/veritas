@@ -328,6 +328,7 @@ impl<B: Backend> Session<B> {
 		if let Some(reason) = command.snapshot_first() {
 			self.snapshot(reason)?;
 		}
+		let clears_schedule_run = command.clears_schedule_run(self.data()?);
 		let rows = if command.reads_sheet() {
 			let today = self.today;
 			let State::Open(bus) = &self.state else {
@@ -364,6 +365,9 @@ impl<B: Backend> Session<B> {
 		self.dirty |= !changed.is_empty();
 		if !changed.is_empty() {
 			self.register = None;
+			if clears_schedule_run {
+				self.write_schedule_run(None);
+			}
 		}
 		if refreshed {
 			self.classification.refresh(&changed);
@@ -371,6 +375,37 @@ impl<B: Backend> Session<B> {
 			self.after_change(&changed);
 		}
 		Ok(changed)
+	}
+
+	/// Actual's daily schedule service (`schedules/app.ts:858-881`): once a
+	/// day, gated by `metadata.json`'s `lastScheduleRun`, post due and missed
+	/// auto-post bills and move paid ones on, as one undo step. The day is
+	/// marked done after the commit, outside SQLite, unless a bill was left
+	/// to Actual (D60), so Actual's own service still runs it.
+	pub fn run_schedules(&mut self, today: CivilDate) -> Result<ChangeSet, CoreError> {
+		self.poll();
+		if self.read_only().is_some() {
+			return Ok(ChangeSet::default());
+		}
+		let metadata = self.dir.join(METADATA_FILE);
+		let day = today.to_string();
+		if veritas_interop::last_schedule_run(&metadata)?.as_deref() == Some(day.as_str()) {
+			return Ok(ChangeSet::default());
+		}
+		let now_ms = self.now().timestamp_millis() as f64;
+		let planned = crate::bills::advance(self.data()?, today, now_ms)?;
+		let rows = planned.rows;
+		let changed = self.perform(&move |_: &BudgetData| Ok(rows.clone()))?;
+		if let Some(crate::bills::ScheduleRun::Done(day)) = planned.schedule_run {
+			self.write_schedule_run(Some(day));
+		}
+		Ok(changed)
+	}
+
+	/// Best effort: the commit already stands, and a missed write only means
+	/// a service run that finds nothing new to post (`app.ts:318-333`).
+	fn write_schedule_run(&self, day: Option<CivilDate>) {
+		let _ = veritas_interop::set_last_schedule_run(&self.dir.join(METADATA_FILE), day);
 	}
 
 	/// A page of the register, from the index kept since the last commit when

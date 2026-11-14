@@ -34,6 +34,13 @@ pub trait Command {
 	fn snapshot_first(&self) -> Option<SnapshotReason> {
 		None
 	}
+
+	/// Saving, ending or resuming an auto-post bill clears `metadata.json`'s
+	/// `lastScheduleRun` once it commits, outside undo, so the schedule
+	/// service runs again today (`allowAutoPostingToRunAgainToday`).
+	fn clears_schedule_run(&self, _data: &BudgetData) -> bool {
+		false
+	}
 }
 
 impl<F> Command for F

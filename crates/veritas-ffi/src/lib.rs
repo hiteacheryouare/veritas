@@ -1,6 +1,7 @@
 //! The only surface the apps see: commands, queries and the change-event stream, exported through UniFFI.
 
 mod accounts;
+mod bills;
 mod blocking;
 mod budget;
 mod commands;
@@ -20,6 +21,10 @@ pub use accounts::{
 	AccountDetail, AccountGroupDetail, AccountList, ClearedStatus, PayeeDetail, PayeeMemory,
 	Reconciliation, RegisterFilter, RegisterLine, RegisterPage, RegisterRow, RegisterScope,
 	RegisterSort, RegisterSortKey, SplitLineDraft, TransactionDraft,
+};
+pub use bills::{
+	BillAmount, BillDate, BillDetail, BillDraft, BillFrequency, BillRepeat, BillRepeatEnd,
+	BillRepeatPattern, BillState, BillStatus, BillSummary, BillWeekday, BillWeekend, UpcomingBill,
 };
 pub use blocking::CancelToken;
 pub use budget::{BudgetMonth, EnvelopeGroup, EnvelopeRow, MoneyTone};

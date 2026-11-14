@@ -3,6 +3,7 @@
 pub mod accounts;
 mod background;
 mod backup;
+pub mod bills;
 mod budgets;
 mod bus;
 mod cancel;
