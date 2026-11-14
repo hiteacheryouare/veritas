@@ -137,6 +137,42 @@ export const widgetData = async ({ internal }: ActualSession, requests: WidgetRe
 			const difference = data && Math.round(data.intervalData[todayDay][selection] - data.intervalData[todayDay].compare);
 			return { compare, compareTo, difference, data };
 		},
+		// NetWorthCard.tsx's range and spreadsheet. The card's labels need a locale
+		// and formatter, so only the numbers come back.
+		'net-worth-card': async ({ meta, firstDayOfWeekIdx }) => {
+			const { createSpreadsheet } = await loadSource(`${REPORTS}/spreadsheets/net-worth-spreadsheet.ts`);
+			const [start, end] = ranges.calculateTimeRange(meta?.timeFrame, undefined, latestDay);
+			const accounts = await internal.send('accounts-get');
+			const data: any = await run(
+				createSpreadsheet(
+					start,
+					end,
+					accounts,
+					meta?.conditions,
+					meta?.conditionsOp,
+					undefined,
+					meta?.interval || 'Monthly',
+					firstDayOfWeekIdx || '0',
+					(value: unknown) => String(value),
+					'MM/dd/yyyy'
+				)
+			);
+			return {
+				start,
+				end,
+				data: {
+					points: data.graphData.data.map((point: any) => point.y),
+					hasNegative: data.graphData.hasNegative,
+					startDate: data.graphData.start,
+					endDate: data.graphData.end,
+					netWorth: data.netWorth,
+					totalChange: data.totalChange,
+					lowestNetWorth: data.lowestNetWorth,
+					highestNetWorth: data.highestNetWorth,
+					accounts: data.accounts.map((account: any) => account.id)
+				}
+			};
+		},
 		'calendar-card': async ({ meta, firstDayOfWeekIdx }) => {
 			const { calendarSpreadsheet } = await loadSource(`${REPORTS}/spreadsheets/calendar-spreadsheet.ts`);
 			const [start, end] = fullRange(meta);

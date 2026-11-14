@@ -57,7 +57,8 @@ pub use widget_meta::{
 };
 pub use widgets::{
 	AgeOfMoney, AgePoint, BudgetAnalysis, BudgetAnalysisMonth, CalendarDay, CalendarMonth,
-	CashFlowCard, Crossover, CrossoverPoint, Granularity, Spending, SpendingDay, SpendingMode,
-	SummaryContent, SummaryData, TimeRange, Trend, age_of_money, budget_analysis,
-	calculate_time_range, calendar, cash_flow_card, crossover, spending, summary,
+	CashFlowCard, Crossover, CrossoverPoint, Granularity, NetWorthCard, NetWorthInterval,
+	NetWorthPeriod, Spending, SpendingDay, SpendingMode, SummaryContent, SummaryData, TimeRange,
+	Trend, age_of_money, budget_analysis, calculate_time_range, calendar, cash_flow_card,
+	crossover, net_worth_card, spending, summary,
 };

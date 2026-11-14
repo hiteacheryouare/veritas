@@ -14,7 +14,7 @@ use veritas_domain::CivilDate;
 use veritas_engine::EnvelopeSheet;
 use veritas_reports::{
 	Granularity, Json, Spending, Trend, age_of_money, budget_analysis, calendar, cash_flow_card,
-	crossover, spending, summary,
+	crossover, net_worth_card, spending, summary,
 };
 
 const ORACLE_TODAY: &str = "2026-11-09";
@@ -718,5 +718,99 @@ fn d73_spending_card_reads_a_tracking_budget() {
 			&theirs[format!("tracking-{index}").as_str()],
 			&value.to_string(),
 		);
+	}
+}
+
+#[test]
+fn d73_net_worth_card_matches_actual() {
+	let budget = fixture("all-features");
+	let checking = account(&budget, "Checking");
+	let savings = account(&budget, "Savings");
+	let visa = account(&budget, "Visa Card");
+	let dining = category(&budget, "Dining Out");
+	let mut metas = vec![json!(null), json!({"interval": "Fortnightly"})];
+	let frames = [
+		json!(null),
+		json!({"start": "2026-01", "end": "2026-11", "mode": "static"}),
+		json!({"start": "2020-01", "end": "2027-03", "mode": "static"}),
+		json!({"start": "2026-03", "end": "2026-05", "mode": "sliding-window"}),
+		json!({"start": "2026-10-01", "end": "2026-11-05", "mode": "sliding-window"}),
+		json!({"start": "2025-06", "end": "2026-11", "mode": "full"}),
+		json!({"mode": "lastYear"}),
+		json!({"mode": "yearToDate"}),
+	];
+	let filters = [
+		(json!([]), "and"),
+		(
+			json!([{"field": "account", "op": "is", "value": checking, "type": "id"}]),
+			"and",
+		),
+		(
+			json!([{"field": "account", "op": "oneOf", "value": [checking, savings], "type": "id"}]),
+			"and",
+		),
+		(
+			json!([{"field": "account", "op": "isNot", "value": visa, "type": "id"}, {"field": "category", "op": "is", "value": dining, "type": "id"}]),
+			"or",
+		),
+		(
+			json!([{"field": "amount", "op": "lt", "value": 0, "type": "number"}]),
+			"and",
+		),
+		(
+			json!([{"field": "transfer", "op": "is", "value": true, "type": "boolean"}]),
+			"and",
+		),
+		(
+			json!([{"field": "date", "op": "gte", "value": "2026-04-01", "type": "date"}]),
+			"and",
+		),
+	];
+	for interval in ["Daily", "Weekly", "Monthly", "Yearly"] {
+		for frame in &frames {
+			for (conditions, op) in &filters {
+				metas.push(json!({"interval": interval, "timeFrame": frame, "conditions": conditions, "conditionsOp": op}));
+			}
+		}
+	}
+	let cases: Vec<(String, &str, Value)> = metas
+		.into_iter()
+		.enumerate()
+		.map(|(index, meta)| (format!("net-worth-{index}"), "net-worth-card", meta))
+		.collect();
+	for first_day_of_week in [0, 1] {
+		let ours: Vec<_> = cases
+			.iter()
+			.map(|(_, _, value)| {
+				net_worth_card(&budget, meta(value).as_ref(), today(), first_day_of_week).unwrap()
+			})
+			.collect();
+		let Some(theirs) = theirs("all-features", &cases, &first_day_of_week.to_string()) else {
+			return;
+		};
+		for ((id, _, value), ours) in cases.iter().zip(ours) {
+			let expected = &theirs[id.as_str()];
+			assert_eq!(
+				expected["start"],
+				ours.range.start.as_str(),
+				"{value} start"
+			);
+			assert_eq!(expected["end"], ours.range.end.as_str(), "{value} end");
+			let ours = json!({
+				"points": ours.periods.iter().map(|period| period.net_worth.minor()).collect::<Vec<_>>(),
+				"hasNegative": ours.has_negative,
+				"startDate": ours.start.to_string(),
+				"endDate": ours.end.to_string(),
+				"netWorth": ours.net_worth.minor(),
+				"totalChange": ours.total_change.minor(),
+				"lowestNetWorth": money(ours.lowest),
+				"highestNetWorth": money(ours.highest),
+				"accounts": ours.accounts.iter().map(ToString::to_string).collect::<Vec<_>>(),
+			});
+			assert_eq!(
+				ours, expected["data"],
+				"{value} with weeks from {first_day_of_week}"
+			);
+		}
 	}
 }
