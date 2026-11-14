@@ -32,6 +32,12 @@ extension BudgetSession {
 	func previewCustomReport(_ settings: CustomReportSettings, today: String) async throws -> CustomReportView { throw FfiError.Cancelled }
 	func dashboards(today: String) async throws -> [DashboardPage] { [] }
 	var canEditDashboards: Bool { false }
+	func accounts() async throws -> AccountList { AccountList(accounts: [], groups: []) }
+	func register(_ scope: RegisterScope, filter: RegisterFilter, sort: RegisterSort, offset: UInt64, limit: UInt64) async throws -> RegisterPage { RegisterPage(total: 0, rows: []) }
+	func registerRow(_ id: String) async throws -> RegisterRow { throw FfiError.NotFound(entity: "transaction", id: id) }
+	func payees() async throws -> [PayeeDetail] { [] }
+	func payeeMemory(_ payeeID: String) async throws -> PayeeMemory? { nil }
+	func reconciliation(_ accountID: String, statementBalance: Int64) async throws -> Reconciliation { Reconciliation(cleared: 0, difference: statementBalance) }
 	func dashboardSheets(today: String) async throws -> [DashboardSheet] { try await dashboards(today: today).map(DashboardSheet.init) }
 	func addWidget(page: String, kind: WidgetKind, x: Int64, y: Int64, width: Int64, height: Int64, config: WidgetConfig) async throws -> String { "" }
 	func removeWidget(_ id: String) async throws {}

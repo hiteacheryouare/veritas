@@ -122,6 +122,7 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 	private var keep = Retention(hourly: 48, daily: 30, monthly: 12, operationDays: 30)
 	private let budget = StubBudget()
 	private let reports = StubReports()
+	private let accountStore = StubAccounts()
 	private lazy var dashboardStore = StubDashboards(reports: reports)
 
 	init(readOnly: ReadOnlyKind?, hasFindings: Bool = false, backupFails: Bool = false) {
@@ -146,7 +147,7 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 	let canExport = true
 
 	func overview() async throws -> BudgetOverview {
-		BudgetOverview(name: name, directory: StubLaunch.budgetDirectory, readOnly: readOnly, accountGroups: accountGroups)
+		BudgetOverview(name: name, directory: StubLaunch.budgetDirectory, readOnly: readOnly, accountGroups: name == "Stub" ? accountStore.sidebar() : accountGroups)
 	}
 
 	func undo() async throws {}
@@ -222,8 +223,20 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 		switch command {
 		case .saveCustomReport(let settings): try reports.save(settings)
 		case .placeWidget(let id, let x, let y, let width, let height): try dashboardStore.place(id, x: x, y: y, width: width, height: height)
-		default: try budget.perform(command)
+		default:
+			if try !accountStore.perform(command) { try budget.perform(command) }
 		}
+	}
+
+	func accounts() async throws -> AccountList { accountStore.list() }
+	func register(_ scope: RegisterScope, filter: RegisterFilter, sort: RegisterSort, offset: UInt64, limit: UInt64) async throws -> RegisterPage {
+		accountStore.register(scope, filter: filter, sort: sort, offset: offset, limit: limit)
+	}
+	func registerRow(_ id: String) async throws -> RegisterRow { try accountStore.registerRow(id) }
+	func payees() async throws -> [PayeeDetail] { accountStore.payeeList() }
+	func payeeMemory(_ payeeID: String) async throws -> PayeeMemory? { accountStore.memory(payeeID) }
+	func reconciliation(_ accountID: String, statementBalance: Int64) async throws -> Reconciliation {
+		accountStore.reconciliation(accountID, statement: statementBalance)
 	}
 
 	func netProfit(first: Month, last: Month) async throws -> NetProfitReport { reports.netProfit(first: first, last: last) }

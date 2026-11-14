@@ -27,6 +27,16 @@ struct GoalWordsTests {
 		#expect(words.detail == nil)
 	}
 
+	@Test func noHistoryIsNeutralAndNothingAddedIsAWarning() {
+		let fresh = GoalWords(active(pace: .noHistory(neededMonthly: 7_600)), format: MoneyFormat(), thisMonth: november)
+		#expect(fresh.note == "Budget $76 a month")
+		#expect(fresh.detail == "No ETA yet")
+		#expect(fresh.tone == .neutral)
+		let stalled = GoalWords(active(pace: .notAdding(neededMonthly: 7_600)), format: MoneyFormat(), thisMonth: november)
+		#expect(stalled.note == "Nothing is being added")
+		#expect(stalled.tone == .low)
+	}
+
 	@Test func withoutAPaceTheSuggestionAndTargetShow() {
 		let words = GoalWords(active(pace: nil), format: MoneyFormat(), thisMonth: november)
 		#expect(words.note == "Budget $76 a month")

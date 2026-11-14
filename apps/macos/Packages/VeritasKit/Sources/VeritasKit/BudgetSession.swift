@@ -132,6 +132,18 @@ public protocol BudgetSession: AnyObject, Sendable {
 	func previewCustomReport(_ settings: CustomReportSettings, today: String) async throws -> CustomReportView
 	func dashboards(today: String) async throws -> [DashboardPage]
 
+	/// Every account with its balances, and the account groups (R-ACC-1).
+	func accounts() async throws -> AccountList
+	/// One page of a register, in the session's order (R-ACC-2, R-PERF-3).
+	func register(_ scope: RegisterScope, filter: RegisterFilter, sort: RegisterSort, offset: UInt64, limit: UInt64) async throws -> RegisterPage
+	func registerRow(_ id: String) async throws -> RegisterRow
+	/// Every payee by name (R-ACC-5).
+	func payees() async throws -> [PayeeDetail]
+	/// The payee's last category and amount, for quick entry (R-ACC-4).
+	func payeeMemory(_ payeeID: String) async throws -> PayeeMemory?
+	/// What's cleared and how far it is from the statement (R-ACC-3).
+	func reconciliation(_ accountID: String, statementBalance: Int64) async throws -> Reconciliation
+
 	/// Whether the core can add, remove and configure widgets and dashboards,
 	/// and save report filters. Until it can, those actions stay hidden.
 	var canEditDashboards: Bool { get }

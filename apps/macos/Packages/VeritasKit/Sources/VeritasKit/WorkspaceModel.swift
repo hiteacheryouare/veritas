@@ -219,6 +219,12 @@ public final class WorkspaceModel {
 
 	public var canEditDashboards: Bool { session?.canEditDashboards ?? false }
 
+	/// Where ⌘N adds a transaction: the account on screen, else the first in the sidebar.
+	public var currentAccountID: String {
+		if case .account(let id) = destination { return id }
+		return overview?.accounts.first { !$0.isInactive }?.id ?? ""
+	}
+
 	/// D62: a code Actual doesn't know uses 2 places.
 	private func decimalPlaces(for code: String?) async -> UInt8 {
 		guard let code, let currencies = try? await library.currencies() else { return 2 }

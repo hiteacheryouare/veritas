@@ -207,6 +207,36 @@ final class CoreBudgetSession: BudgetSession {
 		return try await Core.cancellable { try await session.dashboards(today: today, cancel: $0) }
 	}
 
+	func accounts() async throws -> AccountList {
+		let session = session
+		return try await Core.run { try session.accounts() }
+	}
+
+	func register(_ scope: RegisterScope, filter: RegisterFilter, sort: RegisterSort, offset: UInt64, limit: UInt64) async throws -> RegisterPage {
+		let session = session
+		return try await Core.run { try session.register(scope: scope, filter: filter, sort: sort, offset: offset, limit: limit) }
+	}
+
+	func registerRow(_ id: String) async throws -> RegisterRow {
+		let session = session
+		return try await Core.run { try session.registerRow(transactionId: id) }
+	}
+
+	func payees() async throws -> [PayeeDetail] {
+		let session = session
+		return try await Core.run { try session.payees() }
+	}
+
+	func payeeMemory(_ payeeID: String) async throws -> PayeeMemory? {
+		let session = session
+		return try await Core.run { try session.payeeMemory(payeeId: payeeID) }
+	}
+
+	func reconciliation(_ accountID: String, statementBalance: Int64) async throws -> Reconciliation {
+		let session = session
+		return try await Core.run { try session.reconciliation(accountId: accountID, statementBalance: statementBalance) }
+	}
+
 	/// The dashboard and report-filter contract hasn't landed, so the core
 	/// draws what it can and the editing actions stay hidden.
 	let canEditDashboards = false
