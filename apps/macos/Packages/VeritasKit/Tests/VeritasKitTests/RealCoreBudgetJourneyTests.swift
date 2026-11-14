@@ -235,14 +235,26 @@ struct RealCoreBudgetJourneyTests {
 			await budget.workspace.undo()
 			#expect(await budget.changeAnnounced(after: count))
 			await screen.load()
-			#expect(try screen.sheet?.row(F.groceries).budgeted == 14_000)
-			let shown = try #require(screen.editing?.text)
+			let afterUndo = try #require(screen.sheet).row(F.groceries).budgeted
+			#expect(afterUndo == 14_000)
+			#expect(screen.editing?.text == "140.00", "the untouched field shows the cell after the undo")
 
 			await screen.commitEditing()
+			let afterReturn = try #require(screen.sheet).row(F.groceries).budgeted
+			#expect(afterReturn == 14_000)
+
+			await budget.workspace.redo()
+			await screen.load()
+			screen.beginEditing(F.groceries)
+			screen.editing?.type("200")
+			await budget.workspace.undo()
+			await screen.load()
+			let afterSecondUndo = try #require(screen.sheet).row(F.groceries).budgeted
+			#expect(afterSecondUndo == 14_000)
+			#expect(screen.editing?.text == "200", "a field with typing in it keeps the typing")
+			await screen.commitEditing()
 			let saved = try #require(screen.sheet).row(F.groceries).budgeted
-			withKnownIssue("Known bug: the open field keeps its pre-undo value as the original, so Return on \(shown) writes nothing and the cell stays 140.00") {
-				#expect(shown == "140.00" || saved == 20_000, "Return saves what the field shows, or the field shows the cell")
-			}
+			#expect(saved == 20_000, "Return saves what the field shows")
 		}
 	}
 

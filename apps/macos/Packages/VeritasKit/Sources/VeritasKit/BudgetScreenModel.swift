@@ -75,6 +75,17 @@ public final class BudgetScreenModel {
 		if let selection, !envelopeIDs.contains(selection) {
 			self.selection = nil
 		}
+		refreshEditing()
+	}
+
+	/// An undo or redo can change the cell under an open field. An untouched
+	/// field shows the new value, and the field closes if its envelope is gone.
+	private func refreshEditing() {
+		guard let id = editingID, let editing else { return }
+		guard let envelope = envelope(id) else { return cancelEditing() }
+		if editing.isUntouched, envelope.budgeted != editing.original {
+			self.editing = AmountFieldModel(amount: envelope.budgeted, style: workspace.numberStyle, reader: amountReader)
+		}
 	}
 
 	public func previousMonth() async {
@@ -115,7 +126,7 @@ public final class BudgetScreenModel {
 	public func commitEditing(thenMove step: Int = 0) async {
 		guard let editing, let id = editingID else { return }
 		guard let amount = await editing.commit() else { return }
-		if amount != editing.original {
+		if amount != envelope(id)?.budgeted {
 			guard await workspace.perform(.setBudget(month: month, categoryId: id, amount: amount)) else { return }
 			await load()
 		}
