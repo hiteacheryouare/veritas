@@ -149,27 +149,31 @@ struct ConditionsEditor: View {
 			.accessibilityIdentifier("filters.match")
 		}
 		ForEach($conditions) { $condition in
-			HStack(spacing: Spacing.s2) {
-				Picker("Field", selection: $condition.field) {
-					ForEach(ReportCondition.fields, id: \.id) { Text($0.title).tag($0.id) }
+			VStack(alignment: .leading, spacing: Spacing.s2) {
+				HStack(spacing: Spacing.s2) {
+					Picker("Field", selection: $condition.field) {
+						ForEach(ReportCondition.fields, id: \.id) { Text($0.title).tag($0.id) }
+					}
+					.labelsHidden()
+					.fixedSize()
+					Picker("Operator", selection: $condition.op) {
+						ForEach(ReportCondition.operators(for: condition.field), id: \.id) { Text($0.title).tag($0.id) }
+					}
+					.labelsHidden()
+					.fixedSize()
+					Spacer(minLength: 0)
+					Button {
+						conditions.removeAll { $0.id == condition.id }
+					} label: {
+						Image(systemName: "minus.circle")
+					}
+					.buttonStyle(.borderless)
+					.accessibilityLabel("Remove filter")
 				}
-				.labelsHidden()
-				.frame(width: 110)
-				Picker("Operator", selection: $condition.op) {
-					ForEach(ReportCondition.operators(for: condition.field), id: \.id) { Text($0.title).tag($0.id) }
-				}
-				.labelsHidden()
-				.frame(width: 130)
 				TextField("Value", text: $condition.value, prompt: Text("Value"))
 					.labelsHidden()
+					.textFieldStyle(.roundedBorder)
 					.accessibilityIdentifier("filters.value")
-				Button {
-					conditions.removeAll { $0.id == condition.id }
-				} label: {
-					Image(systemName: "minus.circle")
-				}
-				.buttonStyle(.borderless)
-				.accessibilityLabel("Remove filter")
 			}
 			.onChange(of: condition.field) {
 				if !ReportCondition.operators(for: condition.field).contains(where: { $0.id == condition.op }) { condition.op = "is" }

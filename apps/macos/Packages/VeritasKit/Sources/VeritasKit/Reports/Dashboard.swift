@@ -266,7 +266,8 @@ public enum CardContent: Hashable, Sendable {
 	case budgetAnalysis(months: [Month], budgeted: [Int64], spent: [Int64])
 	case balanceForecast([ForecastPoint])
 	case ageOfMoney(days: Int, change: Int, series: [Int])
-	case monteCarlo(points: [ForecastPoint], successRate: Double?)
+	/// `endAge` is the age the success rate runs to, as Actual's card says it.
+	case monteCarlo(points: [ForecastPoint], successRate: Double?, endAge: Int?)
 	case pending
 	case unknown
 }

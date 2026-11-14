@@ -45,8 +45,10 @@ public final class TransactionEditorModel: Identifiable {
 	public private(set) var envelopes: [EnvelopeGroup] = []
 	public private(set) var accounts: [AccountDetail] = []
 	public private(set) var problem: String?
-	/// Filled from the payee's last transaction, so the sheet can say so.
+	/// Filled from the payee's last transaction.
 	public private(set) var remembered = false
+	/// A reconciled row keeps its cleared mark until it's unlocked, as in Actual.
+	public private(set) var isLocked: Bool
 
 	@ObservationIgnored let workspace: WorkspaceModel
 	@ObservationIgnored let reader: any AmountReader
@@ -65,6 +67,7 @@ public final class TransactionEditorModel: Identifiable {
 		date = editing.flatMap { Self.date($0.date) } ?? .now
 		notes = editing?.notes ?? ""
 		cleared = editing?.cleared ?? false
+		isLocked = editing?.reconciled ?? false
 		if let editing {
 			splits = editing.lines.map { line in
 				SplitLineEditor(lineID: line.id, amount: abs(line.amount), categoryID: line.categoryId, notes: line.notes ?? "", style: workspace.numberStyle, reader: reader)
@@ -125,9 +128,16 @@ public final class TransactionEditorModel: Identifiable {
 		payees.first { $0.id == payeeID }?.transferAccountId != nil
 	}
 
+	public func unlock() async {
+		guard let editing, isLocked else { return }
+		if await workspace.perform(.unlockReconciled(transactionId: editing.id)) { isLocked = false }
+	}
+
 	public func addSplitLine() {
 		if splits.isEmpty {
-			splits.append(SplitLineEditor(lineID: nil, amount: 0, categoryID: categoryID, notes: "", style: workspace.numberStyle, reader: reader))
+			let first = SplitLineEditor(lineID: nil, amount: 0, categoryID: categoryID, notes: "", style: workspace.numberStyle, reader: reader)
+			first.amount.type(amount.text)
+			splits.append(first)
 		}
 		splits.append(SplitLineEditor(lineID: nil, amount: 0, categoryID: nil, notes: "", style: workspace.numberStyle, reader: reader))
 	}

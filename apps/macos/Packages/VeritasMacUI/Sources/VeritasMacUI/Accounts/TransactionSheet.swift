@@ -96,12 +96,16 @@ struct TransactionSheet: View {
 						.accessibilityIdentifier("transaction.notes")
 				}
 				Divider()
-				LabeledRow("Cleared") {
-					Toggle("Cleared", isOn: $model.cleared)
-						.labelsHidden()
-						.toggleStyle(.switch)
-						.disabled(model.editing?.reconciled == true)
-						.accessibilityIdentifier("transaction.cleared")
+				LabeledRow(model.isLocked ? "Reconciled" : "Cleared") {
+					if model.isLocked {
+						Button("Unlock") { Task { await model.unlock() } }
+							.accessibilityIdentifier("transaction.unlock")
+					} else {
+						Toggle("Cleared", isOn: $model.cleared)
+							.labelsHidden()
+							.toggleStyle(.switch)
+							.accessibilityIdentifier("transaction.cleared")
+					}
 				}
 			}
 			if model.isSplit {

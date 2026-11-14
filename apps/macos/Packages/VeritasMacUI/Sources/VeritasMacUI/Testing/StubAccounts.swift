@@ -100,7 +100,7 @@ final class StubAccounts: @unchecked Sendable {
 		add("checking", "2026-11-09", -8_214, "fernwood", "groceries", "Includes prescription #medical", cleared: false)
 		add("savings", "2023-09-30", 1_240_000, nil, nil, "Starting balance")
 		add("brokerage", "2023-09-30", 3_180_000, nil, nil, "Starting balance")
-		add("carloan", "2023-09-30", -1_480_000, nil, nil, "Starting balance")
+		add("carloan", "2023-09-30", -2_480_000, nil, nil, "Starting balance")
 		add("checking", "2023-09-30", 240_000, nil, nil, "Starting balance")
 		recount()
 	}
@@ -237,6 +237,9 @@ final class StubAccounts: @unchecked Sendable {
 				txns.append(try make(draft, id: draft.id ?? UUID().uuidString.lowercased()))
 			case .editTransaction(let id, let draft):
 				guard let index = txns.firstIndex(where: { $0.id == id }) else { throw FfiError.NotFound(entity: "transaction", id: id) }
+				if txns[index].reconciled, !draft.cleared {
+					throw FfiError.Invalid(message: "This transaction is reconciled. Unlock it before you uncheck cleared.")
+				}
 				var edited = try make(draft, id: id)
 				edited.reconciled = txns[index].reconciled
 				txns[index] = edited

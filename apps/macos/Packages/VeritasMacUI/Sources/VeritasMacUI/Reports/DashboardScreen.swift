@@ -368,11 +368,18 @@ private struct WidgetHeader: View {
 			}
 		case .crossover(_, _, _, let month):
 			if let month { Text(ReportPeriod.monthYear(month)).font(.text(.body, weight: .semibold)) }
-		case .monteCarlo(_, let rate):
+		case .monteCarlo(_, let rate, let age):
 			if let rate {
-				Text(rate.formatted(.percent.precision(.fractionLength(0))))
-					.font(.figures(.heading, weight: .semibold))
-					.accessibilityLabel("Success rate \(rate.formatted(.percent.precision(.fractionLength(0))))")
+				VStack(alignment: .trailing, spacing: 2) {
+					Text(rate.formatted(.percent.precision(.fractionLength(0))))
+						.font(.figures(.heading, weight: .semibold))
+					if let age {
+						Text("Success rate to age \(age)")
+							.font(.text(.caption))
+							.foregroundStyle(.textSecondary)
+					}
+				}
+				.accessibilityElement(children: .combine)
 			}
 		default:
 			EmptyView()
@@ -446,7 +453,7 @@ private struct WidgetBody: View {
 				}
 			}
 			.chartYAxis(.hidden)
-		case .balanceForecast(let points), .monteCarlo(let points, _):
+		case .balanceForecast(let points), .monteCarlo(let points, _, _):
 			Chart(points, id: \.month) { point in
 				AreaMark(x: .value("Month", point.month.firstDay), yStart: .value("Low", Double(point.low) / 100), yEnd: .value("High", Double(point.high) / 100))
 					.foregroundStyle(Color.chartBand)

@@ -157,7 +157,6 @@ private struct AccountRow: View {
 	private func figure(_ amount: Int64, weight: Font.Weight) -> some View {
 		Text(format.amount(amount))
 			.font(.figures(.body, weight: weight))
-			.foregroundStyle(amount < 0 ? Color.moneyOverspent : Color.textPrimary)
 			.frame(width: 110, alignment: .trailing)
 	}
 }

@@ -205,7 +205,7 @@ struct RegisterTable: NSViewRepresentable {
 				add("Unlock Reconciled", enabled: editable) { [weak self] in Task { await self?.model.unlock(row.id) } }
 			}
 			menu.addItem(.separator())
-			add(rows.count == 1 ? "Delete" : "Delete \(rows.count) Transactions", enabled: editable) { [weak self] in self?.parent.delete(rows) }
+			add(rows.count == 1 ? "Delete Transaction" : "Delete \(rows.count) Transactions", enabled: editable) { [weak self] in self?.parent.delete(rows) }
 		}
 
 		private func add(_ title: String, enabled: Bool, _ action: @escaping () -> Void) {

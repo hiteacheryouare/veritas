@@ -133,7 +133,7 @@ final class StubDashboards: @unchecked Sendable {
 			return .monteCarlo(points: span.enumerated().map { index, month in
 				let middle = 9_500_000 + Int64(index) * 2_400_000
 				return ForecastPoint(month: month, low: middle - Int64(index) * 1_100_000, middle: middle, high: middle + Int64(index) * 1_600_000)
-			}, successRate: 0.82)
+			}, successRate: 0.82, endAge: 90)
 		}
 	}
 
