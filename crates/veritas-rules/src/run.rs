@@ -347,7 +347,7 @@ impl RuleBook {
 /// is dropped at the end, even on a transaction that was already split, as
 /// in Actual. `None` is a rule Actual would crash on (a line number that
 /// skips ahead).
-fn split(parent: &mut RuleTransaction, actions: &[&Action]) -> Result<(), &'static str> {
+pub(crate) fn split(parent: &mut RuleTransaction, actions: &[&Action]) -> Result<(), &'static str> {
 	const PAST_THE_END: &str =
 		"split lines numbered past the end, which make Actual stop with an error";
 	const TOO_LARGE: &str = "split amounts too large to work out exactly";

@@ -14,7 +14,7 @@ use crate::js;
 use crate::jsontext::{array_items, string, write_array, write_object};
 use crate::rule::{ParsedRule, RuleSupport, rank};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Value {
 	Id(Option<String>),
 	Ids(Vec<String>),
@@ -30,13 +30,15 @@ pub enum Value {
 	Month(String),
 	Year(i32),
 	Bool(bool),
+	/// A split line's share of what the fixed amounts leave.
+	Percent(f64),
 	/// `onBudget`, `offBudget`, `delete-transaction` and a remainder split.
 	Nothing,
 	/// Stored JSON the editor can't show, such as a repeating date or a template.
 	Raw(String),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SentenceCondition {
 	pub field: Field,
 	pub op: Op,
@@ -55,7 +57,7 @@ pub enum ActionOp {
 	SetSplitAmount,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SentenceAction {
 	pub op: ActionOp,
 	/// Only `set` has one; `None` for `set saved` too.
@@ -74,7 +76,7 @@ pub enum Access {
 	EditInActual(Vec<String>),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Sentence {
 	pub id: RuleId,
 	pub stage: RuleStage,
@@ -87,7 +89,7 @@ pub struct Sentence {
 }
 
 /// What the editor saves.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Draft {
 	pub stage: RuleStage,
 	pub conditions_op: ConditionsOp,
@@ -96,7 +98,7 @@ pub struct Draft {
 }
 
 const ITEM_KEYS: [&str; 5] = ["op", "field", "value", "type", "options"];
-const SPLITS: &str = "a split";
+const SPLIT_SHAPE: &str = "split lines the sentence editor can't build";
 const UNSHOWN: &str = "a value the sentence editor can't show";
 const EXTRAS: &str = "stored details the sentence editor can't keep";
 
@@ -292,6 +294,7 @@ fn read_action(budget: &BudgetData, item: &Json) -> Option<(SentenceAction, Opti
 		"set-split-amount" => {
 			let value = match option("method").and_then(Json::as_str) {
 				Some("fixed-amount") => value.and_then(js::integer).map(Value::Amount),
+				Some("fixed-percent") => value.and_then(Json::as_f64).map(Value::Percent),
 				Some("remainder") => Some(Value::Nothing),
 				_ => None,
 			};
@@ -300,11 +303,14 @@ fn read_action(budget: &BudgetData, item: &Json) -> Option<(SentenceAction, Opti
 		_ => return None,
 	};
 	let plain = only_keys(item, &ITEM_KEYS)
-		&& options_hold_only(item, |key, value| {
-			matches!(key, "splitIndex" | "template" | "formula") && !js::truthy(Some(value))
+		&& options_hold_only(item, |key, value| match key {
+			"splitIndex" => true,
+			"method" => op == ActionOp::SetSplitAmount,
+			"template" | "formula" => !js::truthy(Some(value)),
+			_ => false,
 		});
-	let problem = if split > 0 || op == ActionOp::SetSplitAmount {
-		Some(SPLITS)
+	let problem = if op == ActionOp::SetSplitAmount && split == 0 {
+		Some(SPLIT_SHAPE)
 	} else if value.is_none() {
 		Some(UNSHOWN)
 	} else if !plain {
@@ -379,6 +385,9 @@ pub fn sentence(budget: &BudgetData, rule: &Rule) -> Option<Sentence> {
 		}
 	}
 	let actions: Vec<SentenceAction> = actions.into_iter().map(|(_, model, _)| model).collect();
+	if split_shape(&actions).is_err() && !problems.iter().any(|known| known == SPLIT_SHAPE) {
+		problems.push(SPLIT_SHAPE.to_owned());
+	}
 	let access = match (owner(budget, rule, &actions), &support) {
 		(Some(schedule), _) => Access::Bill(schedule),
 		(None, RuleSupport::ReadOnly(reasons)) => Access::EditInActual(reasons.clone()),
@@ -538,13 +547,13 @@ fn check_condition(budget: &BudgetData, condition: &SentenceCondition) -> Result
 }
 
 fn check_action(budget: &BudgetData, action: &SentenceAction) -> Result<(), CoreError> {
-	if action.split > 0 || action.op == ActionOp::SetSplitAmount {
-		return invalid("Splitting rules can only be made in Actual for now.");
+	if action.op == ActionOp::LinkSchedule {
+		return invalid("Only a bill links its own rule. Edit the bill instead.");
+	}
+	if action.split > 0 {
+		return check_split_action(budget, action);
 	}
 	let fits = match (action.op, action.field, &action.value) {
-		(ActionOp::LinkSchedule, ..) => {
-			return invalid("Only a bill links its own rule. Edit the bill instead.");
-		}
 		(ActionOp::Set, Some(field @ (Field::Payee | Field::Category)), Value::Id(id)) => {
 			if let Some(id) = id {
 				live(budget, field, id)?;
@@ -586,6 +595,61 @@ fn check_action(budget: &BudgetData, action: &SentenceAction) -> Result<(), Core
 	}
 }
 
+/// A split line's actions, as Actual's editor offers them (`RuleEditor.tsx:442-458`):
+/// its amount, and setting its payee, category or notes.
+fn check_split_action(budget: &BudgetData, action: &SentenceAction) -> Result<(), CoreError> {
+	match (action.op, action.field, &action.value) {
+		(ActionOp::SetSplitAmount, None, Value::Amount(_) | Value::Nothing) => Ok(()),
+		(ActionOp::SetSplitAmount, None, Value::Percent(percent)) => {
+			if percent.is_finite() && *percent > 0.0 && *percent <= 100.0 {
+				Ok(())
+			} else {
+				invalid("A split percentage is more than 0 and at most 100.")
+			}
+		}
+		(ActionOp::SetSplitAmount, ..) => {
+			invalid("A split line's amount is a fixed amount, a percentage or the remainder.")
+		}
+		(ActionOp::Set, Some(field @ (Field::Payee | Field::Category)), Value::Id(id)) => {
+			if let Some(id) = id {
+				live(budget, field, id)?;
+			}
+			Ok(())
+		}
+		(ActionOp::Set, Some(Field::Notes), Value::Text(_)) => Ok(()),
+		_ => invalid("A split line can set only its amount, payee, category or notes."),
+	}
+}
+
+/// Lines numbered from 1 with no gaps, each with one amount: what Actual's
+/// editor builds. A line past the end makes Actual's `runRules` throw.
+fn split_shape(actions: &[SentenceAction]) -> Result<(), CoreError> {
+	let lines = actions.iter().map(|action| action.split).max().unwrap_or(0);
+	if lines == 0 {
+		return Ok(());
+	}
+	for line in 1..=lines {
+		let amounts = actions
+			.iter()
+			.filter(|action| action.split == line && action.op == ActionOp::SetSplitAmount)
+			.count();
+		if amounts != 1 {
+			return invalid(
+				"Number the split lines from 1 with no gaps, and give each line one amount.",
+			);
+		}
+	}
+	let names_payee = actions
+		.iter()
+		.any(|action| action.op == ActionOp::Set && action.field == Some(Field::PayeeName));
+	if names_payee {
+		return invalid(
+			"A rule that splits can't also name a new payee. Choose an existing payee.",
+		);
+	}
+	Ok(())
+}
+
 fn id_json(id: &Option<String>) -> String {
 	id.as_deref().map_or_else(|| "null".to_owned(), string)
 }
@@ -606,6 +670,8 @@ fn value_json(value: &Value) -> String {
 		]),
 		Value::Year(year) => string(&year.to_string()),
 		Value::Bool(flag) => flag.to_string(),
+		// Rust's shortest round-trip form matches JS's for 0 to 100.
+		Value::Percent(percent) => percent.to_string(),
 		Value::Nothing => "null".to_owned(),
 		Value::Raw(json) => json.clone(),
 	}
@@ -628,11 +694,30 @@ fn write_condition(condition: &SentenceCondition) -> String {
 }
 
 /// `Action.serialize`: `prepend-notes` and `append-notes` get the field
-/// `notes` and type `id` from the constructor, and `delete-transaction` a
-/// null field and no type (action.ts:53-87).
+/// `notes` and type `id` from the constructor, `delete-transaction` a null
+/// field and no type, and `set-split-amount` a null field and type `number`
+/// (action.ts:53-87). A split line's options are what Actual's editor gives
+/// them (`RuleEditor.tsx:1110-1140`): `method` then `splitIndex` for its
+/// amount, `splitIndex` for its other actions.
 fn write_action(action: &SentenceAction) -> String {
 	let value = value_json(&action.value);
+	let options = match (action.op, &action.value) {
+		(ActionOp::SetSplitAmount, value) => {
+			let method = match value {
+				Value::Amount(_) => "fixed-amount",
+				Value::Percent(_) => "fixed-percent",
+				_ => "remainder",
+			};
+			Some(format!(
+				r#"{{"method":"{method}","splitIndex":{}}}"#,
+				action.split
+			))
+		}
+		_ if action.split > 0 => Some(format!(r#"{{"splitIndex":{}}}"#, action.split)),
+		_ => None,
+	};
 	let (op, field, kind) = match (action.op, action.field) {
+		(ActionOp::SetSplitAmount, _) => ("set-split-amount", "null".to_owned(), Some("number")),
 		(ActionOp::PrependNotes, _) => ("prepend-notes", string("notes"), Some("id")),
 		(ActionOp::AppendNotes, _) => ("append-notes", string("notes"), Some("id")),
 		(ActionOp::DeleteTransaction, _) => ("delete-transaction", "null".to_owned(), None),
@@ -643,6 +728,9 @@ fn write_action(action: &SentenceAction) -> String {
 	let mut members = vec![("op", string(op)), ("field", field), ("value", value)];
 	if let Some(kind) = kind {
 		members.push(("type", kind));
+	}
+	if let Some(options) = options {
+		members.push(("options", options));
 	}
 	write_object(members.iter().map(|(key, value)| (*key, value.as_str())))
 }
@@ -717,6 +805,7 @@ pub fn written(
 	if draft.actions.is_empty() {
 		return invalid("Add at least one action.");
 	}
+	split_shape(&draft.actions)?;
 	let stored_conditions = existing.and_then(|rule| {
 		read_items(&rule.conditions_json, |item| read_condition(budget, item))
 			.map(|items| (rule.conditions_json.as_str(), items))
@@ -970,7 +1059,7 @@ mod tests {
 		let split = stored(
 			"split",
 			payee_is,
-			json!([{"op": "set-split-amount", "value": null, "options": {"splitIndex": 1, "method": "remainder"}}]),
+			json!([{"op": "set-split-amount", "value": null, "options": {"splitIndex": 2, "method": "remainder"}}]),
 		);
 		let access = |rule: &Rule| sentence(&budget, rule).unwrap().access;
 		assert_eq!(access(&bill), Access::Bill(ScheduleId::new("rent")));
@@ -979,7 +1068,10 @@ mod tests {
 			Access::EditInActual(vec!["a template action".into()])
 		);
 		assert_eq!(access(&named), Access::EditInActual(vec![EXTRAS.into()]));
-		assert_eq!(access(&split), Access::EditInActual(vec![SPLITS.into()]));
+		assert_eq!(
+			access(&split),
+			Access::EditInActual(vec![SPLIT_SHAPE.into()])
+		);
 		assert!(!sentence(&budget, &template).unwrap().runs_in_veritas);
 		let draft = amzn();
 		for rule in [&bill, &template, &named, &split] {
@@ -988,6 +1080,51 @@ mod tests {
 				Err(CoreError::Invalid(_))
 			));
 		}
+	}
+
+	#[test]
+	fn a_split_is_written_as_actuals_editor_builds_it() {
+		let mut draft = amzn();
+		let line = |split, op, field, value| SentenceAction {
+			op,
+			field,
+			value,
+			split,
+		};
+		draft.actions = vec![
+			line(1, ActionOp::SetSplitAmount, None, Value::Amount(-2500)),
+			line(
+				1,
+				ActionOp::Set,
+				Some(Field::Category),
+				Value::Id(Some("shopping".into())),
+			),
+			line(2, ActionOp::SetSplitAmount, None, Value::Percent(50.0)),
+			line(3, ActionOp::SetSplitAmount, None, Value::Nothing),
+			line(
+				3,
+				ActionOp::Set,
+				Some(Field::Notes),
+				Value::Text("rest".into()),
+			),
+		];
+		let budget = budget();
+		let rule = written(&budget, RuleId::new("r"), &draft, None).unwrap();
+		assert_eq!(
+			rule.actions_json,
+			concat!(
+				r#"[{"op":"set-split-amount","field":null,"value":-2500,"type":"number","options":{"method":"fixed-amount","splitIndex":1}},"#,
+				r#"{"op":"set","field":"category","value":"shopping","type":"id","options":{"splitIndex":1}},"#,
+				r#"{"op":"set-split-amount","field":null,"value":50,"type":"number","options":{"method":"fixed-percent","splitIndex":2}},"#,
+				r#"{"op":"set-split-amount","field":null,"value":null,"type":"number","options":{"method":"remainder","splitIndex":3}},"#,
+				r#"{"op":"set","field":"notes","value":"rest","type":"string","options":{"splitIndex":3}}]"#
+			)
+		);
+		let read = sentence(&budget, &rule).unwrap();
+		assert_eq!(read.access, Access::Editable);
+		assert_eq!(read.actions, draft.actions);
+		draft.actions.remove(2);
+		assert!(written(&budget, RuleId::new("r"), &draft, None).is_err());
 	}
 
 	#[test]

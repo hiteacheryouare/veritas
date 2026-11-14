@@ -390,8 +390,7 @@ pub struct RuleActions {
 }
 
 impl RuleActions {
-	/// `Err` says why Veritas can't run them: an action it doesn't support,
-	/// or a split, which Veritas doesn't apply to existing rows yet.
+	/// `Err` says why Veritas can't run them.
 	pub fn new(budget: &BudgetData, rule: &Rule) -> Result<RuleActions, String> {
 		let mut parsed = ParsedRule::parse(rule);
 		if let Some(reason) = &parsed.unreadable {
@@ -403,22 +402,21 @@ impl RuleActions {
 			.into_iter()
 			.map(|item| item.parsed.map_err(|gap| gap_reason(&gap)))
 			.collect::<Result<Vec<Action>, String>>()?;
-		if actions.iter().any(|action| action.split() > 0) {
-			return Err("a split, which Veritas can't apply to existing transactions yet".into());
-		}
 		Ok(RuleActions { actions })
 	}
 
-	/// `execActions` then `finalizeTransactionForRules`: every action
-	/// overwrites its field, and a payee named by `set payee_name` is found
-	/// or made once they have all run. `Err` is a name two payees share.
+	/// `execActions` (rule.ts:103-124) then `finalizeTransactionForRules`:
+	/// every action overwrites its field, split actions turn a row that isn't
+	/// a split line into a split, and a payee named by `set payee_name` is
+	/// found or made once they have all run. `Err` is what Veritas can't
+	/// give Actual's answer for.
 	pub fn apply(
 		&self,
 		transaction: &mut RuleTransaction,
 		payees: &mut dyn PayeeDirectory,
 	) -> Result<(), String> {
 		let mut name: Option<Option<String>> = None;
-		for action in &self.actions {
+		for action in self.actions.iter().filter(|action| action.split() == 0) {
 			match action {
 				Action::SetPayeeName(next) => name = Some(next.clone()),
 				Action::Set(SetField::Payee(_)) => {
@@ -427,6 +425,17 @@ impl RuleActions {
 				}
 				other => other.apply(transaction),
 			}
+		}
+		let lines: Vec<&Action> = self
+			.actions
+			.iter()
+			.filter(|action| action.split() > 0)
+			.collect();
+		if !lines.is_empty() && !transaction.is_child {
+			if name.is_some() {
+				return Err("a split while naming a new payee, which Actual stores wrongly".into());
+			}
+			crate::run::split(transaction, &lines).map_err(str::to_owned)?;
 		}
 		if let Some(name) = name {
 			transaction.payee = match name.filter(|name| !name.is_empty()) {
@@ -517,6 +526,7 @@ mod tests {
 					starting_balance: false,
 					sort_order: 0.0,
 					tombstone: false,
+					split_error: None,
 				},
 			);
 		}
