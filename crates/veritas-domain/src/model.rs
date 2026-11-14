@@ -19,6 +19,9 @@ pub struct Account {
 	pub group: Option<AccountGroupId>,
 	pub sort_order: f64,
 	pub tombstone: bool,
+	/// When a reconcile last finished, as Actual stores it: `String(Date.now())`,
+	/// epoch milliseconds as text (docs/actual-format.md §4.7).
+	pub last_reconciled: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -88,6 +91,9 @@ pub struct Transaction {
 	pub starting_balance: bool,
 	pub sort_order: f64,
 	pub tombstone: bool,
+	/// A split parent's stored `error` JSON (`SplitTransactionError`), kept
+	/// as Actual wrote it.
+	pub split_error: Option<String>,
 }
 
 /// One envelope in one month (Actual's `zero_budgets` row).

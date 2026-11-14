@@ -1,5 +1,6 @@
 //! The only surface the apps see: commands, queries and the change-event stream, exported through UniFFI.
 
+mod accounts;
 mod blocking;
 mod budget;
 mod commands;
@@ -11,6 +12,11 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use veritas_domain::{CoreError, YearMonth};
 
+pub use accounts::{
+	AccountDetail, AccountGroupDetail, AccountList, ClearedStatus, PayeeDetail, PayeeMemory,
+	Reconciliation, RegisterFilter, RegisterLine, RegisterPage, RegisterRow, RegisterScope,
+	RegisterSort, RegisterSortKey, SplitLineDraft, TransactionDraft,
+};
 pub use blocking::CancelToken;
 pub use budget::{BudgetMonth, EnvelopeGroup, EnvelopeRow, MoneyTone};
 pub use commands::Command;

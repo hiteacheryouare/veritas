@@ -459,6 +459,7 @@ fn budget_from(account: &str, payees: &[(String, &str)], dump: &Value) -> Budget
 	budget.accounts.insert(
 		AccountId::new(account),
 		Account {
+			last_reconciled: None,
 			id: AccountId::new(account),
 			name: account.to_owned(),
 			off_budget: false,
