@@ -252,6 +252,7 @@ fn budget_from(world: &World, dump: &Value) -> BudgetData {
 		budget.accounts.insert(
 			AccountId::new(id),
 			Account {
+				last_reconciled: None,
 				id: AccountId::new(id),
 				name: id.clone(),
 				off_budget: *off_budget,

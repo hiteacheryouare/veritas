@@ -17,6 +17,7 @@ mod sankey;
 mod standard;
 mod statements;
 mod tax;
+mod time_frame;
 mod widgets;
 
 pub use balances::{AccountBalance, Side, account_balances, net_worth};
@@ -47,6 +48,7 @@ pub use tax::{
 	Bucket, BucketTotal, Direction, Source, TaxRow, TaxSummary, detail_csv, extract_tags,
 	summary_csv, tax_summary,
 };
+pub use time_frame::{DefaultFrame, spending_months, widget_months};
 pub use widgets::{
 	AgeOfMoney, AgePoint, BudgetAnalysis, BudgetAnalysisMonth, CalendarDay, CalendarMonth,
 	Crossover, CrossoverPoint, Granularity, SummaryContent, SummaryData, TimeRange, Trend,

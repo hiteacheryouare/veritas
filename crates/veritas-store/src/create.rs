@@ -184,6 +184,7 @@ pub fn plan_new_account(
 	let transfer_payee = PayeeId::new(new_id());
 	let mut rows = vec![
 		Row::Account(Account {
+			last_reconciled: None,
 			id: id.clone(),
 			name: account.name.clone(),
 			off_budget: account.kind.off_budget(),
@@ -259,6 +260,7 @@ pub fn plan_new_account(
 			starting_balance: true,
 			sort_order: now_ms,
 			tombstone: false,
+			split_error: None,
 		}));
 	}
 	Ok(rows)

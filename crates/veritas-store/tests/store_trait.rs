@@ -38,6 +38,7 @@ fn reloading_after_every_kind_of_change_matches_memory_r_rel_1() {
 	let mut data = store.load().unwrap().data;
 
 	let account = Account {
+		last_reconciled: None,
 		id: AccountId::new("acct-cu"),
 		name: "Credit union".to_owned(),
 		off_budget: false,
@@ -106,6 +107,7 @@ fn reloading_after_every_kind_of_change_matches_memory_r_rel_1() {
 		starting_balance: false,
 		sort_order: 1_794_225_600_001.0,
 		tombstone: false,
+		split_error: None,
 	};
 	let november = YearMonth::parse("2026-11").unwrap();
 	perform(
@@ -256,10 +258,13 @@ fn variant(change: &Change) -> &'static str {
 		Change::TransactionMeta(_) => "TransactionMeta",
 		Change::TaxTag(_) => "TaxTag",
 		Change::Goal(_) => "Goal",
+		Change::CustomReport(_) => "CustomReport",
+		Change::DashboardPage(_) => "DashboardPage",
+		Change::Widget(_) => "Widget",
 	}
 }
 
-const EVERY_VARIANT: [&str; 19] = [
+const EVERY_VARIANT: [&str; 22] = [
 	"Account",
 	"AccountGroup",
 	"CategoryGroup",
@@ -279,14 +284,18 @@ const EVERY_VARIANT: [&str; 19] = [
 	"TransactionMeta",
 	"TaxTag",
 	"Goal",
+	"CustomReport",
+	"DashboardPage",
+	"Widget",
 ];
 
 #[test]
 fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
 	use veritas_domain::{
 		AccountGroup, AccountGroupId, AccountKind, AccountMeta, AccountMetaRow, CategoryGroup,
-		CategoryGroupId, CategoryKind, CategoryMeta, CategoryMetaRow, ConditionsOp, Rule, RuleId,
-		RuleStage, Schedule, ScheduleId, Tag, TagId,
+		CategoryGroupId, CategoryKind, CategoryMeta, CategoryMetaRow, ConditionsOp, CustomReportId,
+		CustomReportRow, DashboardPage, DashboardPageId, Rule, RuleId, RuleStage, Schedule,
+		ScheduleId, Tag, TagId, Widget, WidgetId,
 	};
 	let scratch = Scratch::new("trait-every-variant");
 	let db = fixture_db("small", &scratch);
@@ -296,6 +305,7 @@ fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
 	let month = YearMonth::parse("2026-11").unwrap();
 
 	let account = Account {
+		last_reconciled: None,
 		id: AccountId::new("v-acct"),
 		name: "Brokerage".to_owned(),
 		off_budget: true,
@@ -363,6 +373,7 @@ fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
 		starting_balance: false,
 		sort_order: 2.0,
 		tombstone: false,
+		split_error: None,
 	};
 	let created = vec![
 		Row::AccountGroup(AccountGroup {
@@ -448,6 +459,49 @@ fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
 			closed_month: None,
 			released_to: None,
 			released: None,
+		}),
+		Row::CustomReport(CustomReportRow {
+			id: CustomReportId::new("v-report"),
+			name: Some("Spending".to_owned()),
+			start_date: Some("2026-01".to_owned()),
+			end_date: Some("2026-06".to_owned()),
+			date_static: Some(1),
+			date_range: None,
+			mode: Some("total".to_owned()),
+			group_by: Some("Category".to_owned()),
+			balance_type: Some("Payment".to_owned()),
+			show_empty: Some(0),
+			show_offbudget: Some(0),
+			show_hidden: Some(0),
+			show_uncategorized: Some(0),
+			selected_categories: None,
+			graph_type: Some("BarGraph".to_owned()),
+			conditions: Some("[]".to_owned()),
+			conditions_op: Some("and".to_owned()),
+			metadata: None,
+			interval: Some("Monthly".to_owned()),
+			color_scheme: None,
+			tombstone: false,
+			include_current: Some(0),
+			sort_by: Some("desc".to_owned()),
+			trim_intervals: Some(0),
+			show_trend_lines: Some(0),
+		}),
+		Row::DashboardPage(DashboardPage {
+			id: DashboardPageId::new("v-page"),
+			name: Some("Overview".to_owned()),
+			tombstone: false,
+		}),
+		Row::Widget(Widget {
+			id: WidgetId::new("v-widget"),
+			kind: Some("net-worth-card".to_owned()),
+			width: Some(4),
+			height: Some(2),
+			x: Some(0),
+			y: Some(0),
+			meta: Some("{\"name\":\"Net worth\"}".to_owned()),
+			page: Some(DashboardPageId::new("v-page")),
+			tombstone: false,
 		}),
 	];
 	let mut seen = std::collections::BTreeSet::new();
@@ -565,6 +619,20 @@ fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
 			Row::Goal(row) => Row::Goal(Goal {
 				status: GoalStatus::Reached,
 				reached_month: Some(month),
+				..row
+			}),
+			Row::CustomReport(row) => Row::CustomReport(CustomReportRow {
+				name: Some("Spending this year".to_owned()),
+				group_by: Some("Group".to_owned()),
+				..row
+			}),
+			Row::DashboardPage(row) => Row::DashboardPage(DashboardPage {
+				name: Some("Money".to_owned()),
+				..row
+			}),
+			Row::Widget(row) => Row::Widget(Widget {
+				x: Some(6),
+				width: Some(6),
 				..row
 			}),
 		})

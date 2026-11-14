@@ -25,6 +25,7 @@ fn budget_from(account: &str, dump: &Value) -> BudgetData {
 	budget.accounts.insert(
 		AccountId::new(account),
 		Account {
+			last_reconciled: None,
 			id: AccountId::new(account),
 			name: account.to_owned(),
 			off_budget: false,

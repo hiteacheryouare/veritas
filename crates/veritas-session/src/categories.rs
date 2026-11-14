@@ -16,7 +16,10 @@ const SORT_INCREMENT: f64 = 16384.0;
 /// placed before `target` in `items` (sorted by sort order, then id), plus the
 /// neighbours shoved down when the gap is too small. No target, or one not in
 /// the list, appends at the end.
-fn shove<'a, K: PartialEq>(items: &'a [(K, f64)], target: Option<&K>) -> (Vec<(&'a K, f64)>, f64) {
+pub(crate) fn shove<'a, K: PartialEq>(
+	items: &'a [(K, f64)],
+	target: Option<&K>,
+) -> (Vec<(&'a K, f64)>, f64) {
 	let to = target.and_then(|target| items.iter().position(|(id, _)| id == target));
 	let Some(to) = to else {
 		let order = items

@@ -1,25 +1,47 @@
 //! The only surface the apps see: commands, queries and the change-event stream, exported through UniFFI.
 
+mod accounts;
 mod blocking;
 mod budget;
 mod commands;
+mod custom_reports;
 mod goals;
 mod records;
+mod reports;
 mod session;
+#[cfg(test)]
+mod test_support;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use veritas_domain::{CoreError, YearMonth};
 
+pub use accounts::{
+	AccountDetail, AccountGroupDetail, AccountList, ClearedStatus, PayeeDetail, PayeeMemory,
+	Reconciliation, RegisterFilter, RegisterLine, RegisterPage, RegisterRow, RegisterScope,
+	RegisterSort, RegisterSortKey, SplitLineDraft, TransactionDraft,
+};
 pub use blocking::CancelToken;
 pub use budget::{BudgetMonth, EnvelopeGroup, EnvelopeRow, MoneyTone};
 pub use commands::Command;
+pub use custom_reports::{
+	CustomReportBalances, CustomReportCell, CustomReportData, CustomReportGroup,
+	CustomReportInterval, CustomReportItem, CustomReportSettings, CustomReportView, DashboardPage,
+	DashboardWidget, PlaceholderReason, ReportBalanceKind, ReportGrouping, ReportIntervalUnit,
+	ReportSortOrder, StackedAmount, UncategorizedKind, WidgetView,
+};
 pub use goals::{GoalClosePreview, GoalPace, GoalState, GoalSummary, MonthAmount};
 pub use records::{
 	AccountGroup, AccountGroupSummary, AccountSummary, AuditCheck, AuditFinding, BackupInfo,
 	BudgetListing, CategoryHistory, Change, Currency, EntityKind, EntityRef, NewAccount,
 	NewAccountKind, NewBudgetOptions, NumberFormat, NumberStyle, Overview, Retention, SessionState,
 	SnapshotInfo, SnapshotKind,
+};
+pub use reports::{
+	BalanceSheet, CashFlowColumn, DrillCategory, NetProfitColumn, NetProfitLine, NetProfitReport,
+	NetWorthMonth, OwnersEquity, ReportCategory, ReportDrill, ReportLabels, ReportLine,
+	ReportSection, ReportTransaction, SankeyFlow, SankeyNode, SankeyNodeKey, SankeyNodeKind,
+	SankeyReport, SheetAccount, SheetSection, TaxBucket, TaxBucketTotal, TaxDetailRow, TaxSummary,
 };
 pub use session::{ChangeListener, Session};
 

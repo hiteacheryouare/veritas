@@ -328,6 +328,7 @@ fn pay(data: &BudgetData) -> Transaction {
 		starting_balance: false,
 		sort_order: 1.0,
 		tombstone: false,
+		split_error: None,
 	}
 }
 

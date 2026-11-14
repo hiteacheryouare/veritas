@@ -1338,11 +1338,14 @@ name = "veritas-ffi"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "rusqlite",
  "serde_json",
  "thiserror",
  "uniffi",
  "veritas-domain",
  "veritas-engine",
+ "veritas-reports",
+ "veritas-rules",
  "veritas-session",
  "veritas-store",
 ]

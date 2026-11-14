@@ -18,10 +18,24 @@ pub enum GoalState {
 }
 
 /// "On track for March" or "Behind, needs $410 a month" (FC-6, DEBT-8.1).
+/// `neededMonthly` is DEBT-8.1's monthly amount.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum GoalPace {
-	OnTrack { eta_month: Month },
-	Behind { needed_monthly: i64 },
+	OnTrack {
+		eta_month: Month,
+	},
+	/// The ETA is after the target month.
+	Behind {
+		needed_monthly: i64,
+	},
+	/// No complete month of budget yet: a brand-new goal.
+	NoHistory {
+		needed_monthly: i64,
+	},
+	/// Nothing added lately at the median pace.
+	NotAdding {
+		needed_monthly: i64,
+	},
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -52,7 +66,8 @@ pub struct GoalSummary {
 	/// Active goals with a target date only, by FC-6's on-track rule, so the
 	/// card agrees with the forecast's goal ETA.
 	pub pace: Option<GoalPace>,
-	/// When it was last reached; kept through a re-target (D71).
+	/// The first month it was reached; kept through a re-target and a second
+	/// reach (D71).
 	pub reached_month: Option<Month>,
 	pub closed_month: Option<Month>,
 	/// A closed goal's budget in later months: "closed goal has budget"
@@ -131,6 +146,12 @@ impl From<GoalView> for GoalSummary {
 					eta_month: eta_month.into(),
 				},
 				CorePace::Behind { needed_monthly } => GoalPace::Behind {
+					needed_monthly: needed_monthly.minor(),
+				},
+				CorePace::NoHistory { needed_monthly } => GoalPace::NoHistory {
+					needed_monthly: needed_monthly.minor(),
+				},
+				CorePace::NotAdding { needed_monthly } => GoalPace::NotAdding {
 					needed_monthly: needed_monthly.minor(),
 				},
 			}),
