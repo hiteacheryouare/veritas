@@ -941,3 +941,110 @@ fn a_saved_report_and_a_moved_widget_survive_undo_reopen_and_actual() {
 		]
 	);
 }
+
+const NET_WORTH_REPORT: &str = "e920280b-3c05-4a11-87a1-c036aac6bb68";
+
+#[test]
+fn names_that_differ_only_by_case_both_save_and_a_widget_dragged_off_the_grid_lands_on_it() {
+	// Actual's `reportNameExists` compares with SQLite's `=`, which is
+	// case-sensitive, so "net worth over time" can sit beside "Net worth
+	// over time" but an exact repeat can't. A widget dragged past the
+	// top-left corner lands at 0,0, and past the right edge at the last
+	// column it fits. Actual reads all of it back.
+	let scratch = Scratch::new("names-and-edges");
+	let session = import(&scratch, "all-features");
+	let settings = |id: &str| {
+		block_on(session.custom_report(id.to_owned(), TODAY.to_owned(), CancelToken::new()))
+			.unwrap()
+			.settings
+	};
+	let save = |settings: veritas_ffi::CustomReportSettings| {
+		session.perform(Command::SaveCustomReport { settings })
+	};
+
+	let mut spending = settings(SPENDING_REPORT);
+	spending.name = "net worth over time".to_owned();
+	save(spending.clone()).unwrap();
+	let mut net_worth = settings(NET_WORTH_REPORT);
+	assert_eq!(net_worth.name, "Net worth over time");
+	net_worth.name = "NET WORTH OVER TIME".to_owned();
+	save(net_worth.clone()).unwrap();
+	net_worth.name = "net worth over time".to_owned();
+	assert!(matches!(
+		save(net_worth.clone()),
+		Err(veritas_ffi::FfiError::Invalid { .. })
+	));
+	net_worth.name = " net worth over time ".to_owned();
+	assert!(
+		matches!(
+			save(net_worth.clone()),
+			Err(veritas_ffi::FfiError::Invalid { .. })
+		),
+		"saved trimmed, it would repeat the other name exactly"
+	);
+	spending.name = "  net worth over time  ".to_owned();
+	save(spending.clone()).expect("a report keeps its own name");
+	let mut names: Vec<String> = session
+		.custom_reports()
+		.unwrap()
+		.into_iter()
+		.map(|r| r.name)
+		.collect();
+	names.sort();
+	assert_eq!(names, ["NET WORTH OVER TIME", "net worth over time"]);
+
+	let place = |x, y, width, height| {
+		perform(
+			&session,
+			Command::PlaceWidget {
+				widget_id: NET_WORTH_CARD.to_owned(),
+				x,
+				y,
+				width,
+				height,
+			},
+		);
+		frame(&session, NET_WORTH_CARD)
+	};
+	assert_eq!(
+		place(-4, -2, 6, 2),
+		(0, 0, 6, 2),
+		"dragged past the top-left"
+	);
+	assert_eq!(
+		place(i64::MIN, i64::MIN, 0, 0),
+		(0, 0, 3, 2),
+		"the extremes"
+	);
+	assert_eq!(place(40, 3, 20, 2), (0, 3, 12, 2), "wider than the grid");
+	assert_eq!(place(10, 3, 4, 2), (8, 3, 4, 2), "past the right edge");
+	session.undo().unwrap();
+	assert_eq!(frame(&session, NET_WORTH_CARD), (0, 3, 12, 2));
+
+	let zip = scratch.0.join("edges.zip").display().to_string();
+	block_on(session.export_actual_zip(zip.clone(), CancelToken::new())).unwrap();
+	let Some(oracle) = oracle() else {
+		return;
+	};
+	let actual = actual_reads(&oracle, &zip);
+	let mut theirs: Vec<String> = table(&actual, "custom_reports")
+		.iter()
+		.filter(|r| r["tombstone"] == 0)
+		.map(|r| r["name"].as_str().unwrap().to_owned())
+		.collect();
+	theirs.sort();
+	assert_eq!(theirs, names);
+	let card = table(&actual, "dashboard")
+		.into_iter()
+		.find(|w| w["id"] == NET_WORTH_CARD)
+		.unwrap();
+	assert_eq!(
+		(&card["x"], &card["y"], &card["width"], &card["height"]),
+		(
+			&serde_json::json!(0),
+			&serde_json::json!(3),
+			&serde_json::json!(12),
+			&serde_json::json!(2)
+		)
+	);
+}
