@@ -32,6 +32,9 @@ public final class BudgetScreenModel {
 
 	public var isReadOnly: Bool { workspace.readOnly != nil }
 
+	/// A tracking budget has no To Budget, holds, covers or carryover (R-BUD-2).
+	public var isTracking: Bool { workspace.readOnly == .trackingBudget }
+
 	public var numberStyle: NumberStyle { workspace.numberStyle }
 
 	public var reader: any AmountReader { amountReader }
@@ -110,7 +113,7 @@ public final class BudgetScreenModel {
 
 
 	public func beginEditing(_ id: String) {
-		guard let envelope = envelope(id), group(of: id)?.isIncome == false else { return }
+		guard !isReadOnly, let envelope = envelope(id), group(of: id)?.isIncome == false else { return }
 		selection = id
 		editingID = id
 		editing = AmountFieldModel(amount: envelope.budgeted, style: workspace.numberStyle, reader: amountReader)

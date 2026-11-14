@@ -132,7 +132,7 @@ struct EnvelopeRowView: View {
 	@ViewBuilder private var available: some View {
 		if isIncome {
 			AvailableLabel(amount: envelope.spent, tone: .income, format: screen.format)
-		} else if envelope.tone == .overspent {
+		} else if envelope.tone == .overspent, !screen.isTracking {
 			Button {
 				isCovering = true
 			} label: {
@@ -153,12 +153,17 @@ struct EnvelopeRowView: View {
 	@ViewBuilder private var menu: some View {
 		if !isIncome {
 			Button("Edit Budgeted Amount") { screen.beginEditing(envelope.id) }
-			if envelope.tone == .overspent {
-				Button("Cover Overspending…") { isCovering = true }
+				.disabled(screen.isReadOnly)
+			if !screen.isTracking {
+				if envelope.tone == .overspent {
+					Button("Cover Overspending…") { isCovering = true }
+						.disabled(screen.isReadOnly)
+				}
+				Toggle("Roll Over Overspending", isOn: Binding(get: { envelope.carryover }, set: { value in
+					Task { await screen.setCarryover(envelope.id, value) }
+				}))
+				.disabled(screen.isReadOnly)
 			}
-			Toggle("Roll Over Overspending", isOn: Binding(get: { envelope.carryover }, set: { value in
-				Task { await screen.setCarryover(envelope.id, value) }
-			}))
 			Divider()
 		}
 		Button(envelope.note == nil ? "Add Note…" : "Edit Note…") { isEditingNote = true }

@@ -442,6 +442,10 @@ struct RealCoreBudgetJourneyTests {
 			#expect(budget.workspace.readOnly == .trackingBudget)
 			let screen = await budget.screen(F.october)
 			#expect(screen.isReadOnly)
+			#expect(screen.isTracking, "the screen leaves out To Budget, holds, covers and carryover")
+			screen.selection = F.groceries
+			screen.beginEditing(F.groceries)
+			#expect(screen.editing == nil, "a read-only budget opens no amount field")
 			#expect(!(await screen.holdForNextMonth(100)))
 			#expect(!(await budget.workspace.perform(.setBudget(month: F.october, categoryId: F.groceries, amount: 1))))
 			await budget.workspace.closeBudget()

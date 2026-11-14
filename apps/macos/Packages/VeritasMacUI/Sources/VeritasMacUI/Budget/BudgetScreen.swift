@@ -24,16 +24,20 @@ struct BudgetScreen: View {
 		ScrollView {
 			VStack(alignment: .leading, spacing: 0) {
 				if let sheet = screen.sheet {
-					HStack(alignment: .center, spacing: Spacing.s4) {
-						ToBudgetHeader(sheet: sheet, dense: workspace.isDense, screen: screen)
-						Spacer(minLength: Spacing.s4)
-						if !workspace.isDense {
-							ForEach(screen.goals.prefix(2)) { goal in
-								GoalCard(goal: goal, format: screen.format)
+					if !screen.isTracking || (!workspace.isDense && !screen.goals.isEmpty) {
+						HStack(alignment: .center, spacing: Spacing.s4) {
+							if !screen.isTracking {
+								ToBudgetHeader(sheet: sheet, dense: workspace.isDense, screen: screen)
+							}
+							Spacer(minLength: Spacing.s4)
+							if !workspace.isDense {
+								ForEach(screen.goals.prefix(2)) { goal in
+									GoalCard(goal: goal, format: screen.format)
+								}
 							}
 						}
+						.padding(.bottom, workspace.isDense ? Spacing.s3 : Spacing.s6)
 					}
-					.padding(.bottom, workspace.isDense ? Spacing.s3 : Spacing.s6)
 					if workspace.isDense {
 						GroupedRows {
 							EnvelopeColumns(dense: true)
@@ -102,14 +106,16 @@ struct BudgetScreen: View {
 				MonthStepper(screen: screen, isEditing: screen.editing != nil)
 			}
 			ToolbarItem(placement: .primaryAction) {
-				Button {
-					isMovingBudget = true
-				} label: {
-					Label("Move budget", systemImage: "arrow.left.arrow.right")
+				if !screen.isTracking {
+					Button {
+						isMovingBudget = true
+					} label: {
+						Label("Move budget", systemImage: "arrow.left.arrow.right")
+					}
+					.labelStyle(.titleAndIcon)
+					.disabled(screen.sheet == nil || screen.isReadOnly)
+					.accessibilityIdentifier("budget.moveBudget")
 				}
-				.labelStyle(.titleAndIcon)
-				.disabled(screen.sheet == nil || workspace.readOnly != nil)
-				.accessibilityIdentifier("budget.moveBudget")
 			}
 		}
 		.sheet(isPresented: $isMovingBudget) {
@@ -198,9 +204,9 @@ private struct ToBudgetHeader: View {
 		.contentShape(.rect)
 		.contextMenu {
 			Button("Hold for Next Month…") { isHolding = true }
-				.disabled(sheet.toBudget <= 0)
+				.disabled(sheet.toBudget <= 0 || screen.isReadOnly)
 			Button("Reset Hold") { Task { await screen.resetHold() } }
-				.disabled(sheet.forNextMonth == 0)
+				.disabled(sheet.forNextMonth == 0 || screen.isReadOnly)
 		}
 		.popover(isPresented: $isHolding, arrowEdge: .bottom) {
 			HoldPopover(screen: screen, toBudget: sheet.toBudget)
