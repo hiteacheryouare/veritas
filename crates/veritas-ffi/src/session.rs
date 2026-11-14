@@ -1893,6 +1893,7 @@ mod tests {
 			starting_balance: false,
 			sort_order: 1.0,
 			tombstone: false,
+			split_error: None,
 		};
 		core.call(|session| {
 			session.perform(&Rows(vec![veritas_domain::Row::Transaction(bought)]))?;
@@ -2296,6 +2297,7 @@ mod tests {
 				starting_balance: false,
 				sort_order: 1.0,
 				tombstone: false,
+				split_error: None,
 			};
 			core.call(|session| {
 				session.perform(&Rows(vec![veritas_domain::Row::Transaction(spending)]))?;
@@ -2873,12 +2875,38 @@ mod tests {
 			row(&core, &lunch).cleared,
 			"batch clearing skips reconciled rows"
 		);
+		let mut noted = typed(&checking, -1_500);
+		noted.notes = Some("with Sam".to_owned());
+		noted.cleared = true;
+		core.perform(Command::EditTransaction {
+			transaction_id: lunch.clone(),
+			transaction: noted.clone(),
+		})
+		.unwrap();
+		let mut unchecked = noted;
+		unchecked.cleared = false;
+		let refused = core.perform(Command::EditTransaction {
+			transaction_id: lunch.clone(),
+			transaction: unchecked.clone(),
+		});
+		assert!(
+			matches!(refused, Err(FfiError::Invalid { .. })),
+			"Actual never unchecks a locked row, it only offers to unlock it"
+		);
+		let locked = row(&core, &lunch);
+		assert!(locked.reconciled && locked.cleared);
 		core.perform(Command::UnlockReconciled {
 			transaction_id: lunch.clone(),
 		})
 		.unwrap();
 		let unlocked = row(&core, &lunch);
 		assert!(!unlocked.reconciled && unlocked.cleared);
+		core.perform(Command::EditTransaction {
+			transaction_id: lunch.clone(),
+			transaction: unchecked,
+		})
+		.unwrap();
+		assert!(!row(&core, &lunch).cleared, "once unlocked it unchecks");
 	}
 
 	#[test]
@@ -2947,6 +2975,63 @@ mod tests {
 			}),
 			Err(FfiError::Invalid { .. })
 		));
+	}
+
+	#[test]
+	fn merging_payees_and_clearing_many_rows_snapshot_the_budget_first() {
+		// R-REL-3: a snapshot before each bulk edit, and restoring it undoes
+		// the edit. Clearing one row is not a bulk edit.
+		let (_scratch, core) = imported("bulk-snapshots");
+		core.call(|session| {
+			session.wait_for_open_check();
+			Ok(())
+		})
+		.unwrap();
+		let checking = new_account(&core, "Everyday", crate::NewAccountKind::Checking, 0);
+		let mut payees = Vec::new();
+		let mut rows = Vec::new();
+		for name in ["Cafe A", "Cafe B"] {
+			let mut draft = typed(&checking, -300);
+			draft.payee_name = Some(name.to_owned());
+			let id = add(&core, draft);
+			payees.push(row(&core, &id).payee.unwrap().to_string());
+			rows.push(id);
+		}
+		let bulk = |core: &Core<veritas_store::Store>| {
+			core.snapshots()
+				.unwrap()
+				.into_iter()
+				.filter(|s| s.reason == crate::SnapshotKind::BulkEdit)
+				.collect::<Vec<_>>()
+		};
+
+		core.perform(Command::SetCleared {
+			transaction_ids: vec![rows[0].clone()],
+			cleared: true,
+		})
+		.unwrap();
+		assert!(bulk(&core).is_empty(), "one row is not a bulk edit");
+		core.perform(Command::SetCleared {
+			transaction_ids: rows.clone(),
+			cleared: true,
+		})
+		.unwrap();
+		assert_eq!(bulk(&core).len(), 1);
+		core.perform(Command::MergePayees {
+			target_payee_id: payees[1].clone(),
+			payee_ids: vec![payees[0].clone()],
+		})
+		.unwrap();
+		let snapshots = bulk(&core);
+		assert_eq!(snapshots.len(), 2);
+		assert!(!core.payees().unwrap().iter().any(|p| p.id == payees[0]));
+
+		core.restore_snapshot(&snapshots[0].id).unwrap();
+		assert!(
+			core.payees().unwrap().iter().any(|p| p.id == payees[0]),
+			"the snapshot was taken before the merge"
+		);
+		assert!(row(&core, &rows[1]).cleared);
 	}
 
 	#[test]

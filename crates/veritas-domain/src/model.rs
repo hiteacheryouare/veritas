@@ -91,6 +91,9 @@ pub struct Transaction {
 	pub starting_balance: bool,
 	pub sort_order: f64,
 	pub tombstone: bool,
+	/// A split parent's stored `error` JSON (`SplitTransactionError`), kept
+	/// as Actual wrote it.
+	pub split_error: Option<String>,
 }
 
 /// One envelope in one month (Actual's `zero_budgets` row).

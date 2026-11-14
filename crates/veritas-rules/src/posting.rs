@@ -862,6 +862,7 @@ mod tests {
 				starting_balance: false,
 				sort_order: 0.0,
 				tombstone: false,
+				split_error: None,
 			},
 		);
 		let book = RuleBook::new(&paid_budget);

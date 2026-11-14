@@ -191,6 +191,7 @@ mod tests {
 						starting_balance: true,
 						sort_order: 0.0,
 						tombstone: false,
+						split_error: None,
 					},
 				);
 			}

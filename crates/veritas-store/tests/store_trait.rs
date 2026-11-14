@@ -107,6 +107,7 @@ fn reloading_after_every_kind_of_change_matches_memory_r_rel_1() {
 		starting_balance: false,
 		sort_order: 1_794_225_600_001.0,
 		tombstone: false,
+		split_error: None,
 	};
 	let november = YearMonth::parse("2026-11").unwrap();
 	perform(
@@ -381,6 +382,7 @@ fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
 		starting_balance: false,
 		sort_order: 2.0,
 		tombstone: false,
+		split_error: None,
 	};
 	let created = vec![
 		Row::AccountGroup(AccountGroup {

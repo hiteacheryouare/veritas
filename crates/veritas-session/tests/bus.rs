@@ -152,6 +152,7 @@ fn transaction(id: &str, amount: i64) -> Transaction {
 		starting_balance: false,
 		sort_order: 0.0,
 		tombstone: false,
+		split_error: None,
 	}
 }
 

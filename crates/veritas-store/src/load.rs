@@ -12,8 +12,8 @@ use veritas_domain::{
 };
 
 use crate::cells::{
-	Cell, date, date_from_int, db_month, flag, integer, is_zero, money, required_text, sort_order,
-	text, text_month, tombstone, transaction_tombstone,
+	Cell, date, date_from_int, db_month, flag, integer, is_zero, json_text, money, required_text,
+	sort_order, text, text_month, tombstone, transaction_tombstone,
 };
 use crate::connection::storage;
 
@@ -288,7 +288,7 @@ fn load_tables(conn: &Connection) -> Result<Loaded, CoreError> {
 		 isParent, isChild, parent_id, transferred_id, schedule, starting_balance_flag, \
 		 sort_order, tombstone, imported_description, \
 		 CASE WHEN isChild = 1 THEN (SELECT p.tombstone IS NULL FROM transactions p \
-		 WHERE p.id = t.parent_id) END FROM transactions t",
+		 WHERE p.id = t.parent_id) END, error FROM transactions t",
 		&mut skipped,
 		|row| {
 			let transaction = transaction(row)?;
@@ -537,6 +537,7 @@ fn transaction(row: &Row<'_>) -> Cell<Transaction> {
 		starting_balance: flag(at(row, 14)?),
 		sort_order: sort_order(at(row, 15)?)?,
 		tombstone: transaction_tombstone(at(row, 16)?),
+		split_error: json_text(at(row, 19)?),
 	})
 }
 
