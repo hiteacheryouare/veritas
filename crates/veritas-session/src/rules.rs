@@ -233,7 +233,7 @@ fn apply_rule(
 		let Some(mut current) = state.transactions.get(&row.id).cloned() else {
 			continue;
 		};
-		let hooks = sync_transfer(&state, &mut current, Some(&book), now_ms);
+		let hooks = sync_transfer(&state, &mut current, Some(&book), now_ms)?;
 		let mut step = vec![Row::Transaction(current)];
 		step.extend(hooks);
 		state = applied(&state, &step);
