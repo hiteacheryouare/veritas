@@ -406,12 +406,20 @@ fn page_name(name: &str) -> Result<String, CoreError> {
 	Ok(name.to_owned())
 }
 
-/// `dashboard-create`.
-pub fn create_page(id: DashboardPageId, name: &str) -> Result<Row, CoreError> {
+/// `dashboard-create`. The page goes after every other page, deleted ones
+/// included, where SQLite's next rowid puts it.
+pub fn create_page(budget: &BudgetData, id: DashboardPageId, name: &str) -> Result<Row, CoreError> {
+	let last = budget
+		.dashboard_pages
+		.values()
+		.map(|page| page.position)
+		.max()
+		.unwrap_or_default();
 	Ok(Row::DashboardPage(DashboardPage {
 		id,
 		name: Some(page_name(name)?),
 		tombstone: false,
+		position: last + 1,
 	}))
 }
 

@@ -115,13 +115,17 @@ pub struct Dashboard {
 
 pub const GRID_COLUMNS: i64 = 12;
 
-/// Every live dashboard page with its live widgets. Rows Actual treats as
-/// deleted (tombstoned, or with no type) are left out.
+/// Every live dashboard page with its live widgets, in Actual's order. Rows
+/// Actual treats as deleted (tombstoned, or with no type) are left out.
 pub fn dashboards(budget: &BudgetData) -> Result<Vec<Dashboard>, CoreError> {
-	let mut pages: Vec<Dashboard> = budget
+	let mut live: Vec<_> = budget
 		.dashboard_pages
 		.values()
 		.filter(|page| !page.tombstone)
+		.collect();
+	live.sort_by_key(|page| page.position);
+	let mut pages: Vec<Dashboard> = live
+		.into_iter()
 		.map(|page| Dashboard {
 			id: page.id.clone(),
 			name: page.name.clone().unwrap_or_default(),

@@ -491,6 +491,13 @@ fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
 			id: DashboardPageId::new("v-page"),
 			name: Some("Overview".to_owned()),
 			tombstone: false,
+			position: data
+				.dashboard_pages
+				.values()
+				.map(|page| page.position)
+				.max()
+				.unwrap_or_default()
+				+ 1,
 		}),
 		Row::Widget(Widget {
 			id: WidgetId::new("v-widget"),

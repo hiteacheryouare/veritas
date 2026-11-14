@@ -915,12 +915,12 @@ fn a_settings_save_keeps_keys_veritas_does_not_know_exactly_as_actuals_save_does
 }
 
 #[test]
-#[ignore = "known bug on PR #60: dashboards() lists pages by id, while Actual lists them in creation order and opens the first"]
 fn dashboards_are_listed_in_actuals_order() {
 	// Actual lists dashboard pages in the order its query returns them,
 	// which for this table is the order they were created, and opens the
 	// first one. A page created later whose id happens to sort first must
-	// not jump ahead of Main in Veritas.
+	// not jump ahead of Main in Veritas, and a page Veritas creates goes
+	// last in both apps.
 	let scratch = Scratch::new("page-order");
 	let Some(oracle) = oracle() else {
 		return;
@@ -936,25 +936,48 @@ fn dashboards_are_listed_in_actuals_order() {
 		&zip,
 		7,
 	);
-	let theirs: Vec<String> = serde_json::from_slice::<Value>(&node(
-		&oracle,
-		&["dashboards", &text(&zip)],
-		"2026-11-13",
-		1,
-	))
-	.unwrap()["pages"]
-		.as_array()
-		.unwrap()
-		.iter()
-		.map(|page| page["name"].as_str().unwrap().to_owned())
-		.collect();
-	assert_eq!(theirs, ["Main", "Deep dive", "Taxes", "Zoo"]);
-	let session = import(&zip, &scratch.join("veritas"));
-	let ours: Vec<String> = dashboards(&session, "2026-11-13")
-		.into_iter()
-		.map(|page| page.name)
-		.collect();
-	assert_eq!(ours, theirs);
+	let theirs = |zip: &Path| -> Vec<String> {
+		serde_json::from_slice::<Value>(&node(
+			&oracle,
+			&["dashboards", &text(zip)],
+			"2026-11-13",
+			1,
+		))
+		.unwrap()["pages"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.map(|page| page["name"].as_str().unwrap().to_owned())
+			.collect()
+	};
+	let ours = |session: &Session| -> Vec<String> {
+		dashboards(session, "2026-11-13")
+			.into_iter()
+			.map(|page| page.name)
+			.collect()
+	};
+	assert_eq!(theirs(&zip), ["Main", "Deep dive", "Taxes", "Zoo"]);
+	let dir = scratch.join("veritas");
+	let session = import(&zip, &dir);
+	assert_eq!(ours(&session), theirs(&zip));
+
+	let taxes = dashboards(&session, "2026-11-13")[2].id.clone();
+	perform(&session, Command::DeleteDashboard { page_id: taxes });
+	for name in ["Budget", "Annual"] {
+		perform(
+			&session,
+			Command::CreateDashboard {
+				name: name.to_owned(),
+			},
+		);
+	}
+	let expected = ["Main", "Deep dive", "Zoo", "Budget", "Annual"];
+	assert_eq!(ours(&session), expected);
+	let edited = scratch.join("edited.zip");
+	export(&session, &edited);
+	assert_eq!(theirs(&edited), expected, "Actual agrees on the export");
+	session.close().unwrap();
+	assert_eq!(ours(&open(&dir)), expected, "a reopen keeps the order");
 }
 
 fn row_json(row: &veritas_reports::QueryRow) -> Value {
