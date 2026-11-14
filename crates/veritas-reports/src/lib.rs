@@ -18,6 +18,7 @@ mod standard;
 mod statements;
 mod tax;
 mod time_frame;
+mod widget_meta;
 mod widgets;
 
 pub use balances::{AccountBalance, Side, account_balances, net_worth};
@@ -49,6 +50,11 @@ pub use tax::{
 	summary_csv, tax_summary,
 };
 pub use time_frame::{DefaultFrame, spending_months, widget_months};
+pub use widget_meta::{
+	DEFAULT_MARKDOWN, TimeFrame, WidgetSettings, add_widget, check_conditions, condition,
+	create_page, delete_page, live_widget, parse_meta, read_settings, remove_widget, rename_page,
+	set_widget_settings, write_settings,
+};
 pub use widgets::{
 	AgeOfMoney, AgePoint, BudgetAnalysis, BudgetAnalysisMonth, CalendarDay, CalendarMonth,
 	Crossover, CrossoverPoint, Granularity, SummaryContent, SummaryData, TimeRange, Trend,
