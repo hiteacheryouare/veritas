@@ -18,7 +18,7 @@ struct WidgetConfigSheet: View {
 		self.save = save
 		_config = State(initialValue: card.config)
 		let frame = card.config.timeFrame
-		_months = State(initialValue: frame.map { $0.start.months(through: $0.end) + 1 } ?? 6)
+		_months = State(initialValue: frame.flatMap { frame in frame.startMonth.flatMap { start in frame.endMonth.map { start.months(through: $0) + 1 } } } ?? 6)
 	}
 
 	private var kind: WidgetKind { card.kind ?? .markdown }
@@ -39,7 +39,7 @@ struct WidgetConfigSheet: View {
 						}
 					}
 					if kind == .summary {
-						Picker("Figure", selection: Binding(get: { config.summary ?? .sum }, set: { config.summary = $0 })) {
+						Picker("Figure", selection: $config.summaryKind) {
 							ForEach(SummaryKind.allCases, id: \.self) { Text($0.title).tag($0) }
 						}
 						.accessibilityIdentifier("widgetConfig.summary")
@@ -49,7 +49,7 @@ struct WidgetConfigSheet: View {
 							.font(.mono(.body))
 					}
 					if kind == .customReport {
-						Picker("Report", selection: Binding(get: { config.reportID ?? "" }, set: { config.reportID = $0 })) {
+						Picker("Report", selection: Binding(get: { config.reportId ?? "" }, set: { config.reportId = $0 })) {
 							ForEach(reports) { Text($0.name).tag($0.id) }
 						}
 					}
@@ -70,18 +70,18 @@ struct WidgetConfigSheet: View {
 				}
 				if kind.hasTimeFrame {
 					Section("Range") {
-						Picker("Range", selection: Binding(get: { config.timeFrame?.mode ?? .slidingWindow }, set: setMode)) {
+						Picker("Range", selection: Binding(get: { config.timeFrame?.frameMode ?? .slidingWindow }, set: setMode)) {
 							ForEach(TimeFrameMode.allCases, id: \.self) { Text($0.title).tag($0) }
 						}
 						.accessibilityIdentifier("widgetConfig.range")
-						switch config.timeFrame?.mode ?? .slidingWindow {
+						switch config.timeFrame?.frameMode ?? .slidingWindow {
 						case .slidingWindow:
 							Stepper(months == 1 ? "1 month" : "\(months) months", value: $months, in: 1...60)
 								.onChange(of: months) { setMode(.slidingWindow) }
 						case .fixed, .full:
-							MonthChoice(title: "From", month: Binding(get: { config.timeFrame?.start ?? thisMonth }, set: { config.timeFrame?.start = $0 }), thisMonth: thisMonth)
-							if config.timeFrame?.mode == .fixed {
-								MonthChoice(title: "To", month: Binding(get: { config.timeFrame?.end ?? thisMonth }, set: { config.timeFrame?.end = $0 }), thisMonth: thisMonth)
+							MonthChoice(title: "From", month: Binding(get: { config.timeFrame?.startMonth ?? thisMonth }, set: { config.timeFrame?.start = String($0.firstDay.prefix(7)) }), thisMonth: thisMonth)
+							if config.timeFrame?.frameMode == .fixed {
+								MonthChoice(title: "To", month: Binding(get: { config.timeFrame?.endMonth ?? thisMonth }, set: { config.timeFrame?.end = String($0.firstDay.prefix(7)) }), thisMonth: thisMonth)
 							}
 						default:
 							EmptyView()
@@ -114,9 +114,9 @@ struct WidgetConfigSheet: View {
 	}
 
 	private func setMode(_ mode: TimeFrameMode) {
-		let end = mode == .fixed ? (config.timeFrame?.end ?? thisMonth) : thisMonth
-		let start = mode == .slidingWindow ? thisMonth.adding(months: -(months - 1)) : (config.timeFrame?.start ?? thisMonth.adding(months: -5))
-		config.timeFrame = TimeFrame(mode: mode, start: start, end: end)
+		let end = mode == .fixed ? (config.timeFrame?.endMonth ?? thisMonth) : thisMonth
+		let start = mode == .slidingWindow ? thisMonth.adding(months: -(months - 1)) : (config.timeFrame?.startMonth ?? thisMonth.adding(months: -5))
+		config.timeFrame = WidgetTimeFrame(mode: mode, start: start, end: end)
 	}
 }
 
@@ -148,35 +148,36 @@ struct ConditionsEditor: View {
 			.pickerStyle(.segmented)
 			.accessibilityIdentifier("filters.match")
 		}
-		ForEach($conditions) { $condition in
+		ForEach(Array(conditions.indices), id: \.self) { index in
+			let condition = $conditions[index]
 			HStack(spacing: Spacing.s2) {
-				Picker("Field", selection: $condition.field) {
+				Picker("Field", selection: condition.field) {
 					ForEach(ReportCondition.fields, id: \.id) { Text($0.title).tag($0.id) }
 				}
 				.labelsHidden()
 				.frame(width: 110)
-				Picker("Operator", selection: $condition.op) {
-					ForEach(ReportCondition.operators(for: condition.field), id: \.id) { Text($0.title).tag($0.id) }
+				Picker("Operator", selection: condition.op) {
+					ForEach(ReportCondition.operators(for: condition.wrappedValue.field), id: \.id) { Text($0.title).tag($0.id) }
 				}
 				.labelsHidden()
 				.frame(width: 130)
-				TextField("Value", text: $condition.value, prompt: Text("Value"))
+				TextField("Value", text: condition.text, prompt: Text("Value"))
 					.labelsHidden()
 					.accessibilityIdentifier("filters.value")
 				Button {
-					conditions.removeAll { $0.id == condition.id }
+					conditions.remove(at: index)
 				} label: {
 					Image(systemName: "minus.circle")
 				}
 				.buttonStyle(.borderless)
 				.accessibilityLabel("Remove filter")
 			}
-			.onChange(of: condition.field) {
-				if !ReportCondition.operators(for: condition.field).contains(where: { $0.id == condition.op }) { condition.op = "is" }
+			.onChange(of: condition.wrappedValue.field) {
+				if !ReportCondition.operators(for: condition.wrappedValue.field).contains(where: { $0.id == condition.wrappedValue.op }) { condition.wrappedValue.op = "is" }
 			}
 		}
 		Button {
-			conditions.append(ReportCondition(field: "category", op: "is", value: ""))
+			conditions.append(ReportCondition(field: "notes", op: "contains", value: "\"\""))
 		} label: {
 			Label("Add filter", systemImage: "plus")
 		}

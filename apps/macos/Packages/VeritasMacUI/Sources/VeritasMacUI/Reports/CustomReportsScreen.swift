@@ -388,8 +388,8 @@ private struct CustomReportEditor: View {
 			Section("Filters") {
 				if model.canEditFilters {
 					ConditionsEditor(conditions: $draft.conditions, matchAny: $draft.conditionsOr)
-				} else if draft.settings.conditionCount > 0 {
-					Text(draft.settings.conditionCount == 1 ? "1 filter" : "\(draft.settings.conditionCount) filters")
+				} else if draft.settings.conditions.count > 0 {
+					Text(draft.settings.conditions.count == 1 ? "1 filter" : "\(draft.settings.conditions.count) filters")
 						.foregroundStyle(.textSecondary)
 				} else {
 					Text("No filters").foregroundStyle(.textSecondary)

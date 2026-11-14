@@ -163,7 +163,7 @@ public final class CustomReportsModel {
 			id: "", name: "New report", startDate: "", endDate: "", dateStatic: false, dateRange: "Last 6 months",
 			totalMode: true, groupBy: .category, balanceType: .payment, sortBy: .descending, interval: .monthly,
 			graphType: ReportGraph.bar.rawValue, showEmpty: false, showOffBudget: false, showHidden: false,
-			showUncategorized: false, includeCurrent: false, trimIntervals: false, conditionCount: 0
+			showUncategorized: false, includeCurrent: false, trimIntervals: false, conditions: [], conditionsOr: false
 		)
 		isCreating = true
 		draft = ReportDraft(settings: settings)
@@ -289,7 +289,7 @@ public final class DashboardModel {
 	}
 
 	/// A new widget at Actual's default size, under everything else on the page.
-	public func add(_ kind: WidgetKind, config: WidgetConfig = WidgetConfig()) async {
+	public func add(_ kind: WidgetKind, config: WidgetConfig = .empty) async {
 		guard let sheet else { return }
 		let size = kind.defaultSize
 		let bottom = sheet.cards.map { $0.y + $0.height }.max() ?? 0

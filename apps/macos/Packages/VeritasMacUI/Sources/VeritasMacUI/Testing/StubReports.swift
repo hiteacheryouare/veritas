@@ -308,7 +308,7 @@ final class StubReports: @unchecked Sendable {
 			id: id, name: name, startDate: "2026-06", endDate: "2026-11", dateStatic: false, dateRange: "Last 6 months",
 			totalMode: totalMode, groupBy: groupBy, balanceType: groupBy == .account ? .net : .payment,
 			sortBy: .descending, interval: .monthly, graphType: graph, showEmpty: false, showOffBudget: false,
-			showHidden: false, showUncategorized: false, includeCurrent: true, trimIntervals: false, conditionCount: 0
+			showHidden: false, showUncategorized: false, includeCurrent: true, trimIntervals: false, conditions: [], conditionsOr: false
 		)
 	}
 
@@ -328,7 +328,10 @@ final class StubReports: @unchecked Sendable {
 	func draft(_ id: String) throws -> ReportDraft {
 		let view = try customReport(id)
 		let (conditions, or) = lock.withLock { filters[id] ?? ([], false) }
-		return ReportDraft(settings: view.settings, conditions: conditions, conditionsOr: or)
+		var draft = ReportDraft(settings: view.settings)
+		draft.conditions = conditions
+		draft.conditionsOr = or
+		return draft
 	}
 
 	func save(_ draft: ReportDraft) throws {
@@ -343,7 +346,10 @@ final class StubReports: @unchecked Sendable {
 		}
 		var settings = draft.settings
 		settings.id = id
-		try save(ReportDraft(settings: settings, conditions: draft.conditions, conditionsOr: draft.conditionsOr))
+		var saved = ReportDraft(settings: settings)
+		saved.conditions = draft.conditions
+		saved.conditionsOr = draft.conditionsOr
+		try save(saved)
 		return id
 	}
 }

@@ -129,7 +129,7 @@ struct DashboardScreen: View {
 			if !reports.isEmpty {
 				Section("Custom reports") {
 					ForEach(reports) { report in
-						Button(report.name) { Task { await model.add(.customReport, config: WidgetConfig(reportID: report.id)) } }
+						Button(report.name) { Task { await model.add(.customReport, config: .showing(report: report.id)) } }
 					}
 				}
 			}
@@ -324,7 +324,7 @@ private struct WidgetHeader: View {
 							.font(.text(.body, weight: .semibold))
 							.lineLimit(1)
 					}
-					if let caption = CardWords.caption(card.kind) {
+					if let caption = CardWords.caption(card) {
 						InfoButton(caption: caption)
 					}
 				}
@@ -351,28 +351,30 @@ private struct WidgetHeader: View {
 					}
 				}
 			}
-		case .cashFlow(_, _, let net):
+		case .cashFlow(_, _, let net, let classified):
 			Signed(amount: net, format: format, weight: .semibold)
-				.accessibilityLabel("Money in less money out \(format.amount(net))")
-		case .spending(_, let spent, _, let compare):
+				.accessibilityLabel("\(classified ? "Net Profit" : "Money in less money out") \(format.amount(net))")
+		case .spending(_, let spent, _, let compare, _):
 			Signed(amount: compare - spent, format: format, weight: .semibold)
-		case .calendar(_, let days):
+		case .calendar(_, _, let income, let expenses):
 			HStack(spacing: Spacing.s2) {
-				Label(format.amount(days.reduce(0) { $0 + $1.income }), systemImage: "arrow.up")
+				Label(format.amount(income), systemImage: "arrow.up")
 					.foregroundStyle(Color.moneyAvailable)
-					.accessibilityLabel("Money in \(format.amount(days.reduce(0) { $0 + $1.income }))")
-				Label(format.amount(days.reduce(0) { $0 + $1.expenses }), systemImage: "arrow.down")
+					.accessibilityLabel("Money in \(format.amount(income))")
+				Label(format.amount(expenses), systemImage: "arrow.down")
 					.foregroundStyle(Color.moneyOverspent)
-					.accessibilityLabel("Money out \(format.amount(days.reduce(0) { $0 + $1.expenses }))")
+					.accessibilityLabel("Money out \(format.amount(expenses))")
 			}
 			.font(.figures(.caption, weight: .semibold))
 			.labelStyle(.titleAndIcon)
-		case .ageOfMoney(let days, let change, _):
-			VStack(alignment: .trailing, spacing: 2) {
-				Text(days == 1 ? "1 day" : "\(days) days").font(.figures(.heading, weight: .semibold)).foregroundStyle(Color.moneyAvailable)
-				Text(change >= 0 ? "Up \(change) days" : "Down \(-change) days")
-					.font(.text(.caption))
-					.foregroundStyle(.textSecondary)
+		case .ageOfMoney(let days, let trend, _, let insufficientData):
+			if let days, !insufficientData {
+				VStack(alignment: .trailing, spacing: 2) {
+					Text(days == 1 ? "1 day" : "\(days) days").font(.figures(.heading, weight: .semibold)).foregroundStyle(Color.moneyAvailable)
+					Text(trend.words)
+						.font(.text(.caption))
+						.foregroundStyle(.textSecondary)
+				}
 			}
 		case .crossover(_, _, _, let month):
 			if let month { Text(ReportPeriod.monthYear(month)).font(.text(.body, weight: .semibold)) }
@@ -418,11 +420,11 @@ private struct WidgetBody: View {
 			}
 			.chartYAxis(.hidden)
 			.chartYScale(domain: .automatic(includesZero: false))
-		case .cashFlow(let income, let expenses, _):
-			PairBars(first: ("Money in", income, Color.moneyIncomeFill), second: ("Money out", expenses, Color.chartExpense), format: format)
-		case .spending(let month, let spent, let compareMonth, let compareSpent):
+		case .cashFlow(let income, let expenses, _, let classified):
+			PairBars(first: (classified ? "Income" : "Money in", income, Color.moneyIncomeFill), second: (classified ? "Expenses" : "Money out", expenses, Color.chartExpense), format: format)
+		case .spending(let month, let spent, let compareMonth, let compareSpent, let classified):
 			VStack(alignment: .leading, spacing: Spacing.s1) {
-				Text(card.config.conditions.isEmpty ? "Everything except income categories" : "Selected rows")
+				Text(card.config.conditions.isEmpty ? (classified ? "Spending" : "Everything except income categories") : "Selected rows")
 					.font(.text(.caption))
 					.foregroundStyle(.textSecondary)
 				PairBars(first: (ReportPeriod.monthName(month), spent, Color.chartExpense), second: (ReportPeriod.monthName(compareMonth), compareSpent, Color.chartExpenseSoft), format: format)
@@ -433,14 +435,14 @@ private struct WidgetBody: View {
 			CustomReportDetail(view: report, format: format, compact: true)
 		case .markdown(let text):
 			ScrollView { MarkdownText(text: text) }
-		case .calendar(let month, let days):
+		case .calendar(let month, let days, _, _):
 			CalendarGrid(month: month, days: days, format: format)
 		case .crossover(let months, let expenses, let income, let crossover):
 			Chart {
 				ForEach(Array(months.enumerated()), id: \.offset) { index, month in
-					LineMark(x: .value("Month", index), y: .value("Amount", Double(expenses[index]) / 100), series: .value("Line", card.config.conditions.isEmpty ? "All non-income categories" : "Selected categories"))
+					LineMark(x: .value("Month", index), y: .value("Amount", expenses[index] / 100), series: .value("Line", card.config.conditions.isEmpty ? "All non-income categories" : "Selected categories"))
 						.foregroundStyle(Color.chartExpense)
-					LineMark(x: .value("Month", index), y: .value("Amount", Double(income[index]) / 100), series: .value("Line", "Investment income"))
+					LineMark(x: .value("Month", index), y: .value("Amount", income[index] / 100), series: .value("Line", "Investment income"))
 						.foregroundStyle(Color.chartSavings)
 				}
 			}
@@ -468,7 +470,7 @@ private struct WidgetBody: View {
 			}
 			.chartXAxis(.hidden)
 			.chartYAxis(.hidden)
-		case .ageOfMoney(_, _, let series):
+		case .ageOfMoney(_, _, let series, _):
 			Chart(Array(series.enumerated()), id: \.offset) { index, days in
 				AreaMark(x: .value("Month", index), y: .value("Days", days))
 					.foregroundStyle(Color.moneyAvailableFill.opacity(0.18))
@@ -477,6 +479,14 @@ private struct WidgetBody: View {
 			}
 			.chartXAxis(.hidden)
 			.chartYAxis(.hidden)
+		case .missingReport:
+			Text("This report was deleted.")
+				.foregroundStyle(.textSecondary)
+				.accessibilityIdentifier("card.missingReport")
+		case .problem(let message):
+			Text(message)
+				.foregroundStyle(.textSecondary)
+				.accessibilityIdentifier("card.problem")
 		case .pending, .unknown:
 			EmptyView()
 		}
@@ -645,6 +655,14 @@ struct MarkdownText: View {
 /// Captions for the cards that show Actual's raw-movement numbers
 /// (docs/finance/statements.md ST-10.10). They live in the info popover only.
 enum CardWords {
+	/// A card still on Net Profit's figures gets no raw-movement caption.
+	static func caption(_ card: DashboardCard) -> String? {
+		switch card.content {
+		case .cashFlow(_, _, _, true), .spending(_, _, _, _, true): return nil
+		default: return caption(card.kind)
+		}
+	}
+
 	static func caption(_ kind: WidgetKind?) -> String? {
 		switch kind {
 		case .calendar: "All money in and out of every account. Both sides of transfers and card payments count. Includes refunds. Not Net Profit."
@@ -675,6 +693,16 @@ private struct InfoButton: View {
 				.fixedSize(horizontal: false, vertical: true)
 				.frame(width: 280)
 				.padding(Spacing.s3)
+		}
+	}
+}
+
+private extension AgeTrend {
+	var words: String {
+		switch self {
+		case .up: "Rising"
+		case .down: "Falling"
+		case .stable: "Steady"
 		}
 	}
 }
