@@ -530,3 +530,292 @@ impl Session {
 		.await
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use serde_json::{Value, json};
+
+	use super::*;
+	use crate::Command;
+	use crate::session::Core;
+	use crate::session::tests::{
+		actual_apply, actual_reads, data, imported_from, table, this_month, transfer_payee_of,
+		two_account_base,
+	};
+
+	fn condition(field: RuleField, op: RuleConditionOp, value: RuleValue) -> RuleCondition {
+		RuleCondition { field, op, value }
+	}
+
+	fn set(field: RuleField, value: RuleValue) -> RuleAction {
+		RuleAction {
+			op: RuleActionOp::Set,
+			field: Some(field),
+			value,
+			split_index: 0,
+		}
+	}
+
+	fn id(id: &str) -> RuleValue {
+		RuleValue::Id {
+			id: Some(id.to_owned()),
+		}
+	}
+
+	fn stored_rule(core: &Core<veritas_store::Store>, id: &str) -> Value {
+		let rule = &data(core).rules[&RuleId::new(id)];
+		json!({
+			"stage": match rule.stage {
+				veritas_domain::RuleStage::Pre => Some("pre"),
+				veritas_domain::RuleStage::Post => Some("post"),
+				veritas_domain::RuleStage::Default => None,
+			},
+			"conditions_op": match rule.conditions_op {
+				ConditionsOp::And => "and",
+				ConditionsOp::Or => "or",
+			},
+			"conditions": rule.conditions_json,
+			"actions": rule.actions_json,
+			"tombstone": i64::from(rule.tombstone),
+		})
+	}
+
+	fn actual_rule(dump: &Value, id: &str) -> Value {
+		let row = table(dump, "rules")
+			.iter()
+			.find(|row| row["id"] == id)
+			.unwrap();
+		json!({
+			"stage": row["stage"],
+			"conditions_op": row["conditions_op"],
+			"conditions": row["conditions"],
+			"actions": row["actions"],
+			"tombstone": row["tombstone"],
+		})
+	}
+
+	#[test]
+	fn a_rule_is_created_edited_and_deleted_as_actuals_api_stores_it() {
+		// R-RULE-2 against Actual's createRule, updateRule and deleteRule on the same base.
+		let (_, today) = this_month();
+		let (scratch, base, checking, savings, category) = two_account_base("rule-crud-oracle");
+		let core = imported_from(&scratch, &base, "veritas");
+		let to_savings = transfer_payee_of(&core, &savings);
+		let created = RuleDraft {
+			stage: RuleStage::Pre,
+			conditions_op: RuleConditionsOp::And,
+			conditions: vec![condition(
+				RuleField::ImportedPayee,
+				RuleConditionOp::Contains,
+				RuleValue::Text {
+					text: "AMZN Mktp".to_owned(),
+				},
+			)],
+			actions: vec![
+				set(RuleField::Payee, id(&to_savings)),
+				set(RuleField::Category, id(&category)),
+			],
+		};
+		let change = core
+			.perform(Command::CreateRule {
+				draft: created.clone(),
+			})
+			.unwrap();
+		let rule_id = change
+			.entities
+			.iter()
+			.find(|entity| entity.kind == crate::EntityKind::Rule)
+			.and_then(|entity| entity.id.clone())
+			.unwrap();
+		let listed = core
+			.call(|session| session.data().map(veritas_rules::sentences))
+			.unwrap();
+		assert_eq!(listed.len(), 1);
+		assert_eq!(listed[0].access, veritas_rules::Access::Editable);
+		let after_create = stored_rule(&core, &rule_id);
+
+		let mut edited = created;
+		edited.stage = RuleStage::Default;
+		edited.conditions_op = RuleConditionsOp::Or;
+		edited.conditions.push(condition(
+			RuleField::AmountOutflow,
+			RuleConditionOp::Gt,
+			RuleValue::Amount { amount: 10_000 },
+		));
+		edited.actions[1] = RuleAction {
+			op: RuleActionOp::AppendNotes,
+			field: None,
+			value: RuleValue::Text {
+				text: " #shopping".to_owned(),
+			},
+			split_index: 0,
+		};
+		core.perform(Command::EditRule {
+			rule_id: rule_id.clone(),
+			draft: edited,
+		})
+		.unwrap();
+		let after_edit = stored_rule(&core, &rule_id);
+		core.perform(Command::DeleteRule {
+			rule_id: rule_id.clone(),
+		})
+		.unwrap();
+		let after_delete = stored_rule(&core, &rule_id);
+
+		let contains = json!({"op": "contains", "field": "imported_payee", "value": "AMZN Mktp", "type": "string"});
+		let payee = json!({"op": "set", "field": "payee", "value": to_savings, "type": "id"});
+		let first = scratch.0.join("created.zip");
+		let ops = json!([{"op": "createRule", "id": rule_id, "stage": "pre", "conditions": [contains],
+			"actions": [payee, {"op": "set", "field": "category", "value": category, "type": "id"}]}]);
+		if !actual_apply(&base, ops, &first, &today) {
+			return;
+		}
+		assert_eq!(
+			actual_rule(&actual_reads(&first, &today).unwrap(), &rule_id),
+			after_create
+		);
+
+		let second = scratch.0.join("edited.zip");
+		let ops = json!([{"op": "updateRule", "id": rule_id, "conditionsOp": "or",
+			"conditions": [contains, {"op": "gt", "field": "amount", "value": 10_000, "type": "number", "options": {"outflow": true}}],
+			"actions": [payee, {"op": "append-notes", "field": "notes", "value": " #shopping", "type": "id"}]}]);
+		assert!(actual_apply(&first, ops, &second, &today));
+		assert_eq!(
+			actual_rule(&actual_reads(&second, &today).unwrap(), &rule_id),
+			after_edit
+		);
+
+		let third = scratch.0.join("deleted.zip");
+		let ops = json!([{"op": "deleteRule", "id": rule_id}]);
+		assert!(actual_apply(&second, ops, &third, &today));
+		assert_eq!(
+			actual_rule(&actual_reads(&third, &today).unwrap(), &rule_id),
+			after_delete
+		);
+		let _ = checking;
+	}
+
+	fn by_notes<'a>(rows: &'a [Value], notes: &str) -> &'a Value {
+		rows.iter()
+			.find(|row| {
+				row["notes"].as_str().is_some_and(|n| n.starts_with(notes)) && row["tombstone"] == 0
+			})
+			.unwrap()
+	}
+
+	#[test]
+	fn apply_to_existing_writes_what_actuals_rule_editor_writes() {
+		// R-RULE-2's apply against Actual's rule-apply-actions, with the transfer
+		// hook it runs: setting a transfer payee makes the other leg.
+		let (_, today) = this_month();
+		let (scratch, base, checking, savings, category) = two_account_base("rule-apply-oracle");
+		let probe = imported_from(&scratch, &base, "probe");
+		let to_savings = transfer_payee_of(&probe, &savings);
+		probe.close().unwrap();
+		let seeded = scratch.0.join("seeded.zip");
+		let ops = json!([
+			{"op": "addTransactions", "account": checking, "transactions": [
+				{"date": "2026-11-10", "amount": -2500, "notes": "AMZN order 1", "category": category},
+				{"date": "2026-11-11", "amount": -4000, "notes": "amzn order 2"},
+				{"date": "2026-11-12", "amount": -900, "notes": "coffee"}
+			]},
+			{"op": "createRule", "id": "move-amzn", "conditions": [{"op": "contains", "field": "notes", "value": "amzn", "type": "string"}],
+			 "actions": [
+				{"op": "set", "field": "payee", "value": to_savings, "type": "id"},
+				{"op": "append-notes", "field": "notes", "value": " (moved)", "type": "id"},
+				{"op": "set", "field": "cleared", "value": true, "type": "boolean"}
+			 ]},
+		]);
+		if !actual_apply(&base, ops, &seeded, &today) {
+			return;
+		}
+		let core = imported_from(&scratch, &seeded, "veritas");
+		let ids = |core: &Core<veritas_store::Store>| {
+			let data = data(core);
+			let find = |notes: &str| {
+				data.transactions
+					.values()
+					.find(|t| t.notes.as_deref() == Some(notes))
+					.unwrap()
+					.id
+					.to_string()
+			};
+			(find("AMZN order 1"), find("amzn order 2"))
+		};
+		let (first, second) = ids(&core);
+		let source = RuleSource::Saved {
+			rule_id: "move-amzn".to_owned(),
+		};
+		let preview = core
+			.call(|session| preview(session.data()?, &source))
+			.unwrap();
+		let found: Vec<&str> = preview.iter().map(|m| m.transaction_id.as_str()).collect();
+		assert_eq!(found, [second.as_str(), first.as_str()]);
+		assert!(
+			preview[0]
+				.changes
+				.iter()
+				.any(|c| c.field == RuleChangedField::Payee && c.after == id(&to_savings))
+		);
+		assert!(preview[1].changes.iter().any(
+			|c| c.field == RuleChangedField::Category && c.after == RuleValue::Id { id: None }
+		));
+		core.perform(Command::ApplyRule {
+			source,
+			transaction_ids: vec![first.clone(), second.clone()],
+		})
+		.unwrap();
+		let snapshots = core.call(|session| session.snapshots()).unwrap();
+		assert!(
+			snapshots
+				.iter()
+				.any(|s| s.reason == veritas_session::SnapshotReason::RuleApply)
+		);
+		let ours = data(&core);
+		let view = |t: &veritas_domain::Transaction| {
+			json!({
+				"acct": t.account.as_str(),
+				"amount": t.amount.minor(),
+				"description": t.payee.as_ref().map(|p| p.as_str()),
+				"notes": t.notes,
+				"cleared": i64::from(t.cleared),
+				"category": t.category.as_ref().map(|c| c.as_str()),
+				"has_transfer": t.transfer.is_some(),
+			})
+		};
+		let ours: Vec<(Value, Value)> = [&first, &second]
+			.iter()
+			.map(|id| {
+				let row = &ours.transactions[&TransactionId::new(id.as_str())];
+				let leg = &ours.transactions[row.transfer.as_ref().unwrap()];
+				(view(row), view(leg))
+			})
+			.collect();
+
+		let out = scratch.0.join("applied.zip");
+		let ops =
+			json!([{"op": "applyActions", "rule": "move-amzn", "transactions": [first, second]}]);
+		assert!(actual_apply(&seeded, ops, &out, &today));
+		let dump = actual_reads(&out, &today).unwrap();
+		let rows = table(&dump, "transactions");
+		let view = |r: &Value| {
+			json!({
+				"acct": r["acct"], "amount": r["amount"], "description": r["description"],
+				"notes": r["notes"], "cleared": r["cleared"], "category": r["category"],
+				"has_transfer": r["transferred_id"].is_string(),
+			})
+		};
+		let theirs: Vec<(Value, Value)> = ["AMZN order 1", "amzn order 2"]
+			.iter()
+			.map(|notes| {
+				let row = by_notes(rows, notes);
+				let leg = rows
+					.iter()
+					.find(|r| r["id"] == row["transferred_id"])
+					.unwrap();
+				(view(row), view(leg))
+			})
+			.collect();
+		assert_eq!(ours, theirs);
+	}
+}
