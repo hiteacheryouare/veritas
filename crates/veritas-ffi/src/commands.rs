@@ -4,7 +4,7 @@ use veritas_domain::{
 };
 use veritas_domain::{AccountGroupId, PayeeId, TransactionId};
 use veritas_rules::RuleBook;
-use veritas_session::{accounts, categories, goals, payees, transactions, writes};
+use veritas_session::{SnapshotReason, accounts, categories, goals, payees, transactions, writes};
 
 use crate::accounts::TransactionDraft;
 use crate::records::NewAccount;
@@ -14,6 +14,7 @@ use veritas_engine::EnvelopeSheet;
 use crate::Month;
 use crate::budget::{civil_date, edit, envelope, money};
 use crate::custom_reports::{self, CustomReportSettings};
+use crate::rules::{self, RuleDraft, RuleSource};
 
 /// A user action. Each one is a single transaction and a single undo step.
 /// Workstreams add commands through `contract` PRs.
@@ -283,6 +284,28 @@ pub enum Command {
 		width: i64,
 		height: i64,
 	},
+	/// A rule from the sentence editor, stored as Actual's API stores it
+	/// (R-RULE-2). The id is the `rule` entity in the `Change`.
+	CreateRule {
+		draft: RuleDraft,
+	},
+	/// Parts the draft leaves unchanged keep their stored text. A bill's rule,
+	/// or one shown as "Edit in Actual", answers `Invalid`.
+	EditRule {
+		rule_id: String,
+		draft: RuleDraft,
+	},
+	/// `Invalid` while a bill (schedule) uses the rule, as in Actual.
+	DeleteRule {
+		rule_id: String,
+	},
+	/// "Apply to existing": runs only the rule's actions on the chosen rows,
+	/// overwriting what's there, with the transfer hooks. The session snapshots
+	/// first. A rule Veritas can't run here answers `Invalid` and writes nothing.
+	ApplyRule {
+		source: RuleSource,
+		transaction_ids: Vec<String>,
+	},
 }
 
 impl veritas_session::Command for Command {
@@ -292,6 +315,10 @@ impl veritas_session::Command for Command {
 		}
 		let sheet = EnvelopeSheet::compute(data, today(data))?;
 		self.plan_with_sheet(data, &sheet)
+	}
+
+	fn snapshot_first(&self) -> Option<SnapshotReason> {
+		matches!(self, Command::ApplyRule { .. }).then_some(SnapshotReason::RuleApply)
 	}
 
 	fn reads_sheet(&self) -> bool {
@@ -714,6 +741,13 @@ impl Command {
 				width,
 				height,
 			} => custom_reports::place_widget(data, widget_id, (*x, *y, *width, *height)),
+			Command::CreateRule { draft } => rules::create(data, draft),
+			Command::EditRule { rule_id, draft } => rules::edit(data, rule_id, draft),
+			Command::DeleteRule { rule_id } => rules::delete(data, rule_id),
+			Command::ApplyRule {
+				source,
+				transaction_ids,
+			} => rules::apply(data, source, transaction_ids, now_ms()),
 			_ => Err(CoreError::Internal(
 				"a budget command was planned without the envelope sheet".to_owned(),
 			)),
