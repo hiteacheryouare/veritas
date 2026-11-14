@@ -52,7 +52,7 @@ pub use reports::{
 pub use rules::{
 	RuleAccess, RuleAction, RuleActionOp, RuleChangedField, RuleCondition, RuleConditionOp,
 	RuleConditionsOp, RuleDraft, RuleField, RuleFieldChange, RuleMatch, RuleSentence, RuleSource,
-	RuleStage, RuleValue,
+	RuleSplitLine, RuleStage, RuleValue,
 };
 pub use session::{ChangeListener, Session};
 

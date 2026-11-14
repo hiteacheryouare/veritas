@@ -21,7 +21,7 @@ use crate::rules::{self, RuleDraft, RuleSource};
 
 /// A user action. Each one is a single transaction and a single undo step.
 /// Workstreams add commands through `contract` PRs.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Clone, PartialEq, uniffi::Enum)]
 pub enum Command {
 	RenameAccount {
 		account_id: String,

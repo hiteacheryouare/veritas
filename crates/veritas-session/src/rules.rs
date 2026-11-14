@@ -107,8 +107,10 @@ fn cannot_run(reason: &str) -> CoreError {
 
 /// `applyActions` on the chosen rows: only the rule's actions, overwriting
 /// what's there, then `batchUpdateTransactions` with its transfer hooks. An
-/// off-budget row loses its category. A run Veritas can't finish writes
-/// nothing (D60).
+/// off-budget row loses its category. A split rule makes the row a split
+/// parent with new lines built as `makeChild` builds them
+/// (`shared/transactions.ts:33-59`, `:249-267`, `:362-391`). A run Veritas
+/// can't finish writes nothing (D60).
 pub fn apply(
 	data: &BudgetData,
 	source: Source,
@@ -149,20 +151,72 @@ fn apply_rule(
 			.accounts
 			.get(&ruled.account)
 			.is_some_and(|account| account.off_budget);
-		updated.push(Transaction {
+		let split_error = ruled.split_difference()?.map(|difference| {
+			format!(
+				r#"{{"type":"SplitTransactionError","version":1,"difference":{}}}"#,
+				difference.minor()
+			)
+		});
+		let lines = std::mem::take(&mut ruled.splits);
+		let split = !lines.is_empty();
+		let top = Transaction {
 			account: ruled.account,
 			date: ruled.date,
 			amount: ruled.amount,
 			payee: ruled.payee,
-			category: if off_budget { None } else { ruled.category },
+			category: if off_budget || split {
+				None
+			} else {
+				ruled.category
+			},
 			notes: ruled.notes,
 			imported_payee: ruled.imported_payee,
 			cleared: ruled.cleared.unwrap_or(row.cleared),
 			reconciled: ruled.reconciled.unwrap_or(row.reconciled),
 			schedule: ruled.schedule,
 			tombstone: ruled.deleted,
+			split: if split {
+				SplitRole::Parent
+			} else {
+				row.split.clone()
+			},
+			split_error: if split {
+				split_error
+			} else {
+				row.split_error.clone()
+			},
 			..row.clone()
-		});
+		};
+		// `splitTransaction` gives the first line `sort_order || -1`, and each
+		// line after it one less; that first line is the scratch row Actual drops.
+		let first = if row.sort_order == 0.0 {
+			-1.0
+		} else {
+			row.sort_order
+		};
+		let children: Vec<Transaction> = lines
+			.into_iter()
+			.zip(1..)
+			.map(|(line, n)| Transaction {
+				id: TransactionId::new(veritas_store::new_id()),
+				amount: line.amount,
+				payee: line.payee,
+				imported_payee: None,
+				category: if off_budget { None } else { line.category },
+				notes: line.notes,
+				split: SplitRole::Child {
+					parent: top.id.clone(),
+				},
+				transfer: None,
+				schedule: line.schedule,
+				sort_order: first - f64::from(n),
+				tombstone: false,
+				split_error: None,
+				..top.clone()
+			})
+			.collect();
+		updated.push(top);
+		updated.extend(children);
 	}
 	let mut rows = Vec::new();
 	for (id, name) in &payees.created {
@@ -204,7 +258,7 @@ pub enum ChangedField {
 	Deleted,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Change {
 	pub field: ChangedField,
 	pub before: Value,
@@ -216,6 +270,8 @@ pub struct Change {
 pub struct Match {
 	pub transaction: Transaction,
 	pub changes: Vec<Change>,
+	/// The lines a split rule would give it.
+	pub lines: Vec<Transaction>,
 }
 
 fn changes(
@@ -329,9 +385,20 @@ pub fn preview(data: &BudgetData, source: Source) -> Result<Vec<Match>, CoreErro
 		.filter_map(|id| {
 			let before = data.transactions.get(id)?;
 			let now = after.transactions.get(id)?;
+			let mut lines: Vec<Transaction> = after
+				.transactions
+				.values()
+				.filter(|line| {
+					matches!(&line.split, SplitRole::Child { parent } if parent == id)
+						&& !data.transactions.contains_key(&line.id)
+				})
+				.cloned()
+				.collect();
+			lines.sort_by(|a, b| b.sort_order.total_cmp(&a.sort_order));
 			Some(Match {
 				transaction: before.clone(),
 				changes: changes(data, before, now, &made),
+				lines,
 			})
 		})
 		.collect())

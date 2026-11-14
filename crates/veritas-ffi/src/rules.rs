@@ -76,11 +76,12 @@ pub enum RuleActionOp {
 	/// A bill's rule. Read only.
 	LinkSchedule,
 	DeleteTransaction,
-	/// A split line's amount. Read only.
+	/// A split line's amount: `.amount` fixed, `.percent` of what the fixed
+	/// amounts leave, or `.nothing` for an equal share of the remainder.
 	SetSplitAmount,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Clone, PartialEq, uniffi::Enum)]
 pub enum RuleValue {
 	/// A payee, category, category group, account or schedule id; `None` is empty.
 	Id {
@@ -117,6 +118,10 @@ pub enum RuleValue {
 	Bool {
 		value: bool,
 	},
+	/// A split line's percentage of what the fixed amounts leave.
+	Percent {
+		percent: f64,
+	},
 	Nothing,
 	/// Stored JSON the sentence can't show. Read only.
 	Raw {
@@ -124,20 +129,20 @@ pub enum RuleValue {
 	},
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct RuleCondition {
 	pub field: RuleField,
 	pub op: RuleConditionOp,
 	pub value: RuleValue,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct RuleAction {
 	pub op: RuleActionOp,
 	/// Only `Set` has one.
 	pub field: Option<RuleField>,
 	pub value: RuleValue,
-	/// 0 is the transaction itself; 1 and up are split lines (read only).
+	/// 0 is the transaction itself; 1 and up are split lines.
 	pub split_index: u32,
 }
 
@@ -155,7 +160,7 @@ pub enum RuleAccess {
 	},
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct RuleSentence {
 	pub id: String,
 	pub stage: RuleStage,
@@ -168,7 +173,7 @@ pub struct RuleSentence {
 	pub runs_in_veritas: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct RuleDraft {
 	pub stage: RuleStage,
 	pub conditions_op: RuleConditionsOp,
@@ -177,7 +182,7 @@ pub struct RuleDraft {
 }
 
 /// A saved rule, or the editor's unsaved draft.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Clone, PartialEq, uniffi::Enum)]
 pub enum RuleSource {
 	Saved { rule_id: String },
 	Draft { draft: RuleDraft },
@@ -198,7 +203,7 @@ pub enum RuleChangedField {
 	Deleted,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct RuleFieldChange {
 	pub field: RuleChangedField,
 	pub before: RuleValue,
@@ -206,7 +211,7 @@ pub struct RuleFieldChange {
 	pub after: RuleValue,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct RuleMatch {
 	pub transaction_id: String,
 	/// Set for a split line.
@@ -218,6 +223,16 @@ pub struct RuleMatch {
 	pub category_id: Option<String>,
 	pub notes: Option<String>,
 	pub changes: Vec<RuleFieldChange>,
+	/// The lines a split rule would give it, in order.
+	pub split_lines: Vec<RuleSplitLine>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct RuleSplitLine {
+	pub amount: i64,
+	pub payee_id: Option<String>,
+	pub category_id: Option<String>,
+	pub notes: Option<String>,
 }
 
 fn stage(stage: veritas_domain::RuleStage) -> RuleStage {
@@ -318,6 +333,7 @@ fn value(value: veritas_rules::Value) -> RuleValue {
 		V::Month(month) => RuleValue::Month { month },
 		V::Year(year) => RuleValue::Year { year },
 		V::Bool(value) => RuleValue::Bool { value },
+		V::Percent(percent) => RuleValue::Percent { percent },
 		V::Nothing => RuleValue::Nothing,
 		V::Raw(json) => RuleValue::Raw { json },
 	}
@@ -336,6 +352,7 @@ fn core_value(value: &RuleValue) -> Result<veritas_rules::Value, CoreError> {
 		RuleValue::Month { month } => V::Month(month),
 		RuleValue::Year { year } => V::Year(year),
 		RuleValue::Bool { value } => V::Bool(value),
+		RuleValue::Percent { percent } => V::Percent(percent),
 		RuleValue::Nothing => V::Nothing,
 		RuleValue::Raw { .. } => {
 			return Err(CoreError::Invalid(
@@ -457,6 +474,16 @@ fn preview(budget: &BudgetData, source: &RuleSource) -> Result<Vec<RuleMatch>, C
 				payee_id: row.payee.map(|p| p.to_string()),
 				category_id: row.category.map(|c| c.to_string()),
 				notes: row.notes,
+				split_lines: found
+					.lines
+					.into_iter()
+					.map(|line| RuleSplitLine {
+						amount: line.amount.minor(),
+						payee_id: line.payee.map(|p| p.to_string()),
+						category_id: line.category.map(|c| c.to_string()),
+						notes: line.notes,
+					})
+					.collect(),
 				changes: found
 					.changes
 					.into_iter()
