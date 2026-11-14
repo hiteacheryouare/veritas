@@ -236,6 +236,9 @@ pub struct NewAccount {
 	/// Cents as typed. For a credit card, line of credit, loan or mortgage,
 	/// what is owed, as a positive amount; the core stores it negative.
 	pub starting_balance: i64,
+	/// v9. A loan's or a mortgage's terms, saved with it (R-DEBT-1).
+	#[uniffi(default = None)]
+	pub loan: Option<crate::money::LoanTerms>,
 }
 
 /// What setup offers. The core decides each one's budget flag and side
@@ -272,6 +275,7 @@ impl From<&NewAccount> for CoreNewAccount {
 				NewAccountKind::Mortgage => CoreNewAccountKind::Mortgage,
 			},
 			starting_balance: Money::from_minor(account.starting_balance),
+			loan: account.loan.as_ref().map(Into::into),
 		}
 	}
 }

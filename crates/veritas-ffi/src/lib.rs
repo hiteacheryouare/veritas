@@ -8,6 +8,7 @@ mod commands;
 mod custom_reports;
 mod dashboards;
 mod goals;
+mod money;
 mod records;
 mod reports;
 mod rules;
@@ -42,6 +43,11 @@ pub use dashboards::{
 	CrossoverCardPoint, DashboardPage, DashboardWidget, WidgetConfig, WidgetTimeFrame, WidgetView,
 };
 pub use goals::{GoalClosePreview, GoalPace, GoalState, GoalSummary, MonthAmount};
+pub use money::{
+	BalanceAfter, BalanceHistory, BalancePoint, CategoryKind, KindTarget, LoanPaymentDefaults,
+	LoanPaymentDraft, LoanPaymentPreview, LoanPaymentProblem, LoanTerms, TagSummary,
+	TransferPreview, TransferPurpose, evaluate_rate,
+};
 pub use records::{
 	AccountGroup, AccountGroupSummary, AccountSummary, AuditCheck, AuditFinding, BackupInfo,
 	BudgetListing, CategoryHistory, Change, Currency, EntityKind, EntityRef, NewAccount,

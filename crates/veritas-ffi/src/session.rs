@@ -820,12 +820,21 @@ pub(crate) mod tests {
 		})
 		.unwrap();
 		let snapshots = core.snapshots().unwrap();
-		assert_eq!(snapshots.len(), 1);
-		assert_eq!(snapshots[0].reason, crate::SnapshotKind::Open);
-		assert!(snapshots[0].taken_at.ends_with('Z'));
+		let mut reasons: Vec<crate::SnapshotKind> = snapshots.iter().map(|s| s.reason).collect();
+		reasons.sort_by_key(|reason| format!("{reason:?}"));
+		assert_eq!(
+			reasons,
+			[crate::SnapshotKind::Import, crate::SnapshotKind::Open],
+			"the import's own snapshot, then the open check's"
+		);
+		let opened = snapshots
+			.iter()
+			.find(|s| s.reason == crate::SnapshotKind::Open)
+			.unwrap();
+		assert!(opened.taken_at.ends_with('Z'));
 		let listener = refetcher(&core);
 
-		let change = core.restore_snapshot(&snapshots[0].id).unwrap();
+		let change = core.restore_snapshot(&opened.id).unwrap();
 
 		assert!(change.everything);
 		assert_eq!(listener.heard.lock().unwrap().len(), 1);
@@ -959,6 +968,7 @@ pub(crate) mod tests {
 			name: name.to_owned(),
 			kind,
 			starting_balance,
+			loan: None,
 		};
 		let options = NewBudgetOptions {
 			retirement_401k: true,
@@ -1075,6 +1085,7 @@ pub(crate) mod tests {
 				name: "Checking".to_owned(),
 				kind: NewAccountKind::Checking,
 				starting_balance: 120_000,
+				loan: None,
 			}],
 		};
 		let create = |into: &str, cancel: &CancelToken| {
@@ -2427,6 +2438,7 @@ pub(crate) mod tests {
 					name: name.to_owned(),
 					kind,
 					starting_balance,
+					loan: None,
 				},
 			})
 			.unwrap();
@@ -2497,6 +2509,7 @@ pub(crate) mod tests {
 					name: " Everyday ".to_owned(),
 					kind: Checking,
 					starting_balance: 0,
+					loan: None,
 				},
 			}),
 			Err(FfiError::Invalid { .. })
