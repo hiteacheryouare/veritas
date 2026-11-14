@@ -714,10 +714,12 @@ mod tests {
 		);
 	}
 
-	fn by_notes<'a>(rows: &'a [Value], notes: &str) -> &'a Value {
+	fn by_notes<'a>(rows: &'a [Value], account: &str, notes: &str) -> &'a Value {
 		rows.iter()
 			.find(|row| {
-				row["notes"].as_str().is_some_and(|n| n.starts_with(notes)) && row["tombstone"] == 0
+				row["acct"] == account
+					&& row["tombstone"] == 0
+					&& row["notes"].as_str().is_some_and(|n| n.starts_with(notes))
 			})
 			.unwrap()
 	}
