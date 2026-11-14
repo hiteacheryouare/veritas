@@ -935,6 +935,7 @@ fn a_new_budget_starts_with_its_accounts_in_the_right_groups() {
 		name: name.to_owned(),
 		kind,
 		starting_balance: Money::from_minor(typed),
+		loan: None,
 	};
 	let budget = veritas_domain::NewBudget {
 		accounts: vec![
@@ -1072,6 +1073,7 @@ fn setup_accounts_need_a_name_and_a_balance_that_fits() {
 			name: name.to_owned(),
 			kind: veritas_domain::NewAccountKind::CreditCard,
 			starting_balance: veritas_domain::Money::from_minor(typed),
+			loan: None,
 		}],
 		..new_budget("Household")
 	};

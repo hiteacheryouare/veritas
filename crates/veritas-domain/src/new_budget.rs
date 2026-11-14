@@ -59,6 +59,18 @@ pub struct NewAccount {
 	/// mortgage, what is owed, as a positive amount. `opening_balance` gives
 	/// the signed amount the account stores.
 	pub starting_balance: Money,
+	/// A loan's terms, stored with it (R-DEBT-1).
+	pub loan: Option<LoanTerms>,
+}
+
+/// A loan's optional metadata (R-DEBT-1, docs/finance/debt.md DEBT-1), as
+/// `veritas_account_meta` keeps it. `lender` is the lender payee's name.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LoanTerms {
+	pub rate_bps: Option<i64>,
+	pub payment: Option<Money>,
+	pub payment_day: Option<u8>,
+	pub lender: Option<String>,
 }
 
 /// What setup offers. Each kind decides the budget flag and the account's
@@ -130,6 +142,7 @@ mod tests {
 			name: "Account".to_owned(),
 			kind,
 			starting_balance: Money::from_minor(typed),
+			loan: None,
 		}
 	}
 

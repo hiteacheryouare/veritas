@@ -24,6 +24,6 @@ pub use ids::*;
 pub use kinds::{AccountKind, BudgetType, CategoryKind, GoalStatus, TransactionKind};
 pub use model::*;
 pub use money::Money;
-pub use new_budget::{NewAccount, NewAccountKind, NewBudget, NumberFormat, NumberStyle};
+pub use new_budget::{LoanTerms, NewAccount, NewAccountKind, NewBudget, NumberFormat, NumberStyle};
 pub use scenario::{Cadence, IncomeDelta, Scenario, ScenarioChange, ScenarioEvent};
 pub use store::{Store, StoreTransaction};
