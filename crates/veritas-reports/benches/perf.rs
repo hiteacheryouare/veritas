@@ -10,8 +10,8 @@ use std::path::Path;
 use criterion::{Criterion, criterion_group, criterion_main};
 use veritas_domain::{BudgetData, CivilDate, YearMonth};
 use veritas_reports::{
-	Period, balance_sheet, cash_flow, classify, net_profit, net_worth_by_month, owners_equity,
-	sankey, tax_summary,
+	Json, Period, age_of_money, balance_sheet, budget_analysis, calendar, cash_flow, classify,
+	crossover, net_profit, net_worth_by_month, owners_equity, sankey, summary, tax_summary,
 };
 
 fn load_perf_100k() -> BudgetData {
@@ -97,5 +97,62 @@ fn reports(c: &mut Criterion) {
 	group.finish();
 }
 
-criterion_group!(benches, reports);
+/// D73's cards on perf-100k, each over a year of history, filtered the way
+/// a typical card is.
+fn widgets(c: &mut Criterion) {
+	let budget = load_perf_100k();
+	let last = budget
+		.transactions
+		.values()
+		.map(|row| row.date)
+		.max()
+		.expect("perf-100k has rows");
+	let today = last.naive();
+	let sheet = veritas_engine::EnvelopeSheet::compute(&budget, last).unwrap();
+	let first = |pick: &dyn Fn(&veritas_domain::Category) -> bool| {
+		budget
+			.categories
+			.values()
+			.find(|category| !category.tombstone && pick(category))
+			.map(|category| category.id.to_string())
+			.unwrap()
+	};
+	let category = first(&|category| !category.is_income);
+	let year = format!(
+		r#"{{"start":"{}","end":"{}","mode":"static"}}"#,
+		(today - chrono::Months::new(11)).format("%Y-%m"),
+		today.format("%Y-%m")
+	);
+	let filtered = |extra: &str| {
+		Json::parse(&format!(
+			r#"{{"timeFrame":{year},"conditions":[{{"field":"category","op":"isNot","value":"{category}","type":"id"}},{{"field":"notes","op":"doesNotContain","value":"zzz","type":"string"}}],"conditionsOp":"and"{extra}}}"#
+		))
+		.unwrap()
+	};
+	let summary_meta = filtered(r#","content":"{\"type\":\"avgPerMonth\"}""#);
+	let plain = filtered("");
+	let weekly = filtered(r#","granularity":"weekly""#);
+	let crossover_meta = Json::parse(&format!(r#"{{"timeFrame":{year}}}"#)).unwrap();
+
+	let mut group = c.benchmark_group("perf-100k widgets");
+	group.sample_size(20);
+	group.bench_function("summary, average per month", |b| {
+		b.iter(|| summary(&budget, Some(&summary_meta), today).unwrap())
+	});
+	group.bench_function("calendar, one year", |b| {
+		b.iter(|| calendar(&budget, Some(&plain), today, 0).unwrap())
+	});
+	group.bench_function("age of money, weekly", |b| {
+		b.iter(|| age_of_money(&budget, Some(&weekly), today).unwrap())
+	});
+	group.bench_function("budget analysis, one year", |b| {
+		b.iter(|| budget_analysis(&budget, &sheet, Some(&plain), today).unwrap())
+	});
+	group.bench_function("crossover, one year", |b| {
+		b.iter(|| crossover(&budget, Some(&crossover_meta), today).unwrap())
+	});
+	group.finish();
+}
+
+criterion_group!(benches, reports, widgets);
 criterion_main!(benches);

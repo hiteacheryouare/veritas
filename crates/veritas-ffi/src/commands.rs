@@ -14,6 +14,8 @@ use veritas_engine::EnvelopeSheet;
 use crate::Month;
 use crate::budget::{civil_date, edit, envelope, money};
 use crate::custom_reports::{self, CustomReportSettings};
+use crate::dashboards::{self, WidgetConfig};
+use veritas_reports as reports;
 
 /// A user action. Each one is a single transaction and a single undo step.
 /// Workstreams add commands through `contract` PRs.
@@ -277,6 +279,43 @@ pub enum Command {
 		y: i64,
 		width: i64,
 		height: i64,
+	},
+	/// A new widget of Actual's `kind` on a dashboard, framed like
+	/// `PlaceWidget`. Its id comes back in the `Change`.
+	AddWidget {
+		page_id: String,
+		kind: String,
+		x: i64,
+		y: i64,
+		width: i64,
+		height: i64,
+		config: WidgetConfig,
+	},
+	RemoveWidget {
+		widget_id: String,
+	},
+	/// Writes only the settings that changed; keys Veritas doesn't show keep
+	/// their stored text.
+	SetWidgetConfig {
+		widget_id: String,
+		config: WidgetConfig,
+	},
+	/// Its id comes back in the `Change`.
+	CreateDashboard {
+		name: String,
+	},
+	RenameDashboard {
+		page_id: String,
+		name: String,
+	},
+	/// Deletes the page and its widgets. The last page can't be deleted.
+	DeleteDashboard {
+		page_id: String,
+	},
+	/// A new custom report with Actual's defaults for what `settings` doesn't
+	/// hold. `settings.id` is ignored; the id comes back in the `Change`.
+	CreateCustomReport {
+		settings: CustomReportSettings,
 	},
 }
 
@@ -716,7 +755,30 @@ impl Command {
 				y,
 				width,
 				height,
-			} => custom_reports::place_widget(data, widget_id, (*x, *y, *width, *height)),
+			} => dashboards::place_widget(data, widget_id, (*x, *y, *width, *height)),
+			Command::AddWidget {
+				page_id,
+				kind,
+				x,
+				y,
+				width,
+				height,
+				config,
+			} => dashboards::add_widget(data, page_id, kind, (*x, *y, *width, *height), config),
+			Command::RemoveWidget { widget_id } => reports::remove_widget(data, widget_id),
+			Command::SetWidgetConfig { widget_id, config } => {
+				dashboards::set_widget_config(data, widget_id, config)
+			}
+			Command::CreateDashboard { name } => dashboards::create_dashboard(name),
+			Command::RenameDashboard { page_id, name } => reports::rename_page(data, page_id, name),
+			Command::DeleteDashboard { page_id } => reports::delete_page(data, page_id),
+			Command::CreateCustomReport { settings } => {
+				Ok(vec![custom_reports::create_custom_report(
+					data,
+					veritas_domain::CustomReportId::new(veritas_store::new_id()),
+					settings,
+				)?])
+			}
 			_ => Err(CoreError::Internal(
 				"a budget command was planned without the envelope sheet".to_owned(),
 			)),

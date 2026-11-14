@@ -311,8 +311,56 @@ export const opHandlers: Record<string, OpHandler> = {
 		);
 	},
 	createCustomReport: (session, op) => {
-		required(op, 'id', 'report');
-		return createWithId(session, 'custom_reports', op.id, () => session.internal.send('report/create', op.report));
+		required(op, 'id');
+		// reportText keeps the key order of nested JSON such as conditions.
+		const report = op.reportText !== undefined ? JSON.parse(op.reportText) : op.report;
+		return createWithId(session, 'custom_reports', op.id, () => session.internal.send('report/create', report));
+	},
+	// The report editor's save: the stored entity with the edited fields over it.
+	updateCustomReport: async ({ internal }, op) => {
+		required(op, 'id', 'setText');
+		const reports = await internal.send('report/get');
+		const report = reports.find((item: any) => item.id === op.id);
+		if (!report) {
+			throw new Error(`No custom report ${op.id}`);
+		}
+		const conditions = [...(report.conditions ?? []), ...JSON.parse(op.appendConditionsText ?? '[]')];
+		await internal.send('report/update', { ...report, conditions, ...JSON.parse(op.setText) });
+	},
+	// A card's settings save: its stored meta with the changed keys over it.
+	updateWidgetMeta: async ({ internal }, op) => {
+		required(op, 'id', 'setText');
+		const row = await internal.db.first('SELECT meta FROM dashboard WHERE id = ?', [op.id]);
+		if (!row) {
+			throw new Error(`No widget ${op.id}`);
+		}
+		const meta = row.meta ? JSON.parse(row.meta) : {};
+		if (op.appendConditionsText !== undefined) {
+			meta.conditions = [...(meta.conditions ?? []), ...JSON.parse(op.appendConditionsText)];
+		}
+		await internal.send('dashboard-update-widget', { id: op.id, meta: { ...meta, ...JSON.parse(op.setText) } });
+	},
+	moveWidget: ({ internal }, op) => {
+		required(op, 'id', 'x', 'y', 'width', 'height');
+		return internal.send('dashboard-update-widget', {
+			id: op.id,
+			x: op.x,
+			y: op.y,
+			width: op.width,
+			height: op.height
+		});
+	},
+	removeWidget: ({ internal }, op) => {
+		required(op, 'id');
+		return internal.send('dashboard-remove-widget', op.id);
+	},
+	renameDashboardPage: ({ internal }, op) => {
+		required(op, 'id', 'name');
+		return internal.send('dashboard-rename', { id: op.id, name: op.name });
+	},
+	deleteDashboardPage: ({ internal }, op) => {
+		required(op, 'id');
+		return internal.send('dashboard-delete', op.id);
 	},
 	createDashboardPage: (session, op) => {
 		required(op, 'id', 'name');
@@ -323,7 +371,9 @@ export const opHandlers: Record<string, OpHandler> = {
 	addDashboardWidget: async ({ internal }, op) => {
 		required(op, 'id', 'page', 'type', 'width', 'height');
 		const { op: _op, page, ...widget } = op;
-		await internal.send('dashboard-add-widget', { ...widget, meta: op.meta ?? null, dashboard_page_id: page });
+		const meta = op.metaText !== undefined ? JSON.parse(op.metaText) : (op.meta ?? null);
+		const { metaText: _metaText, ...fields } = widget;
+		await internal.send('dashboard-add-widget', { ...fields, meta, dashboard_page_id: page });
 		if (!(await internal.db.first('SELECT id FROM dashboard WHERE id = ?', [op.id]))) {
 			throw new Error(`Actual did not keep the supplied widget id ${op.id}`);
 		}
