@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use veritas_domain::{
 	AccountId, BudgetData, CategoryId, CategoryKind, CivilDate, Money, SplitRole, Transaction,
@@ -223,6 +223,19 @@ impl Classification {
 						.is_none()
 				})
 		})
+	}
+
+	/// CLS-4.2: each category that [`Self::transfers_counted_as_spending`]
+	/// files under, with how many of those transfers it holds. These are the
+	/// categories the one-time wizard asks about.
+	pub fn categories_to_review(&self, budget: &BudgetData) -> BTreeMap<CategoryId, usize> {
+		let mut counts = BTreeMap::new();
+		for row in self.transfers_counted_as_spending(budget) {
+			if let Some(category) = &row.category {
+				*counts.entry(category.clone()).or_insert(0) += 1;
+			}
+		}
+		counts
 	}
 }
 

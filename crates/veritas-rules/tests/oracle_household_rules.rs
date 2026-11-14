@@ -108,6 +108,7 @@ fn budget_from(dump: &Value) -> BudgetData {
 		budget.accounts.insert(
 			id.clone(),
 			Account {
+				last_reconciled: None,
 				id,
 				name: name.into(),
 				off_budget,

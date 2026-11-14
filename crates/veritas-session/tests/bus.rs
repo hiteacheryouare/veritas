@@ -111,6 +111,7 @@ type Bus = CommandBus<MirrorStore>;
 
 fn account(id: &str, name: &str) -> Account {
 	Account {
+		last_reconciled: None,
 		id: AccountId::new(id),
 		name: name.to_owned(),
 		off_budget: false,
@@ -151,6 +152,7 @@ fn transaction(id: &str, amount: i64) -> Transaction {
 		starting_balance: false,
 		sort_order: 0.0,
 		tombstone: false,
+		split_error: None,
 	}
 }
 

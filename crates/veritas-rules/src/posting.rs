@@ -647,6 +647,7 @@ mod tests {
 		budget.accounts.insert(
 			AccountId::new("checking"),
 			Account {
+				last_reconciled: None,
 				id: AccountId::new("checking"),
 				name: "Checking".into(),
 				off_budget: false,
@@ -779,6 +780,7 @@ mod tests {
 				starting_balance: false,
 				sort_order: 0.0,
 				tombstone: false,
+				split_error: None,
 			},
 		);
 		let book = RuleBook::new(&paid_budget);

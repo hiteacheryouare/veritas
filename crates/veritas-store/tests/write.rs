@@ -235,6 +235,7 @@ fn a_new_account_needs_its_transfer_payee_and_mapping() {
 	let scratch = Scratch::new("write-account");
 	let db = fixture_db("small", &scratch);
 	let account = Account {
+		last_reconciled: None,
 		id: AccountId::new("veritas-acct"),
 		name: "Credit union".to_owned(),
 		off_budget: false,
@@ -274,6 +275,7 @@ fn a_new_account_needs_its_transfer_payee_and_mapping() {
 
 	let renamed = Account {
 		name: "Credit union checking".to_owned(),
+		last_reconciled: Some("1740506588539".to_owned()),
 		..account.clone()
 	};
 	let mut writer = store.writer().unwrap();

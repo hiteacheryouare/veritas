@@ -3,6 +3,7 @@
 mod amount_field;
 mod arithmetic;
 mod budget_edits;
+pub mod category_kinds;
 mod envelope;
 pub mod goals;
 

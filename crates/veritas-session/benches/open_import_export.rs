@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 use criterion::{Criterion, criterion_group, criterion_main};
 use veritas_domain::{BudgetData, CategoryId, CivilDate, CoreError, Money, Row};
 use veritas_engine::{BudgetEditor, EnvelopeSheet, NumberFormat};
+use veritas_session::register::{self, Filter, Scope, Sort};
 use veritas_session::{Command, Session, SessionOptions};
 
 type BenchSession = Session<veritas_store::Store>;
@@ -128,6 +129,53 @@ fn benches(c: &mut Criterion) {
 			});
 		},
 	);
+
+	// R-PERF-3's core portion: one 100-row page of the busiest account, in
+	// Actual's order and with a search, as the register asks while scrolling.
+	let (scope, rows) = session
+		.with_sheet(today, |data, _| {
+			let mut counts = std::collections::BTreeMap::new();
+			for row in data.transactions.values() {
+				*counts.entry(row.account.clone()).or_insert(0usize) += 1;
+			}
+			let (busiest, rows) = counts.into_iter().max_by_key(|(_, n)| *n).unwrap();
+			Ok((Scope::Account(busiest), rows))
+		})
+		.unwrap();
+	let mut offset = 0;
+	group.bench_function(
+		format!("R-PERF-3 scrolling a register of {rows} rows"),
+		|b| {
+			b.iter(|| {
+				offset = (offset + 100) % rows;
+				session
+					.register_page(&scope, &Filter::default(), Sort::DEFAULT, offset, 100)
+					.unwrap()
+			});
+		},
+	);
+	group.bench_function("R-PERF-3 first page after a commit", |b| {
+		b.iter(|| {
+			session
+				.with_sheet(today, |data, _| {
+					register::page(data, &scope, &Filter::default(), Sort::DEFAULT, 0, 100)
+				})
+				.unwrap()
+		});
+	});
+	let search = Filter {
+		search: Some("gro".to_owned()),
+		..Filter::default()
+	};
+	group.bench_function("R-PERF-3 first page of a search", |b| {
+		b.iter(|| {
+			session
+				.with_sheet(today, |data, _| {
+					register::page(data, &Scope::All, &search, Sort::DEFAULT, 0, 100)
+				})
+				.unwrap()
+		});
+	});
 	group.finish();
 	drop(session);
 	std::fs::remove_dir_all(&root).unwrap();

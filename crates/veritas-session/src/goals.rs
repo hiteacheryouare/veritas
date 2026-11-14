@@ -30,8 +30,13 @@ pub enum GoalState {
 pub enum GoalPace {
 	/// The median pace's ETA is not after the target month.
 	OnTrack { eta_month: YearMonth },
-	/// Later, or no ETA at all: DEBT-8.1's monthly amount gets there.
+	/// The ETA is after the target month. DEBT-8.1's monthly amount gets
+	/// there in time.
 	Behind { needed_monthly: Money },
+	/// No complete month of budget yet, so no ETA (a brand-new goal).
+	NoHistory { needed_monthly: Money },
+	/// Nothing added at the median pace lately, so no ETA.
+	NotAdding { needed_monthly: Money },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -134,12 +139,13 @@ fn pace(
 ) -> Result<GoalPace, CoreError> {
 	use veritas_forecast::EtaStatus;
 	let eta = veritas_forecast::goal_eta(data, &goal.id, month, available, None)?;
+	let needed_monthly = suggestion.monthly;
 	Ok(match (eta.on_track, eta.status) {
+		(_, EtaStatus::NoHistory) => GoalPace::NoHistory { needed_monthly },
+		(_, EtaStatus::NotAdding) => GoalPace::NotAdding { needed_monthly },
 		(Some(true), EtaStatus::Eta { month, .. }) => GoalPace::OnTrack { eta_month: month },
 		(Some(true), _) => GoalPace::OnTrack { eta_month: month },
-		_ => GoalPace::Behind {
-			needed_monthly: suggestion.monthly,
-		},
+		_ => GoalPace::Behind { needed_monthly },
 	})
 }
 
@@ -266,6 +272,19 @@ pub fn reopen_goal(
 	let goal = live_goal(data, id)?;
 	if goal.status != GoalStatus::Closed {
 		return Err(CoreError::Invalid("This goal isn't closed.".to_owned()));
+	}
+	// CLS-3.3: a goal is an expense envelope, and reopening never flips the
+	// kind back.
+	let kind = match data.category_kind(&goal.category) {
+		veritas_domain::CategoryKind::Expense => None,
+		veritas_domain::CategoryKind::DebtPrincipal => Some("debt principal"),
+		veritas_domain::CategoryKind::Savings => Some("savings"),
+		veritas_domain::CategoryKind::Income => Some("income"),
+	};
+	if let Some(kind) = kind {
+		return Err(CoreError::Invalid(format!(
+			"This category is now a {kind} category. Change it back to an expense category to reopen this goal."
+		)));
 	}
 	let available = available(sheet, &goal.category, sheet.today().year_month());
 	let mut planned = vec![Row::Goal(engine::reopen(goal, available))];

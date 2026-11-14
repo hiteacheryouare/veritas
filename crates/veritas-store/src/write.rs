@@ -66,6 +66,7 @@ fn account_columns(row: &Account) -> Columns {
 		),
 		("sort_order", Value::Real(row.sort_order)),
 		("tombstone", flag(row.tombstone)),
+		("last_reconciled", text(row.last_reconciled.as_deref())),
 	]
 }
 
@@ -147,6 +148,7 @@ fn transaction_columns(row: &Transaction) -> Columns {
 		("starting_balance_flag", flag(row.starting_balance)),
 		("sort_order", Value::Real(row.sort_order)),
 		("tombstone", flag(row.tombstone)),
+		("error", text(row.split_error.as_deref())),
 	]
 }
 

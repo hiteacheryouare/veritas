@@ -54,7 +54,7 @@ pub fn rows(data: &BudgetData, writes: &BudgetWrites) -> Vec<Row> {
 }
 
 /// `data` with `rows` applied, for planning a command in steps.
-pub(crate) fn applied(data: &BudgetData, rows: &[Row]) -> BudgetData {
+pub fn applied(data: &BudgetData, rows: &[Row]) -> BudgetData {
 	let mut after = data.clone();
 	for row in rows {
 		Change::put(&after, row.clone()).apply(&mut after);
