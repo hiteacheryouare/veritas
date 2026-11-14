@@ -22,6 +22,14 @@ struct GoalWords {
 				note = "Behind, needs \(format.wholeCurrency(needed)) a month"
 				tone = .low
 				detail = nil
+			case .noHistory(let needed):
+				note = "Budget \(format.wholeCurrency(needed)) a month"
+				tone = .neutral
+				detail = "No ETA yet"
+			case .notAdding(let needed):
+				note = "Nothing is being added"
+				tone = .low
+				detail = "Budget \(format.wholeCurrency(needed)) a month"
 			case nil:
 				if let suggestion, let month = goal.targetMonth {
 					note = suggestion
