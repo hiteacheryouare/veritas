@@ -62,6 +62,12 @@ final class StubBudget: @unchecked Sendable {
 	/// Gifts is charitable, so moving its history elsewhere shows TAX-8's warning.
 	private let taxBuckets: [String: String] = ["gifts": "charitable"]
 
+	/// The stub has one set of figures, shown for whichever 2026 month is asked.
+	static func clamped(_ month: Month) -> Month {
+		guard month.year == 2026 else { return month.year < 2026 ? Month(year: 2026, month: 1) : Month(year: 2026, month: 12) }
+		return month
+	}
+
 	func month(_ month: Month) -> BudgetMonth {
 		lock.withLock {
 			let rows = groups.map { group in
@@ -76,7 +82,7 @@ final class StubBudget: @unchecked Sendable {
 			let income = groups.filter(\.isIncome).flatMap(\.envelopes).reduce(0) { $0 + $1.spent }
 			let budgeted = groups.filter { !$0.isIncome }.flatMap(\.envelopes).reduce(0) { $0 + $1.budgeted }
 			return BudgetMonth(
-				month: Self.month, firstMonth: Month(year: 2026, month: 1), lastMonth: Month(year: 2026, month: 12),
+				month: Self.clamped(month), firstMonth: Month(year: 2026, month: 1), lastMonth: Month(year: 2026, month: 12),
 				toBudget: income - budgeted - held, income: income, fromLastMonth: 0, overspentLastMonth: 0,
 				budgeted: budgeted, forNextMonth: held, spent: 0, available: 0, groups: rows
 			)

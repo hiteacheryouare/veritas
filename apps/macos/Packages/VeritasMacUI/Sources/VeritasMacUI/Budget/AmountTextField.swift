@@ -35,6 +35,12 @@ struct AmountTextField: NSViewRepresentable {
 		return view
 	}
 
+	/// Gives up first responder as it goes, so its field editor isn't left
+	/// holding the window's keys.
+	static func dismantleNSView(_ view: FocusingTextField, coordinator: Coordinator) {
+		if view.currentEditor() != nil { view.window?.makeFirstResponder(nil) }
+	}
+
 	func updateNSView(_ view: FocusingTextField, context: Context) {
 		context.coordinator.parent = self
 		if view.stringValue != field.text {

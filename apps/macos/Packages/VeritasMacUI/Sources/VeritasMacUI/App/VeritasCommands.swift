@@ -14,7 +14,9 @@ struct VeritasCommands: Commands {
 	/// in a sheet, which is about something else.
 	private func step(back: Bool) {
 		let window = NSApp.keyWindow
-		if let editor = window?.firstResponder as? NSTextView {
+		// A field that just closed can leave its detached editor as first
+		// responder; only a field still on screen keeps the keys.
+		if let editor = window?.firstResponder as? NSTextView, editor.superview != nil, editor.isEditable {
 			if back { editor.moveToLeftEndOfLine(nil) } else { editor.moveToRightEndOfLine(nil) }
 			return
 		}

@@ -107,12 +107,23 @@ final class BudgetJourneyTests: XCTestCase {
 		let go = app.menuBars.menuBarItems["Go"]
 		go.click()
 		XCTAssertTrue(previousMonth.isEnabled, "Go › Previous Month is on while the Budget screen is showing")
-		go.typeKey(.escape, modifierFlags: [])
-		budgetScreen.typeKey(.leftArrow, modifierFlags: .command)
+		app.typeKey(.escape, modifierFlags: [])
+		XCTAssertTrue(waitUntil { !previousMonth.isHittable }, "the Go menu closed")
+		app.typeKey(.leftArrow, modifierFlags: .command)
 		XCTContext.runActivity(named: "After ⌘←") { activity in
 			record(app, in: activity)
 		}
-		XCTAssertTrue(waitUntil { app.windows.firstMatch.title != title }, "⌘← goes to the previous month")
+		let keyWorked = waitUntil { app.windows.firstMatch.title != title }
+		if !keyWorked {
+			// Evidence: does the menu item itself step the month?
+			go.click()
+			previousMonth.click()
+			let menuWorked = waitUntil { app.windows.firstMatch.title != title }
+			XCTContext.runActivity(named: "Menu item \(menuWorked ? "steps" : "doesn't step") the month") { activity in
+				record(app, in: activity)
+			}
+		}
+		XCTAssertTrue(keyWorked, "⌘← goes to the previous month")
 	}
 
 	@MainActor
