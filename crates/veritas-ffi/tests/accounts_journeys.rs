@@ -143,6 +143,7 @@ fn new_account(
 				name: name.to_owned(),
 				kind,
 				starting_balance,
+				loan: None,
 			},
 		},
 	);
@@ -1295,6 +1296,7 @@ fn undo_walks_a_session_of_account_work_back_step_by_step_and_redo_replays_it() 
 			name: name.to_owned(),
 			kind,
 			starting_balance,
+			loan: None,
 		},
 	};
 	step(create("Joint checking", Checking, 120_000));
@@ -1552,4 +1554,383 @@ fn closing_an_account_a_bill_pays_into_leaves_the_bill_as_actual_does() {
 	let closed_flag = |dump: &Value| by_id(dump, "accounts")[&rainy]["closed"].clone();
 	assert_eq!(closed_flag(&ours), json!(1));
 	assert_eq!(closed_flag(&ours), closed_flag(&theirs));
+}
+
+fn noted(id: &str, account: &str, date: &str, amount: i64, notes: &str) -> TransactionDraft {
+	TransactionDraft {
+		notes: Some(notes.to_owned()),
+		payee_name: Some("Corner grocer".to_owned()),
+		..entry(id, account, date, amount)
+	}
+}
+
+fn filtered(session: &Session, account: &str, filter: RegisterFilter) -> Vec<RegisterRow> {
+	session
+		.register(in_account(account), filter, NEWEST_FIRST, 0, 100_000)
+		.unwrap()
+		.rows
+}
+
+#[test]
+fn the_register_charts_balances_counts_tags_and_keeps_running_balances_over_a_date_range() {
+	// The Mac's register requests: balanceHistory, tags(), the exact tag
+	// filter, and runningBalance with only a date range. Tags are read as
+	// Actual's extractTagsFromText reads them (shared/tags.ts:34-48).
+	let scratch = Scratch::new("register-history");
+	let session = import(&scratch, &small_zip(), "budget");
+	let everyday = new_account(
+		&session,
+		"Joint checking",
+		NewAccountKind::Checking,
+		100_000,
+	);
+	add(
+		&session,
+		noted("lunch", &everyday, "2026-11-16", -5_000, "#vtfood lunch"),
+	);
+	add(
+		&session,
+		noted("desk", &everyday, "2026-11-16", -2_000, "#vtfood#vtwork"),
+	);
+	add(
+		&session,
+		noted(
+			"pay",
+			&everyday,
+			"2026-11-18",
+			10_000,
+			"pay ##vtfood #vtwork",
+		),
+	);
+	let mut trip = noted("trip", &everyday, "2026-11-20", -3_000, "trip");
+	trip.splits = vec![
+		SplitLineDraft {
+			notes: Some("#vttravel".to_owned()),
+			..line(-1_000, None)
+		},
+		line(-2_000, None),
+	];
+	add(&session, trip);
+
+	let history = session
+		.balance_history(
+			everyday.clone(),
+			"2026-11-14".to_owned(),
+			"2026-11-22".to_owned(),
+		)
+		.unwrap();
+	let points: Vec<(&str, i64)> = history
+		.points
+		.iter()
+		.map(|p| (p.date.as_str(), p.balance))
+		.collect();
+	assert_eq!(
+		points,
+		[
+			("2026-11-14", 0),
+			("2026-11-15", 100_000),
+			("2026-11-16", 93_000),
+			("2026-11-18", 103_000),
+			("2026-11-20", 100_000),
+			("2026-11-22", 100_000),
+		]
+	);
+	assert_eq!(history.change, None, "the first balance is 0");
+	let week = session
+		.balance_history(
+			everyday.clone(),
+			"2026-11-15".to_owned(),
+			"2026-11-18".to_owned(),
+		)
+		.unwrap();
+	assert_eq!(week.change, Some(0.03));
+	assert!(
+		session
+			.balance_history(
+				everyday.clone(),
+				"2026-11-18".to_owned(),
+				"2026-11-15".to_owned()
+			)
+			.is_err()
+	);
+
+	let tags: Vec<(String, u64)> = session
+		.tags()
+		.unwrap()
+		.into_iter()
+		.filter(|t| t.name.starts_with("vt"))
+		.map(|t| (t.name, t.count))
+		.collect();
+	assert_eq!(
+		tags,
+		[
+			("vtfood".to_owned(), 2),
+			("vtwork".to_owned(), 2),
+			("vttravel".to_owned(), 1)
+		],
+		"##vtfood is escaped, a line's notes count, ties go by name"
+	);
+	let counts = session.tags().unwrap();
+	assert!(counts.windows(2).all(|w| w[0].count >= w[1].count));
+	assert_eq!(
+		session.register_row("desk".to_owned()).unwrap().tags,
+		["vtfood", "vtwork"]
+	);
+
+	let tagged = |tag: &str| -> Vec<String> {
+		filtered(
+			&session,
+			&everyday,
+			RegisterFilter {
+				tag: Some(tag.to_owned()),
+				..RegisterFilter::default()
+			},
+		)
+		.into_iter()
+		.map(|row| row.id)
+		.collect()
+	};
+	assert_eq!(tagged("vtwork"), ["pay", "desk"]);
+	assert_eq!(tagged("vtfood"), ["desk", "lunch"]);
+	assert_eq!(tagged("vttravel"), ["trip"]);
+	assert!(tagged("vtwor").is_empty(), "the exact tag, not a substring");
+
+	let whole: BTreeMap<String, Option<i64>> = register(&session, in_account(&everyday))
+		.into_iter()
+		.map(|row| (row.id, row.running_balance))
+		.collect();
+	let ranged = filtered(
+		&session,
+		&everyday,
+		RegisterFilter {
+			from: Some("2026-11-16".to_owned()),
+			to: Some("2026-11-18".to_owned()),
+			..RegisterFilter::default()
+		},
+	);
+	assert_eq!(ranged.len(), 3);
+	for row in &ranged {
+		assert!(row.running_balance.is_some());
+		assert_eq!(row.running_balance, whole[&row.id], "{}", row.id);
+	}
+	assert_eq!(ranged[0].running_balance, Some(103_000));
+	let searched = filtered(
+		&session,
+		&everyday,
+		RegisterFilter {
+			from: Some("2026-11-16".to_owned()),
+			search: Some("lunch".to_owned()),
+			..RegisterFilter::default()
+		},
+	);
+	assert_eq!(searched[0].running_balance, None);
+}
+
+#[test]
+fn amounts_actual_cant_load_are_refused_before_anything_is_written() {
+	// #56 follow-up: Actual can't load past 2^51 - 1 minor units
+	// (shared/util.ts:426), so a command can't write one, and the mirror
+	// leg's negation is checked.
+	let scratch = Scratch::new("bounds");
+	let session = import(&scratch, &small_zip(), "budget");
+	let everyday = new_account(&session, "Joint checking", NewAccountKind::Checking, 0);
+	let rainy = new_account(&session, "Rainy day", NewAccountKind::Savings, 0);
+	let too_much = 1_i64 << 51;
+	let overflow = |result: Result<Change, veritas_ffi::FfiError>| {
+		matches!(result, Err(veritas_ffi::FfiError::Overflow))
+	};
+	assert!(overflow(session.perform(Command::AddTransaction {
+		transaction: entry("huge", &everyday, "2026-11-16", -too_much),
+	})));
+	let mut split = entry("huge-split", &everyday, "2026-11-16", -10);
+	split.splits = vec![line(too_much, None), line(-too_much - 10, None)];
+	assert!(overflow(
+		session.perform(Command::AddTransaction { transaction: split })
+	));
+	let mut moved = entry("moved", &everyday, "2026-11-16", -(too_much - 1));
+	moved.payee_id = Some(transfer_payee(&session, &rainy));
+	add(&session, moved.clone());
+	assert_eq!(account(&session, &rainy).total, too_much - 1);
+	moved.amount = i64::MIN;
+	assert!(overflow(session.perform(Command::EditTransaction {
+		transaction_id: "moved".to_owned(),
+		transaction: moved,
+	})));
+	assert_eq!(account(&session, &rainy).total, too_much - 1);
+	assert!(session.register_row("huge".to_owned()).is_err());
+}
+
+#[test]
+fn imported_oddities_load_close_and_duplicate_as_actual_handles_them() {
+	// #56 follow-ups: a numeric `last_reconciled`, an account whose only rows
+	// are lines of a deleted split (it has no rows, so closing deletes it),
+	// and duplicating an unbalanced split copies it as it is, error and all.
+	let scratch = Scratch::new("oddities");
+	let session = import(&scratch, &small_zip(), "budget");
+	let everyday = new_account(&session, "Joint checking", NewAccountKind::Checking, 0);
+	let stale = new_account(&session, "Old wallet", NewAccountKind::Cash, 0);
+	let groceries = category(&session, "Groceries");
+	session.close().unwrap();
+	inject(
+		&scratch,
+		"budget",
+		&format!(
+			"UPDATE accounts SET last_reconciled = 1700000000000.0 WHERE id = '{everyday}';
+			 INSERT INTO transactions (id, acct, date, amount, isParent, isChild, cleared, sort_order, tombstone, error)
+			 VALUES ('odd', '{everyday}', 20261101, -3000, 1, 0, 1, 3, 0, '{SPLIT_ERROR}');
+			 INSERT INTO transactions (id, acct, date, amount, isParent, isChild, parent_id, category, cleared, sort_order, tombstone)
+			 VALUES ('odd-1', '{everyday}', 20261101, -2500, 0, 1, 'odd', '{groceries}', 1, -1, 0);
+			 INSERT INTO transactions (id, acct, date, amount, isParent, isChild, cleared, sort_order, tombstone)
+			 VALUES ('gone', '{stale}', 20261101, -700, 1, 0, 1, 4, 1);
+			 INSERT INTO transactions (id, acct, date, amount, isParent, isChild, parent_id, cleared, sort_order, tombstone)
+			 VALUES ('gone-1', '{stale}', 20261101, -700, 0, 1, 'gone', 1, -1, 0);"
+		),
+	);
+	let session = reopen(&scratch, "budget");
+	assert_eq!(
+		account(&session, &everyday).last_reconciled.as_deref(),
+		Some("1700000000000.0"),
+		"the TEXT column keeps a number written as one as text, and it loads as stored"
+	);
+
+	perform(
+		&session,
+		Command::CloseAccount {
+			account_id: stale.clone(),
+			transfer_to_account_id: None,
+			category_id: None,
+		},
+	);
+	assert!(
+		session
+			.accounts()
+			.unwrap()
+			.accounts
+			.iter()
+			.all(|a| a.id != stale),
+		"no live rows, so it's deleted rather than closed"
+	);
+
+	perform(
+		&session,
+		Command::DuplicateTransaction {
+			transaction_id: "odd".to_owned(),
+			new_id: Some("odd-again".to_owned()),
+		},
+	);
+	let copy = session.register_row("odd-again".to_owned()).unwrap();
+	assert_eq!((copy.amount, copy.split_difference), (-3_000, Some(-500)));
+	assert_eq!(copy.lines.len(), 1);
+	assert!(!copy.cleared);
+	let stored: String = sqlite(&scratch, "budget")
+		.query_row(
+			"SELECT error FROM transactions WHERE id = 'odd-again'",
+			[],
+			|row| row.get(0),
+		)
+		.unwrap();
+	assert_eq!(stored, SPLIT_ERROR);
+}
+
+#[test]
+fn closing_moves_the_whole_balance_cleared_or_not_and_files_an_expense_when_it_leaves() {
+	// #56 follow-ups: a close with cleared and uncleared rows moves the total,
+	// and a balance leaving the budget is spending in the category picked
+	// (§4.9, CloseAccountModal.tsx:33-40).
+	let scratch = Scratch::new("close-mixed");
+	let session = import(&scratch, &small_zip(), "budget");
+	let everyday = new_account(&session, "Joint checking", NewAccountKind::Checking, 0);
+	let wallet = new_account(&session, "Wallet", NewAccountKind::Cash, 10_000);
+	let brokerage = new_account(&session, "Brokerage", NewAccountKind::Investment, 0);
+	let jar = new_account(&session, "Coin jar", NewAccountKind::Cash, 4_000);
+	let groceries = category(&session, "Groceries");
+	add(&session, entry("unchecked", &wallet, "2026-11-16", -2_500));
+	let mut checked = entry("checked", &wallet, "2026-11-16", -1_000);
+	checked.cleared = true;
+	add(&session, checked);
+	let before = account(&session, &wallet);
+	assert_eq!((before.cleared, before.uncleared), (9_000, -2_500));
+
+	perform(
+		&session,
+		Command::CloseAccount {
+			account_id: wallet.clone(),
+			transfer_to_account_id: Some(everyday.clone()),
+			category_id: None,
+		},
+	);
+	let closed = account(&session, &wallet);
+	assert!(closed.closed);
+	assert_eq!(
+		(closed.total, closed.cleared, closed.uncleared),
+		(0, 2_500, -2_500),
+		"the cleared closing transfer moves the total, uncleared rows included"
+	);
+	assert_eq!(account(&session, &everyday).total, 6_500);
+
+	let spent_before = session
+		.budget_month(NOVEMBER, TODAY.to_owned())
+		.unwrap()
+		.groups
+		.into_iter()
+		.flat_map(|g| g.envelopes)
+		.find(|e| e.id == groceries)
+		.unwrap()
+		.spent;
+	perform(
+		&session,
+		Command::CloseAccount {
+			account_id: jar.clone(),
+			transfer_to_account_id: Some(brokerage.clone()),
+			category_id: Some(groceries.clone()),
+		},
+	);
+	let closing = register(&session, in_account(&jar))
+		.into_iter()
+		.find(|row| row.notes.as_deref() == Some("Closing account"))
+		.unwrap();
+	assert_eq!(
+		(closing.amount, closing.category_id.as_deref()),
+		(-4_000, Some(groceries.as_str()))
+	);
+	let other = session
+		.register_row(closing.counterpart_id.unwrap())
+		.unwrap();
+	assert_eq!((other.amount, other.category_id), (4_000, None));
+	let spent_after = session
+		.budget_month(NOVEMBER, TODAY.to_owned())
+		.unwrap()
+		.groups
+		.into_iter()
+		.flat_map(|g| g.envelopes)
+		.find(|e| e.id == groceries)
+		.unwrap()
+		.spent;
+	assert_eq!(spent_after - spent_before, -4_000);
+}
+
+#[test]
+fn a_just_imported_budget_has_its_import_snapshot_before_any_edit() {
+	// R-REL-3: the budget as Actual handed it over is a restore point at
+	// once, not only after the background open check, which a quick first
+	// edit could beat.
+	let scratch = Scratch::new("import-snapshot");
+	let session = import(&scratch, &small_zip(), "budget");
+	let snapshots = session.snapshots().unwrap();
+	let imported = snapshots
+		.iter()
+		.find(|s| s.reason == veritas_ffi::SnapshotKind::Import)
+		.expect("an import snapshot right away")
+		.id
+		.clone();
+	let everyday = new_account(&session, "Joint checking", NewAccountKind::Checking, 0);
+	session.restore_snapshot(imported).unwrap();
+	assert!(
+		session
+			.accounts()
+			.unwrap()
+			.accounts
+			.iter()
+			.all(|a| a.id != everyday)
+	);
 }
