@@ -4,7 +4,7 @@ use veritas_domain::{
 };
 use veritas_domain::{AccountGroupId, PayeeId, TransactionId};
 use veritas_rules::RuleBook;
-use veritas_session::{accounts, categories, goals, payees, transactions, writes};
+use veritas_session::{SnapshotReason, accounts, categories, goals, payees, transactions, writes};
 
 use crate::accounts::TransactionDraft;
 use crate::records::NewAccount;
@@ -287,6 +287,18 @@ impl veritas_session::Command for Command {
 		}
 		let sheet = EnvelopeSheet::compute(data, today(data))?;
 		self.plan_with_sheet(data, &sheet)
+	}
+
+	/// R-REL-3: a merge repoints every row of the merged payees, and clearing
+	/// several rows at once is a bulk edit.
+	fn snapshot_first(&self) -> Option<SnapshotReason> {
+		match self {
+			Command::MergePayees { .. } => Some(SnapshotReason::BulkEdit),
+			Command::SetCleared {
+				transaction_ids, ..
+			} if transaction_ids.len() > 1 => Some(SnapshotReason::BulkEdit),
+			_ => None,
+		}
 	}
 
 	fn reads_sheet(&self) -> bool {
