@@ -12,6 +12,7 @@ struct AccountRegisterScreen: View {
 	@State private var register: RegisterModel
 	@State private var accounts: AccountsModel
 	@State private var editing: TransactionEditorModel?
+	@State private var moving: MoveMoneyModel?
 	@State private var deleting: [RegisterRow] = []
 	@State private var reconcile: ReconcileModel?
 	@State private var search = ""
@@ -70,7 +71,11 @@ struct AccountRegisterScreen: View {
 			.padding(.top, Spacing.s2)
 			.padding(.bottom, Spacing.s3)
 			RegisterTable(model: register) { row in
-				editing = TransactionEditorModel(workspace: workspace, accountID: accountID, editing: row)
+				if row.transferAccountId != nil, row.lines.isEmpty {
+					moving = MoveMoneyModel(workspace: workspace, fromID: accountID, editing: row)
+				} else {
+					editing = TransactionEditorModel(workspace: workspace, accountID: accountID, editing: row)
+				}
 			} delete: { rows in
 				deleting = rows
 			}
@@ -80,6 +85,7 @@ struct AccountRegisterScreen: View {
 		.navigationSubtitle(account.map { register.format.currency($0.total) } ?? "")
 		.toolbar { toolbar }
 		.sheet(item: $editing) { TransactionSheet(model: $0) }
+		.sheet(item: $moving) { MoveMoneySheet(model: $0) }
 		.confirmationDialog(deleting.count == 1 ? "Delete this transaction?" : "Delete \(deleting.count) transactions?", isPresented: Binding(get: { !deleting.isEmpty }, set: { if !$0 { deleting = [] } })) {
 			Button("Delete", role: .destructive) {
 				let ids = deleting.map(\.id)

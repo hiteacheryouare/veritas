@@ -12,10 +12,16 @@ public final class SplitLineEditor: Identifiable {
 	public let amount: AmountFieldModel
 	public var categoryID: String?
 	public var notes: String
+	/// A line with its own payee keeps it, so a loan payment's principal stays a transfer.
+	public let payeeID: String?
+	/// The account a transfer line moves money to or from.
+	public let transferName: String?
 
-	init(lineID: String?, amount: Int64, categoryID: String?, notes: String, style: NumberStyle, reader: any AmountReader) {
+	init(lineID: String?, amount: Int64, categoryID: String?, notes: String, payeeID: String? = nil, transferName: String? = nil, style: NumberStyle, reader: any AmountReader) {
 		id = lineID ?? UUID().uuidString
 		self.lineID = lineID
+		self.payeeID = payeeID
+		self.transferName = transferName
 		self.amount = AmountFieldModel(amount: amount, style: style, reader: reader)
 		self.categoryID = categoryID
 		self.notes = notes
@@ -49,6 +55,9 @@ public final class TransactionEditorModel: Identifiable {
 	public private(set) var remembered = false
 	/// A reconciled row keeps its cleared mark until it's unlocked, as in Actual.
 	public private(set) var isLocked: Bool
+	/// R-XFER-4: a new transfer leaving the budget says what it's for.
+	public let transferPurpose: TransferPurposeModel
+	public private(set) var transferAsks = false
 
 	@ObservationIgnored let workspace: WorkspaceModel
 	@ObservationIgnored let reader: any AmountReader
@@ -68,9 +77,15 @@ public final class TransactionEditorModel: Identifiable {
 		notes = editing?.notes ?? ""
 		cleared = editing?.cleared ?? false
 		isLocked = editing?.reconciled ?? false
+		transferPurpose = TransferPurposeModel(workspace: workspace)
 		if let editing {
 			splits = editing.lines.map { line in
-				SplitLineEditor(lineID: line.id, amount: abs(line.amount), categoryID: line.categoryId, notes: line.notes ?? "", style: workspace.numberStyle, reader: reader)
+				SplitLineEditor(
+					lineID: line.id, amount: abs(line.amount), categoryID: line.categoryId, notes: line.notes ?? "",
+					payeeID: line.payeeId == editing.payeeId ? nil : line.payeeId,
+					transferName: line.transferAccountId == nil ? nil : line.payeeName,
+					style: workspace.numberStyle, reader: reader
+				)
 			}
 		}
 	}
@@ -128,6 +143,50 @@ public final class TransactionEditorModel: Identifiable {
 		payees.first { $0.id == payeeID }?.transferAccountId != nil
 	}
 
+	/// The two ends when the payee is another account. Money leaves `from`.
+	var transferEnds: (from: String, to: String)? {
+		guard let other = payees.first(where: { $0.id == payeeID })?.transferAccountId else { return nil }
+		return isDeposit ? (other, accountID) : (accountID, other)
+	}
+
+	public var transferKey: String { "\(payeeID ?? "")|\(isDeposit)|\(accountID)" }
+
+	/// The view calls this whenever `transferKey` changes.
+	public func refreshTransfer() async {
+		guard isNew, workspace.canPlanTransfers, let ends = transferEnds else {
+			transferAsks = false
+			return
+		}
+		let preview = await workspace.report { try await $0.transferPreview(from: ends.from, to: ends.to, amount: 0) }
+		transferAsks = preview?.purpose == .ask
+		guard transferAsks else { return }
+		await transferPurpose.load(envelopes: envelopes)
+		if preview?.toLoan == true, transferPurpose.answer == nil { transferPurpose.answer = .debt }
+	}
+
+	/// Written from the side the money leaves, which is the on-budget side
+	/// when Veritas asks, so the envelope lands on it (CLS-1, primary leg).
+	private func saveAskedTransfer(magnitude: Int64) async -> Bool {
+		guard transferPurpose.isAnswered else {
+			problem = "Choose what this money is for."
+			return false
+		}
+		guard let ends = transferEnds, let payee = payees.first(where: { $0.transferAccountId == ends.to }) else { return false }
+		let purpose = transferPurpose
+		let typed = notes.trimmingCharacters(in: .whitespaces)
+		let draft = TransactionDraft(
+			id: UUID().uuidString.lowercased(), accountId: ends.from, date: Self.civilDate(date), amount: -magnitude,
+			payeeId: payee.id, payeeName: nil, categoryId: nil, notes: typed.isEmpty ? nil : typed, cleared: cleared, splits: []
+		)
+		problem = nil
+		return await workspace.change { session -> Bool in
+			var filed = draft
+			filed.categoryId = try await purpose.resolve(using: session)
+			try await session.perform(.addTransaction(transaction: filed))
+			return true
+		} ?? false
+	}
+
 	public func unlock() async {
 		guard let editing, isLocked else { return }
 		if await workspace.perform(.unlockReconciled(transactionId: editing.id)) { isLocked = false }
@@ -152,6 +211,7 @@ public final class TransactionEditorModel: Identifiable {
 			problem = amount.problem
 			return false
 		}
+		if isNew, transferAsks, choseTransfer { return await saveAskedTransfer(magnitude: magnitude) }
 		let sign: Int64 = isDeposit ? 1 : -1
 		var lines: [SplitLineDraft] = []
 		for line in splits {
@@ -159,7 +219,7 @@ public final class TransactionEditorModel: Identifiable {
 				problem = line.amount.problem
 				return false
 			}
-			lines.append(SplitLineDraft(id: line.lineID, amount: sign * value, payeeId: nil, payeeName: nil, categoryId: line.categoryID, notes: line.notes.isEmpty ? nil : line.notes))
+			lines.append(SplitLineDraft(id: line.lineID, amount: sign * value, payeeId: line.payeeID, payeeName: nil, categoryId: line.categoryID, notes: line.notes.isEmpty ? nil : line.notes))
 		}
 		let typed = payeeText.trimmingCharacters(in: .whitespaces)
 		let draft = TransactionDraft(

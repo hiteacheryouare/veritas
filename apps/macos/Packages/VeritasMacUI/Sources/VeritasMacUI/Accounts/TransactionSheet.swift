@@ -111,6 +111,9 @@ struct TransactionSheet: View {
 			if model.isSplit {
 				SplitLines(model: model)
 			}
+			if model.transferAsks && model.choseTransfer {
+				TransferPurposeSection(purpose: model.transferPurpose)
+			}
 			if let problem = model.problem, model.amount.problem == nil {
 				Text(problem).foregroundStyle(Color.moneyOverspent)
 			}
@@ -136,6 +139,7 @@ struct TransactionSheet: View {
 			await model.load()
 			if model.isNew { payeeFocused = true }
 		}
+		.task(id: model.transferKey) { await model.refreshTransfer() }
 		.containerIdentifier("sheet.transaction")
 	}
 }
@@ -168,7 +172,7 @@ private struct SplitLines: View {
 				.font(.text(.heading, weight: .semibold))
 			GroupedRows {
 				ForEach(model.splits) { line in
-					SplitLineRow(line: line, groups: model.envelopes) { model.removeSplitLine(line) }
+					SplitLineRow(line: line, groups: model.envelopes, isDeposit: model.isDeposit) { model.removeSplitLine(line) }
 					if line.id != model.splits.last?.id { Divider() }
 				}
 			}
@@ -180,10 +184,17 @@ private struct SplitLines: View {
 private struct SplitLineRow: View {
 	@Bindable var line: SplitLineEditor
 	let groups: [EnvelopeGroup]
+	let isDeposit: Bool
 	let remove: () -> Void
 
 	var body: some View {
 		HStack(spacing: Spacing.s3) {
+			if let transfer = line.transferName {
+				Text(isDeposit ? "← From \(transfer)" : "→ To \(transfer)")
+					.fontWeight(.medium)
+					.lineLimit(1)
+					.accessibilityIdentifier("transaction.line.transfer")
+			}
 			EnvelopeMenu(groups: groups, selection: $line.categoryID)
 			TextField("Notes", text: $line.notes, prompt: Text("Notes"))
 				.labelsHidden()
