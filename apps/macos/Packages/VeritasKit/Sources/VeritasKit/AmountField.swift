@@ -86,6 +86,11 @@ public final class AmountFieldModel {
 		return nil
 	}
 
+	/// What the text reads as right now, without flagging a half-typed amount.
+	public func peek() async -> Int64? {
+		try? await reader.evaluate(text, style: style)
+	}
+
 	private func updatePreview() {
 		previewTask?.cancel()
 		let text = text

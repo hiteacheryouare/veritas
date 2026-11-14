@@ -144,6 +144,30 @@ public protocol BudgetSession: AnyObject, Sendable {
 	/// What's cleared and how far it is from the statement (R-ACC-3).
 	func reconciliation(_ accountID: String, statementBalance: Int64) async throws -> Reconciliation
 
+	/// Whether the core has the transfer, category-kind and loan calls below.
+	/// Until it does, Move money is a plain transfer with no previews.
+	var canPlanTransfers: Bool { get }
+	/// Both balances before and after a move, and whether Veritas asks what it's for (R-XFER-1, R-XFER-4).
+	func transferPreview(from: String, to: String, amount: Int64) async throws -> TransferPreview
+	func kindTarget(_ kind: CategoryKind) async throws -> KindTarget
+	/// How many transactions a kind change reclassifies (CLS-3.3).
+	func kindChangePreview(_ categoryID: String, kind: CategoryKind) async throws -> UInt64
+	func setCategoryKind(_ categoryID: String, kind: CategoryKind) async throws
+	/// Returns the new envelope's id.
+	@discardableResult
+	func createKindCategory(kind: CategoryKind, name: String) async throws -> String
+	/// `nil` when the account isn't a loan.
+	func loanTerms(_ accountID: String) async throws -> LoanTerms?
+	func setLoanTerms(_ accountID: String, _ terms: LoanTerms) async throws
+	/// Returns the new account's id.
+	@discardableResult
+	func createAccount(_ account: NewAccount, loan: LoanTerms?) async throws -> String
+	func loanPaymentDefaults(_ loanAccountID: String, today: String) async throws -> LoanPaymentDefaults
+	func loanPaymentPreview(_ loanAccountID: String, date: String, total: Int64, interest: Int64, escrow: Int64, fees: Int64) async throws -> LoanPaymentPreview
+	func recordLoanPayment(_ payment: LoanPaymentDraft) async throws
+	/// Basis points: "9.80%" is 980.
+	func evaluateRate(_ text: String, style: NumberStyle) async throws -> Int64
+
 	/// Whether the core can add, remove and configure widgets and dashboards,
 	/// and save report filters. Until it can, those actions stay hidden.
 	var canEditDashboards: Bool { get }

@@ -239,6 +239,49 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 		accountStore.reconciliation(accountID, statement: statementBalance)
 	}
 
+	let canPlanTransfers = true
+	func transferPreview(from: String, to: String, amount: Int64) async throws -> TransferPreview {
+		try accountStore.transferPreview(from: from, to: to, amount: amount)
+	}
+	func kindTarget(_ kind: CategoryKind) async throws -> KindTarget { accountStore.kindTarget(kind) }
+	func kindChangePreview(_ categoryID: String, kind: CategoryKind) async throws -> UInt64 { accountStore.kindChangePreview(categoryID) }
+	func setCategoryKind(_ categoryID: String, kind: CategoryKind) async throws {
+		try writable()
+		try accountStore.setKind(categoryID, kind)
+	}
+	func createKindCategory(kind: CategoryKind, name: String) async throws -> String {
+		try writable()
+		let id = try budget.createEnvelope(in: "savingsdebt", name: name)
+		accountStore.named(id, name, kind: kind)
+		return id
+	}
+	func loanTerms(_ accountID: String) async throws -> LoanTerms? { accountStore.loanTerms(accountID) }
+	func setLoanTerms(_ accountID: String, _ terms: LoanTerms) async throws {
+		try writable()
+		accountStore.setLoanTerms(accountID, terms)
+	}
+	func createAccount(_ account: NewAccount, loan: LoanTerms?) async throws -> String {
+		try writable()
+		let before = Set(accountStore.list().accounts.map(\.id))
+		_ = try accountStore.perform(.createAccount(account: account))
+		guard let id = accountStore.list().accounts.map(\.id).first(where: { !before.contains($0) }) else { return "" }
+		if let loan { accountStore.setLoanTerms(id, loan) }
+		return id
+	}
+	func loanPaymentDefaults(_ loanAccountID: String, today: String) async throws -> LoanPaymentDefaults { accountStore.loanDefaults(loanAccountID) }
+	func loanPaymentPreview(_ loanAccountID: String, date: String, total: Int64, interest: Int64, escrow: Int64, fees: Int64) async throws -> LoanPaymentPreview {
+		accountStore.loanPreview(loanAccountID, total: total, interest: interest, escrow: escrow, fees: fees)
+	}
+	func recordLoanPayment(_ payment: LoanPaymentDraft) async throws {
+		try writable()
+		try accountStore.recordLoanPayment(payment)
+	}
+	func evaluateRate(_ text: String, style: NumberStyle) async throws -> Int64 {
+		let digits = text.replacingOccurrences(of: "%", with: "").trimmingCharacters(in: .whitespaces)
+		guard let value = Decimal(string: digits), value >= 0 else { throw FfiError.Invalid(message: "Can't read \(text) as a rate.") }
+		return NSDecimalNumber(decimal: value * 100).int64Value
+	}
+
 	func netProfit(first: Month, last: Month) async throws -> NetProfitReport { reports.netProfit(first: first, last: last) }
 	func netWorth(first: Month, last: Month) async throws -> [NetWorthMonth] { reports.netWorth(first: first, last: last) }
 	func cashFlow(first: Month, last: Month) async throws -> [CashFlowColumn] { reports.cashFlow(first: first, last: last) }

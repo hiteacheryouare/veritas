@@ -37,8 +37,11 @@ final class StubAccounts: @unchecked Sendable {
 	static let categories: [String: String] = [
 		"groceries": "Groceries", "dining": "Dining out", "gas": "Gas", "household": "Household", "rent": "Rent",
 		"electric": "Electric", "internet": "Internet", "hobbies": "Hobbies", "gifts": "Gifts", "paycheck": "Paycheck",
-		"principal": "Car loan payment", "interest": "Loan interest"
+		"principal": "Car loan payment", "interest": "Loan interest", "savingsfund": "Savings", "investing": "Investments"
 	]
+	private var kinds: [String: CategoryKind] = ["principal": .debtPrincipal, "savingsfund": .savings, "investing": .savings, "paycheck": .income]
+	private var loans: [String: LoanTerms] = ["carloan": LoanTerms(rateBps: 980, payment: 41_200, paymentDay: 12, lender: "Lakeshore Credit Union")]
+	private var created: [String: String] = [:]
 
 	static func account(_ id: String, _ name: String, offBudget: Bool = false, closed: Bool = false) -> AccountDetail {
 		AccountDetail(id: id, name: name, offBudget: offBudget, closed: closed, groupId: nil, cleared: 0, uncleared: 0, total: 0, note: nil, lastReconciled: nil)
@@ -132,8 +135,8 @@ final class StubAccounts: @unchecked Sendable {
 			return [
 				SidebarGroup(name: "Cash", accounts: open.filter { ["checking", "savings"].contains($0.id) || (!$0.offBudget && !["visa", "checking", "savings"].contains($0.id)) }.map(item)),
 				SidebarGroup(name: "Credit", accounts: open.filter { $0.id == "visa" }.map(item)),
-				SidebarGroup(name: "Investments", accounts: open.filter { $0.id == "brokerage" }.map(item)),
-				SidebarGroup(name: "Loans", accounts: open.filter { $0.id == "carloan" }.map(item))
+				SidebarGroup(name: "Investments", accounts: open.filter { $0.offBudget && loans[$0.id] == nil }.map(item)),
+				SidebarGroup(name: "Loans", accounts: open.filter { $0.offBudget && loans[$0.id] != nil }.map(item))
 			].filter { !$0.accounts.isEmpty }
 		}
 	}
@@ -144,7 +147,7 @@ final class StubAccounts: @unchecked Sendable {
 		return RegisterRow(
 			id: txn.id, accountId: txn.account, accountName: accounts.first { $0.id == txn.account }?.name ?? "",
 			date: txn.date, amount: txn.amount, payeeId: txn.payee, payeeName: payee?.name, categoryId: txn.category,
-			categoryName: txn.category.flatMap { Self.categories[$0] }, notes: txn.notes, tags: tags, cleared: txn.cleared,
+			categoryName: txn.category.flatMap(categoryName), notes: txn.notes, tags: tags, cleared: txn.cleared,
 			reconciled: txn.reconciled, transferAccountId: txn.transfer, counterpartId: txn.counterpart, lines: txn.lines,
 			splitDifference: nil, startingBalance: txn.startingBalance, scheduleId: nil, needsActual: nil, runningBalance: balance
 		)
@@ -234,7 +237,10 @@ final class StubAccounts: @unchecked Sendable {
 			defer { recount() }
 			switch command {
 			case .addTransaction(let draft):
-				txns.append(try make(draft, id: draft.id ?? UUID().uuidString.lowercased()))
+				var added = try make(draft, id: draft.id ?? UUID().uuidString.lowercased())
+				pair(&added)
+				pairLines(&added, old: [])
+				txns.append(added)
 			case .editTransaction(let id, let draft):
 				guard let index = txns.firstIndex(where: { $0.id == id }) else { throw FfiError.NotFound(entity: "transaction", id: id) }
 				if txns[index].reconciled, !draft.cleared {
@@ -242,10 +248,14 @@ final class StubAccounts: @unchecked Sendable {
 				}
 				var edited = try make(draft, id: id)
 				edited.reconciled = txns[index].reconciled
-				txns[index] = edited
+				edited.counterpart = txns[index].counterpart
+				pair(&edited)
+				pairLines(&edited, old: txns[index].lines)
+				if let i = txns.firstIndex(where: { $0.id == id }) { txns[i] = edited }
 			case .deleteTransaction(let id):
-				let partner = txns.first { $0.id == id }?.counterpart
-				txns.removeAll { $0.id == id || $0.id == partner }
+				let doomed = txns.first { $0.id == id }
+				let partners = Set([doomed?.counterpart].compactMap(\.self) + (doomed?.lines.compactMap(\.counterpartId) ?? []))
+				txns.removeAll { $0.id == id || partners.contains($0.id) }
 			case .duplicateTransaction(let id, let newID):
 				guard var copy = txns.first(where: { $0.id == id }) else { throw FfiError.NotFound(entity: "transaction", id: id) }
 				copy.id = newID ?? UUID().uuidString
@@ -272,6 +282,7 @@ final class StubAccounts: @unchecked Sendable {
 				let id = "acct-\(accounts.count)"
 				let offBudget = [.investment, .retirement, .property, .loan, .mortgage].contains(new.kind)
 				accounts.append(Self.account(id, new.name, offBudget: offBudget))
+				if [.loan, .mortgage].contains(new.kind) { loans[id] = LoanTerms() }
 				payees["to-\(id)"] = PayeeDetail(id: "to-\(id)", name: new.name, transferAccountId: id, favorite: false, learnCategories: false, transactions: 0)
 				if new.startingBalance != 0 {
 					let owed = [.creditCard, .lineOfCredit, .loan, .mortgage].contains(new.kind)
@@ -322,6 +333,164 @@ final class StubAccounts: @unchecked Sendable {
 		}
 	}
 
+	private func offBudget(_ account: String?) -> Bool {
+		accounts.first { $0.id == account }?.offBudget == true
+	}
+
+	/// The core's transfer hooks, as contract v9 will have them: the other
+	/// side follows the amount, date, notes and accounts (R-XFER-3); a
+	/// same-side pair and the off-budget side carry no envelope.
+	private func pair(_ txn: inout Txn) {
+		guard let to = txn.transfer else {
+			if let old = txn.counterpart { txns.removeAll { $0.id == old } }
+			txn.counterpart = nil
+			return
+		}
+		if offBudget(txn.account) == offBudget(to) || offBudget(txn.account) { txn.category = nil }
+		let otherID = txn.counterpart ?? UUID().uuidString.lowercased()
+		let other = txns.first { $0.id == otherID }
+		let mirror = Txn(
+			id: otherID, account: to, date: txn.date, amount: -txn.amount, payee: "to-\(txn.account)",
+			category: offBudget(txn.account) && !offBudget(to) ? other?.category : nil, notes: txn.notes,
+			cleared: other?.cleared ?? txn.cleared, reconciled: other?.reconciled ?? false, transfer: txn.account, counterpart: txn.id
+		)
+		txns.removeAll { $0.id == otherID }
+		txns.append(mirror)
+		txn.counterpart = otherID
+	}
+
+	/// Actual's transfers inside split lines (DEBT-6 A.4): each transfer line has its own counterpart.
+	private func pairLines(_ txn: inout Txn, old: [RegisterLine]) {
+		for kept in old where !txn.lines.contains(where: { $0.id == kept.id && $0.transferAccountId == kept.transferAccountId }) {
+			if let mirror = kept.counterpartId { txns.removeAll { $0.id == mirror } }
+		}
+		for index in txn.lines.indices {
+			guard let to = txn.lines[index].transferAccountId else { continue }
+			let line = txn.lines[index]
+			let mirror = old.first { $0.id == line.id && $0.transferAccountId == to }?.counterpartId ?? UUID().uuidString.lowercased()
+			let existing = txns.first { $0.id == mirror }
+			txns.removeAll { $0.id == mirror }
+			txns.append(Txn(id: mirror, account: to, date: txn.date, amount: -line.amount, payee: "to-\(txn.account)", category: nil, notes: line.notes ?? txn.notes, cleared: existing?.cleared ?? txn.cleared, reconciled: existing?.reconciled ?? false, transfer: txn.account, counterpart: line.id))
+			txn.lines[index].counterpartId = mirror
+		}
+	}
+
+	func transferPreview(from: String, to: String, amount: Int64) throws -> TransferPreview {
+		try lock.withLock {
+			guard let source = accounts.first(where: { $0.id == from }), let target = accounts.first(where: { $0.id == to }) else {
+				throw FfiError.NotFound(entity: "account", id: from)
+			}
+			return TransferPreview(
+				from: BalanceAfter(accountId: from, now: source.total, after: source.total - amount),
+				to: BalanceAfter(accountId: to, now: target.total, after: target.total + amount),
+				purpose: !source.offBudget && target.offBudget ? .ask : .none,
+				toLoan: !source.offBudget && loans[to] != nil
+			)
+		}
+	}
+
+	func kindTarget(_ kind: CategoryKind) -> KindTarget {
+		lock.withLock {
+			let ids = kinds.filter { $0.value == kind }.keys.sorted()
+			switch ids.count {
+			case 0: return .none
+			case 1: return .one(categoryId: ids[0])
+			default: return .several(categoryIds: ids)
+			}
+		}
+	}
+
+	func kindChangePreview(_ category: String) -> UInt64 {
+		lock.withLock { UInt64(txns.filter { $0.category == category && $0.transfer != nil }.count) }
+	}
+
+	func setKind(_ category: String, _ kind: CategoryKind) throws {
+		try lock.withLock {
+			if kinds[category] == .income, kind != .income {
+				throw FfiError.Invalid(message: "This is an income category in Actual, so it stays income. Pick an expense category instead.")
+			}
+			kinds[category] = kind
+		}
+	}
+
+	func named(_ id: String, _ name: String, kind: CategoryKind) {
+		lock.withLock {
+			created[id] = name
+			kinds[id] = kind
+		}
+	}
+
+	func loanTerms(_ account: String) -> LoanTerms? {
+		lock.withLock { loans[account] }
+	}
+
+	func setLoanTerms(_ account: String, _ terms: LoanTerms) {
+		lock.withLock { loans[account] = terms }
+	}
+
+	func isLoan(_ account: String) -> Bool {
+		lock.withLock { loans[account] != nil }
+	}
+
+	func loanDefaults(_ loan: String) -> LoanPaymentDefaults {
+		lock.withLock {
+			guard let last = txns.filter({ $0.account == loan && $0.transfer != nil && $0.amount > 0 }).max(by: { $0.date < $1.date }) else {
+				return LoanPaymentDefaults(total: loans[loan]?.payment)
+			}
+			return LoanPaymentDefaults(fromAccountId: last.transfer, total: last.amount, interest: 8_020, principalCategoryId: "principal", interestCategoryId: "interest")
+		}
+	}
+
+	/// DEBT-2.1, DEBT-2.2, DEBT-2.3 and DEBT-4 with invented figures.
+	func loanPreview(_ loan: String, total: Int64, interest: Int64, escrow: Int64, fees: Int64) -> LoanPaymentPreview {
+		lock.withLock {
+			let outstanding = max(0, -(accounts.first { $0.id == loan }?.total ?? 0))
+			let principal = total - interest - escrow - fees
+			let rate = loans[loan]?.rateBps
+			let estimate = rate.map { (outstanding * $0 + 60_000) / 120_000 }
+			let problem: LoanPaymentProblem? = principal < 0 ? .interestAbovePayment(shortBy: -principal) : principal > outstanding ? .paysOff(credit: principal - outstanding) : nil
+			return LoanPaymentPreview(principal: principal, outstanding: outstanding, estimate: estimate, rateBps: rate, problem: problem)
+		}
+	}
+
+	func recordLoanPayment(_ payment: LoanPaymentDraft) throws {
+		try lock.withLock {
+			defer { recount() }
+			let principal = payment.total - payment.interest - payment.escrow - payment.fees
+			guard principal >= 0 else { throw FfiError.Invalid(message: "The interest is more than the payment.") }
+			var lender: String?
+			if let name = loans[payment.loanAccountId]?.lender {
+				lender = payees.values.first { $0.name == name }?.id
+				if lender == nil {
+					lender = "payee-\(payees.count)"
+					payees[lender!] = PayeeDetail(id: lender!, name: name, transferAccountId: nil, favorite: false, learnCategories: true, transactions: 0)
+				}
+			}
+			let parent = payment.id ?? UUID().uuidString.lowercased()
+			let principalLine = UUID().uuidString.lowercased()
+			let mirror = UUID().uuidString.lowercased()
+			let loanName = accounts.first { $0.id == payment.loanAccountId }?.name
+			var lines = [RegisterLine(
+				id: principalLine, amount: -principal, payeeId: "to-\(payment.loanAccountId)", payeeName: loanName,
+				categoryId: payment.principalCategoryId, categoryName: payment.principalCategoryId.flatMap(categoryName),
+				notes: nil, transferAccountId: payment.loanAccountId, counterpartId: mirror
+			)]
+			if payment.interest != 0 {
+				lines.append(RegisterLine(
+					id: UUID().uuidString.lowercased(), amount: -payment.interest, payeeId: lender, payeeName: lender.flatMap { payees[$0]?.name },
+					categoryId: payment.interestCategoryId, categoryName: payment.interestCategoryId.flatMap(categoryName),
+					notes: nil, transferAccountId: nil, counterpartId: nil
+				))
+			}
+			txns.append(Txn(id: parent, account: payment.fromAccountId, date: payment.date, amount: -payment.total, payee: lender, category: nil, notes: payment.notes, cleared: payment.cleared, reconciled: false, transfer: nil, counterpart: nil, lines: lines))
+			txns.append(Txn(id: mirror, account: payment.loanAccountId, date: payment.date, amount: principal, payee: "to-\(payment.fromAccountId)", category: nil, notes: payment.notes, cleared: payment.cleared, reconciled: false, transfer: payment.fromAccountId, counterpart: principalLine))
+		}
+	}
+
+	private func categoryName(_ id: String) -> String? {
+		Self.categories[id] ?? created[id]
+	}
+
 	private func make(_ draft: TransactionDraft, id: String) throws -> Txn {
 		if !draft.splits.isEmpty, draft.splits.reduce(0, { $0 + $1.amount }) != draft.amount {
 			throw FfiError.Invalid(message: "The split lines add up to \(draft.splits.reduce(0) { $0 + $1.amount }), not \(draft.amount).")
@@ -341,7 +510,7 @@ final class StubAccounts: @unchecked Sendable {
 			id: id, account: draft.accountId, date: draft.date, amount: draft.amount, payee: payee, category: draft.categoryId,
 			notes: draft.notes, cleared: draft.cleared, reconciled: false, transfer: transfer, counterpart: nil,
 			lines: draft.splits.map { line in
-				RegisterLine(id: line.id ?? UUID().uuidString, amount: line.amount, payeeId: payee, payeeName: payee.flatMap { payees[$0]?.name }, categoryId: line.categoryId, categoryName: line.categoryId.flatMap { Self.categories[$0] }, notes: line.notes, transferAccountId: nil, counterpartId: nil)
+				RegisterLine(id: line.id ?? UUID().uuidString, amount: line.amount, payeeId: line.payeeId ?? payee, payeeName: (line.payeeId ?? payee).flatMap { payees[$0]?.name }, categoryId: line.categoryId, categoryName: line.categoryId.flatMap(categoryName), notes: line.notes, transferAccountId: line.payeeId.flatMap { payees[$0]?.transferAccountId }, counterpartId: nil)
 			}
 		)
 	}

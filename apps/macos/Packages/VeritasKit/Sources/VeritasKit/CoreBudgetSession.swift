@@ -237,6 +237,33 @@ final class CoreBudgetSession: BudgetSession {
 		return try await Core.run { try session.reconciliation(accountId: accountID, statementBalance: statementBalance) }
 	}
 
+	/// Contract v9 brings the transfer, kind and loan calls.
+	let canPlanTransfers = false
+	func transferPreview(from: String, to: String, amount: Int64) async throws -> TransferPreview { throw Self.notYetTransfers }
+	func kindTarget(_ kind: CategoryKind) async throws -> KindTarget { throw Self.notYetTransfers }
+	func kindChangePreview(_ categoryID: String, kind: CategoryKind) async throws -> UInt64 { throw Self.notYetTransfers }
+	func setCategoryKind(_ categoryID: String, kind: CategoryKind) async throws { throw Self.notYetTransfers }
+	func createKindCategory(kind: CategoryKind, name: String) async throws -> String { throw Self.notYetTransfers }
+	func loanTerms(_ accountID: String) async throws -> LoanTerms? { nil }
+	func setLoanTerms(_ accountID: String, _ terms: LoanTerms) async throws { throw Self.notYetTransfers }
+	func loanPaymentDefaults(_ loanAccountID: String, today: String) async throws -> LoanPaymentDefaults { throw Self.notYetTransfers }
+	func loanPaymentPreview(_ loanAccountID: String, date: String, total: Int64, interest: Int64, escrow: Int64, fees: Int64) async throws -> LoanPaymentPreview {
+		throw Self.notYetTransfers
+	}
+	func recordLoanPayment(_ payment: LoanPaymentDraft) async throws { throw Self.notYetTransfers }
+	func evaluateRate(_ text: String, style: NumberStyle) async throws -> Int64 { throw Self.notYetTransfers }
+
+	func createAccount(_ account: NewAccount, loan: LoanTerms?) async throws -> String {
+		let session = session
+		let change = try await Core.run { try session.perform(command: .createAccount(account: account)) }
+		guard let id = change.entities.first(where: { $0.kind == .account })?.id else {
+			throw FfiError.Invalid(message: "The core added the account but didn't name it. Reopen the budget to see it.")
+		}
+		return id
+	}
+
+	private static let notYetTransfers = FfiError.Invalid(message: "This Veritas build can't plan transfers or loans yet.")
+
 	/// The dashboard and report-filter contract hasn't landed, so the core
 	/// draws what it can and the editing actions stay hidden.
 	let canEditDashboards = false

@@ -218,6 +218,7 @@ public final class WorkspaceModel {
 	}
 
 	public var canEditDashboards: Bool { session?.canEditDashboards ?? false }
+	public var canPlanTransfers: Bool { session?.canPlanTransfers ?? false }
 
 	/// Where ⌘N adds a transaction: the account on screen, else the first in the sidebar.
 	public var currentAccountID: String {

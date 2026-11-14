@@ -49,6 +49,21 @@ extension BudgetSession {
 	func previewReport(_ draft: ReportDraft, today: String) async throws -> CustomReportView { try await previewCustomReport(draft.settings, today: today) }
 	func saveReport(_ draft: ReportDraft) async throws { try await perform(.saveCustomReport(settings: draft.settings)) }
 	func createReport(_ draft: ReportDraft) async throws -> String { "" }
+	var canPlanTransfers: Bool { false }
+	func transferPreview(from: String, to: String, amount: Int64) async throws -> TransferPreview { throw FfiError.Cancelled }
+	func kindTarget(_ kind: CategoryKind) async throws -> KindTarget { .none }
+	func kindChangePreview(_ categoryID: String, kind: CategoryKind) async throws -> UInt64 { 0 }
+	func setCategoryKind(_ categoryID: String, kind: CategoryKind) async throws {}
+	func createKindCategory(kind: CategoryKind, name: String) async throws -> String { "" }
+	func loanTerms(_ accountID: String) async throws -> LoanTerms? { nil }
+	func setLoanTerms(_ accountID: String, _ terms: LoanTerms) async throws {}
+	func createAccount(_ account: NewAccount, loan: LoanTerms?) async throws -> String { "" }
+	func loanPaymentDefaults(_ loanAccountID: String, today: String) async throws -> LoanPaymentDefaults { LoanPaymentDefaults() }
+	func loanPaymentPreview(_ loanAccountID: String, date: String, total: Int64, interest: Int64, escrow: Int64, fees: Int64) async throws -> LoanPaymentPreview {
+		throw FfiError.Cancelled
+	}
+	func recordLoanPayment(_ payment: LoanPaymentDraft) async throws {}
+	func evaluateRate(_ text: String, style: NumberStyle) async throws -> Int64 { 0 }
 }
 
 extension BudgetLibrary {
