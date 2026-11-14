@@ -167,10 +167,9 @@ final class BudgetJourneyTests: XCTestCase {
 	}
 
 	/// design/interaction.md: typing any digit or operator on a selected row opens
-	/// its field with what was typed. Not yet run: it needs the Automation Mode prompt.
+	/// its field with what was typed.
 	@MainActor
 	func testTypingPlusFortyOnASelectedEnvelopeAppendsToItsValue() {
-		XCTExpectFailure("Known bug: the first key's text opens selected, so the next key replaces it")
 		let app = openBudget()
 		app.descendants(matching: .any)["envelope.groceries"].click()
 		app.typeText("+40")

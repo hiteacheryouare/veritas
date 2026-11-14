@@ -27,17 +27,15 @@ struct AmountFieldTypingTests {
 	}
 
 	/// BudgetScreen's key handler opens the field with the first key already
-	/// typed (`beginEditing`, then `editing?.type(press.characters)`), and the
-	/// field then opens with that text selected, so the next key replaces it.
+	/// typed (`beginEditing`, then `editing?.type(press.characters)`), so the
+	/// field must open with the caret after it for the next key to append.
 	@Test func typingPlusFortyOnASelectedEnvelopeAppendsToItsValue() async throws {
 		let field = AmountFieldModel(amount: 14_000, style: .commaDot, reader: CoreAmountReader(budgetDecimalPlaces: 2))
 		field.type("+")
 		let typing = try Typing(into: field)
 		try await typing.type("40")
-		await withKnownIssue("Known bug: the first key's text opens selected, so +40 typed on a selected row saves 40.00 instead of 180.00") {
-			#expect(field.text == "140.00+40")
-			#expect(await field.commit() == 18_000)
-		}
+		#expect(field.text == "140.00+40")
+		#expect(await field.commit() == 18_000)
 	}
 
 	@Test func typingSeventyFiveOnASelectedEnvelopeSetsSeventyFive() async throws {
@@ -45,9 +43,8 @@ struct AmountFieldTypingTests {
 		field.type("7")
 		let typing = try Typing(into: field)
 		try await typing.type("5")
-		await withKnownIssue("Known bug: the first key's text opens selected, so 75 typed on a selected row saves 5.00") {
-			#expect(await field.commit() == 7_500)
-		}
+		#expect(field.text == "75")
+		#expect(await field.commit() == 7_500)
 	}
 }
 

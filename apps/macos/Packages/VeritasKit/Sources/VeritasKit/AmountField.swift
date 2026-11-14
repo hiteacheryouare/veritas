@@ -64,6 +64,9 @@ public final class AmountFieldModel {
 		text = originalText
 	}
 
+	/// Whether the text is still the value the field opened on.
+	public var isUntouched: Bool { text == originalText }
+
 	public func type(_ typed: String) {
 		let shaped = reader.fieldText(original: originalText, typed: typed)
 		guard shaped != text else { return }
