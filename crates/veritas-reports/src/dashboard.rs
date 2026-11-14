@@ -203,20 +203,10 @@ pub fn place_widget(
 	width: i64,
 	height: i64,
 ) -> Result<Widget, CoreError> {
-	let (min_width, min_height) = widget
-		.kind
-		.as_deref()
-		.and_then(WidgetType::parse)
-		.map_or((1, 1), WidgetType::minimum_size);
-	let width = width.clamp(min_width, GRID_COLUMNS);
-	let height = height.max(min_height);
-	if y < 0 || x < 0 {
-		return Err(CoreError::Invalid(
-			"a widget can't sit above or left of the grid".to_owned(),
-		));
-	}
+	let kind = widget.kind.as_deref().and_then(WidgetType::parse);
+	let (x, y, width, height) = crate::widget_meta::place(kind, x, y, width, height)?;
 	Ok(Widget {
-		x: Some(x.min(GRID_COLUMNS - width)),
+		x: Some(x),
 		y: Some(y),
 		width: Some(width),
 		height: Some(height),

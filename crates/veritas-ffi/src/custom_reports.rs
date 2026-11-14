@@ -1,23 +1,89 @@
-//! Actual's custom reports and dashboards, read natively and written back in
-//! Actual's own format (R-REP-4).
+//! Actual's custom reports, read natively and written back in Actual's own
+//! format (R-REP-4).
 
 use std::sync::Arc;
 
-use veritas_domain::{BudgetData, CivilDate, CoreError, CustomReportId, Row, WidgetId, YearMonth};
+use veritas_domain::{BudgetData, CivilDate, CoreError, CustomReportId, CustomReportRow, Row};
 use veritas_reports::{
-	self as reports, BalanceType, Classification, CustomReport, DefaultFrame, GroupBy, Interval,
-	Json, Period, SortBy, Uncategorized, WidgetContent, WidgetType,
+	self as reports, BalanceType, CustomReport, GroupBy, Interval, Json, SortBy, Uncategorized,
 };
 
+use crate::FfiError;
 use crate::blocking::{CancelToken as CancelHandle, run};
 use crate::budget::civil_date;
-use crate::reports::{SankeyReport, net_worth_months, sankey_report};
 use crate::session::Session;
-use crate::{FfiError, Month};
 
 /// Actual's first day of the week until its `firstDayOfWeekIdx` preference
 /// is read: Sunday.
-const FIRST_DAY_OF_WEEK: u32 = 0;
+pub(crate) const FIRST_DAY_OF_WEEK: u32 = 0;
+
+/// One filter condition as Actual stores it. `value` and `options` are
+/// Actual's JSON as text: `"\"<id>\""` for an id or a string, `-5000` for an
+/// amount, `true`, `["a","b"]` for `oneOf`, `{"num1":1,"num2":2}` for
+/// `isbetween`; `options` is `{"inflow":true}`, `{"outflow":true}`,
+/// `{"month":true}` or `{"year":true}`, or `nil`.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ReportCondition {
+	pub field: String,
+	pub op: String,
+	pub value: String,
+	#[uniffi(default = None)]
+	pub options: Option<String>,
+}
+
+pub(crate) fn report_condition(stored: &Json) -> ReportCondition {
+	let text = |key: &str| {
+		stored
+			.get(key)
+			.and_then(Json::as_str)
+			.unwrap_or_default()
+			.to_owned()
+	};
+	ReportCondition {
+		field: text("field"),
+		op: text("op"),
+		value: stored.get("value").unwrap_or(&Json::Null).stringify(),
+		options: stored
+			.get("options")
+			.filter(|options| !matches!(options, Json::Null))
+			.map(Json::stringify),
+	}
+}
+
+fn json(text: &str, what: &str) -> Result<Json, CoreError> {
+	Json::parse(text).map_err(|reason| CoreError::Invalid(format!("a filter's {what}: {reason}")))
+}
+
+/// The conditions to store. One that matches a stored condition keeps that
+/// condition's JSON exactly; a new one is written the way Actual's filter
+/// editor writes it.
+pub(crate) fn stored_conditions(
+	conditions: &[ReportCondition],
+	stored: &[Json],
+) -> Result<Vec<Json>, CoreError> {
+	conditions
+		.iter()
+		.map(|condition| {
+			let value = json(&condition.value, "value")?;
+			let options = condition
+				.options
+				.as_deref()
+				.map(|options| json(options, "options"))
+				.transpose()?;
+			let same = |old: &&Json| {
+				let old = report_condition(old);
+				old.field == condition.field
+					&& old.op == condition.op
+					&& old.value == value.stringify()
+					&& old.options == options.as_ref().map(Json::stringify)
+			};
+			match stored.iter().find(same) {
+				Some(old) => Ok(old.clone()),
+				None => reports::condition(&condition.field, &condition.op, value, options),
+			}
+		})
+		.collect()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum ReportGrouping {
@@ -83,8 +149,9 @@ pub struct CustomReportSettings {
 	pub show_uncategorized: bool,
 	pub include_current: bool,
 	pub trim_intervals: bool,
-	/// Filter conditions stay read-only in Veritas.
-	pub condition_count: u32,
+	/// The report's filters, all of which must match unless `conditions_or`.
+	pub conditions: Vec<ReportCondition>,
+	pub conditions_or: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
@@ -165,81 +232,6 @@ pub struct CustomReportItem {
 	pub name: String,
 	/// Set when Veritas can't read the report's settings.
 	pub problem: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
-pub enum PlaceholderReason {
-	/// A widget type Actual added that Veritas doesn't know.
-	UnknownType,
-	/// A known type Veritas doesn't draw yet.
-	NotNative,
-	/// The card filters its transactions, which Veritas reports don't do yet.
-	Filtered,
-	/// The custom report it shows was deleted.
-	MissingReport,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
-#[expect(
-	clippy::large_enum_variant,
-	reason = "UniFFI can't box a record, and a dashboard holds only a few dozen widgets"
-)]
-pub enum WidgetView {
-	NetWorth {
-		points: Vec<crate::reports::NetWorthMonth>,
-	},
-	/// Net Profit over the card's range.
-	CashFlow {
-		first: Month,
-		last: Month,
-		income: i64,
-		expenses: i64,
-		net_profit: i64,
-	},
-	/// Expenses in `month` against `compare_month`.
-	Spending {
-		month: Month,
-		spent: i64,
-		compare_month: Month,
-		compare_spent: i64,
-	},
-	Sankey {
-		report: SankeyReport,
-	},
-	CustomReport {
-		report: CustomReportView,
-	},
-	Markdown {
-		text: String,
-		align: Option<String>,
-	},
-	/// Shown as "Open in Actual" and written back untouched.
-	OpenInActual {
-		reason: PlaceholderReason,
-	},
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
-pub struct DashboardWidget {
-	pub id: String,
-	/// Actual's widget type, such as `net-worth-card`.
-	pub kind: String,
-	pub name: Option<String>,
-	/// On Actual's 12-column grid.
-	pub x: i64,
-	pub y: i64,
-	pub width: i64,
-	pub height: i64,
-	pub min_width: i64,
-	pub min_height: i64,
-	pub view: WidgetView,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
-pub struct DashboardPage {
-	pub id: String,
-	pub name: String,
-	pub widgets: Vec<DashboardWidget>,
 }
 
 fn grouping(group_by: GroupBy) -> ReportGrouping {
@@ -344,11 +336,12 @@ pub(crate) fn settings(report: &CustomReport) -> CustomReportSettings {
 		show_uncategorized: report.show_uncategorized,
 		include_current: report.include_current,
 		trim_intervals: report.trim_intervals,
-		condition_count: u32::try_from(report.conditions.len()).unwrap_or(u32::MAX),
+		conditions: report.conditions.iter().map(report_condition).collect(),
+		conditions_or: report.conditions_or,
 	}
 }
 
-fn stored(budget: &BudgetData, id: &str) -> Result<CustomReport, CoreError> {
+pub(crate) fn stored(budget: &BudgetData, id: &str) -> Result<CustomReport, CoreError> {
 	let row = budget
 		.custom_reports
 		.get(&CustomReportId::new(id))
@@ -367,26 +360,10 @@ pub(crate) fn edited(
 	settings: &CustomReportSettings,
 ) -> Result<CustomReport, CoreError> {
 	let mut report = stored(budget, &settings.id)?;
-	let name = settings.name.trim();
-	if name.is_empty() {
-		return Err(CoreError::Invalid(
-			"Enter a name for the report.".to_owned(),
-		));
-	}
-	let taken = budget.custom_reports.values().any(|row| {
-		!row.tombstone
-			&& row.id != report.id
-			&& row
-				.name
-				.as_deref()
-				.is_some_and(|other| other.trim().eq_ignore_ascii_case(name))
-	});
-	if taken {
-		return Err(CoreError::Invalid(format!(
-			"There's already a report named {name}."
-		)));
-	}
-	report.name = name.to_owned();
+	report.name = report_name(budget, &settings.name, Some(&report.id))?;
+	report.conditions = stored_conditions(&settings.conditions, &report.conditions)?;
+	report.conditions_or = settings.conditions_or;
+	reports::check_conditions(&report.conditions, report.conditions_or)?;
 	report.start_date = settings.start_date.clone();
 	report.end_date = settings.end_date.clone();
 	report.date_static = settings.date_static;
@@ -408,6 +385,110 @@ pub(crate) fn edited(
 	Ok(report)
 }
 
+fn report_name(
+	budget: &BudgetData,
+	name: &str,
+	except: Option<&CustomReportId>,
+) -> Result<String, CoreError> {
+	let name = name.trim();
+	if name.is_empty() {
+		return Err(CoreError::Invalid(
+			"Enter a name for the report.".to_owned(),
+		));
+	}
+	let taken = budget.custom_reports.values().any(|row| {
+		!row.tombstone
+			&& Some(&row.id) != except
+			&& row
+				.name
+				.as_deref()
+				.is_some_and(|other| other.trim().eq_ignore_ascii_case(name))
+	});
+	if taken {
+		return Err(CoreError::Invalid(format!(
+			"There's already a report named {name}."
+		)));
+	}
+	Ok(name.to_owned())
+}
+
+/// A new report as `report/create` inserts it: every column `fromJS` writes,
+/// with Actual's defaults for what the settings don't carry (no trend lines,
+/// all tags, `BarGraph`). `settings.id` is ignored.
+pub(crate) fn create_custom_report(
+	budget: &BudgetData,
+	id: CustomReportId,
+	settings: &CustomReportSettings,
+) -> Result<Row, CoreError> {
+	let name = report_name(budget, &settings.name, None)?;
+	if settings.group_by == ReportGrouping::Tag
+		&& settings.balance_type == ReportBalanceKind::Budgeted
+	{
+		return Err(CoreError::Invalid(
+			"Budgeted reports cannot be split by tags.".to_owned(),
+		));
+	}
+	let conditions = stored_conditions(&settings.conditions, &[])?;
+	reports::check_conditions(&conditions, settings.conditions_or)?;
+	let blank = CustomReportRow {
+		id,
+		name: Some(name.clone()),
+		start_date: None,
+		end_date: None,
+		date_static: None,
+		date_range: None,
+		mode: None,
+		group_by: None,
+		balance_type: None,
+		show_empty: None,
+		show_offbudget: None,
+		show_hidden: None,
+		show_uncategorized: None,
+		selected_categories: None,
+		graph_type: None,
+		conditions: None,
+		conditions_op: None,
+		metadata: Some(r#"{"tagScope":{"mode":"all"}}"#.to_owned()),
+		interval: None,
+		color_scheme: None,
+		tombstone: false,
+		include_current: None,
+		sort_by: None,
+		trim_intervals: None,
+		show_trend_lines: Some(0),
+	};
+	let report = CustomReport {
+		id: blank.id.clone(),
+		name,
+		start_date: settings.start_date.clone(),
+		end_date: settings.end_date.clone(),
+		date_static: settings.date_static,
+		date_range: settings.date_range.clone(),
+		total_mode: settings.total_mode,
+		group_by: group_by(settings.group_by),
+		balance_type: balance_type(settings.balance_type),
+		sort_by: sort_by(settings.sort_by),
+		interval: interval(settings.interval),
+		show_empty: settings.show_empty,
+		show_off_budget: settings.show_off_budget,
+		show_hidden: settings.show_hidden,
+		show_uncategorized: settings.show_uncategorized,
+		include_current: settings.include_current,
+		trim_intervals: settings.trim_intervals,
+		conditions,
+		conditions_or: settings.conditions_or,
+		row: blank,
+	};
+	let mut row = report.to_new_row();
+	row.graph_type = Some(
+		settings
+			.graph_type
+			.clone()
+			.unwrap_or_else(|| "BarGraph".to_owned()),
+	);
+	Ok(Row::CustomReport(row))
+}
+
 pub(crate) fn save_custom_report(
 	budget: &BudgetData,
 	settings: &CustomReportSettings,
@@ -416,24 +497,6 @@ pub(crate) fn save_custom_report(
 	let mut row = report.to_row();
 	row.graph_type = report.row.graph_type.clone();
 	Ok(vec![Row::CustomReport(row)])
-}
-
-pub(crate) fn place_widget(
-	budget: &BudgetData,
-	widget_id: &str,
-	(x, y, width, height): (i64, i64, i64, i64),
-) -> Result<Vec<Row>, CoreError> {
-	let widget = budget
-		.widgets
-		.get(&WidgetId::new(widget_id))
-		.filter(|widget| !widget.tombstone)
-		.ok_or_else(|| CoreError::NotFound {
-			entity: "widget",
-			id: widget_id.to_owned(),
-		})?;
-	Ok(vec![Row::Widget(reports::place_widget(
-		widget, x, y, width, height,
-	)?)])
 }
 
 fn balances(from: &reports::Balances) -> CustomReportBalances {
@@ -548,167 +611,6 @@ fn custom_reports(budget: &BudgetData) -> Vec<CustomReportItem> {
 	items
 }
 
-fn has_conditions(meta: Option<&Json>) -> bool {
-	meta.and_then(|meta| meta.get("conditions"))
-		.and_then(Json::as_array)
-		.is_some_and(|conditions| !conditions.is_empty())
-}
-
-fn expenses(
-	budget: &BudgetData,
-	classification: &Classification,
-	month: YearMonth,
-) -> Result<i64, CoreError> {
-	Ok(
-		reports::net_profit(budget, classification, Period::month(month))?
-			.expenses
-			.total
-			.minor(),
-	)
-}
-
-fn card(
-	budget: &BudgetData,
-	classification: &Classification,
-	kind: WidgetType,
-	meta: Option<&Json>,
-	today: CivilDate,
-) -> Result<WidgetView, CoreError> {
-	let placeholder = |reason| Ok(WidgetView::OpenInActual { reason });
-	if has_conditions(meta) {
-		return placeholder(PlaceholderReason::Filtered);
-	}
-	let latest = classification.rows().last().map(|row| row.date);
-	let months = |default| reports::widget_months(meta, default, today, latest);
-	match kind {
-		WidgetType::NetWorth => {
-			let (first, last) = months(DefaultFrame::SixMonths)?;
-			Ok(WidgetView::NetWorth {
-				points: net_worth_months(budget, classification, first, last)?,
-			})
-		}
-		WidgetType::CashFlow => {
-			let (first, last) = months(DefaultFrame::ThisMonth)?;
-			let period = Period::new(first.first_day(), Period::month(last).last())?;
-			let report = reports::net_profit(budget, classification, period)?;
-			Ok(WidgetView::CashFlow {
-				first: first.into(),
-				last: last.into(),
-				income: report.income.total.minor(),
-				expenses: report.expenses.total.minor(),
-				net_profit: report.net_profit.total.minor(),
-			})
-		}
-		WidgetType::Spending => match reports::spending_months(meta, today)? {
-			Some((month, compare)) => Ok(WidgetView::Spending {
-				month: month.into(),
-				spent: expenses(budget, classification, month)?,
-				compare_month: compare.into(),
-				compare_spent: expenses(budget, classification, compare)?,
-			}),
-			None => placeholder(PlaceholderReason::NotNative),
-		},
-		WidgetType::Sankey => {
-			let budgeted = meta
-				.and_then(|meta| meta.get("mode"))
-				.and_then(Json::as_str)
-				.is_some_and(|mode| mode != "spent");
-			if budgeted {
-				return placeholder(PlaceholderReason::NotNative);
-			}
-			let (first, last) = months(DefaultFrame::SixMonths)?;
-			let period = Period::new(first.first_day(), Period::month(last).last())?;
-			let sankey = reports::sankey(budget, classification, period)?;
-			Ok(WidgetView::Sankey {
-				report: sankey_report(budget, &sankey),
-			})
-		}
-		_ => placeholder(PlaceholderReason::NotNative),
-	}
-}
-
-pub(crate) fn dashboards(
-	budget: &BudgetData,
-	classification: &Classification,
-	today: CivilDate,
-) -> Result<Vec<DashboardPage>, CoreError> {
-	let mut pages = Vec::new();
-	for page in reports::dashboards(budget)? {
-		let mut widgets = Vec::new();
-		for widget in &page.widgets {
-			let stored = budget.widgets.get(&widget.id);
-			let kind = stored
-				.and_then(|stored| stored.kind.clone())
-				.unwrap_or_default();
-			let (min_width, min_height) =
-				WidgetType::parse(&kind).map_or((1, 1), WidgetType::minimum_size);
-			let (name, view) = match &widget.content {
-				WidgetContent::Placeholder { .. } => (
-					None,
-					WidgetView::OpenInActual {
-						reason: if WidgetType::parse(&kind).is_some() {
-							PlaceholderReason::MissingReport
-						} else {
-							PlaceholderReason::UnknownType
-						},
-					},
-				),
-				WidgetContent::Markdown { content, align } => (
-					None,
-					WidgetView::Markdown {
-						text: content.clone(),
-						align: align.clone(),
-					},
-				),
-				WidgetContent::CustomReport(id) => match stored_report(budget, id) {
-					Some(report) => (
-						Some(report.name.clone()),
-						WidgetView::CustomReport {
-							report: view(budget, &report, today)?,
-						},
-					),
-					None => (
-						None,
-						WidgetView::OpenInActual {
-							reason: PlaceholderReason::MissingReport,
-						},
-					),
-				},
-				WidgetContent::Card { kind, name, meta } => (
-					name.clone(),
-					card(budget, classification, *kind, meta.as_ref(), today)?,
-				),
-			};
-			widgets.push(DashboardWidget {
-				id: widget.id.to_string(),
-				kind,
-				name,
-				x: widget.x,
-				y: widget.y,
-				width: widget.width,
-				height: widget.height,
-				min_width,
-				min_height,
-				view,
-			});
-		}
-		pages.push(DashboardPage {
-			id: page.id.to_string(),
-			name: page.name,
-			widgets,
-		});
-	}
-	Ok(pages)
-}
-
-fn stored_report(budget: &BudgetData, id: &CustomReportId) -> Option<CustomReport> {
-	budget
-		.custom_reports
-		.get(id)
-		.filter(|row| !row.tombstone)
-		.and_then(|row| CustomReport::from_row(row).ok())
-}
-
 #[uniffi::export]
 impl Session {
 	/// Every saved custom report, by name.
@@ -749,21 +651,6 @@ impl Session {
 		})
 		.await
 	}
-
-	/// Every dashboard page with each widget's numbers as of `today`.
-	pub async fn dashboards(
-		&self,
-		today: String,
-		cancel: Arc<CancelHandle>,
-	) -> Result<Vec<DashboardPage>, FfiError> {
-		let core = self.core.clone();
-		run(&cancel, move |cancel| {
-			core.report(cancel, |budget, classification| {
-				dashboards(budget, classification, civil_date(&today)?)
-			})
-		})
-		.await
-	}
 }
 
 #[cfg(test)]
@@ -774,7 +661,6 @@ mod tests {
 	use crate::test_support::{imported, reopened};
 
 	const SPENDING: &str = "c7eaad37-4a0f-4f44-8c5e-ca30ff232dd2";
-	const NET_WORTH_CARD: &str = "a8828813-ceda-452a-8de4-4a24a78c531e";
 
 	fn today() -> CivilDate {
 		CivilDate::new(2026, 11, 13).unwrap()
@@ -782,22 +668,6 @@ mod tests {
 
 	fn data(core: &Core<veritas_store::Store>) -> BudgetData {
 		core.call(|session| session.data().cloned()).unwrap()
-	}
-
-	fn pages(core: &Core<veritas_store::Store>) -> Vec<DashboardPage> {
-		core.report(
-			&veritas_session::CancelToken::default(),
-			|budget, classification| dashboards(budget, classification, today()),
-		)
-		.unwrap()
-	}
-
-	fn widget<'a>(pages: &'a [DashboardPage], id: &str) -> &'a DashboardWidget {
-		pages
-			.iter()
-			.flat_map(|page| &page.widgets)
-			.find(|widget| widget.id == id)
-			.unwrap()
 	}
 
 	#[test]
@@ -864,94 +734,5 @@ mod tests {
 			core.perform(Command::SaveCustomReport { settings: edit }),
 			Err(FfiError::Invalid { .. })
 		));
-	}
-
-	#[test]
-	fn dashboards_draw_known_cards_and_keep_the_rest_as_placeholders() {
-		let (_scratch, core) = imported("all-features");
-		let pages = pages(&core);
-		let names: Vec<&str> = pages.iter().map(|page| page.name.as_str()).collect();
-		assert_eq!(names, ["Main", "Deep dive"]);
-
-		let WidgetView::NetWorth { points } = &widget(&pages, NET_WORTH_CARD).view else {
-			panic!("the net worth card should draw natively");
-		};
-		assert_eq!(points.len(), 6);
-		assert_eq!(
-			points.last().unwrap().month,
-			YearMonth::new(2026, 11).unwrap().into()
-		);
-
-		let view = |id: &str| widget(&pages, id).view.clone();
-		assert!(matches!(
-			view("07fb54b8-dd18-40de-8bca-381826688a49"),
-			WidgetView::Spending { .. }
-		));
-		assert_eq!(
-			view("e24fe8dc-a2ab-4c62-8e34-43eef7285413"),
-			WidgetView::OpenInActual {
-				reason: PlaceholderReason::NotNative
-			}
-		);
-		assert_eq!(
-			view("b595baa8-f97d-4f1a-ac8f-d7c2a1d7a0b3"),
-			WidgetView::OpenInActual {
-				reason: PlaceholderReason::UnknownType
-			}
-		);
-		assert_eq!(
-			view("5658fbe9-b6d0-428e-a4ff-77b3eb54803b"),
-			WidgetView::OpenInActual {
-				reason: PlaceholderReason::Filtered
-			}
-		);
-		assert!(matches!(
-			view("8bb52bc7-1c5b-4af7-8236-aa36926a85da"),
-			WidgetView::Sankey { .. }
-		));
-		assert!(matches!(
-			view("a7456f7b-ad43-448c-a280-7cea8714f699"),
-			WidgetView::Markdown { text, .. } if text.contains("**in full**")
-		));
-		let report = widget(&pages, "8de603a2-58a0-411b-8e1c-cca26d049f0c");
-		assert_eq!(report.name.as_deref(), Some("Spending by category"));
-		assert!(
-			matches!(&report.view, WidgetView::CustomReport { report } if report.data.is_some())
-		);
-		assert_eq!(widget(&pages, NET_WORTH_CARD).min_width, 3);
-	}
-
-	#[test]
-	fn placing_a_widget_moves_only_its_frame_and_undoes() {
-		let (scratch, core) = imported("all-features");
-		let before = data(&core).widgets[&WidgetId::new(NET_WORTH_CARD)].clone();
-		core.perform(Command::PlaceWidget {
-			widget_id: NET_WORTH_CARD.to_owned(),
-			x: 6,
-			y: 12,
-			width: 1,
-			height: 2,
-		})
-		.unwrap();
-		drop(core);
-
-		let core = reopened(&scratch);
-		let moved = widget(&pages(&core), NET_WORTH_CARD).clone();
-		assert_eq!((moved.x, moved.y, moved.width, moved.height), (6, 12, 3, 2));
-		let stored = data(&core).widgets[&WidgetId::new(NET_WORTH_CARD)].clone();
-		assert_eq!(stored.meta, before.meta);
-		assert_eq!(stored.kind, before.kind);
-
-		core.perform(Command::PlaceWidget {
-			widget_id: NET_WORTH_CARD.to_owned(),
-			x: 0,
-			y: 2,
-			width: 6,
-			height: 2,
-		})
-		.unwrap();
-		core.undo().unwrap();
-		let undone = widget(&pages(&core), NET_WORTH_CARD).clone();
-		assert_eq!((undone.x, undone.y, undone.width), (6, 12, 3));
 	}
 }

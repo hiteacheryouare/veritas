@@ -58,6 +58,7 @@ fn budget() -> BudgetData {
 	budget.accounts.insert(
 		account.clone(),
 		Account {
+			last_reconciled: None,
 			id: account.clone(),
 			name: "Checking".to_owned(),
 			off_budget: false,
@@ -100,6 +101,7 @@ fn budget() -> BudgetData {
 				starting_balance: false,
 				sort_order: t as f64,
 				tombstone: false,
+				split_error: None,
 			},
 		);
 	}

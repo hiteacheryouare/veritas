@@ -360,3 +360,8 @@ Every decision behind Veritas, so no question gets asked twice. D1–D24 are PLA
 - **Options:** a new goal row / the same goal goes back to active / refuse
 - **Decision:** Re-targeting sets the new target (and date) on the same goal and puts it back to `active`. Its first `reached_month` is kept as history, so Wrapped counts the goal once, in the year it was first reached. This amends R-GOAL-3: a re-target is the one way a reached goal returns to active. The store keeps one `veritas_goal` row per category, which is why a second row was not an option.
 - **Date:** 2026-11-13
+
+### D73. Every Actual dashboard widget is native
+- **Options:** draw common widgets and send the rest to Actual / draw every widget natively
+- **Decision:** Veritas draws every Actual 26.11 dashboard widget type natively, and filtered custom reports too. No widget says "Open in Actual". The widget types are summary, calendar, formula, crossover, budget analysis, balance forecast, age of money and Monte Carlo, plus the ones already drawn (net worth, cash flow, spending, custom report, markdown, Sankey). Numbers match Actual's own computation for the same widget config. Layout follows Actual's 12-column grid and sizes, so a user's dashboards carry over 1:1. Cards use Veritas's own type and colors.
+- **Date:** 2026-11-13

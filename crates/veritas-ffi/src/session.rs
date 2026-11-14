@@ -6,6 +6,10 @@ use veritas_session::{
 	Backend, CancelToken, ChangeSet, Session as CoreSession, SessionOptions, SharedSession,
 };
 
+use crate::accounts::{
+	AccountList, PayeeDetail, PayeeMemory, Reconciliation, RegisterFilter, RegisterPage,
+	RegisterRow, RegisterScope, RegisterSort,
+};
 use crate::blocking::{CancelToken as CancelHandle, run};
 use crate::budget::BudgetMonth;
 use crate::commands::Command;
@@ -184,6 +188,43 @@ impl<B: Backend> Core<B> {
 				tax_bucket: history.tax_bucket,
 			})
 		})
+	}
+
+	pub(crate) fn accounts(&self) -> Result<AccountList, FfiError> {
+		self.call(|session| crate::accounts::account_list(session.data()?))
+	}
+
+	pub(crate) fn register(
+		&self,
+		scope: &RegisterScope,
+		filter: &RegisterFilter,
+		sort: RegisterSort,
+		offset: u64,
+		limit: u64,
+	) -> Result<RegisterPage, FfiError> {
+		self.call(|session| {
+			crate::accounts::register_page(session, scope, filter, sort, offset, limit)
+		})
+	}
+
+	pub(crate) fn register_row(&self, id: &str) -> Result<RegisterRow, FfiError> {
+		self.call(|session| crate::accounts::register_row(session.data()?, id))
+	}
+
+	pub(crate) fn payees(&self) -> Result<Vec<PayeeDetail>, FfiError> {
+		self.call(|session| Ok(crate::accounts::payee_list(session.data()?)))
+	}
+
+	pub(crate) fn payee_memory(&self, payee: &str) -> Result<Option<PayeeMemory>, FfiError> {
+		self.call(|session| Ok(crate::accounts::payee_memory(session.data()?, payee)))
+	}
+
+	pub(crate) fn reconciliation(
+		&self,
+		account: &str,
+		statement: i64,
+	) -> Result<Reconciliation, FfiError> {
+		self.call(|session| crate::accounts::reconciliation(session.data()?, account, statement))
 	}
 
 	pub(crate) fn goals(&self, today: &str) -> Result<Vec<GoalSummary>, FfiError> {
@@ -404,6 +445,51 @@ impl Session {
 	/// move first.
 	pub fn category_history(&self, category_id: String) -> Result<CategoryHistory, FfiError> {
 		self.core.category_history(&category_id)
+	}
+
+	/// Every live account with its balances, note and last reconcile, and the
+	/// account groups (R-ACC-1).
+	pub fn accounts(&self) -> Result<AccountList, FfiError> {
+		self.core.accounts()
+	}
+
+	/// One page of the register (R-ACC-2). `offset` rows in, at most `limit`.
+	/// The running balance is set for one account in Actual's order with no
+	/// filter.
+	pub fn register(
+		&self,
+		scope: RegisterScope,
+		filter: RegisterFilter,
+		sort: RegisterSort,
+		offset: u64,
+		limit: u64,
+	) -> Result<RegisterPage, FfiError> {
+		self.core.register(&scope, &filter, sort, offset, limit)
+	}
+
+	/// One row as the register shows it, to refresh it after a `Change`.
+	pub fn register_row(&self, transaction_id: String) -> Result<RegisterRow, FfiError> {
+		self.core.register_row(&transaction_id)
+	}
+
+	/// Every live payee by name, transfer payees under their account's name.
+	pub fn payees(&self) -> Result<Vec<PayeeDetail>, FfiError> {
+		self.core.payees()
+	}
+
+	/// D38: the category and amount of the payee's most recent row, for quick
+	/// entry. `nil` for a payee with no rows.
+	pub fn payee_memory(&self, payee_id: String) -> Result<Option<PayeeMemory>, FfiError> {
+		self.core.payee_memory(&payee_id)
+	}
+
+	/// The reconcile sheet's numbers for a statement balance (R-ACC-3).
+	pub fn reconciliation(
+		&self,
+		account_id: String,
+		statement_balance: i64,
+	) -> Result<Reconciliation, FfiError> {
+		self.core.reconciliation(&account_id, statement_balance)
 	}
 
 	/// Every goal, in budget order, as of `today` (`YYYY-MM-DD`).
@@ -1797,6 +1883,7 @@ mod tests {
 			starting_balance: false,
 			sort_order: 1.0,
 			tombstone: false,
+			split_error: None,
 		};
 		core.call(|session| {
 			session.perform(&Rows(vec![veritas_domain::Row::Transaction(bought)]))?;
@@ -2108,6 +2195,7 @@ mod tests {
 				starting_balance: false,
 				sort_order: 1.0,
 				tombstone: false,
+				split_error: None,
 			};
 			core.call(|session| {
 				session.perform(&Rows(vec![veritas_domain::Row::Transaction(spending)]))?;
@@ -2122,7 +2210,7 @@ mod tests {
 	#[test]
 	fn the_goal_card_paces_by_fc6_like_the_forecast() {
 		// FC-6 E-1 to E-6, moved to November 2026 as the current month.
-		use crate::GoalPace::{Behind, OnTrack};
+		use crate::GoalPace::{Behind, NoHistory, NotAdding, OnTrack};
 		// E-1: available 112000, contributions 25000, 25000, 20000: remaining
 		// 38000, pace 25000, 2 months: January 2027.
 		let e1 = paced_goal(
@@ -2169,11 +2257,20 @@ mod tests {
 				eta_month: month(2027, 1)
 			})
 		);
-		// E-3: nothing added: no ETA, so behind.
+		// E-3, E-14: contributions 0, 0, 0: "No ETA: nothing is being added".
 		let e3 = paced_goal(150_000, Some("2027-04-30"), &[0, 0, 0], 0, 0);
 		assert_eq!(
 			e3.pace,
-			Some(Behind {
+			Some(NotAdding {
+				needed_monthly: 25_000
+			})
+		);
+		// E-13: a brand-new goal, no complete month of history, needs 25000 a
+		// month: "No ETA yet".
+		let new = paced_goal(150_000, Some("2027-04-30"), &[], 25_000, 0);
+		assert_eq!(
+			new.pace,
+			Some(NoHistory {
 				needed_monthly: 25_000
 			})
 		);
@@ -2203,5 +2300,1110 @@ mod tests {
 		// No target date: no pace.
 		let undated = paced_goal(150_000, None, &[25_000], 25_000, 0);
 		assert_eq!(undated.pace, None);
+	}
+
+	fn entity(change: &Change, kind: crate::EntityKind) -> String {
+		change
+			.entities
+			.iter()
+			.find(|e| e.kind == kind && e.id.is_some())
+			.and_then(|e| e.id.clone())
+			.unwrap()
+	}
+
+	fn new_account(
+		core: &Core<veritas_store::Store>,
+		name: &str,
+		kind: crate::NewAccountKind,
+		starting_balance: i64,
+	) -> String {
+		let (_, today) = this_month();
+		core.goals(&today).unwrap();
+		let change = core
+			.perform(Command::CreateAccount {
+				account: crate::NewAccount {
+					name: name.to_owned(),
+					kind,
+					starting_balance,
+				},
+			})
+			.unwrap();
+		entity(&change, crate::EntityKind::Account)
+	}
+
+	fn account_of(core: &Core<veritas_store::Store>, id: &str) -> crate::AccountDetail {
+		core.accounts()
+			.unwrap()
+			.accounts
+			.into_iter()
+			.find(|a| a.id == id)
+			.unwrap()
+	}
+
+	fn transfer_payee_of(core: &Core<veritas_store::Store>, account: &str) -> String {
+		core.payees()
+			.unwrap()
+			.into_iter()
+			.find(|p| p.transfer_account_id.as_deref() == Some(account))
+			.unwrap()
+			.id
+	}
+
+	fn typed(account: &str, amount: i64) -> crate::TransactionDraft {
+		static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+		let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+		crate::TransactionDraft {
+			id: Some(format!("typed-{n}")),
+			account_id: account.to_owned(),
+			date: "2026-11-12".to_owned(),
+			amount,
+			payee_id: None,
+			payee_name: None,
+			category_id: None,
+			notes: None,
+			cleared: false,
+			splits: Vec::new(),
+		}
+	}
+
+	fn add(core: &Core<veritas_store::Store>, draft: crate::TransactionDraft) -> String {
+		let id = draft.id.clone().unwrap();
+		core.perform(Command::AddTransaction { transaction: draft })
+			.unwrap();
+		id
+	}
+
+	fn row(core: &Core<veritas_store::Store>, id: &str) -> veritas_domain::Transaction {
+		data(core).transactions[&veritas_domain::TransactionId::new(id)].clone()
+	}
+
+	fn an_expense(core: &Core<veritas_store::Store>) -> String {
+		let (_, members) = busy_group(&data(core));
+		members[0].clone()
+	}
+
+	#[test]
+	fn accounts_are_created_grouped_noted_moved_closed_and_reopened() {
+		// R-ACC-1, docs/actual-format.md §4.6, §4.8, §4.9.
+		use crate::NewAccountKind::{Checking, CreditCard};
+		let (_scratch, core) = imported("accounts");
+		let checking = new_account(&core, "Everyday", Checking, 100_000);
+		let card = new_account(&core, "Travel card", CreditCard, 50_000);
+		assert!(matches!(
+			core.perform(Command::CreateAccount {
+				account: crate::NewAccount {
+					name: " Everyday ".to_owned(),
+					kind: Checking,
+					starting_balance: 0,
+				},
+			}),
+			Err(FfiError::Invalid { .. })
+		));
+		let opened = account_of(&core, &card);
+		assert_eq!(
+			(opened.total, opened.cleared, opened.uncleared),
+			(-50_000, -50_000, 0)
+		);
+		assert!(!opened.off_budget);
+
+		let group = entity(
+			&core
+				.perform(Command::CreateAccountGroup {
+					name: "Cards".to_owned(),
+				})
+				.unwrap(),
+			crate::EntityKind::AccountGroup,
+		);
+		core.perform(Command::SetAccountGroup {
+			account_id: card.clone(),
+			group_id: Some(group.clone()),
+		})
+		.unwrap();
+		core.perform(Command::SetAccountNote {
+			account_id: card.clone(),
+			text: "Paid off monthly".to_owned(),
+		})
+		.unwrap();
+		let first = core.accounts().unwrap().accounts[0].id.clone();
+		core.perform(Command::MoveAccount {
+			account_id: card.clone(),
+			before_account_id: Some(first),
+		})
+		.unwrap();
+		let list = core.accounts().unwrap();
+		assert_eq!(list.accounts[0].id, card);
+		assert_eq!(list.accounts[0].group_id.as_deref(), Some(group.as_str()));
+		assert_eq!(list.accounts[0].note.as_deref(), Some("Paid off monthly"));
+		assert_eq!(
+			list.groups
+				.iter()
+				.map(|g| g.name.as_str())
+				.collect::<Vec<_>>(),
+			["Cards"]
+		);
+
+		assert!(matches!(
+			core.perform(Command::CloseAccount {
+				account_id: card.clone(),
+				transfer_to_account_id: None,
+				category_id: None,
+			}),
+			Err(FfiError::Invalid { .. })
+		));
+		core.perform(Command::CloseAccount {
+			account_id: card.clone(),
+			transfer_to_account_id: Some(checking.clone()),
+			category_id: None,
+		})
+		.unwrap();
+		let closed = account_of(&core, &card);
+		assert!(closed.closed);
+		assert_eq!(closed.total, 0);
+		assert_eq!(account_of(&core, &checking).total, 50_000);
+		let closing = data(&core)
+			.transactions
+			.values()
+			.find(|t| t.notes.as_deref() == Some("Closing account") && t.account.as_str() == card)
+			.unwrap()
+			.clone();
+		assert_eq!(closing.amount.minor(), 50_000);
+		assert_eq!(
+			closing.category, None,
+			"on budget to on budget: no category"
+		);
+		let other = row(&core, closing.transfer.as_ref().unwrap().as_str());
+		assert_eq!(
+			(
+				other.account.as_str(),
+				other.amount.minor(),
+				other.transfer.as_ref()
+			),
+			(checking.as_str(), -50_000, Some(&closing.id))
+		);
+
+		core.perform(Command::ReopenAccount {
+			account_id: card.clone(),
+		})
+		.unwrap();
+		assert!(!account_of(&core, &card).closed);
+
+		let empty = new_account(&core, "Never used", Checking, 0);
+		core.perform(Command::CloseAccount {
+			account_id: empty.clone(),
+			transfer_to_account_id: None,
+			category_id: None,
+		})
+		.unwrap();
+		assert!(
+			data(&core).accounts[&veritas_domain::AccountId::new(empty.as_str())].tombstone,
+			"an account with no rows is deleted, not closed"
+		);
+		core.undo().unwrap();
+		assert!(!data(&core).accounts[&veritas_domain::AccountId::new(empty.as_str())].tombstone);
+	}
+
+	#[test]
+	fn a_typed_transfer_gets_its_counterpart_and_edits_drive_it() {
+		// R-ACC-2, R-XFER via WS-RULES' transfers(), §4.2.
+		use crate::NewAccountKind::{Checking, Savings};
+		let (_scratch, core) = imported("transfers");
+		let checking = new_account(&core, "Everyday", Checking, 100_000);
+		let savings = new_account(&core, "Rainy day", Savings, 0);
+		let mut draft = typed(&checking, -10_000);
+		draft.payee_id = Some(transfer_payee_of(&core, &savings));
+		draft.notes = Some("to savings".to_owned());
+		draft.category_id = Some(an_expense(&core));
+		let id = add(&core, draft.clone());
+		let source = row(&core, &id);
+		assert_eq!(
+			source.category, None,
+			"on budget to on budget clears the category"
+		);
+		let other = row(&core, source.transfer.as_ref().unwrap().as_str());
+		assert_eq!(other.account.as_str(), savings);
+		assert_eq!(other.amount.minor(), 10_000);
+		assert!(!other.cleared);
+		assert_eq!(other.notes.as_deref(), Some("to savings"));
+		assert_eq!(
+			other.payee.as_ref().map(|p| p.to_string()),
+			Some(transfer_payee_of(&core, &checking))
+		);
+		assert_eq!(
+			other.transfer.as_ref().map(|t| t.as_str()),
+			Some(id.as_str())
+		);
+		let shown = core.register_row(&id).unwrap();
+		assert_eq!(shown.transfer_account_id.as_deref(), Some(savings.as_str()));
+		assert_eq!(shown.payee_name.as_deref(), Some("Rainy day"));
+
+		draft.amount = -12_000;
+		draft.notes = Some("more".to_owned());
+		core.perform(Command::EditTransaction {
+			transaction_id: id.clone(),
+			transaction: draft.clone(),
+		})
+		.unwrap();
+		let other = row(&core, &other.id.to_string());
+		assert_eq!(
+			(other.amount.minor(), other.notes.as_deref()),
+			(12_000, Some("more"))
+		);
+
+		draft.payee_id = None;
+		draft.payee_name = Some("Corner Grocer".to_owned());
+		core.perform(Command::EditTransaction {
+			transaction_id: id.clone(),
+			transaction: draft,
+		})
+		.unwrap();
+		assert!(
+			row(&core, &other.id.to_string()).tombstone,
+			"no longer a transfer"
+		);
+		assert_eq!(row(&core, &id).transfer, None);
+		core.undo().unwrap();
+		assert!(!row(&core, &other.id.to_string()).tombstone);
+
+		core.perform(Command::DeleteTransaction {
+			transaction_id: id.clone(),
+		})
+		.unwrap();
+		assert!(row(&core, &id).tombstone && row(&core, &other.id.to_string()).tombstone);
+		assert_eq!(account_of(&core, &savings).total, 0);
+	}
+
+	#[test]
+	fn splits_keep_their_lines_and_refuse_to_unbalance() {
+		// R-ACC-2, §4.3, edge case 6.
+		let (_scratch, core) = imported("splits");
+		let checking = new_account(&core, "Everyday", crate::NewAccountKind::Checking, 100_000);
+		let (_, members) = busy_group(&data(&core));
+		let line = |amount, category: &str, id: Option<String>| crate::SplitLineDraft {
+			id,
+			amount,
+			payee_id: None,
+			payee_name: None,
+			category_id: Some(category.to_owned()),
+			notes: None,
+		};
+		let mut draft = typed(&checking, -9_000);
+		draft.payee_name = Some("Warehouse".to_owned());
+		draft.splits = vec![
+			line(-6_000, &members[0], None),
+			line(-3_000, &members[1], None),
+		];
+		let id = add(&core, draft.clone());
+		let shown = core.register_row(&id).unwrap();
+		assert_eq!(shown.category_id, None);
+		assert_eq!(shown.lines.len(), 2);
+		assert_eq!(shown.split_difference, None);
+		assert!(shown.payee_id.is_some());
+		assert!(
+			shown
+				.lines
+				.iter()
+				.all(|line| line.payee_id == shown.payee_id),
+			"makeChild: lines without a payee take the parent's"
+		);
+		let first = shown.lines[0].id.clone();
+
+		draft.splits = vec![
+			line(-5_000, &members[0], Some(first.clone())),
+			line(-3_000, &members[1], Some(shown.lines[1].id.clone())),
+			line(-2_000, &members[1], None),
+		];
+		assert!(matches!(
+			core.perform(Command::EditTransaction {
+				transaction_id: id.clone(),
+				transaction: draft.clone(),
+			}),
+			Err(FfiError::Invalid { .. })
+		));
+		draft.amount = -10_000;
+		core.perform(Command::EditTransaction {
+			transaction_id: id.clone(),
+			transaction: draft.clone(),
+		})
+		.unwrap();
+		let edited = core.register_row(&id).unwrap();
+		assert_eq!(edited.lines.len(), 3);
+		assert_eq!(edited.lines[0].id, first, "a kept line keeps its row");
+		assert_eq!(edited.lines[0].amount, -5_000);
+
+		draft.splits.clear();
+		draft.category_id = Some(members[0].clone());
+		core.perform(Command::EditTransaction {
+			transaction_id: id.clone(),
+			transaction: draft,
+		})
+		.unwrap();
+		let plain = core.register_row(&id).unwrap();
+		assert!(plain.lines.is_empty());
+		assert_eq!(plain.category_id.as_deref(), Some(members[0].as_str()));
+		assert!(row(&core, &first).tombstone);
+
+		let copy = "the-copy".to_owned();
+		core.perform(Command::DuplicateTransaction {
+			transaction_id: id.clone(),
+			new_id: Some(copy.clone()),
+		})
+		.unwrap();
+		let copied = row(&core, &copy);
+		assert_eq!(
+			(copied.amount.minor(), copied.cleared, copied.reconciled),
+			(-10_000, false, false)
+		);
+		assert_ne!(copy, id);
+	}
+
+	#[test]
+	fn quick_entry_remembers_a_payee_and_learns_its_category() {
+		// R-ACC-4, D38, §4.5 learn_categories.
+		let (_scratch, core) = imported("quick-entry");
+		let checking = new_account(&core, "Everyday", crate::NewAccountKind::Checking, 100_000);
+		let category = an_expense(&core);
+		let rules_before = data(&core).rules.values().filter(|r| !r.tombstone).count();
+		for amount in [-450, -500, -475] {
+			let mut draft = typed(&checking, amount);
+			draft.payee_name = Some("Corner Cafe".to_owned());
+			draft.category_id = Some(category.clone());
+			add(&core, draft);
+		}
+		let payee = core
+			.payees()
+			.unwrap()
+			.into_iter()
+			.find(|p| p.name == "Corner Cafe")
+			.unwrap();
+		assert_eq!(
+			payee.transactions, 3,
+			"the name was reused, not made three times"
+		);
+		let memory = core.payee_memory(&payee.id).unwrap().unwrap();
+		assert_eq!(memory.category_id.as_deref(), Some(category.as_str()));
+		assert!([-450, -500, -475].contains(&memory.amount));
+
+		let after = data(&core);
+		let learned: Vec<_> = after
+			.rules
+			.values()
+			.filter(|r| !r.tombstone && r.conditions_json.contains(payee.id.as_str()))
+			.collect();
+		assert_eq!(
+			after.rules.values().filter(|r| !r.tombstone).count(),
+			rules_before + 1
+		);
+		assert_eq!(learned.len(), 1);
+		assert!(learned[0].actions_json.contains(category.as_str()));
+
+		let mut typed_in = typed(&checking, -520);
+		typed_in.payee_id = Some(payee.id.clone());
+		let id = add(&core, typed_in);
+		assert_eq!(
+			row(&core, &id).category.map(|c| c.to_string()),
+			Some(category),
+			"the learned rule fills the empty category"
+		);
+	}
+
+	#[test]
+	fn reconciling_checks_off_adjusts_and_locks() {
+		// R-ACC-3, §4.7, CLS-5.
+		let (_scratch, core) = imported("reconcile");
+		let checking = new_account(&core, "Everyday", crate::NewAccountKind::Checking, 100_000);
+		let lunch = add(&core, typed(&checking, -1_500));
+		let coffee = add(&core, typed(&checking, -400));
+		core.perform(Command::SetCleared {
+			transaction_ids: vec![lunch.clone()],
+			cleared: true,
+		})
+		.unwrap();
+		let state = core.reconciliation(&checking, 98_000).unwrap();
+		assert_eq!((state.cleared, state.difference), (98_500, -500));
+
+		core.perform(Command::FinishReconcile {
+			account_id: checking.clone(),
+			statement_balance: 98_000,
+		})
+		.unwrap();
+		assert!(
+			!row(&core, &lunch).reconciled,
+			"a difference leaves rows unlocked"
+		);
+		assert!(account_of(&core, &checking).last_reconciled.is_some());
+
+		core.perform(Command::AddReconcileAdjustment {
+			account_id: checking.clone(),
+			statement_balance: 98_000,
+		})
+		.unwrap();
+		let after = data(&core);
+		let adjustment = after
+			.transactions
+			.values()
+			.find(|t| t.notes.as_deref() == Some("Reconciliation balance adjustment"))
+			.unwrap();
+		assert_eq!(
+			(
+				adjustment.amount.minor(),
+				adjustment.cleared,
+				adjustment.payee.as_ref()
+			),
+			(-500, true, None)
+		);
+		assert!(after.transaction_meta[&adjustment.id].adjustment);
+		assert_eq!(
+			core.reconciliation(&checking, 98_000).unwrap().difference,
+			0
+		);
+
+		core.perform(Command::FinishReconcile {
+			account_id: checking.clone(),
+			statement_balance: 98_000,
+		})
+		.unwrap();
+		assert!(row(&core, &lunch).reconciled);
+		assert!(!row(&core, &coffee).reconciled, "uncleared rows stay open");
+		core.perform(Command::SetCleared {
+			transaction_ids: vec![lunch.clone()],
+			cleared: false,
+		})
+		.unwrap();
+		assert!(
+			row(&core, &lunch).cleared,
+			"batch clearing skips reconciled rows"
+		);
+		let mut noted = typed(&checking, -1_500);
+		noted.notes = Some("with Sam".to_owned());
+		noted.cleared = true;
+		core.perform(Command::EditTransaction {
+			transaction_id: lunch.clone(),
+			transaction: noted.clone(),
+		})
+		.unwrap();
+		let mut unchecked = noted;
+		unchecked.cleared = false;
+		let refused = core.perform(Command::EditTransaction {
+			transaction_id: lunch.clone(),
+			transaction: unchecked.clone(),
+		});
+		assert!(
+			matches!(refused, Err(FfiError::Invalid { .. })),
+			"Actual never unchecks a locked row, it only offers to unlock it"
+		);
+		let locked = row(&core, &lunch);
+		assert!(locked.reconciled && locked.cleared);
+		core.perform(Command::UnlockReconciled {
+			transaction_id: lunch.clone(),
+		})
+		.unwrap();
+		let unlocked = row(&core, &lunch);
+		assert!(!unlocked.reconciled && unlocked.cleared);
+		core.perform(Command::EditTransaction {
+			transaction_id: lunch.clone(),
+			transaction: unchecked,
+		})
+		.unwrap();
+		assert!(!row(&core, &lunch).cleared, "once unlocked it unchecks");
+	}
+
+	#[test]
+	fn payees_rename_favorite_and_merge_with_their_mappings() {
+		// R-ACC-5, §4.5.
+		let (_scratch, core) = imported("payees");
+		let checking = new_account(&core, "Everyday", crate::NewAccountKind::Checking, 0);
+		let mut ids = Vec::new();
+		for name in ["Cafe A", "Cafe B", "Cafe C"] {
+			let mut draft = typed(&checking, -300);
+			draft.payee_name = Some(name.to_owned());
+			let id = add(&core, draft);
+			ids.push(row(&core, &id).payee.unwrap().to_string());
+		}
+		core.perform(Command::RenamePayee {
+			payee_id: ids[2].clone(),
+			name: "The Cafe".to_owned(),
+		})
+		.unwrap();
+		core.perform(Command::SetPayeeFavorite {
+			payee_id: ids[2].clone(),
+			favorite: true,
+		})
+		.unwrap();
+		core.perform(Command::MergePayees {
+			target_payee_id: ids[1].clone(),
+			payee_ids: vec![ids[0].clone()],
+		})
+		.unwrap();
+		core.perform(Command::MergePayees {
+			target_payee_id: ids[2].clone(),
+			payee_ids: vec![ids[1].clone(), transfer_payee_of(&core, &checking)],
+		})
+		.unwrap();
+		let after = data(&core);
+		let mapped = |id: &str| after.payee_mapping[&veritas_domain::PayeeId::new(id)].to_string();
+		assert_eq!(
+			mapped(&ids[0]),
+			ids[2],
+			"an earlier merge's mapping follows the chain"
+		);
+		assert_eq!(mapped(&ids[1]), ids[2]);
+		assert!(
+			!after.payees
+				[&veritas_domain::PayeeId::new(transfer_payee_of(&core, &checking).as_str())]
+				.tombstone
+		);
+		let the_cafe = core
+			.payees()
+			.unwrap()
+			.into_iter()
+			.find(|p| p.id == ids[2])
+			.unwrap();
+		assert_eq!(
+			(
+				the_cafe.name.as_str(),
+				the_cafe.favorite,
+				the_cafe.transactions
+			),
+			("The Cafe", true, 3)
+		);
+		assert!(matches!(
+			core.perform(Command::MergePayees {
+				target_payee_id: transfer_payee_of(&core, &checking),
+				payee_ids: vec![ids[2].clone()],
+			}),
+			Err(FfiError::Invalid { .. })
+		));
+	}
+
+	#[test]
+	fn merging_payees_and_clearing_many_rows_snapshot_the_budget_first() {
+		// R-REL-3: a snapshot before each bulk edit, and restoring it undoes
+		// the edit. Clearing one row is not a bulk edit.
+		let (_scratch, core) = imported("bulk-snapshots");
+		core.call(|session| {
+			session.wait_for_open_check();
+			Ok(())
+		})
+		.unwrap();
+		let checking = new_account(&core, "Everyday", crate::NewAccountKind::Checking, 0);
+		let mut payees = Vec::new();
+		let mut rows = Vec::new();
+		for name in ["Cafe A", "Cafe B"] {
+			let mut draft = typed(&checking, -300);
+			draft.payee_name = Some(name.to_owned());
+			let id = add(&core, draft);
+			payees.push(row(&core, &id).payee.unwrap().to_string());
+			rows.push(id);
+		}
+		let bulk = |core: &Core<veritas_store::Store>| {
+			core.snapshots()
+				.unwrap()
+				.into_iter()
+				.filter(|s| s.reason == crate::SnapshotKind::BulkEdit)
+				.collect::<Vec<_>>()
+		};
+
+		core.perform(Command::SetCleared {
+			transaction_ids: vec![rows[0].clone()],
+			cleared: true,
+		})
+		.unwrap();
+		assert!(bulk(&core).is_empty(), "one row is not a bulk edit");
+		core.perform(Command::SetCleared {
+			transaction_ids: rows.clone(),
+			cleared: true,
+		})
+		.unwrap();
+		assert_eq!(bulk(&core).len(), 1);
+		core.perform(Command::MergePayees {
+			target_payee_id: payees[1].clone(),
+			payee_ids: vec![payees[0].clone()],
+		})
+		.unwrap();
+		let snapshots = bulk(&core);
+		assert_eq!(snapshots.len(), 2);
+		assert!(!core.payees().unwrap().iter().any(|p| p.id == payees[0]));
+
+		core.restore_snapshot(&snapshots[0].id).unwrap();
+		assert!(
+			core.payees().unwrap().iter().any(|p| p.id == payees[0]),
+			"the snapshot was taken before the merge"
+		);
+		assert!(row(&core, &rows[1]).cleared);
+	}
+
+	#[test]
+	fn the_register_pages_sorts_filters_and_runs_a_balance() {
+		// R-ACC-2.
+		let (_scratch, core) = imported("register");
+		let checking = new_account(&core, "Everyday", crate::NewAccountKind::Checking, 100_000);
+		for (amount, notes) in [
+			(-1_000, "rent #home"),
+			(-2_000, "food"),
+			(-3_000, "fuel #car"),
+		] {
+			let mut draft = typed(&checking, amount);
+			draft.notes = Some(notes.to_owned());
+			add(&core, draft);
+		}
+		let scope = crate::RegisterScope::Account {
+			account_id: checking.clone(),
+		};
+		let default_sort = crate::RegisterSort {
+			key: crate::RegisterSortKey::Date,
+			ascending: false,
+		};
+		let all = core
+			.register(
+				&scope,
+				&crate::RegisterFilter::default(),
+				default_sort,
+				0,
+				100,
+			)
+			.unwrap();
+		assert_eq!(all.total, 4);
+		assert_eq!(all.rows[0].running_balance, Some(94_000));
+		let oldest = all.rows.last().unwrap();
+		assert_eq!(oldest.running_balance, Some(oldest.amount));
+		let page = core
+			.register(
+				&scope,
+				&crate::RegisterFilter::default(),
+				default_sort,
+				1,
+				2,
+			)
+			.unwrap();
+		assert_eq!(
+			page.rows.iter().map(|r| r.id.clone()).collect::<Vec<_>>(),
+			all.rows[1..3]
+				.iter()
+				.map(|r| r.id.clone())
+				.collect::<Vec<_>>()
+		);
+		let tagged = core
+			.register(
+				&scope,
+				&crate::RegisterFilter {
+					search: Some("FUEL".to_owned()),
+					..Default::default()
+				},
+				default_sort,
+				0,
+				100,
+			)
+			.unwrap();
+		assert_eq!(tagged.total, 1);
+		assert_eq!(tagged.rows[0].tags, ["car"]);
+		assert_eq!(
+			tagged.rows[0].running_balance, None,
+			"no running balance under a filter"
+		);
+		let by_amount = core
+			.register(
+				&scope,
+				&crate::RegisterFilter::default(),
+				crate::RegisterSort {
+					key: crate::RegisterSortKey::Amount,
+					ascending: true,
+				},
+				0,
+				100,
+			)
+			.unwrap();
+		assert_eq!(by_amount.rows[0].amount, -3_000);
+	}
+
+	#[test]
+	fn an_imported_unbalanced_split_survives_an_edit_elsewhere_and_the_round_trip() {
+		// Edge case 6: shown, never fixed or rewritten.
+		let (scratch, core) = imported("unbalanced");
+		let checking = new_account(&core, "Everyday", crate::NewAccountKind::Checking, 0);
+		core.close().unwrap();
+		let db = std::path::Path::new(&scratch.budget()).join(veritas_session::DB_FILE);
+		let error = r#"{"type":"SplitTransactionError","version":1,"difference":-500}"#;
+		{
+			let sql = rusqlite::Connection::open(&db).unwrap();
+			sql.execute_batch(&format!(
+				"INSERT INTO transactions (id, acct, date, amount, isParent, isChild, cleared, sort_order, tombstone, error)
+				 VALUES ('odd', '{checking}', 20261101, -3000, 1, 0, 0, 3, 0, '{error}');
+				 INSERT INTO transactions (id, acct, date, amount, isParent, isChild, parent_id, cleared, sort_order, tombstone)
+				 VALUES ('odd-1', '{checking}', 20261101, -2500, 0, 1, 'odd', 0, -1, 0);"
+			))
+			.unwrap();
+		}
+		let core =
+			Core::<veritas_store::Store>::open(&scratch.budget(), &CancelToken::default()).unwrap();
+		let shown = core.register_row("odd").unwrap();
+		assert_eq!(shown.split_difference, Some(-500));
+		core.perform(Command::SetCleared {
+			transaction_ids: vec!["odd".to_owned()],
+			cleared: true,
+		})
+		.unwrap();
+		let other = add(&core, typed(&checking, -100));
+		core.perform(Command::DeleteTransaction {
+			transaction_id: other,
+		})
+		.unwrap();
+		let stored = |path: &std::path::Path| -> Option<String> {
+			rusqlite::Connection::open(path)
+				.unwrap()
+				.query_row("SELECT error FROM transactions WHERE id = 'odd'", [], |r| {
+					r.get(0)
+				})
+				.unwrap()
+		};
+		assert_eq!(stored(&db).as_deref(), Some(error));
+		assert!(core.register_row("odd").unwrap().cleared);
+
+		let zip = scratch.0.join("odd.zip");
+		core.export_actual_zip(&zip.display().to_string(), &CancelToken::default())
+			.unwrap();
+		let (_, today) = this_month();
+		let Some(actual) = actual_reads(&zip, &today) else {
+			return;
+		};
+		let rows = actual["tables"]["transactions"]["rows"].as_array().unwrap();
+		let odd = rows.iter().find(|r| r["id"] == "odd").unwrap();
+		assert_eq!(odd["error"].as_str(), Some(error));
+		assert_eq!(odd["cleared"].as_i64(), Some(1));
+	}
+
+	#[test]
+	fn actual_reads_the_register_veritas_wrote_with_the_same_balances() {
+		// R-ACC-1..3 parity: accounts, a transfer, a split, a close with its
+		// closing transfer and a reconcile adjustment, read back by Actual.
+		use crate::NewAccountKind::{Checking, CreditCard, Savings};
+		let (scratch, core) = imported("register-oracle");
+		let checking = new_account(&core, "Everyday", Checking, 100_000);
+		let savings = new_account(&core, "Rainy day", Savings, 0);
+		let card = new_account(&core, "Old card", CreditCard, 20_000);
+		let mut transfer = typed(&checking, -15_000);
+		transfer.payee_id = Some(transfer_payee_of(&core, &savings));
+		add(&core, transfer);
+		let (_, members) = busy_group(&data(&core));
+		let mut split = typed(&checking, -9_000);
+		split.payee_name = Some("Warehouse".to_owned());
+		split.splits = [(-6_000, 0), (-3_000, 1)]
+			.into_iter()
+			.map(|(amount, n)| crate::SplitLineDraft {
+				id: None,
+				amount,
+				payee_id: None,
+				payee_name: None,
+				category_id: Some(members[n].clone()),
+				notes: None,
+			})
+			.collect();
+		add(&core, split);
+		core.perform(Command::CloseAccount {
+			account_id: card.clone(),
+			transfer_to_account_id: Some(checking.clone()),
+			category_id: None,
+		})
+		.unwrap();
+		core.perform(Command::AddReconcileAdjustment {
+			account_id: savings.clone(),
+			statement_balance: 15_250,
+		})
+		.unwrap();
+
+		let (_, today) = this_month();
+		let ours = core.accounts().unwrap();
+		let budget = core.budget_month(NOVEMBER, &today).unwrap();
+		let zip = scratch.0.join("register.zip");
+		core.export_actual_zip(&zip.display().to_string(), &CancelToken::default())
+			.unwrap();
+		let Some(actual) = actual_reads(&zip, &today) else {
+			return;
+		};
+		for account in &ours.accounts {
+			assert_eq!(
+				actual["computed"]["accounts"][&account.id]["balance"].as_i64(),
+				Some(account.total),
+				"{}",
+				account.name
+			);
+		}
+		assert_eq!(
+			actual["computed"]["months"]["2026-11"]["toBudget"].as_i64(),
+			Some(budget.to_budget)
+		);
+	}
+
+	#[test]
+	fn a_closed_goal_whose_category_changed_kind_reopens_only_as_an_expense() {
+		// CLS-3.3: reopening never flips the kind.
+		let (_scratch, core) = imported("goal-kind");
+		let id = new_goal(&core, "New laptop", 50_000, None);
+		let category = veritas_domain::CategoryId::new(goal_of(&core, &id).category_id.as_str());
+		core.perform(Command::CloseGoal {
+			goal_id: id.clone(),
+			release_to_category_id: None,
+			also_move_later: false,
+		})
+		.unwrap();
+		let set_kind = |kind| {
+			core.call(|session| {
+				let write = veritas_engine::category_kinds::set_category_kind(
+					session.data()?,
+					&category,
+					kind,
+				)?;
+				session.perform(&Rows(vec![veritas_domain::Row::CategoryMeta(
+					veritas_domain::CategoryMetaRow {
+						category: write.category,
+						meta: write.meta,
+					},
+				)]))?;
+				Ok(())
+			})
+			.unwrap();
+		};
+		set_kind(veritas_domain::CategoryKind::Savings);
+		match core.perform(Command::ReopenGoal {
+			goal_id: id.clone(),
+		}) {
+			Err(FfiError::Invalid { message }) => assert_eq!(
+				message,
+				"This category is now a savings category. Change it back to an expense category to reopen this goal."
+			),
+			other => panic!("{other:?}"),
+		}
+		assert_eq!(
+			data(&core).category_kind(&category),
+			veritas_domain::CategoryKind::Savings
+		);
+		set_kind(veritas_domain::CategoryKind::Expense);
+		core.perform(Command::ReopenGoal {
+			goal_id: id.clone(),
+		})
+		.unwrap();
+		assert_eq!(goal_of(&core, &id).state, crate::GoalState::Active);
+	}
+
+	/// Runs Actual's own ops on `zip` (tools/actual-oracle `apply`) into `out`.
+	/// `false` without the oracle, unless CI requires it.
+	fn actual_apply(zip: &Path, ops: serde_json::Value, out: &Path, today: &str) -> bool {
+		let oracle = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/actual-oracle");
+		if !oracle.join("node_modules").exists() {
+			assert!(
+				std::env::var_os("VERITAS_REQUIRE_ORACLE").is_none(),
+				"VERITAS_REQUIRE_ORACLE is set but tools/actual-oracle/node_modules is missing"
+			);
+			return false;
+		}
+		let file = out.with_extension("ops.json");
+		std::fs::write(
+			&file,
+			serde_json::json!({"version": 1, "ops": ops}).to_string(),
+		)
+		.unwrap();
+		let output = std::process::Command::new("node")
+			.current_dir(&oracle)
+			.arg("src/main.ts")
+			.arg("apply")
+			.arg(zip)
+			.arg(&file)
+			.arg("--out")
+			.arg(out)
+			.args(["--today", today])
+			.output()
+			.expect("node runs");
+		assert!(
+			output.status.success(),
+			"Actual couldn't apply the ops: {}",
+			String::from_utf8_lossy(&output.stderr)
+		);
+		true
+	}
+
+	fn table<'a>(dump: &'a serde_json::Value, name: &str) -> &'a Vec<serde_json::Value> {
+		dump["tables"][name]["rows"].as_array().unwrap()
+	}
+
+	/// A Veritas budget with two open accounts, exported as the base both
+	/// sides start from.
+	fn two_account_base(label: &str) -> (Scratch, std::path::PathBuf, String, String, String) {
+		use crate::NewAccountKind::{Checking, Savings};
+		let (scratch, core) = imported(label);
+		let checking = new_account(&core, "Everyday", Checking, 0);
+		let savings = new_account(&core, "Rainy day", Savings, 0);
+		let category = an_expense(&core);
+		let base = scratch.0.join("base.zip");
+		core.export_actual_zip(&base.display().to_string(), &CancelToken::default())
+			.unwrap();
+		core.close().unwrap();
+		(scratch, base, checking, savings, category)
+	}
+
+	fn imported_from(scratch: &Scratch, zip: &Path, name: &str) -> Core<veritas_store::Store> {
+		Core::<veritas_store::Store>::import_actual_zip(
+			&zip.display().to_string(),
+			&scratch.0.join(name).display().to_string(),
+			&CancelToken::default(),
+		)
+		.unwrap()
+	}
+
+	#[test]
+	fn a_learned_category_rule_is_stored_as_actual_stores_it() {
+		// §4.5 learn_categories, against Actual's own addTransactions with
+		// learnCategories on the same base.
+		let (_, today) = this_month();
+		let (scratch, base, checking, _, category) = two_account_base("learn-oracle");
+		let core = imported_from(&scratch, &base, "veritas");
+		core.call(|session| {
+			let id = veritas_domain::PayeeId::new("cafe");
+			session.perform(&Rows(vec![
+				veritas_domain::Row::Payee(veritas_domain::Payee {
+					id: id.clone(),
+					name: "Corner Cafe".to_owned(),
+					transfer_account: None,
+					favorite: false,
+					learn_categories: true,
+					tombstone: false,
+				}),
+				veritas_domain::Row::PayeeMapping(veritas_domain::PayeeMapping {
+					from: id.clone(),
+					to: id,
+				}),
+			]))?;
+			Ok(())
+		})
+		.unwrap();
+		core.goals(&today).unwrap();
+		for amount in [-450, -500, -475] {
+			let mut draft = typed(&checking, amount);
+			draft.payee_id = Some("cafe".to_owned());
+			draft.category_id = Some(category.clone());
+			draft.cleared = true;
+			add(&core, draft);
+		}
+		let ours = data(&core);
+		let ours: Vec<_> = ours
+			.rules
+			.values()
+			.filter(|r| r.conditions_json.contains("cafe"))
+			.collect();
+		assert_eq!(ours.len(), 1);
+
+		let out = scratch.0.join("actual.zip");
+		let transactions: Vec<serde_json::Value> = [-450, -500, -475]
+			.iter()
+			.map(|amount| {
+				serde_json::json!({"date": "2026-11-12", "amount": amount, "payee": "cafe", "category": category})
+			})
+			.collect();
+		let ops = serde_json::json!([
+			{"op": "createPayee", "id": "cafe", "name": "Corner Cafe"},
+			{"op": "addTransactions", "account": checking, "learnCategories": true, "transactions": transactions},
+		]);
+		if !actual_apply(&base, ops, &out, &today) {
+			return;
+		}
+		let actual = actual_reads(&out, &today).unwrap();
+		let theirs: Vec<&serde_json::Value> = table(&actual, "rules")
+			.iter()
+			.filter(|r| r["conditions"].as_str().is_some_and(|c| c.contains("cafe")))
+			.collect();
+		assert_eq!(theirs.len(), 1, "Actual learned one rule too");
+		let parse = |text: &str| serde_json::from_str::<serde_json::Value>(text).unwrap();
+		assert_eq!(
+			parse(&ours[0].conditions_json),
+			parse(theirs[0]["conditions"].as_str().unwrap())
+		);
+		assert_eq!(
+			parse(&ours[0].actions_json),
+			parse(theirs[0]["actions"].as_str().unwrap())
+		);
+		assert_eq!(theirs[0]["stage"], serde_json::Value::Null);
+		assert_eq!(theirs[0]["conditions_op"], "and");
+	}
+
+	#[test]
+	fn a_transfer_pair_is_written_as_actual_writes_it_on_add_and_edit() {
+		// §4.2 addTransfer and updateTransfer, against Actual's own
+		// addTransactions and updateTransaction on the same base.
+		let (_, today) = this_month();
+		let (scratch, base, checking, savings, _) = two_account_base("transfer-oracle");
+		let core = imported_from(&scratch, &base, "veritas");
+		core.goals(&today).unwrap();
+		let mut draft = typed(&checking, -10_000);
+		draft.payee_id = Some(transfer_payee_of(&core, &savings));
+		draft.notes = Some("to savings".to_owned());
+		draft.cleared = true;
+		let id = add(&core, draft.clone());
+		let pair = |core: &Core<veritas_store::Store>| {
+			let source = row(core, &id);
+			let other = row(core, source.transfer.as_ref().unwrap().as_str());
+			let view = |t: &veritas_domain::Transaction| {
+				serde_json::json!({
+					"acct": t.account.as_str(),
+					"amount": t.amount.minor(),
+					"description": t.payee.as_ref().map(|p| p.as_str()),
+					"notes": t.notes,
+					"cleared": i64::from(t.cleared),
+					"reconciled": i64::from(t.reconciled),
+					"category": t.category.as_ref().map(|c| c.as_str()),
+				})
+			};
+			(view(&source), view(&other))
+		};
+		let added = pair(&core);
+		draft.amount = -12_000;
+		draft.notes = Some("more".to_owned());
+		core.perform(Command::EditTransaction {
+			transaction_id: id.clone(),
+			transaction: draft,
+		})
+		.unwrap();
+		let edited = pair(&core);
+
+		let theirs = |dump: &serde_json::Value| {
+			let rows = table(dump, "transactions");
+			let source = rows
+				.iter()
+				.find(|r| {
+					r["acct"] == checking.as_str()
+						&& r["transferred_id"].is_string()
+						&& r["tombstone"] == 0
+				})
+				.unwrap()
+				.clone();
+			let other = rows
+				.iter()
+				.find(|r| r["id"] == source["transferred_id"])
+				.unwrap()
+				.clone();
+			let view = |r: &serde_json::Value| {
+				serde_json::json!({
+					"acct": r["acct"], "amount": r["amount"], "description": r["description"],
+					"notes": r["notes"], "cleared": r["cleared"], "reconciled": r["reconciled"],
+					"category": r["category"],
+				})
+			};
+			(
+				source["id"].as_str().unwrap().to_owned(),
+				view(&source),
+				view(&other),
+			)
+		};
+		let first = scratch.0.join("actual-added.zip");
+		let ops = serde_json::json!([{"op": "addTransactions", "account": checking, "transactions": [
+			{"date": "2026-11-12", "amount": -10_000, "payee": {"transferTo": savings}, "notes": "to savings"}
+		]}]);
+		if !actual_apply(&base, ops, &first, &today) {
+			return;
+		}
+		let (source_id, source, other) = theirs(&actual_reads(&first, &today).unwrap());
+		assert_eq!((source, other), added, "after the add");
+		let second = scratch.0.join("actual-edited.zip");
+		let ops = serde_json::json!([{"op": "updateTransaction", "id": source_id, "fields": {"amount": -12_000, "notes": "more"}}]);
+		assert!(actual_apply(&first, ops, &second, &today));
+		let (_, source, other) = theirs(&actual_reads(&second, &today).unwrap());
+		assert_eq!((source, other), edited, "after the edit");
 	}
 }

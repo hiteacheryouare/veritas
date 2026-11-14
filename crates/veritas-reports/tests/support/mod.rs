@@ -1,6 +1,7 @@
 // Test helpers outside #[test] fns, so clippy.toml's test allowances miss them.
 #![allow(dead_code, clippy::unwrap_used, clippy::panic)]
 
+pub mod actual;
 pub mod household;
 
 use veritas_domain::{
@@ -56,6 +57,7 @@ impl Book {
 		self.budget.accounts.insert(
 			AccountId::new(id),
 			Account {
+				last_reconciled: None,
 				id: AccountId::new(id),
 				name: id.to_owned(),
 				off_budget,
@@ -223,6 +225,7 @@ impl Book {
 				starting_balance: false,
 				sort_order: 0.0,
 				tombstone: false,
+				split_error: None,
 			},
 		);
 		self.budget.transactions.get_mut(&id).unwrap()

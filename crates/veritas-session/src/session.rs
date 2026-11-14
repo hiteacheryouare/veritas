@@ -114,6 +114,7 @@ pub struct Session<B: Backend> {
 	backup_folder: Option<PathBuf>,
 	last_backup: Option<BackupResult>,
 	sheet: SheetCache,
+	register: Option<crate::register::Index>,
 	classification: ClassificationCache,
 	/// The local date the shell last read the budget as of. It decides the
 	/// months the envelope sheet covers.
@@ -155,6 +156,7 @@ impl<B: Backend> Session<B> {
 			backup_folder: None,
 			last_backup: None,
 			sheet: SheetCache::default(),
+			register: None,
 			classification: ClassificationCache::default(),
 			today,
 		};
@@ -360,12 +362,44 @@ impl<B: Backend> Session<B> {
 			}
 		};
 		self.dirty |= !changed.is_empty();
+		if !changed.is_empty() {
+			self.register = None;
+		}
 		if refreshed {
 			self.classification.refresh(&changed);
 		} else {
 			self.after_change(&changed);
 		}
 		Ok(changed)
+	}
+
+	/// A page of the register, from the index kept since the last commit when
+	/// the same scope, filter and sort were asked for (R-PERF-3).
+	pub fn register_page(
+		&mut self,
+		scope: &crate::register::Scope,
+		filter: &crate::register::Filter,
+		sort: crate::register::Sort,
+		offset: usize,
+		limit: usize,
+	) -> Result<crate::register::Page, CoreError> {
+		let State::Open(bus) = &self.state else {
+			return Err(closed());
+		};
+		let data = bus.data();
+		let fresh = self
+			.register
+			.as_ref()
+			.is_some_and(|index| index.answers(scope, filter, sort));
+		if !fresh {
+			self.register = Some(crate::register::index(data, scope, filter, sort)?);
+		}
+		match &self.register {
+			Some(index) => index.page(data, offset, limit),
+			None => Err(CoreError::Internal(
+				"the register index went missing".to_owned(),
+			)),
+		}
 	}
 
 	pub fn undo(&mut self) -> Result<ChangeSet, CoreError> {
@@ -410,8 +444,32 @@ impl<B: Backend> Session<B> {
 		read(bus.data(), self.classification.get(bus.data()))
 	}
 
+	/// `with_classification` plus the envelope sheet as of `today`, built
+	/// only when `sheet` asks for it.
+	pub fn with_reports<T>(
+		&mut self,
+		today: CivilDate,
+		sheet: bool,
+		read: impl FnOnce(&BudgetData, &Classification, Option<&EnvelopeSheet>) -> Result<T, CoreError>,
+	) -> Result<T, CoreError> {
+		let State::Open(bus) = &self.state else {
+			return Err(closed());
+		};
+		let data = bus.data();
+		let envelopes = if sheet {
+			self.today = today;
+			Some(self.sheet.get(data, today)?)
+		} else {
+			None
+		};
+		read(data, self.classification.get(data), envelopes)
+	}
+
 	fn after_change(&mut self, changed: &ChangeSet) {
 		self.dirty |= !changed.is_empty();
+		if !changed.is_empty() {
+			self.register = None;
+		}
 		self.classification.refresh(changed);
 		if let State::Open(bus) = &self.state {
 			self.sheet.refresh(bus.data(), changed);
@@ -683,6 +741,7 @@ impl<B: Backend> Session<B> {
 
 	fn reopen(&mut self, listeners: Listeners) -> Result<(), CoreError> {
 		self.sheet.clear();
+		self.register = None;
 		self.classification.clear();
 		match open_bus(&self.db, self.lock.as_ref(), listeners) {
 			Ok((bus, report)) => {

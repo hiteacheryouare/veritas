@@ -254,6 +254,7 @@ pub fn budget_from_dump(dump: &Value) -> veritas_domain::BudgetData {
 		budget.accounts.insert(
 			id.clone(),
 			Account {
+				last_reconciled: None,
 				id,
 				name: text(row, "name").unwrap_or_default(),
 				off_budget: flag(row, "offbudget"),
@@ -378,6 +379,7 @@ pub fn budget_from_dump(dump: &Value) -> veritas_domain::BudgetData {
 				starting_balance: flag(row, "starting_balance_flag"),
 				sort_order: row["sort_order"].as_f64().unwrap_or_default(),
 				tombstone: flag(row, "tombstone"),
+				split_error: None,
 			},
 		);
 	}

@@ -83,6 +83,7 @@ impl Book {
 		self.budget.accounts.insert(
 			acct(id),
 			Account {
+				last_reconciled: None,
 				id: acct(id),
 				name: id.to_owned(),
 				off_budget,
@@ -213,6 +214,7 @@ impl Book {
 				starting_balance: false,
 				sort_order: 0.0,
 				tombstone: false,
+				split_error: None,
 			},
 		);
 		self.budget.transactions.get_mut(&id).unwrap()

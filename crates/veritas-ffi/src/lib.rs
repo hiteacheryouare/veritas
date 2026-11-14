@@ -1,9 +1,11 @@
 //! The only surface the apps see: commands, queries and the change-event stream, exported through UniFFI.
 
+mod accounts;
 mod blocking;
 mod budget;
 mod commands;
 mod custom_reports;
+mod dashboards;
 mod goals;
 mod records;
 mod reports;
@@ -15,14 +17,23 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use veritas_domain::{CoreError, YearMonth};
 
+pub use accounts::{
+	AccountDetail, AccountGroupDetail, AccountList, ClearedStatus, PayeeDetail, PayeeMemory,
+	Reconciliation, RegisterFilter, RegisterLine, RegisterPage, RegisterRow, RegisterScope,
+	RegisterSort, RegisterSortKey, SplitLineDraft, TransactionDraft,
+};
 pub use blocking::CancelToken;
 pub use budget::{BudgetMonth, EnvelopeGroup, EnvelopeRow, MoneyTone};
 pub use commands::Command;
 pub use custom_reports::{
 	CustomReportBalances, CustomReportCell, CustomReportData, CustomReportGroup,
-	CustomReportInterval, CustomReportItem, CustomReportSettings, CustomReportView, DashboardPage,
-	DashboardWidget, PlaceholderReason, ReportBalanceKind, ReportGrouping, ReportIntervalUnit,
-	ReportSortOrder, StackedAmount, UncategorizedKind, WidgetView,
+	CustomReportInterval, CustomReportItem, CustomReportSettings, CustomReportView,
+	ReportBalanceKind, ReportCondition, ReportGrouping, ReportIntervalUnit, ReportSortOrder,
+	StackedAmount, UncategorizedKind,
+};
+pub use dashboards::{
+	AgeGranularity, AgePoint, AgeTrend, BudgetAnalysisPoint, CalendarCardMonth, CalendarDayCell,
+	CrossoverCardPoint, DashboardPage, DashboardWidget, WidgetConfig, WidgetTimeFrame, WidgetView,
 };
 pub use goals::{GoalClosePreview, GoalPace, GoalState, GoalSummary, MonthAmount};
 pub use records::{

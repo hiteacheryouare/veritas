@@ -227,6 +227,47 @@ private final class Recorder: ChangeListener, @unchecked Sendable {
 	#expect(try evaluateBudgetAmount(text: yen, style: .commaDot, decimalPlaces: 0) == 5_000)
 }
 
+@Test func accountsAndTheRegisterAreEditedThroughCommands() async throws {
+	let scratch = try Scratch()
+	let session = try await importSmall(into: scratch)
+	_ = try await settled(session)
+
+	let created = try session.perform(
+		command: .createAccount(
+			account: NewAccount(name: "Everyday", kind: .checking, startingBalance: 100_000)))
+	let accountId = try #require(created.entities.first { $0.kind == .account }?.id)
+	let rowId = UUID().uuidString
+	_ = try session.perform(
+		command: .addTransaction(
+			transaction: TransactionDraft(
+				id: rowId, accountId: accountId, date: "2026-11-12", amount: -1_250, payeeId: nil,
+				payeeName: "Corner Cafe", categoryId: nil, notes: "lunch #work", cleared: false,
+				splits: [])))
+
+	let page = try session.register(
+		scope: .account(accountId: accountId), filter: RegisterFilter(
+			search: nil, status: nil, from: nil, to: nil, categoryId: nil, payeeId: nil,
+			uncategorized: false),
+		sort: RegisterSort(key: .date, ascending: false),
+		offset: 0, limit: 50)
+	#expect(page.total == 2)
+	let row = try session.registerRow(transactionId: rowId)
+	#expect(row.payeeName == "Corner Cafe")
+	#expect(row.tags == ["work"])
+
+	_ = try session.perform(command: .setCleared(transactionIds: [rowId], cleared: true))
+	let state = try session.reconciliation(accountId: accountId, statementBalance: 98_750)
+	#expect(state.difference == 0)
+	_ = try session.perform(command: .finishReconcile(accountId: accountId, statementBalance: 98_750))
+	#expect(try session.registerRow(transactionId: rowId).reconciled)
+
+	let account = try #require(try session.accounts().accounts.first { $0.id == accountId })
+	#expect(account.total == 98_750)
+	#expect(account.lastReconciled != nil)
+	let cafe = try #require(try session.payees().first { $0.name == "Corner Cafe" })
+	#expect(try session.payeeMemory(payeeId: cafe.id)?.amount == -1_250)
+}
+
 /// What VeritasKit's wrapper does: the Swift task's cancellation reaches the
 /// core through the token, because UniFFI never cancels the Rust side itself.
 private func importCancellably(zip: String, into directory: String) async throws -> Session {

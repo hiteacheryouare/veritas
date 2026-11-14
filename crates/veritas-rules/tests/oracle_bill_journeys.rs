@@ -347,6 +347,7 @@ fn budget_from(dump: &Value) -> BudgetData {
 	budget.accounts.insert(
 		AccountId::new(CHECKING),
 		Account {
+			last_reconciled: None,
 			id: AccountId::new(CHECKING),
 			name: "Household checking".into(),
 			off_budget: false,
