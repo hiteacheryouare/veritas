@@ -13,7 +13,8 @@ use veritas_domain::BudgetData;
 use veritas_domain::CivilDate;
 use veritas_engine::EnvelopeSheet;
 use veritas_reports::{
-	Granularity, Json, Trend, age_of_money, budget_analysis, calendar, crossover, summary,
+	Granularity, Json, Trend, age_of_money, budget_analysis, calendar, cash_flow_card, crossover,
+	summary,
 };
 
 const ORACLE_TODAY: &str = "2026-11-09";
@@ -455,5 +456,63 @@ fn d73_crossover_card_matches_actual() {
 			"targetNestEgg": optional(ours.target_nest_egg),
 		});
 		assert_eq!(&ours, data, "{value}");
+	}
+}
+
+#[test]
+fn d73_cash_flow_card_matches_actual() {
+	let budget = fixture("all-features");
+	let dining = category(&budget, "Dining Out");
+	let mut metas = vec![json!(null), json!({"name": "no frame"})];
+	for conditions in [
+		json!(null),
+		json!([{"field": "category", "op": "is", "value": dining, "type": "id"}]),
+		json!([{"field": "amount", "op": "lt", "value": -5000, "type": "number"}, {"field": "notes", "op": "contains", "value": "a", "type": "string"}]),
+		json!([{"field": "transfer", "op": "is", "value": true, "type": "boolean"}]),
+		json!([{"field": "account", "op": "offBudget", "value": "", "type": "id"}]),
+	] {
+		for frame in [
+			json!({"start": "2026-01", "end": "2026-10", "mode": "static"}),
+			json!({"start": "2026-04", "end": "2026-11", "mode": "sliding-window"}),
+			json!({"start": "2026-01-15", "end": "2026-02-14", "mode": "sliding-window"}),
+			json!({"start": "2025-01", "end": "2026-11", "mode": "full"}),
+			json!({"mode": "yearToDate"}),
+			json!({"mode": "lastYear"}),
+			json!({"mode": "priorYearToDate"}),
+			json!({"mode": "currentQuarter"}),
+		] {
+			for op in ["and", "or"] {
+				metas.push(
+					json!({"timeFrame": frame, "conditions": conditions, "conditionsOp": op}),
+				);
+			}
+		}
+	}
+	let cases: Vec<(String, &str, Value)> = metas
+		.into_iter()
+		.enumerate()
+		.map(|(index, meta)| (format!("cash-flow-{index}"), "cash-flow-card", meta))
+		.collect();
+	let ours: Vec<_> = cases
+		.iter()
+		.map(|(_, _, value)| cash_flow_card(&budget, meta(value).as_ref(), today()).unwrap())
+		.collect();
+	assert!(
+		ours.iter()
+			.any(|card| card.income.minor() != 0 && card.expense.minor() != 0)
+	);
+	let Some(theirs) = theirs("all-features", &cases, "0") else {
+		return;
+	};
+	for ((id, _, value), ours) in cases.iter().zip(ours) {
+		let expected = &theirs[id.as_str()];
+		assert_eq!(
+			expected["start"],
+			ours.range.start.as_str(),
+			"{value} start"
+		);
+		assert_eq!(expected["end"], ours.range.end.as_str(), "{value} end");
+		assert_eq!(expected["income"], ours.income.minor(), "{value} income");
+		assert_eq!(expected["expense"], ours.expense.minor(), "{value} expense");
 	}
 }

@@ -74,6 +74,39 @@ export const widgetData = async ({ internal }: ActualSession, requests: WidgetRe
 			}
 			return { start, end, data: await run(summarySpreadsheet(start, end, meta?.conditions, meta?.conditionsOp, content, undefined)) };
 		},
+		// simpleCashFlow, verbatim apart from running its two queries directly, since
+		// node can't load the .tsx file it lives in
+		// (reference/actual/packages/desktop-client/src/components/reports/spreadsheets/cash-flow-spreadsheet.tsx:18-72).
+		'cash-flow-card': async ({ meta }) => {
+			const [startMonth, endMonth] = ranges.calculateTimeRange(
+				meta?.timeFrame,
+				{ start: months.currentMonth(), end: months.currentMonth(), mode: 'sliding-window' },
+				latestDay
+			);
+			const start = months.firstDayOfMonth(startMonth);
+			const end = months.lastDayOfMonth(endMonth);
+			const { filters } = await internal.send('make-filters-from-conditions', {
+				conditions: (meta?.conditions ?? []).filter((cond: any) => !cond.customName)
+			});
+			const conditionsOpKey = meta?.conditionsOp === 'or' ? '$or' : '$and';
+			const { q } = await import('@actual-app/api');
+			const makeQuery = () =>
+				q('transactions')
+					.filter({ [conditionsOpKey]: filters })
+					.filter({
+						$and: [{ date: { $gte: start } }, { date: { $lte: end > months.currentDay() ? months.currentDay() : end } }],
+						'account.offbudget': false,
+						'payee.transfer_acct': null
+					})
+					.calculate({ $sum: '$amount' });
+			const sum = async (query: any) => (await internal.send('query', query.serialize())).data;
+			return {
+				start: startMonth,
+				end: endMonth,
+				income: await sum(makeQuery().filter({ amount: { $gt: 0 } })),
+				expense: await sum(makeQuery().filter({ amount: { $lt: 0 } }))
+			};
+		},
 		'calendar-card': async ({ meta, firstDayOfWeekIdx }) => {
 			const { calendarSpreadsheet } = await loadSource(`${REPORTS}/spreadsheets/calendar-spreadsheet.ts`);
 			const [start, end] = fullRange(meta);

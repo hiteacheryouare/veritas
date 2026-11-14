@@ -5,6 +5,7 @@
 mod age_of_money;
 mod budget_analysis;
 mod calendar;
+mod cash_flow;
 mod crossover;
 mod summary;
 mod time_frame;
@@ -12,6 +13,7 @@ mod time_frame;
 pub use age_of_money::{AgeOfMoney, AgePoint, Granularity, Trend, age_of_money};
 pub use budget_analysis::{BudgetAnalysis, BudgetAnalysisMonth, budget_analysis};
 pub use calendar::{CalendarDay, CalendarMonth, calendar};
+pub use cash_flow::{CashFlowCard, cash_flow_card};
 pub use crossover::{Crossover, CrossoverPoint, crossover};
 pub use summary::{SummaryContent, SummaryData, summary};
 pub use time_frame::{TimeRange, calculate_time_range};
