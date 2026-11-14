@@ -51,6 +51,31 @@ struct AccountScreenshotTests {
 		try render(TransactionSheet(model: editor), named: "quick-entry-split", settle: 0.6)
 	}
 
+	@Test func moveMoney() async throws {
+		let workspace = await workspace()
+		let loan = MoveMoneyModel(workspace: workspace, fromID: "checking")
+		await loan.load()
+		loan.toID = "carloan"
+		await loan.refreshPreview()
+		await loan.refreshPreview()
+		try render(MoveMoneySheet(model: loan), named: "move-money-loan", settle: 0.6)
+
+		let saving = MoveMoneyModel(workspace: workspace, fromID: "checking")
+		await saving.load()
+		saving.toID = "brokerage"
+		saving.typeAmount("500.00")
+		await saving.refreshPreview()
+		saving.purpose.answer = .saving
+		try render(MoveMoneySheet(model: saving), named: "move-money-purpose", settle: 0.6)
+
+		let plain = MoveMoneyModel(workspace: workspace, fromID: "checking")
+		await plain.load()
+		plain.toID = "savings"
+		plain.typeAmount("200.00")
+		await plain.refreshPreview()
+		try render(MoveMoneySheet(model: plain), named: "move-money", settle: 0.6)
+	}
+
 	@Test func reconcile() async throws {
 		let workspace = await workspace()
 		let model = ReconcileModel(workspace: workspace, accountID: "checking")

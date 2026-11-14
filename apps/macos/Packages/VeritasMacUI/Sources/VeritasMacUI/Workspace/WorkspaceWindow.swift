@@ -39,6 +39,8 @@ struct WorkspaceWindow: View {
 				IntegrityReportSheet(report: model.integrityReport)
 			} else if sheet == .addTransaction {
 				TransactionSheet(model: TransactionEditorModel(workspace: model, accountID: model.currentAccountID))
+			} else if sheet == .moveMoney {
+				MoveMoneySheet(model: MoveMoneyModel(workspace: model, fromID: model.currentAccountID))
 			} else {
 				PlaceholderSheet(sheet: sheet)
 			}
