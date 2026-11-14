@@ -396,13 +396,10 @@ fn report_name(
 			"Enter a name for the report.".to_owned(),
 		));
 	}
+	// Actual's `reportNameExists` compares names exactly, so "Spending" and
+	// "spending" can live side by side.
 	let taken = budget.custom_reports.values().any(|row| {
-		!row.tombstone
-			&& Some(&row.id) != except
-			&& row
-				.name
-				.as_deref()
-				.is_some_and(|other| other.trim().eq_ignore_ascii_case(name))
+		!row.tombstone && Some(&row.id) != except && row.name.as_deref() == Some(name)
 	});
 	if taken {
 		return Err(CoreError::Invalid(format!(
@@ -693,6 +690,20 @@ mod tests {
 	}
 
 	#[test]
+	fn report_names_clash_only_when_they_match_exactly_as_in_actual() {
+		let (_scratch, core) = imported("all-features");
+		let budget = data(&core);
+		let mut settings = settings(&stored(&budget, SPENDING).unwrap());
+		settings.name = "net worth over time".to_owned();
+		assert!(edited(&budget, &settings).is_ok());
+		settings.name = "Net worth over time".to_owned();
+		assert!(matches!(
+			edited(&budget, &settings),
+			Err(CoreError::Invalid(_))
+		));
+	}
+
+	#[test]
 	fn a_setting_veritas_cannot_evaluate_comes_back_as_a_problem_not_an_error() {
 		let (_scratch, core) = imported("all-features");
 		let budget = data(&core);
@@ -729,7 +740,7 @@ mod tests {
 			before
 		);
 
-		edit.name = "net worth OVER time".to_owned();
+		edit.name = "Net worth over time".to_owned();
 		assert!(matches!(
 			core.perform(Command::SaveCustomReport { settings: edit }),
 			Err(FfiError::Invalid { .. })

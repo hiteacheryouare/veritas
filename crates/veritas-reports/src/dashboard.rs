@@ -203,11 +203,16 @@ pub fn place_widget(
 	width: i64,
 	height: i64,
 ) -> Result<Widget, CoreError> {
-	let kind = widget.kind.as_deref().and_then(WidgetType::parse);
-	let (x, y, width, height) = crate::widget_meta::place(kind, x, y, width, height)?;
+	let (min_width, min_height) = widget
+		.kind
+		.as_deref()
+		.and_then(WidgetType::parse)
+		.map_or((1, 1), WidgetType::minimum_size);
+	let width = width.clamp(min_width, GRID_COLUMNS);
+	let height = height.max(min_height);
 	Ok(Widget {
-		x: Some(x),
-		y: Some(y),
+		x: Some(x.clamp(0, GRID_COLUMNS - width)),
+		y: Some(y.max(0)),
 		width: Some(width),
 		height: Some(height),
 		..widget.clone()
