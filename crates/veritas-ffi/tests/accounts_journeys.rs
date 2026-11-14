@@ -1553,3 +1553,148 @@ fn closing_an_account_a_bill_pays_into_leaves_the_bill_as_actual_does() {
 	assert_eq!(closed_flag(&ours), json!(1));
 	assert_eq!(closed_flag(&ours), closed_flag(&theirs));
 }
+
+#[test]
+fn relearning_after_two_merges_in_a_row_updates_the_one_rule_as_actual_does() {
+	// A chain: Cafe A learns Groceries, is merged into Cafe B, and Cafe B
+	// into Cafe C. Cafe C is then put under Utilities three times. Actual
+	// reads the rule through the flattened mapping and updates it, so the
+	// next entry for Cafe C gets Utilities, with one rule left.
+	let scratch = Scratch::new("merge-chain");
+	let Some(oracle) = oracle() else {
+		return;
+	};
+	let (cafes, everyday, groceries, utilities) = two_cafes(&scratch, &oracle);
+	let base = scratch.join("three-cafes.zip");
+	actual_apply(
+		&oracle,
+		&cafes,
+		json!([{"op": "createPayee", "id": "cafe-c", "name": "Cafe C"}]),
+		&base,
+		31,
+	);
+	let into_c = || Command::MergePayees {
+		target_payee_id: "cafe-c".to_owned(),
+		payee_ids: vec!["cafe-b".to_owned()],
+	};
+
+	let veritas = import(&scratch, &base, "veritas");
+	for day in [1, 2, 3] {
+		typed_visit(&veritas, &everyday, day, "cafe-a", Some(&groceries));
+	}
+	perform(&veritas, merge_a_into_b());
+	perform(&veritas, into_c());
+	for day in [5, 6, 7] {
+		typed_visit(&veritas, &everyday, day, "cafe-c", Some(&utilities));
+	}
+	typed_visit(&veritas, &everyday, 9, "cafe-c", None);
+	let ours_zip = scratch.join("veritas.zip");
+	export(&veritas, &ours_zip);
+	let ours = actual_reads(&oracle, &ours_zip);
+
+	let added = scratch.join("actual-added.zip");
+	actual_apply(
+		&oracle,
+		&base,
+		json!([
+			{"op": "addTransactions", "account": everyday, "learnCategories": true,
+				"transactions": ([1, 2, 3].map(|day| visit(day, "cafe-a", Some(&groceries))))},
+			{"op": "mergePayees", "target": "cafe-b", "merge": ["cafe-a"]},
+			{"op": "mergePayees", "target": "cafe-c", "merge": ["cafe-b"]},
+			{"op": "addTransactions", "account": everyday,
+				"transactions": ([5, 6, 7].map(|day| visit(day, "cafe-c", Some(&utilities))))},
+		]),
+		&added,
+		32,
+	);
+	let after_add = actual_reads(&oracle, &added);
+	let mut ops: Vec<Value> = rows(&after_add, "transactions")
+		.iter()
+		.filter(|t| t["description"] == "cafe-c" && t["tombstone"] != 1)
+		.map(
+			|t| json!({"op": "updateTransaction", "id": t["id"], "fields": {"category": utilities}}),
+		)
+		.collect();
+	assert_eq!(ops.len(), 3);
+	ops.push(
+		json!({"op": "addTransactions", "account": everyday, "learnCategories": true,
+		"transactions": [visit(8, "cafe-c", Some(&utilities))]}),
+	);
+	ops.push(json!({"op": "addTransactions", "account": everyday,
+		"transactions": [visit(9, "cafe-c", None)]}));
+	let learned = scratch.join("actual-learned.zip");
+	actual_apply(&oracle, &added, Value::Array(ops), &learned, 33);
+	let theirs = actual_reads(&oracle, &learned);
+	assert_eq!(category_on_day(&theirs, 9), json!(utilities));
+
+	assert_eq!(category_on_day(&ours, 9), category_on_day(&theirs, 9));
+	let payees = ["cafe-a", "cafe-b", "cafe-c"];
+	assert_eq!(rules_naming(&ours, &payees), rules_naming(&theirs, &payees));
+	assert_eq!(rules_naming(&ours, &payees).len(), 1);
+}
+
+#[test]
+fn a_locked_row_is_unchecked_only_after_it_is_unlocked() {
+	// R-ACC-3: a reconciled row keeps counting in the cleared balance until
+	// the user unlocks it. A refused uncheck changes nothing and leaves undo
+	// pointing at the user's last real step.
+	let scratch = Scratch::new("locked-uncheck");
+	let session = import(&scratch, &small_zip(), "budget");
+	let everyday = new_account(&session, "Joint checking", NewAccountKind::Checking, 40_000);
+	let groceries = category(&session, "Groceries");
+	let mut shop = entry("shop", &everyday, "2026-11-02", -2_000);
+	shop.cleared = true;
+	shop.splits = vec![line(-1_500, Some(&groceries)), line(-500, Some(&groceries))];
+	add(&session, shop);
+	perform(
+		&session,
+		Command::FinishReconcile {
+			account_id: everyday.clone(),
+			statement_balance: 38_000,
+		},
+	);
+	let locked = session.register_row("shop".to_owned()).unwrap();
+	assert!(locked.reconciled);
+	let before = screens(&session);
+
+	let mut uncheck = entry("shop", &everyday, "2026-11-02", -2_000);
+	uncheck.notes = Some("returned the eggs".to_owned());
+	uncheck.splits = locked
+		.lines
+		.iter()
+		.map(|l| SplitLineDraft {
+			id: Some(l.id.clone()),
+			..line(l.amount, l.category_id.as_deref())
+		})
+		.collect();
+	assert!(matches!(
+		session.perform(Command::EditTransaction {
+			transaction_id: "shop".to_owned(),
+			transaction: uncheck.clone(),
+		}),
+		Err(veritas_ffi::FfiError::Invalid { .. })
+	));
+	assert_eq!(screens(&session), before, "the refusal wrote nothing");
+	assert_eq!(account(&session, &everyday).cleared, 38_000);
+
+	let mut kept = uncheck.clone();
+	kept.cleared = true;
+	edit(&session, "shop", kept);
+	let edited = session.register_row("shop".to_owned()).unwrap();
+	assert!(edited.reconciled && edited.cleared);
+	assert_eq!(edited.notes.as_deref(), Some("returned the eggs"));
+	session.undo().unwrap();
+	assert_eq!(screens(&session), before, "undo takes back the notes edit");
+	session.redo().unwrap();
+
+	perform(
+		&session,
+		Command::UnlockReconciled {
+			transaction_id: "shop".to_owned(),
+		},
+	);
+	edit(&session, "shop", uncheck);
+	let open = session.register_row("shop".to_owned()).unwrap();
+	assert!(!open.reconciled && !open.cleared);
+	assert_eq!(account(&session, &everyday).cleared, 40_000);
+}
