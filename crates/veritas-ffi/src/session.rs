@@ -3984,6 +3984,55 @@ mod tests {
 		}
 
 		#[test]
+		fn post_now_writes_the_transaction_actual_posts() {
+			// R-BILL-3: "Post transaction" and "Post transaction today", against
+			// schedule/post-transaction on the same base.
+			let confirm = |account: &str| {
+				rent(
+					account,
+					BillAmount::About { amount: -150_000 },
+					monthly("2026-11-20"),
+					false,
+				)
+			};
+			let (scratch, base, _) = bill_base("bill-post", Some(&confirm));
+			let core = imported_from(&scratch, &base, "veritas");
+			core.goals(TODAY).unwrap();
+			for dated_today in [false, true] {
+				core.perform(Command::PostBillNow {
+					bill_id: "bill-1".to_owned(),
+					dated_today,
+				})
+				.unwrap();
+			}
+			let ours_zip = export(&core, &scratch, "ours.zip");
+			let theirs_zip = scratch.0.join("theirs.zip");
+			let ops = json!([
+				{"op": "postSchedule", "id": "bill-1", "today": false},
+				{"op": "postSchedule", "id": "bill-1", "today": true},
+			]);
+			if !actual_apply(&base, ops, &theirs_zip, TODAY) {
+				return;
+			}
+			let ours = actual_reads(&ours_zip, TODAY).unwrap();
+			let theirs = actual_reads(&theirs_zip, TODAY).unwrap();
+			let rows = |dump: &Value| {
+				let mut rows: Vec<Value> = posted_for(dump, "bill-1")
+					.iter()
+					.map(|row| without(row, &["id", "sort_order"]))
+					.collect();
+				rows.sort_by_key(|row| row["date"].as_i64());
+				rows
+			};
+			assert_eq!(rows(&ours).len(), 2);
+			assert_eq!(rows(&ours), rows(&theirs));
+			assert_eq!(
+				ours["computed"]["schedules"]["bill-1"],
+				theirs["computed"]["schedules"]["bill-1"]
+			);
+		}
+
+		#[test]
 		fn bills_actual_would_misread_are_refused_and_income_is_a_bill_too() {
 			// R-BILL-4, R-BILL-5.
 			let (_scratch, core) = imported("bill-checks");
