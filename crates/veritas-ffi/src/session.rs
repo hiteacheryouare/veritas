@@ -3199,6 +3199,11 @@ pub(crate) mod tests {
 		out: &Path,
 		today: &str,
 	) -> bool {
+		actual_apply_text(zip, &ops.to_string(), out, today)
+	}
+
+	/// `actual_apply` with the ops as JSON text, for ops whose key order matters.
+	pub(crate) fn actual_apply_text(zip: &Path, ops: &str, out: &Path, today: &str) -> bool {
 		let oracle = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/actual-oracle");
 		if !oracle.join("node_modules").exists() {
 			assert!(
@@ -3208,11 +3213,7 @@ pub(crate) mod tests {
 			return false;
 		}
 		let file = out.with_extension("ops.json");
-		std::fs::write(
-			&file,
-			serde_json::json!({"version": 1, "ops": ops}).to_string(),
-		)
-		.unwrap();
+		std::fs::write(&file, format!(r#"{{"version":1,"ops":{ops}}}"#)).unwrap();
 		let output = std::process::Command::new("node")
 			.current_dir(&oracle)
 			.arg("src/main.ts")

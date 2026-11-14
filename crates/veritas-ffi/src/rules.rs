@@ -539,8 +539,8 @@ mod tests {
 	use crate::Command;
 	use crate::session::Core;
 	use crate::session::tests::{
-		actual_apply, actual_reads, data, imported_from, table, this_month, transfer_payee_of,
-		two_account_base,
+		actual_apply, actual_apply_text, actual_reads, data, imported_from, table, this_month,
+		transfer_payee_of, two_account_base,
 	};
 
 	fn condition(field: RuleField, op: RuleConditionOp, value: RuleValue) -> RuleCondition {
@@ -598,7 +598,7 @@ mod tests {
 	fn a_rule_is_created_edited_and_deleted_as_actuals_api_stores_it() {
 		// R-RULE-2 against Actual's createRule, updateRule and deleteRule on the same base.
 		let (_, today) = this_month();
-		let (scratch, base, checking, savings, category) = two_account_base("rule-crud-oracle");
+		let (scratch, base, _, savings, category) = two_account_base("rule-crud-oracle");
 		let core = imported_from(&scratch, &base, "veritas");
 		let to_savings = transfer_payee_of(&core, &savings);
 		let created = RuleDraft {
@@ -662,12 +662,30 @@ mod tests {
 		.unwrap();
 		let after_delete = stored_rule(&core, &rule_id);
 
-		let contains = json!({"op": "contains", "field": "imported_payee", "value": "AMZN Mktp", "type": "string"});
-		let payee = json!({"op": "set", "field": "payee", "value": to_savings, "type": "id"});
+		// Actual stores the items in the order the caller gives them, with
+		// `field` renamed in place, so handing it Veritas's items under their
+		// public names must store exactly Veritas's text.
+		let public = |text: &Value| {
+			text.as_str()
+				.unwrap()
+				.replace(r#""field":"description""#, r#""field":"payee""#)
+				.replace(
+					r#""field":"imported_description""#,
+					r#""field":"imported_payee""#,
+				)
+				.replace(r#""field":"acct""#, r#""field":"account""#)
+		};
+		let rule_op = |op: &str, stored: &Value| {
+			format!(
+				r#"[{{"op":"{op}","id":"{rule_id}","stage":{},"conditionsOp":{},"conditions":{},"actions":{}}}]"#,
+				stored["stage"],
+				stored["conditions_op"],
+				public(&stored["conditions"]),
+				public(&stored["actions"]),
+			)
+		};
 		let first = scratch.0.join("created.zip");
-		let ops = json!([{"op": "createRule", "id": rule_id, "stage": "pre", "conditions": [contains],
-			"actions": [payee, {"op": "set", "field": "category", "value": category, "type": "id"}]}]);
-		if !actual_apply(&base, ops, &first, &today) {
+		if !actual_apply_text(&base, &rule_op("createRule", &after_create), &first, &today) {
 			return;
 		}
 		assert_eq!(
@@ -676,10 +694,12 @@ mod tests {
 		);
 
 		let second = scratch.0.join("edited.zip");
-		let ops = json!([{"op": "updateRule", "id": rule_id, "conditionsOp": "or",
-			"conditions": [contains, {"op": "gt", "field": "amount", "value": 10_000, "type": "number", "options": {"outflow": true}}],
-			"actions": [payee, {"op": "append-notes", "field": "notes", "value": " #shopping", "type": "id"}]}]);
-		assert!(actual_apply(&first, ops, &second, &today));
+		assert!(actual_apply_text(
+			&first,
+			&rule_op("updateRule", &after_edit),
+			&second,
+			&today
+		));
 		assert_eq!(
 			actual_rule(&actual_reads(&second, &today).unwrap(), &rule_id),
 			after_edit
@@ -692,7 +712,6 @@ mod tests {
 			actual_rule(&actual_reads(&third, &today).unwrap(), &rule_id),
 			after_delete
 		);
-		let _ = checking;
 	}
 
 	fn by_notes<'a>(rows: &'a [Value], notes: &str) -> &'a Value {
@@ -808,7 +827,7 @@ mod tests {
 		let theirs: Vec<(Value, Value)> = ["AMZN order 1", "amzn order 2"]
 			.iter()
 			.map(|notes| {
-				let row = by_notes(rows, notes);
+				let row = by_notes(rows, &checking, notes);
 				let leg = rows
 					.iter()
 					.find(|r| r["id"] == row["transferred_id"])
