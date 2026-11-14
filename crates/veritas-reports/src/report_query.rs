@@ -282,7 +282,19 @@ pub fn report_rows(
 	end: &str,
 ) -> Result<(Vec<QueryRow>, Vec<QueryRow>), CoreError> {
 	let filter = TransactionFilter::new(&report.conditions, report.conditions_or)?;
-	let (low, high) = (bound(start, report.interval)?, bound(end, report.interval)?);
+	query_rows(budget, &filter, report.interval, start, end)
+}
+
+/// `makeQuery` for a filter and dates given directly, as the spending card
+/// runs it.
+pub(crate) fn query_rows(
+	budget: &BudgetData,
+	filter: &TransactionFilter,
+	interval: Interval,
+	start: &str,
+	end: &str,
+) -> Result<(Vec<QueryRow>, Vec<QueryRow>), CoreError> {
+	let (low, high) = (bound(start, interval)?, bound(end, interval)?);
 	let mut assets: BTreeMap<GroupKey, (Fields, Money)> = BTreeMap::new();
 	let mut debts: BTreeMap<GroupKey, (Fields, Money)> = BTreeMap::new();
 	for transaction in budget.transactions.values() {
@@ -290,7 +302,7 @@ pub fn report_rows(
 			continue;
 		}
 		let date = transaction.date.naive();
-		let unit = date_in_unit(date, report.interval);
+		let unit = date_in_unit(date, interval);
 		if unit < low || unit > high || transaction.amount == Money::ZERO {
 			continue;
 		}
@@ -299,7 +311,7 @@ pub fn report_rows(
 		}
 		let row = fields(budget, transaction);
 		let key = (
-			interval_key(date, report.interval),
+			interval_key(date, interval),
 			row.account,
 			row.payee,
 			row.category,

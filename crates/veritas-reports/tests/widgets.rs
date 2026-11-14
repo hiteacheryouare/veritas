@@ -8,13 +8,13 @@ mod support;
 
 use chrono::NaiveDate;
 use serde_json::{Value, json};
-use support::actual::{fixture, oracle};
+use support::actual::{fixture, oracle, tracking_fixture};
 use veritas_domain::BudgetData;
 use veritas_domain::CivilDate;
 use veritas_engine::EnvelopeSheet;
 use veritas_reports::{
-	Granularity, Json, Trend, age_of_money, budget_analysis, calendar, cash_flow_card, crossover,
-	summary,
+	Granularity, Json, Spending, Trend, age_of_money, budget_analysis, calendar, cash_flow_card,
+	crossover, spending, summary,
 };
 
 const ORACLE_TODAY: &str = "2026-11-09";
@@ -514,5 +514,209 @@ fn d73_cash_flow_card_matches_actual() {
 		assert_eq!(expected["end"], ours.range.end.as_str(), "{value} end");
 		assert_eq!(expected["income"], ours.income.minor(), "{value} income");
 		assert_eq!(expected["expense"], ours.expense.minor(), "{value} expense");
+	}
+}
+
+fn money(value: Option<veritas_domain::Money>) -> Value {
+	value.map_or(Value::Null, |money| json!(money.minor()))
+}
+
+fn spending_matches(ours: &Spending, expected: &Value, what: &str) {
+	assert!(expected.get("error").is_none(), "{what}: {expected}");
+	assert_eq!(
+		expected["compare"],
+		ours.compare.to_string(),
+		"{what} compare"
+	);
+	assert_eq!(
+		expected["compareTo"],
+		ours.compare_to.to_string(),
+		"{what} compareTo"
+	);
+	assert_eq!(expected["difference"], ours.difference, "{what} difference");
+	let data = &expected["data"];
+	let (first, last) = ours
+		.average_months
+		.map(|(first, last)| (json!(first.to_string()), json!(last.to_string())))
+		.unwrap_or_default();
+	assert_eq!(data["averageRange"]["startMonth"], first, "{what} average");
+	assert_eq!(data["averageRange"]["endMonth"], last, "{what} average");
+	assert_eq!(data["totalAssets"], ours.total_assets.minor(), "{what}");
+	assert_eq!(data["totalDebts"], ours.total_debts.minor(), "{what}");
+	let days: Vec<Value> = ours
+		.days
+		.iter()
+		.map(|day| {
+			json!({
+				"day": format!("{:02}", day.day),
+				"compare": money(day.compare),
+				"compareTo": money(day.compare_to),
+				"average": day.average.minor(),
+				"budget": number(day.budget),
+			})
+		})
+		.collect();
+	let theirs: Vec<Value> = data["intervalData"]
+		.as_array()
+		.unwrap()
+		.iter()
+		.map(|day| {
+			json!({
+				"day": day["day"],
+				"compare": day["compare"],
+				"compareTo": day["compareTo"],
+				"average": day["average"],
+				"budget": day["budget"],
+			})
+		})
+		.collect();
+	assert_eq!(days, theirs, "{what}");
+}
+
+#[test]
+fn d73_spending_card_matches_actual() {
+	let budget = fixture("all-features");
+	let groceries = category(&budget, "Groceries");
+	let dining = category(&budget, "Dining Out");
+	let everyday = group(&budget, "Everyday");
+	let mut metas = vec![
+		json!(null),
+		json!({"name": "only a name"}),
+		json!({"mode": null, "isLive": null}),
+		json!({"compare": "2026-10", "compareTo": "2026-10", "isLive": false}),
+		json!({"compare": "2026-09", "isLive": false}),
+		json!({"compare": "2026-03", "compareTo": "2025-12", "isLive": false}),
+		json!({"compare": "2026-03", "compareTo": "2025-12"}),
+		json!({"compare": "2026-02", "compareTo": "2026-12", "isLive": false}),
+		json!({"compare": "2027-01", "compareTo": "2026-10", "isLive": false}),
+		json!({"compare": "2026-08", "compareTo": "2026-04", "isLive": false}),
+		json!({"compare": "2026-08", "compareTo": "2026-07", "isLive": false, "averageRange": {"mode": "last-n-months", "months": 12}}),
+		json!({"mode": "budget", "compare": "2026-10", "isLive": null}),
+		json!({"mode": "average", "compare": "2026-10", "isLive": null}),
+	];
+	for mode in ["single-month", "budget", "average"] {
+		for live in [json!(true), json!(false)] {
+			for range in [
+				json!(null),
+				json!({"mode": "last-n-months", "months": 3}),
+				json!({"mode": "last-n-months", "months": 6}),
+				json!({"mode": "last-n-months", "months": 12}),
+				json!({"mode": "last-n-months", "months": 5}),
+				json!({"mode": "year-to-date"}),
+				json!({"mode": "all-time"}),
+				json!({"mode": "someday"}),
+			] {
+				metas.push(json!({"mode": mode, "isLive": live, "compare": "2026-10", "compareTo": "2026-08", "averageRange": range}));
+			}
+		}
+	}
+	metas.push(json!({"mode": "average", "isLive": false, "compare": "2026-01", "averageRange": {"mode": "year-to-date"}}));
+	metas.push(json!({"mode": "average", "isLive": false, "compare": "2020-01", "averageRange": {"mode": "all-time"}}));
+	for (conditions, op) in [
+		(
+			json!([{"field": "category", "op": "is", "value": groceries, "type": "id"}]),
+			"and",
+		),
+		(
+			json!([{"field": "category", "op": "oneOf", "value": [groceries, dining], "type": "id"}]),
+			"and",
+		),
+		(
+			json!([{"field": "category", "op": "notOneOf", "value": [groceries], "type": "id"}]),
+			"and",
+		),
+		(
+			json!([{"field": "category_group", "op": "is", "value": everyday, "type": "id"}, {"field": "category", "op": "isNot", "value": dining, "type": "id"}]),
+			"and",
+		),
+		(
+			json!([{"field": "category_group", "op": "contains", "value": "BILL", "type": "id"}, {"field": "category", "op": "is", "value": groceries, "type": "id"}]),
+			"or",
+		),
+		(
+			json!([{"field": "category", "op": "doesNotContain", "value": "fund", "type": "id"}]),
+			"and",
+		),
+		(
+			json!([{"field": "category", "op": "matches", "value": "^g", "type": "id"}]),
+			"and",
+		),
+		(
+			json!([{"field": "category", "op": "matches", "value": "x".repeat(300), "type": "id"}, {"field": "category", "op": "is", "value": dining, "type": "id"}]),
+			"or",
+		),
+		(
+			json!([{"field": "amount", "op": "lt", "value": -5000, "type": "number"}]),
+			"and",
+		),
+		(
+			json!([{"field": "amount", "op": "lt", "value": -5000, "type": "number"}, {"field": "category", "op": "is", "value": groceries, "type": "id"}]),
+			"or",
+		),
+		(
+			json!([{"field": "category", "op": "is", "value": null, "type": "id"}]),
+			"and",
+		),
+		(
+			json!([{"field": "notes", "op": "contains", "value": "a", "type": "string"}, {"field": "category", "op": "is", "value": dining, "type": "id", "customName": "named"}]),
+			"and",
+		),
+	] {
+		for mode in ["single-month", "budget"] {
+			metas.push(json!({"mode": mode, "isLive": false, "compare": "2026-10", "conditions": conditions, "conditionsOp": op}));
+		}
+	}
+	let cases: Vec<(String, &str, Value)> = metas
+		.into_iter()
+		.enumerate()
+		.map(|(index, meta)| (format!("spending-{index}"), "spending-card", meta))
+		.collect();
+	let ours: Vec<_> = cases
+		.iter()
+		.map(|(_, _, value)| spending(&budget, meta(value).as_ref(), today()).unwrap())
+		.collect();
+	assert!(ours.iter().any(|card| card.difference != 0));
+	let Some(theirs) = theirs("all-features", &cases, "0") else {
+		return;
+	};
+	for ((id, _, value), ours) in cases.iter().zip(&ours) {
+		spending_matches(ours, &theirs[id.as_str()], &value.to_string());
+	}
+}
+
+#[test]
+fn d73_spending_card_reads_a_tracking_budget() {
+	let budget = tracking_fixture("all-features");
+	assert_eq!(budget.budget_type, veritas_domain::BudgetType::Tracking);
+	let groceries = category(&budget, "Groceries");
+	let metas = [
+		json!({"mode": "budget", "isLive": false, "compare": "2026-10"}),
+		json!({"mode": "budget", "isLive": false, "compare": "2026-10", "conditions": [{"field": "category", "op": "is", "value": groceries, "type": "id"}]}),
+		json!({"mode": "budget", "isLive": false, "compare": "2026-09"}),
+	];
+	let ours: Vec<_> = metas
+		.iter()
+		.map(|value| spending(&budget, meta(value).as_ref(), today()).unwrap())
+		.collect();
+	assert!(ours[0].days[27].budget < 0.0);
+	let requests: Vec<Value> = metas
+		.iter()
+		.enumerate()
+		.map(|(index, meta)| json!({"id": format!("tracking-{index}"), "type": "spending-card", "meta": meta, "budgetType": "tracking"}))
+		.collect();
+	let Some(theirs) = oracle(
+		"widgets",
+		"all-features",
+		&Value::Array(requests),
+		ORACLE_TODAY,
+	) else {
+		return;
+	};
+	for (index, (value, ours)) in metas.iter().zip(&ours).enumerate() {
+		spending_matches(
+			ours,
+			&theirs[format!("tracking-{index}").as_str()],
+			&value.to_string(),
+		);
 	}
 }

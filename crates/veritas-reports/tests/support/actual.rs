@@ -64,6 +64,16 @@ pub fn int(row: &rusqlite::Row, name: &str) -> Option<i64> {
 /// A synthetic fixture loaded the way the app loads it, plus the report and
 /// dashboard tables, which veritas-store does not read yet.
 pub fn fixture(name: &str) -> BudgetData {
+	load_fixture(name, false)
+}
+
+/// The fixture with its `budgetType` preference switched to tracking before
+/// it loads, so its budget cells come from `reflect_budgets`.
+pub fn tracking_fixture(name: &str) -> BudgetData {
+	load_fixture(name, true)
+}
+
+fn load_fixture(name: &str, tracking: bool) -> BudgetData {
 	let scratch = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!(
 		"reports-{name}-{}-{}",
 		std::process::id(),
@@ -77,6 +87,15 @@ pub fn fixture(name: &str) -> BudgetData {
 	.unwrap() else {
 		panic!("{name} imports cleanly");
 	};
+	if tracking {
+		rusqlite::Connection::open(&imported.db_path)
+			.unwrap()
+			.execute(
+				"UPDATE preferences SET value = 'tracking' WHERE id = 'budgetType'",
+				[],
+			)
+			.unwrap();
+	}
 	let mut store =
 		veritas_store::Store::open(&imported.db_path, veritas_store::Access::ReadWrite).unwrap();
 	store.adopt().unwrap();

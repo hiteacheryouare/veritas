@@ -7,6 +7,7 @@ mod budget_analysis;
 mod calendar;
 mod cash_flow;
 mod crossover;
+mod spending;
 mod summary;
 mod time_frame;
 
@@ -15,6 +16,7 @@ pub use budget_analysis::{BudgetAnalysis, BudgetAnalysisMonth, budget_analysis};
 pub use calendar::{CalendarDay, CalendarMonth, calendar};
 pub use cash_flow::{CashFlowCard, cash_flow_card};
 pub use crossover::{Crossover, CrossoverPoint, crossover};
+pub use spending::{Spending, SpendingDay, SpendingMode, spending};
 pub use summary::{SummaryContent, SummaryData, summary};
 pub use time_frame::{TimeRange, calculate_time_range};
 

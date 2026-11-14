@@ -9,6 +9,7 @@ export interface WidgetRequest {
 	type: string;
 	meta: any;
 	firstDayOfWeekIdx?: string;
+	budgetType?: string;
 }
 
 const REPORTS = 'packages/desktop-client/src/components/reports';
@@ -106,6 +107,35 @@ export const widgetData = async ({ internal }: ActualSession, requests: WidgetRe
 				income: await sum(makeQuery().filter({ amount: { $gt: 0 } })),
 				expense: await sum(makeQuery().filter({ amount: { $lt: 0 } }))
 			};
+		},
+		// SpendingCard.tsx's range, spreadsheet and headline difference. A request's
+		// budgetType stands in for the synced pref the card reads.
+		'spending-card': async ({ meta, budgetType }) => {
+			const { createSpendingSpreadsheet } = await loadSource(`${REPORTS}/spreadsheets/spending-spreadsheet.ts`);
+			const { normalizeSpendingAverageRange } = await loadSource(`${REPORTS}/spendingAverageRange.ts`);
+			const stored = await internal.db.first("SELECT value FROM preferences WHERE id = 'budgetType'");
+			const type = (budgetType ?? stored?.value) === 'tracking' ? 'tracking' : 'envelope';
+			const mode = meta?.mode ?? 'single-month';
+			const [compare, compareTo] = ranges.calculateSpendingReportTimeRange(meta ?? {});
+			const data: any = await run(
+				createSpendingSpreadsheet({
+					conditions: meta?.conditions,
+					conditionsOp: meta?.conditionsOp,
+					compare,
+					compareTo,
+					averageRange: normalizeSpendingAverageRange(meta?.averageRange),
+					budgetType: type
+				})
+			);
+			const selection = mode === 'single-month' ? 'compareTo' : mode;
+			const todayDay =
+				compare !== months.currentMonth()
+					? 27
+					: months.getDay(months.currentDay()) - 1 >= 28
+						? 27
+						: months.getDay(months.currentDay()) - 1;
+			const difference = data && Math.round(data.intervalData[todayDay][selection] - data.intervalData[todayDay].compare);
+			return { compare, compareTo, difference, data };
 		},
 		'calendar-card': async ({ meta, firstDayOfWeekIdx }) => {
 			const { calendarSpreadsheet } = await loadSource(`${REPORTS}/spreadsheets/calendar-spreadsheet.ts`);
