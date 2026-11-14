@@ -83,6 +83,8 @@ public final class AmountFieldModel {
 			return amount
 		} catch FfiError.Overflow {
 			problem = "That amount is too large."
+		} catch where text.trimmingCharacters(in: .whitespaces).isEmpty {
+			problem = "Enter an amount or press Esc."
 		} catch {
 			problem = "Can't read \(text) as an amount. Fix it or press Esc."
 		}

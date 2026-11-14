@@ -29,6 +29,13 @@ struct BudgetScreenTests {
 		#expect(field.original == 41_200)
 	}
 
+	@Test func anEmptyAmountAsksForOne() async {
+		let field = AmountFieldModel(amount: 41_200, style: .commaDot, reader: CoreAmountReader(budgetDecimalPlaces: 2))
+		field.type("")
+		#expect(await field.commit() == nil)
+		#expect(field.problem == "Enter an amount or press Esc.")
+	}
+
 	@Test func anExpressionPreviewsWhatReturnWouldSet() async throws {
 		let field = AmountFieldModel(amount: 41_200, style: .commaDot, reader: CoreAmountReader())
 		field.type("+")
