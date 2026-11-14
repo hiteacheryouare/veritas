@@ -12,6 +12,7 @@ import { arithmeticVectors } from './arithmeticVectors.ts';
 import { loadArithmetic } from './reference.ts';
 import { reportRows } from './reportRows.ts';
 import { widgetData } from './widgets.ts';
+import { dashboardReadback } from './dashboards.ts';
 import { fixtureSpecs } from './specs/index.ts';
 
 const USAGE = `Usage:
@@ -23,6 +24,7 @@ const USAGE = `Usage:
   node src/main.ts arithmetic-vectors [--out <file>]
   node src/main.ts report-rows <zip> <requests.json> [--out <file>]
   node src/main.ts widgets <zip> <requests.json> [--out <file>]
+  node src/main.ts dashboards <zip> [--out <file>]
 
 eval, arithmetic-vectors and widgets run Actual's own code from the pinned source in
 reference/actual (or ACTUAL_REFERENCE_DIR), because the bundle doesn't ship it.
@@ -213,6 +215,12 @@ const main = async () => {
 		const data = await withActual(determinism, async session => {
 			await session.api.importBudget(readFileSync(args[0]));
 			return widgetData(session, requests);
+		});
+		writeCanonicalTo(data, values.out);
+	} else if (command === 'dashboards' && args.length === 1) {
+		const data = await withActual(determinism, async session => {
+			await session.api.importBudget(readFileSync(args[0]));
+			return dashboardReadback(session);
 		});
 		writeCanonicalTo(data, values.out);
 	} else if (command === 'generate' && args.length === 1) {
