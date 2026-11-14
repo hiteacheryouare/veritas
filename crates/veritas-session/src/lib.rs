@@ -15,6 +15,7 @@ mod overview;
 pub mod payees;
 pub mod register;
 mod retention;
+pub mod rules;
 mod session;
 mod shared;
 mod sheet;

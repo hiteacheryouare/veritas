@@ -230,7 +230,7 @@ pub fn insert(
 	write_new(data, draft.id.clone(), &ruled(draft), book, now_ms)
 }
 
-fn new_payee(id: &PayeeId, name: &str) -> Payee {
+pub(crate) fn new_payee(id: &PayeeId, name: &str) -> Payee {
 	Payee {
 		id: id.clone(),
 		name: name.to_owned(),
@@ -445,7 +445,7 @@ fn remove_counterpart(data: &BudgetData, counterpart: &TransactionId) -> Option<
 
 /// `onUpdate` for one row as it now stands (transfer.ts:154-172). `row` is
 /// updated in place; the counterpart's rows are returned.
-fn sync_transfer(
+pub(crate) fn sync_transfer(
 	data: &BudgetData,
 	row: &mut Transaction,
 	book: Option<&RuleBook>,
