@@ -169,6 +169,23 @@ pub struct AccountMeta {
 	pub lender: Option<String>,
 }
 
+/// A `schedules_json_paths` row: JSON paths such as `$[2]` into the rule's
+/// conditions, which `v_schedules` reads the payee, account, amount and date through.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct ScheduleJsonPaths {
+	pub payee: Option<String>,
+	pub account: Option<String>,
+	pub amount: Option<String>,
+	pub date: Option<String>,
+}
+
+/// Pause and End are both Actual's Complete; this only says which one the
+/// bill screen shows. It never changes what posts.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct ScheduleMeta {
+	pub paused: bool,
+}
+
 /// docs/finance/classification.md CLS-5: a reconciliation adjustment Veritas made.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct TransactionMeta {
@@ -215,6 +232,9 @@ pub struct DashboardPage {
 	pub id: DashboardPageId,
 	pub name: Option<String>,
 	pub tombstone: bool,
+	/// The row's SQLite rowid, so creation order. Actual's page query has no
+	/// `ORDER BY`, so it lists pages in this order and opens the first.
+	pub position: i64,
 }
 
 /// One `dashboard` row. `kind` is Actual's widget `type`, kept as text so
@@ -257,6 +277,12 @@ pub struct Goal {
 	pub closed_month: Option<YearMonth>,
 	pub released_to: Option<CategoryId>,
 	pub released: Option<Money>,
+	/// GOAL-6's dismiss (D72): activity through this month, totalling
+	/// `activity_seen_total`, was seen, and the close month's ending available
+	/// was `close_month_dismissed_available`.
+	pub activity_seen_through: Option<YearMonth>,
+	pub activity_seen_total: Option<Money>,
+	pub close_month_dismissed_available: Option<Money>,
 }
 
 /// Everything Veritas models about one budget. Collections are keyed by id;
@@ -289,6 +315,10 @@ pub struct BudgetData {
 	pub transaction_meta: BTreeMap<TransactionId, TransactionMeta>,
 	/// `veritas_tax_tag`: Actual tag name (without `#`) to TAX-2 bucket id.
 	pub tax_tags: BTreeMap<String, String>,
+	/// `schedules_json_paths`: where each schedule condition sits in its rule.
+	pub schedule_json_paths: BTreeMap<ScheduleId, ScheduleJsonPaths>,
+	/// `veritas_schedule_meta`: how Veritas labels a completed bill.
+	pub schedule_meta: BTreeMap<ScheduleId, ScheduleMeta>,
 	pub format: FormatPrefs,
 	pub goals: BTreeMap<GoalId, Goal>,
 	pub custom_reports: BTreeMap<CustomReportId, CustomReportRow>,
@@ -319,6 +349,8 @@ impl BudgetData {
 			account_meta: BTreeMap::new(),
 			transaction_meta: BTreeMap::new(),
 			tax_tags: BTreeMap::new(),
+			schedule_json_paths: BTreeMap::new(),
+			schedule_meta: BTreeMap::new(),
 			format: FormatPrefs::default(),
 			goals: BTreeMap::new(),
 			custom_reports: BTreeMap::new(),

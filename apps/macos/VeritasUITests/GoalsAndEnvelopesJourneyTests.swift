@@ -51,7 +51,7 @@ final class GoalsAndEnvelopesJourneyTests: XCTestCase {
 		let japan = app.descendants(matching: .any)["goal.japan"]
 		XCTAssertTrue(japan.waitForExistence(timeout: 5))
 		japan.rightClick()
-		app.menuItems["Close Goal…"].click()
+		contextItem(app, "Close Goal…")?.click()
 		let later = app.checkBoxes["closeGoal.alsoMoveLater"]
 		XCTAssertTrue(later.waitForExistence(timeout: 5))
 		XCTAssertEqual(later.value as? Int, 0, "unchecked by default")
@@ -67,12 +67,12 @@ final class GoalsAndEnvelopesJourneyTests: XCTestCase {
 		let vet = app.descendants(matching: .any)["goal.vet"]
 		XCTAssertTrue(vet.waitForExistence(timeout: 5))
 		vet.rightClick()
-		XCTAssertFalse(app.menuItems["Change Target…"].exists, "a closed goal is reopened first")
-		app.menuItems["Reopen Goal"].click()
+		XCTAssertNil(contextItem(app, "Change Target…"), "a closed goal is reopened first")
+		contextItem(app, "Reopen Goal")?.click()
 		XCTAssertTrue(waitUntil { app.descendants(matching: .any)["goal.vet"].label.contains("Closed") == false })
 		let laptop = app.descendants(matching: .any)["goal.laptop"]
 		laptop.rightClick()
-		app.menuItems["Change Target…"].click()
+		contextItem(app, "Change Target…")?.click()
 		let sheet = app.descendants(matching: .any)["sheet.retargetGoal"]
 		XCTAssertTrue(sheet.waitForExistence(timeout: 5))
 		let target = sheet.textFields["amountField"]
@@ -258,6 +258,13 @@ final class GoalsAndEnvelopesJourneyTests: XCTestCase {
 		let app = XCUIApplication.veritas(stub: "open")
 		XCTAssertTrue(app.buttons["envelope.groceries.budgeted"].waitForExistence(timeout: 10))
 		return app
+	}
+
+	/// The Goal menu repeats every context-menu item, so a title alone matches
+	/// two; the open context menu's item is the one on screen.
+	@MainActor
+	private func contextItem(_ app: XCUIApplication, _ title: String) -> XCUIElement? {
+		app.menuItems.matching(NSPredicate(format: "title == %@", title)).allElementsBoundByIndex.first { $0.isHittable }
 	}
 
 	@MainActor

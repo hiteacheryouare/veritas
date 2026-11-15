@@ -44,7 +44,8 @@ final class CoreBudgetSession: BudgetSession {
 
 	func maintain() async throws {
 		let session = session
-		_ = try await Core.run { try session.maintain() }
+		let today = WorkspaceModel.today()
+		_ = try await Core.run { try session.maintain(today: today) }
 	}
 
 	/// In the sandbox the core writes only in the app's own folders (contract v2), so

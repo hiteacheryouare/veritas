@@ -256,7 +256,7 @@ public final class WorkspaceModel {
 	}
 
 	/// The local civil date (PLAN §9 #14): time zones never shift it.
-	public static func today(_ now: Date = .now, calendar: Calendar = .current) -> String {
+	public nonisolated static func today(_ now: Date = .now, calendar: Calendar = .current) -> String {
 		let parts = calendar.dateComponents([.year, .month, .day], from: now)
 		return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 1, parts.day ?? 1)
 	}
@@ -415,6 +415,11 @@ public final class WorkspaceModel {
 				self?.present(error)
 			}
 			self.settings = settings
+			do {
+				try await opened.maintain()
+			} catch {
+				present(error)
+			}
 			startMaintenance(of: opened)
 			await settings.connectBackupFolder()
 			await settings.backUpIfDue()

@@ -150,6 +150,9 @@ fn reloading_after_every_kind_of_change_matches_memory_r_rel_1() {
 				closed_month: None,
 				released_to: None,
 				released: None,
+				activity_seen_through: None,
+				activity_seen_total: None,
+				close_month_dismissed_available: None,
 			}),
 		],
 	)
@@ -247,6 +250,9 @@ fn variant(change: &Change) -> &'static str {
 		Change::Transaction(_) => "Transaction",
 		Change::Rule(_) => "Rule",
 		Change::Schedule(_) => "Schedule",
+		Change::NextDateReset(_) => "NextDateReset",
+		Change::ScheduleJsonPaths(_) => "ScheduleJsonPaths",
+		Change::ScheduleMeta(_) => "ScheduleMeta",
 		Change::Tag(_) => "Tag",
 		Change::BudgetCell(_) => "BudgetCell",
 		Change::Hold(_) => "Hold",
@@ -264,7 +270,7 @@ fn variant(change: &Change) -> &'static str {
 	}
 }
 
-const EVERY_VARIANT: [&str; 22] = [
+const EVERY_VARIANT: [&str; 25] = [
 	"Account",
 	"AccountGroup",
 	"CategoryGroup",
@@ -273,6 +279,9 @@ const EVERY_VARIANT: [&str; 22] = [
 	"Transaction",
 	"Rule",
 	"Schedule",
+	"NextDateReset",
+	"ScheduleJsonPaths",
+	"ScheduleMeta",
 	"Tag",
 	"BudgetCell",
 	"Hold",
@@ -396,6 +405,23 @@ fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
 		}),
 		Row::Rule(rule.clone()),
 		Row::Schedule(schedule.clone()),
+		Row::NextDateReset(veritas_domain::NextDateReset {
+			schedule: schedule.id.clone(),
+			date: Some(CivilDate::new(2027, 1, 1).unwrap()),
+		}),
+		Row::ScheduleJsonPaths(veritas_domain::ScheduleJsonPathsRow {
+			schedule: schedule.id.clone(),
+			paths: veritas_domain::ScheduleJsonPaths {
+				payee: Some("$[0]".to_owned()),
+				account: None,
+				amount: Some("$[2]".to_owned()),
+				date: Some("$[1]".to_owned()),
+			},
+		}),
+		Row::ScheduleMeta(veritas_domain::ScheduleMetaRow {
+			schedule: schedule.id.clone(),
+			meta: veritas_domain::ScheduleMeta { paused: true },
+		}),
 		Row::Transaction(transaction.clone()),
 		Row::Tag(Tag {
 			id: TagId::new("v-tag"),
@@ -459,6 +485,9 @@ fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
 			closed_month: None,
 			released_to: None,
 			released: None,
+			activity_seen_through: None,
+			activity_seen_total: None,
+			close_month_dismissed_available: None,
 		}),
 		Row::CustomReport(CustomReportRow {
 			id: CustomReportId::new("v-report"),
@@ -491,6 +520,13 @@ fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
 			id: DashboardPageId::new("v-page"),
 			name: Some("Overview".to_owned()),
 			tombstone: false,
+			position: data
+				.dashboard_pages
+				.values()
+				.map(|page| page.position)
+				.max()
+				.unwrap_or_default()
+				+ 1,
 		}),
 		Row::Widget(Widget {
 			id: WidgetId::new("v-widget"),
@@ -536,6 +572,18 @@ fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
 	let edited: Vec<Row> = created
 		.into_iter()
 		.map(|row| match row {
+			Row::NextDateReset(row) => Row::NextDateReset(veritas_domain::NextDateReset {
+				date: Some(CivilDate::new(2027, 2, 1).unwrap()),
+				..row
+			}),
+			Row::ScheduleJsonPaths(mut row) => {
+				row.paths.account = Some("$[3]".to_owned());
+				Row::ScheduleJsonPaths(row)
+			}
+			Row::ScheduleMeta(row) => Row::ScheduleMeta(veritas_domain::ScheduleMetaRow {
+				meta: veritas_domain::ScheduleMeta { paused: false },
+				..row
+			}),
 			Row::AccountGroup(row) => Row::AccountGroup(AccountGroup {
 				name: "Brokerage".to_owned(),
 				..row

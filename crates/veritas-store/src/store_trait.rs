@@ -32,6 +32,21 @@ impl StoreTransaction for Writer<'_> {
 			Change::Schedule(delta) => {
 				self.put_schedule(delta.before.as_ref(), delta.after.as_ref())
 			}
+			Change::NextDateReset(delta) => self.put_next_date_reset(
+				&delta.key,
+				delta.before.as_ref().map(|row| row.date),
+				delta.after.as_ref().map(|row| row.date),
+			),
+			Change::ScheduleJsonPaths(delta) => self.put_schedule_json_paths(
+				&delta.key,
+				delta.before.as_ref().map(|row| &row.paths),
+				delta.after.as_ref().map(|row| &row.paths),
+			),
+			Change::ScheduleMeta(delta) => self.put_schedule_meta(
+				&delta.key,
+				delta.before.as_ref().map(|row| &row.meta),
+				delta.after.as_ref().map(|row| &row.meta),
+			),
 			Change::Tag(delta) => self.put_tag(delta.before.as_ref(), delta.after.as_ref()),
 			Change::BudgetCell(delta) => {
 				self.put_budget_cell(delta.before.as_ref(), delta.after.as_ref())

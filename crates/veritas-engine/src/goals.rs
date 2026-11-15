@@ -122,6 +122,10 @@ pub fn reopen(goal: &Goal, available: Money) -> Goal {
 		} else {
 			GoalStatus::Active
 		},
+		// GOAL-6 (D72): a reopened goal forgets what its notice dismissed.
+		activity_seen_through: None,
+		activity_seen_total: None,
+		close_month_dismissed_available: None,
 		..goal.clone()
 	}
 }

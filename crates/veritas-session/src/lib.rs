@@ -3,6 +3,7 @@
 pub mod accounts;
 mod background;
 mod backup;
+pub mod bills;
 mod budgets;
 mod bus;
 mod cancel;
@@ -15,6 +16,7 @@ mod overview;
 pub mod payees;
 pub mod register;
 mod retention;
+pub mod rules;
 mod session;
 mod shared;
 mod sheet;

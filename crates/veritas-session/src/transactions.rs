@@ -167,6 +167,7 @@ fn ruled(draft: &Draft) -> RuleTransaction {
 				payee: line.payee.clone().or_else(|| draft.payee.clone()),
 				category: line.category.clone(),
 				notes: line.notes.clone(),
+				schedule: None,
 			})
 			.collect(),
 		is_child: false,
@@ -229,7 +230,18 @@ pub fn insert(
 	write_new(data, draft.id.clone(), &ruled(draft), book, now_ms)
 }
 
-fn new_payee(id: &PayeeId, name: &str) -> Payee {
+/// A row a schedule posts, already through its rules, written with its
+/// transfer leg as `addTransactions` writes it (`schedules/app.ts:589-625`).
+pub fn post(
+	data: &BudgetData,
+	added: &RuleTransaction,
+	book: &RuleBook,
+	now_ms: f64,
+) -> Result<Planned, CoreError> {
+	write_new(data, None, added, Some(book), now_ms)
+}
+
+pub(crate) fn new_payee(id: &PayeeId, name: &str) -> Payee {
 	Payee {
 		id: id.clone(),
 		name: name.to_owned(),
@@ -318,7 +330,7 @@ fn write_new(
 			reconciled,
 			split: SplitRole::Child { parent: id.clone() },
 			transfer: None,
-			schedule: None,
+			schedule: line.schedule.clone(),
 			starting_balance: false,
 			sort_order: -((n + 1) as f64),
 			tombstone: transaction.deleted,
@@ -337,6 +349,7 @@ fn write_new(
 			};
 			let (other, note) = counterpart_row(data, &leg.mirror, &source.id, book, now_ms);
 			source.transfer = Some(other.id.clone());
+			link_back(source, &other);
 			if let Some(note) = note {
 				extra.push(meta(&other.id, &note));
 			}
@@ -398,6 +411,14 @@ fn counterpart_row(
 	)
 }
 
+/// `Transfers::link_back` on a stored row: the leg's schedule, when it has
+/// one, goes onto the row or line it came from (transfer.ts:81-85).
+fn link_back(source: &mut Transaction, leg: &Transaction) {
+	if leg.schedule.is_some() {
+		source.schedule = leg.schedule.clone();
+	}
+}
+
 fn as_ruled(row: &Transaction) -> RuleTransaction {
 	RuleTransaction {
 		account: row.account.clone(),
@@ -438,7 +459,7 @@ fn remove_counterpart(data: &BudgetData, counterpart: &TransactionId) -> Option<
 
 /// `onUpdate` for one row as it now stands (transfer.ts:154-172). `row` is
 /// updated in place; the counterpart's rows are returned.
-fn sync_transfer(
+pub(crate) fn sync_transfer(
 	data: &BudgetData,
 	row: &mut Transaction,
 	book: Option<&RuleBook>,
@@ -459,6 +480,7 @@ fn sync_transfer(
 			if let Some(leg) = legs.into_iter().next() {
 				let (other, note) = counterpart_row(data, &leg.mirror, &row.id, book, now_ms);
 				row.transfer = Some(other.id.clone());
+				link_back(row, &other);
 				if let Some(note) = note {
 					rows.push(meta(&other.id, &note));
 				}

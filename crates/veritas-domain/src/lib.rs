@@ -13,8 +13,9 @@ mod scenario;
 mod store;
 
 pub use change::{
-	AccountMetaRow, CategoryMapping, CategoryMetaRow, Change, Delta, EntityRef, Hold, Note,
-	PayeeMapping, Record, Retired, Row, TaxTag, TransactionMetaRow,
+	AccountMetaRow, CategoryMapping, CategoryMetaRow, Change, Delta, EntityRef, Hold,
+	NextDateReset, Note, PayeeMapping, Record, Retired, Row, ScheduleJsonPathsRow, ScheduleMetaRow,
+	TaxTag, TransactionMetaRow,
 };
 pub use currency::{CURRENCIES, Currency, currency};
 pub use date::{CivilDate, YearMonth};
