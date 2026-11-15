@@ -11,6 +11,7 @@ use veritas_domain::{
 	Row, Rule, RuleId, RuleStage, SplitRole, Transaction, TransactionId, TransactionMeta,
 	TransactionMetaRow,
 };
+use veritas_engine::MAX_SAFE_MINOR;
 use veritas_rules::{
 	BudgetPayees, RuleBook, RuleTransaction, SplitLine, Transfers, counterpart, manual_entry,
 	transfers,
@@ -122,25 +123,44 @@ pub fn children<'a>(data: &'a BudgetData, parent: &TransactionId) -> Vec<&'a Tra
 	lines
 }
 
+/// An amount Actual can load: within its MAX_SAFE_NUMBER, 2^51 - 1 minor
+/// units (loot-core/src/shared/util.ts:426), either sign.
+pub fn storable(amount: Money) -> Result<Money, CoreError> {
+	if amount.minor().unsigned_abs() > MAX_SAFE_MINOR.unsigned_abs() {
+		return Err(CoreError::Overflow);
+	}
+	Ok(amount)
+}
+
 fn check(data: &BudgetData, draft: &Draft) -> Result<(), CoreError> {
-	let account = data
-		.accounts
+	check_stored(data, draft)?;
+	if draft.splits.is_empty() {
+		return Ok(());
+	}
+	let total = storable(Money::checked_sum(
+		draft.splits.iter().map(|line| line.amount),
+	)?)?;
+	if total != draft.amount {
+		return Err(CoreError::Invalid(format!(
+			"The split lines add up to {total}, not {}. Make them match before saving.",
+			draft.amount
+		)));
+	}
+	Ok(())
+}
+
+/// The account exists and every amount is storable; the lines needn't add up.
+fn check_stored(data: &BudgetData, draft: &Draft) -> Result<(), CoreError> {
+	data.accounts
 		.get(&draft.account)
 		.filter(|account| !account.tombstone)
 		.ok_or_else(|| CoreError::NotFound {
 			entity: "account",
 			id: draft.account.to_string(),
 		})?;
-	let _ = account;
-	if draft.splits.is_empty() {
-		return Ok(());
-	}
-	let total = Money::checked_sum(draft.splits.iter().map(|line| line.amount))?;
-	if total != draft.amount {
-		return Err(CoreError::Invalid(format!(
-			"The split lines add up to {total}, not {}. Make them match before saving.",
-			draft.amount
-		)));
+	storable(draft.amount)?;
+	for line in &draft.splits {
+		storable(line.amount)?;
 	}
 	Ok(())
 }
@@ -464,13 +484,13 @@ pub(crate) fn sync_transfer(
 	row: &mut Transaction,
 	book: Option<&RuleBook>,
 	now_ms: f64,
-) -> Vec<Row> {
+) -> Result<Vec<Row>, CoreError> {
 	let mut rows = Vec::new();
 	if row.split == SplitRole::Parent {
 		if let Some(counterpart) = row.transfer.take() {
 			rows.extend(remove_counterpart(data, &counterpart));
 		}
-		return rows;
+		return Ok(rows);
 	}
 	let to = transfer_account(data, row.payee.as_ref());
 	match (to, row.transfer.clone()) {
@@ -497,7 +517,7 @@ pub(crate) fn sync_transfer(
 				.get(&counterpart)
 				.filter(|o| alive(data, o))
 			else {
-				return rows;
+				return Ok(rows);
 			};
 			let same_side = off_budget(data, &row.account) == off_budget(data, &to);
 			if same_side {
@@ -507,17 +527,66 @@ pub(crate) fn sync_transfer(
 				account: to,
 				payee: transfer_payee(data, &row.account),
 				notes: row.notes.clone(),
-				amount: Money::from_minor(-row.amount.minor()),
+				amount: row.amount.checked_neg()?,
 				schedule: row.schedule.clone(),
 				category: if same_side {
 					None
 				} else {
 					other.category.clone()
 				},
+				date: row.date,
 				..other.clone()
 			}));
+			if let SplitRole::Child { parent } = &other.split
+				&& other.date != row.date
+			{
+				rows.extend(redate_split(data, parent, &other.id, &row.id, row.date));
+			}
 		}
 		(None, None) => {}
+	}
+	Ok(rows)
+}
+
+/// R-XFER-3 when the other side is a split line: the parent and the other
+/// lines take the new date too, and so does the far side of any other line
+/// that is a transfer, so neither the split nor its pairs straddle two dates.
+/// Actual's client date sync moves the line and its parent
+/// (TransactionsTable.tsx:1286-1327).
+fn redate_split(
+	data: &BudgetData,
+	parent: &TransactionId,
+	line: &TransactionId,
+	source: &TransactionId,
+	date: CivilDate,
+) -> Vec<Row> {
+	let mut rows = Vec::new();
+	if let Some(found) = data.transactions.get(parent).filter(|p| alive(data, p)) {
+		rows.push(Row::Transaction(Transaction {
+			date,
+			..found.clone()
+		}));
+	}
+	for sibling in children(data, parent) {
+		if &sibling.id == line {
+			continue;
+		}
+		rows.push(Row::Transaction(Transaction {
+			date,
+			..sibling.clone()
+		}));
+		let far = sibling
+			.transfer
+			.as_ref()
+			.filter(|far| *far != source)
+			.and_then(|far| data.transactions.get(far))
+			.filter(|far| alive(data, far));
+		if let Some(far) = far {
+			rows.push(Row::Transaction(Transaction {
+				date,
+				..far.clone()
+			}));
+		}
 	}
 	rows
 }
@@ -628,9 +697,9 @@ pub fn edit(
 			..(*old).clone()
 		}));
 	}
-	let mut hooks = sync_transfer(data, &mut top, book, now_ms);
+	let mut hooks = sync_transfer(data, &mut top, book, now_ms)?;
 	for line in &mut lines {
-		hooks.extend(sync_transfer(data, line, book, now_ms));
+		hooks.extend(sync_transfer(data, line, book, now_ms)?);
 	}
 	rows.push(Row::Transaction(top));
 	rows.extend(lines.into_iter().map(Row::Transaction));
@@ -639,23 +708,44 @@ pub fn edit(
 }
 
 /// Deletes a transaction with its split lines, and each transfer counterpart
-/// (§4.2 `removeTransfer`, §4.3 deleting).
+/// (§4.2 `removeTransfer`, §4.3 deleting). When the other side of the row is
+/// a split line, the whole split goes too, rather than Actual's unlink:
+/// deleting the loan side of a payment deletes the payment (R-XFER-3,
+/// DEBT-6 A.5). The shell confirms first, from `counterpart_parent`.
 pub fn delete(data: &BudgetData, id: &TransactionId) -> Result<Vec<Row>, CoreError> {
 	let top = top_level(data, id)?;
 	let mut doomed = vec![top];
 	doomed.extend(children(data, id));
+	if let Some(parent) = counterpart_parent(data, top) {
+		let parent = top_level(data, &parent)?;
+		doomed.push(parent);
+		doomed.extend(children(data, &parent.id));
+	}
+	let ids: BTreeSet<&TransactionId> = doomed.iter().map(|row| &row.id).collect();
 	let mut rows = Vec::new();
-	for row in doomed {
-		if let Some(counterpart) = &row.transfer {
+	for row in &doomed {
+		if let Some(counterpart) = row.transfer.as_ref().filter(|c| !ids.contains(c)) {
 			rows.extend(remove_counterpart(data, counterpart));
 		}
 		rows.push(Row::Transaction(Transaction {
 			tombstone: true,
 			transfer: None,
-			..row.clone()
+			..(*row).clone()
 		}));
 	}
 	Ok(rows)
+}
+
+/// The split a row's transfer counterpart is a line of, if it is one.
+pub fn counterpart_parent(data: &BudgetData, row: &Transaction) -> Option<TransactionId> {
+	let other = data
+		.transactions
+		.get(row.transfer.as_ref()?)
+		.filter(|other| alive(data, other))?;
+	match &other.split {
+		SplitRole::Child { parent } => Some(parent.clone()),
+		_ => None,
+	}
 }
 
 /// The draft that reproduces a transaction and its lines.
@@ -699,7 +789,19 @@ pub fn duplicate(
 	for line in &mut draft.splits {
 		line.id = None;
 	}
-	insert(data, &draft, book, now_ms)
+	// An imported split that doesn't add up is copied as it is, error and
+	// all, as Actual's copy keeps every field (edge case 6).
+	check_stored(data, &draft)?;
+	let mut planned = write_new(data, draft.id.clone(), &ruled(&draft), book, now_ms)?;
+	let error = top_level(data, id)?.split_error.clone();
+	for row in &mut planned.rows {
+		if let Row::Transaction(row) = row
+			&& row.id == planned.id
+		{
+			row.split_error = error.clone();
+		}
+	}
+	Ok(planned)
 }
 
 /// Checks rows off (or back on), as a batch edit does: reconciled rows are

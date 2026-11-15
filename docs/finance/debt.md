@@ -10,7 +10,7 @@ Envelope budget math (To Budget, carryover, overspending, hold) is Actual's and 
 |---|---|
 | Loan account | An off-budget account that is a liability. Its balance is negative (-980000 means $9,800.00 owed). `veritas_account_meta.kind = liability`. |
 | Loan metadata (R-DEBT-1, all optional) | `rate_bps` (annual rate in basis points, integer, 980 = 9.80%), `payment_cents`, `payment_day` (1-31), `lender` (payee). |
-| Outstanding principal | `-balance` of the loan account as of the day before the payment, in cents, never below 0. |
+| Outstanding principal | `-balance` of the loan account as of the day before the payment date, counting every live row, in cents, never below 0 (a positive, overpaid balance gives 0). Another payment on the same date is not counted. When editing a payment, its own counterpart is dated that day, so it is excluded. The default is computed for the payment date shown, so for a new payment it is the day before today until the user changes the date. |
 | Loan payment | One payment from an on-budget account to the lender, made of parts: principal, interest, escrow, fees. |
 | Payment total | Money that left the paying account. Equals the sum of the parts. |
 
@@ -37,11 +37,13 @@ Rules:
 
 Order of sources for the wizard's defaults:
 
-1. The most recent loan payment to this loan account (the last row of kind `debt_principal` in this loan account, grouped with its sibling parts): `total`, `interest`, `escrow`. `fees` is never pre-filled (0).
+1. The most recent loan payment to this loan account (the last row of kind `debt_principal` in this loan account, grouped with its sibling parts), read as described below: `total`, `interest`, `escrow`. `fees` is never pre-filled (0).
 2. If no earlier payment exists, `payment_cents` from the loan metadata as the total, with interest as the estimate in DEBT-4 if `rate_bps` is set, escrow 0.
 3. Otherwise nothing is pre-filled.
 
-Then `principal = total - interest - escrow - fees` (DEBT-2.1). If principal exceeds outstanding principal, principal is capped at outstanding principal and the total is reduced by the same amount (a final, smaller payment). The user can overwrite every field.
+**Reading the last payment's parts.** Nothing stored says which expense child is interest, escrow or fees, and names are never used to guess (CLS-3.4). The wizard writes children in the order principal, interest, escrow, fees, omitting parts that are 0 (DEBT-6). To read an existing payment: `principal_last` = the `debt_principal` child. `interest` = the first expense child in Actual's split order, if any. `escrow` = the second expense child, if any. Any further expense child is ignored. The pre-filled `total` is `principal_last + interest + escrow`, never the last payment's total, so a late fee is never carried into the next payment, and principal can only ever pre-fill as `principal_last`. Known limit: a payment with interest and a fee but no escrow pre-fills the fee as escrow. That is visible and editable, so the wizard shows the category name beside each pre-filled amount, and the error can never reach principal. Example L-5b below.
+
+Then `principal = total - interest - escrow - fees` (DEBT-2.1). If principal exceeds outstanding principal (DEBT-1, as of the day before the payment date shown), principal is capped at outstanding principal and the total is reduced by the same amount (a final, smaller payment). The user can overwrite every field.
 
 The date defaults to today. The category fields default to the categories used by the last payment.
 
@@ -66,6 +68,7 @@ Standard payment: $400 = $320 principal + $80 interest. Loan balance -980000, `r
 | L-3 Pre-fill from last payment | last: total 40000, interest 8000, escrow 0 | wizard shows total 40000, interest 8000, principal 32000. For the next payment the hint on balance -948000 is 948000 * 980 / 120000 = 7742 exactly (hint only) |
 | L-4 Escrow | mortgage payment total 200000 = interest 100000 + escrow 40000, remainder principal 60000 | expense 140000. Debt paydown 60000. Loan balance moves by 60000. Net cash flow effect -200000 |
 | L-5 Fee | total 40000 + late fee 2500 = 42500, interest 8000 | principal = 42500 - 8000 - 2500 = 32000. Expense 10500 |
+| L-5b Pre-fill after a fee | last payment is L-5: children principal 32000, interest 8000, fee 2500 (no escrow, so the fee is read as escrow) | pre-fill interest 8000, escrow 2500 (shown with category "Loan fees", user clears it), total 42500 = 32000 + 8000 + 2500, principal 32000. Last total 42500 is never used as principal's base. With escrow 0 entered: total 40000, principal 32000 |
 | L-6 Extra principal | total 50000, interest 8000 | principal 42000. All of it is debt paydown. Expense 8000 |
 | L-7 Final payment | outstanding 20000, pre-fill total 40000, interest 100 | principal capped at 20000, total becomes 20100, loan balance 0 |
 | L-8 Overpay | principal 25000 on outstanding 20000 | warning. Loan balance +5000, moves to assets. Net worth unchanged by the payment |
@@ -94,7 +97,7 @@ Rules:
 - **A.3** Register shows one payment row "Loan payment -$400.00" expandable to its parts. The principal child renders `-> To Car Loan` (R-XFER-2).
 - **A.4** Confirmed in Actual: `addTransfer` refuses only split parents (`reference/actual/packages/loot-core/src/server/transactions/transfer.ts:48-54`); a child with `transferred_id` and a standalone counterpart is tested at `transfer.test.ts:172-219`.
 - **A.6** Budget activity (Actual's math, kept as is): the principal child is on-budget with a category, so it is spending in that envelope (`reference/actual/packages/loot-core/src/server/budget/base.ts:133-149`). The "Loan principal" envelope must be funded each month or it shows overspent, while reports show Debt paydown, not an expense (classification.md CLS-9). The wizard offers to budget the payment's principal into that envelope, and the pre-fill principal (DEBT-3) is the suggestion for that envelope (forecasting.md FC-5).
-- **A.5** Deleting the *loan-side* counterpart does not delete the child. Actual unlinks it (payee and `transferred_id` set to null, `transfer.ts:103-111`), leaving an ordinary categorized child. R-XFER-3 "deleting one side deletes both" therefore holds from the checking side only. Veritas, deleting the loan-side row, must either delete the whole payment (parent, children) after confirmation or accept the unlink. Recommendation: confirm, then delete the whole payment in one SQLite transaction.
+- **A.5** Deleting the *loan-side* counterpart does not delete the child. Actual unlinks it (payee and `transferred_id` set to null, `transfer.ts:103-111`), leaving an ordinary categorized child. R-XFER-3 "deleting one side deletes both" therefore holds from the checking side only. Veritas, deleting the loan-side row, must either delete the whole payment (parent, children) after confirmation or accept the unlink. Recommendation: confirm, then delete the whole payment in one SQLite transaction. When a payment pays more than one loan, deleting any loan's side deletes the whole payment, and the confirm names every other line it will remove.
 
 ## DEBT-7 Credit cards (R-DEBT-3)
 
