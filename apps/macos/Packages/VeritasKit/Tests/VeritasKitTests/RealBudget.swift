@@ -119,10 +119,13 @@ enum ActualDatabase {
 		return rows
 	}
 
+	/// Waits out a lock the way Actual's SQLite does, since a budget's
+	/// background check can still be finishing just after it closes.
 	static func execute(_ file: URL, _ sql: String) throws {
 		var db: OpaquePointer?
 		defer { sqlite3_close(db) }
 		guard sqlite3_open(file.path(percentEncoded: false), &db) == SQLITE_OK,
+			sqlite3_busy_timeout(db, 5_000) == SQLITE_OK,
 			sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK
 		else {
 			throw DatabaseError(message: String(cString: sqlite3_errmsg(db)))
