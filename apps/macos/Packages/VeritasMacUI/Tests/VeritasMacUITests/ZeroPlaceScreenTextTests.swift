@@ -19,9 +19,10 @@ struct ZeroPlaceScreenTextTests {
 	@Test func goalAmountsAreWholeYenAndSpendingIsOnTheRegisterScale() {
 		let bike = StubBudget.goal("bike", "Bike", target: 150_000, available: -20_000, date: nil, state: .reachedSpent, spent: 50_000)
 		let words = GoalWords(bike, format: yen)
-		#expect(words.note == "Reached → Spent, overspent")
+		// CLS-12.14: the mixed Available never reads as over, and spending has its own line.
+		#expect(words.note == "Reached → Spent")
 		#expect(words.tone == .overspent)
-		#expect(words.detail == "¥500 spent, \u{2212}¥20,000 over")
+		#expect(words.detail == "Spending to date ¥500")
 	}
 
 	@Test func aSuggestionIsAlreadyWholeYen() {
