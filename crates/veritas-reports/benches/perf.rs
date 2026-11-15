@@ -11,8 +11,8 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use veritas_domain::{BudgetData, CivilDate, YearMonth};
 use veritas_reports::{
 	Json, Period, age_of_money, balance_forecast_card, balance_sheet, budget_analysis, calendar,
-	cash_flow, classify, crossover, net_profit, net_worth_by_month, owners_equity, sankey,
-	sankey_card, summary, tax_summary,
+	cash_flow, classify, crossover, monte_carlo_card, net_profit, net_worth_by_month,
+	owners_equity, sankey, sankey_card, summary, tax_summary,
 };
 
 fn load_perf_100k() -> BudgetData {
@@ -140,6 +140,25 @@ fn widgets(c: &mut Criterion) {
 		r#"{{"granularity":"Daily","conditions":[{{"field":"category","op":"isNot","value":"{category}","type":"id"}},{{"field":"notes","op":"doesNotContain","value":"zzz","type":"string"}}]}}"#
 	))
 	.unwrap();
+	let account = budget
+		.accounts
+		.values()
+		.find(|account| !account.tombstone)
+		.map(|account| account.id.to_string())
+		.unwrap();
+	let monte_carlo_heavy = Json::parse(&format!(
+		r#"{{"simulationCount":10000,"currentAge":20,"targetAge":120,"taxModel":"bands",
+		"withdrawalStrategy":"target-mix","withdrawalRule":{{"type":"guardrails"}},"minimumSpending":2500000,"inflationStdDev":0.03,
+		"taxBands":[{{"id":"a","from":1257000,"rate":0.2}},{{"id":"b","from":5027000,"rate":0.4}}],
+		"pots":[{{"id":"surplus","isSurplus":true}},{{"id":"linked","accountId":"{account}","annualFeeRate":0.002}},
+		{{"id":"pension","startingBalance":40000000,"accessAge":57,"taxableFraction":0.75,"annualFeeFixed":20000,"feeAdjustsWithInflation":true,
+		"investmentPhases":[{{"id":"glide","fromAge":60,"transition":"gradual","allocationPreset":"equity-40"}}]}},
+		{{"id":"cash","startingBalance":5000000,"allocationPreset":"cash"}}],
+		"incomeStreams":[{{"id":"salary","toAge":60,"annualAmount":6000000,"taxableFraction":1}},{{"id":"state","fromAge":67,"annualAmount":1100000}}],
+		"contributions":[{{"id":"sacrifice","potId":"pension","sourceIncomeStreamId":"salary","beforeTax":true,"annualAmount":800000}}],
+		"spendingPhases":[{{"id":"work","annualWithdrawal":3000000}},{{"id":"retired","fromAge":60,"annualWithdrawal":4500000}}]}}"#
+	))
+	.unwrap();
 
 	let mut group = c.benchmark_group("perf-100k widgets");
 	group.sample_size(20);
@@ -169,6 +188,12 @@ fn widgets(c: &mut Criterion) {
 	});
 	group.bench_function("balance forecast, daily, filtered", |b| {
 		b.iter(|| balance_forecast_card(&budget, &sheet, Some(&forecast_daily), today).unwrap())
+	});
+	group.bench_function("monte carlo, default", |b| {
+		b.iter(|| monte_carlo_card(&budget, None).unwrap())
+	});
+	group.bench_function("monte carlo, 10,000 runs over 100 years", |b| {
+		b.iter(|| monte_carlo_card(&budget, Some(&monte_carlo_heavy)).unwrap())
 	});
 	group.finish();
 }

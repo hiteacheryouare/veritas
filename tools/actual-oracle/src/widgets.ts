@@ -11,6 +11,7 @@ export interface WidgetRequest {
 	firstDayOfWeekIdx?: string;
 	budgetType?: string;
 	cardHeight?: number;
+	captureRunDetail?: number;
 }
 
 const REPORTS = 'packages/desktop-client/src/components/reports';
@@ -294,6 +295,46 @@ export const widgetData = async ({ internal }: ActualSession, requests: WidgetRe
 				points,
 				scheduled: chart.countForecastScheduledOccurrences(args),
 				lowest: chart.getLowestChartDataPoint(points) ?? null
+			};
+		},
+		// MonteCarloCard.tsx's run, with each linked pot resolved the way
+		// useResolvedMonteCarloConfig.ts resolves it, from the accountBalance
+		// binding's own query (spreadsheet/bindings.ts:23-31). A request's
+		// captureRunDetail records one run, as the report page asks for.
+		'monte-carlo-card': async ({ meta, captureRunDetail }) => {
+			const engine = await loadSource(`${REPORTS}/reports/monte-carlo/monteCarloSimulation.ts`);
+			const { q } = await import('@actual-app/api');
+			const config = engine.monteCarloConfigFromMeta(meta);
+			const balances: Record<string, number | null> = {};
+			for (const accountId of new Set<string>(config.pots.map((pot: any) => pot.accountId).filter((id: unknown) => id != null))) {
+				const query = q('transactions').filter({ account: accountId }).options({ splits: 'none' }).calculate({ $sum: '$amount' });
+				const { data } = await internal.send('query', query.serialize());
+				balances[accountId] = typeof data === 'number' ? data : null;
+			}
+			const resolved = {
+				...config,
+				pots: config.pots.map((pot: any) => {
+					const balance = pot.accountId != null ? balances[pot.accountId] : null;
+					return balance != null ? { ...pot, startingBalance: Math.max(0, balance) } : pot;
+				})
+			};
+			const result = engine.runMonteCarloSimulation({
+				...resolved,
+				horizonYears: engine.getMonteCarloHorizonYears(resolved),
+				deflateToTodaysMoney: true,
+				...(captureRunDetail != null && { captureRunDetail })
+			});
+			return {
+				balances,
+				successPercent: Math.round(result.successRate * 1000) / 10,
+				startAge: config.currentAge,
+				endAge: config.currentAge + result.horizonYears,
+				result: {
+					...result,
+					endingBalances: Array.from(result.endingBalances),
+					depletionYearBySimulation: Array.from(result.depletionYearBySimulation),
+					totalWithdrawnBySimulation: Array.from(result.totalWithdrawnBySimulation)
+				}
 			};
 		},
 		// CrossoverCard.tsx's range effect and props; defaultTimeFrame is
