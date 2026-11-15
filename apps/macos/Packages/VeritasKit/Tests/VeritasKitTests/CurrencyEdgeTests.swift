@@ -38,6 +38,7 @@ struct CurrencyEdgeTests {
 			#expect(format.amount(try sheet.row(F.household).available, on: .budget) == "\u{2212}1")
 
 			screen.beginEditing(F.groceries)
+			#expect(screen.editing?.text == "140", "the core drops the hidden fraction from the field's opening text")
 			screen.editing?.type("+")
 			screen.editing?.type("140.00+0.50")
 			await screen.commitEditing()

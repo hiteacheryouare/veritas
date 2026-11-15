@@ -207,7 +207,7 @@ public final class WorkspaceModel {
 	/// What every budget-cell and goal amount field asks the core, at the
 	/// open budget's places. Fields build it when they open, never earlier.
 	public var budgetAmountReader: any AmountReader {
-		CoreAmountReader(budgetDecimalPlaces: budgetDecimalPlaces)
+		CoreAmountReader(budgetDecimalPlaces: budgetDecimalPlaces, hideDecimals: format.hidesDecimals)
 	}
 
 	/// Runs one command. Errors are shown here; `false` means nothing changed.
