@@ -458,6 +458,15 @@ pub const CURRENCIES: &[Currency] = &[
 	},
 ];
 
+impl Currency {
+	/// Whether Actual's currency picker turns on the space between amount and
+	/// symbol (`Currency.tsx` `handleCurrencyChange`): for a symbol after the
+	/// amount, or a symbol that is the code itself (`CHF 100`).
+	pub fn symbol_space(&self) -> bool {
+		!self.symbol_first || self.symbol == self.code
+	}
+}
+
 /// The currency with this code, ignoring case. The empty code is "None".
 pub fn currency(code: &str) -> Option<&'static Currency> {
 	CURRENCIES
@@ -480,5 +489,16 @@ mod tests {
 			NumberStyle::CommaDotIn
 		);
 		assert!(currency("XXX").is_none());
+	}
+
+	#[test]
+	fn the_picker_spaces_a_trailing_symbol_and_a_code_used_as_one() {
+		let placement = |code| {
+			let currency = currency(code).unwrap();
+			(currency.symbol_first, currency.symbol_space())
+		};
+		assert_eq!(placement("USD"), (true, false));
+		assert_eq!(placement("EUR"), (false, true));
+		assert_eq!(placement("CHF"), (true, true));
 	}
 }

@@ -56,6 +56,8 @@ fn format() -> NumberFormat {
 		currency: Some("USD".to_owned()),
 		style: NumberStyle::CommaDot,
 		hide_decimals: true,
+		symbol_first: true,
+		symbol_space: false,
 	}
 }
 
@@ -230,6 +232,8 @@ fn a_new_budget_has_the_starter_set_accounts_and_starting_balances_r_io_0() {
 			number_format: Some("comma-dot".to_owned()),
 			hide_fraction: true,
 			currency_code: Some("USD".to_owned()),
+			symbol_position: Some("before".to_owned()),
+			symbol_space: Some("false".to_owned()),
 		}
 	);
 	assert!(

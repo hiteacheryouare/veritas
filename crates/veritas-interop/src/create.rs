@@ -85,6 +85,18 @@ fn build(
 	}
 	if let Some(code) = &budget.format.currency {
 		writer.put_preference("defaultCurrencyCode", code)?;
+		let position = if budget.format.symbol_first {
+			"before"
+		} else {
+			"after"
+		};
+		writer.put_preference("currencySymbolPosition", position)?;
+		let space = if budget.format.symbol_space {
+			"true"
+		} else {
+			"false"
+		};
+		writer.put_preference("currencySpaceBetweenAmountAndSymbol", space)?;
 	}
 	let mut write =
 		|planned: &mut veritas_domain::BudgetData, rows: Vec<Row>| -> Result<(), CoreError> {

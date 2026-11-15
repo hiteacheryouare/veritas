@@ -33,7 +33,8 @@ struct CurrencySwitchTests {
 			#expect(budgeted == 5_000, "5000 typed in a 0-place budget cell is stored as 5000, not 500000")
 			#expect(try await budget.monthFromDisk(screen.month).row(envelope.id).budgeted == 5_000)
 			#expect(workspace.format.currency(budgeted, on: .budget) == "¥5,000")
-			#expect(workspace.mixedScaleNote != nil, "CLS-12.10's line shows in a 0-place budget")
+			#expect(screen.sheet?.mixedScaleNote != nil, "CLS-12.10's line shows in a 0-place budget")
+			#expect(workspace.mixedScaleNote != nil, "and on its goals")
 
 			screen.beginEditing(envelope.id)
 			#expect(screen.editing?.text == "5,000", "the field opens on the row's own figure")
@@ -44,6 +45,7 @@ struct CurrencySwitchTests {
 			#expect(workspace.mixedScaleNote == nil)
 			let back = BudgetScreenModel(workspace: workspace, month: AllFeatures.october)
 			await back.load()
+			#expect(back.sheet?.mixedScaleNote == nil)
 			back.beginEditing(AllFeatures.groceries)
 			back.editing?.type("50")
 			await back.commitEditing()

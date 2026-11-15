@@ -1,11 +1,12 @@
 use veritas_domain::{BudgetData, CoreError, GoalId, Money, YearMonth};
 use veritas_engine::{Envelope, EnvelopeSheet};
+use veritas_reports::Classification;
 use veritas_session::goals::{
 	self, ClosePreview, GoalPace as CorePace, GoalState as CoreState, GoalView,
 };
 
 use crate::Month;
-use crate::budget::envelope;
+use crate::budget::{MoneyTone, envelope};
 
 /// What a goal card shows (DEBT-8, D66).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -57,8 +58,19 @@ pub struct GoalSummary {
 	pub state: GoalState,
 	/// The envelope's available balance this month.
 	pub available: i64,
-	/// Net spending from the envelope over all months, at least zero.
+	/// DEBT-8's Spending to date: CLS-6 `expense_total` for the category
+	/// through today, the figure every report shows. Not clamped: refunds
+	/// can make it negative, shown with a true minus (ST-1.2). On the
+	/// register scale in a 0-place budget (CLS-12.14).
 	pub spent: i64,
+	/// The card's colour: on track, behind, reached, spent past zero.
+	pub tone: MoneyTone,
+	/// 0 to 100 for the ring and the number beside it, rounded down. 100
+	/// only for `reached` and `reachedSpent`.
+	pub progress_percent: u8,
+	/// The "X of target" figure: `available`, or the target once a reached
+	/// goal has been spent from.
+	pub progress_amount: i64,
 	/// DEBT-8.1, for active and reached goals with a target date.
 	pub suggested_monthly: Option<i64>,
 	/// Budget months through the target month, this one included.
@@ -94,10 +106,12 @@ pub struct GoalClosePreview {
 pub(crate) fn summaries(
 	data: &BudgetData,
 	sheet: &EnvelopeSheet,
+	classification: &Classification,
 ) -> Result<Vec<GoalSummary>, CoreError> {
-	Ok(goals::goals(data, sheet)?
+	let zero_places = data.format.decimal_places() == 0;
+	Ok(goals::goals(data, sheet, classification)?
 		.into_iter()
-		.map(GoalSummary::from)
+		.map(|view| summary(view, zero_places))
 		.collect())
 }
 
@@ -120,46 +134,69 @@ pub(crate) fn close_preview(
 	})
 }
 
-impl From<GoalView> for GoalSummary {
-	fn from(view: GoalView) -> Self {
-		let goal = view.goal;
-		GoalSummary {
-			id: goal.id.to_string(),
-			category_id: goal.category.to_string(),
-			name: view.name,
-			target: goal.target.minor(),
-			target_date: goal.target_date.map(|date| date.to_string()),
-			icon: goal.icon,
-			color: goal.color,
-			state: match view.state {
-				CoreState::Active => GoalState::Active,
-				CoreState::Reached => GoalState::Reached,
-				CoreState::ReachedSpent => GoalState::ReachedSpent,
-				CoreState::Closed => GoalState::Closed,
-			},
-			available: view.available.minor(),
-			spent: view.spent.minor(),
-			suggested_monthly: view.suggestion.map(|s| s.monthly.minor()),
-			months_left: view.suggestion.map(|s| s.months_left),
-			pace: view.pace.map(|pace| match pace {
-				CorePace::OnTrack { eta_month } => GoalPace::OnTrack {
-					eta_month: eta_month.into(),
-				},
-				CorePace::Behind { needed_monthly } => GoalPace::Behind {
-					needed_monthly: needed_monthly.minor(),
-				},
-				CorePace::NoHistory { needed_monthly } => GoalPace::NoHistory {
-					needed_monthly: needed_monthly.minor(),
-				},
-				CorePace::NotAdding { needed_monthly } => GoalPace::NotAdding {
-					needed_monthly: needed_monthly.minor(),
-				},
-			}),
-			reached_month: goal.reached_month.map(Month::from),
-			closed_month: goal.closed_month.map(Month::from),
-			later_budget: month_amounts(view.later_budget),
-			new_activity: view.new_activity,
+/// In a 0-place budget `available` mixes register and budget scales, so a
+/// negative one isn't shown as overspent (CLS-12.14: never "over").
+fn tone(view: &GoalView, zero_places: bool) -> MoneyTone {
+	match view.state {
+		CoreState::Active if view.available < Money::ZERO && zero_places => MoneyTone::Neutral,
+		CoreState::Active if view.available < Money::ZERO => MoneyTone::Overspent,
+		CoreState::Active => match view.pace {
+			None | Some(CorePace::OnTrack { .. }) => MoneyTone::Available,
+			Some(CorePace::Behind { .. } | CorePace::NotAdding { .. }) => MoneyTone::Low,
+			Some(CorePace::NoHistory { .. }) => MoneyTone::Neutral,
+		},
+		CoreState::Reached => MoneyTone::Available,
+		CoreState::ReachedSpent if view.available < Money::ZERO && zero_places => {
+			MoneyTone::Neutral
 		}
+		CoreState::ReachedSpent if view.available < Money::ZERO => MoneyTone::Overspent,
+		CoreState::ReachedSpent => MoneyTone::Available,
+		CoreState::Closed => MoneyTone::Neutral,
+	}
+}
+
+fn summary(view: GoalView, zero_places: bool) -> GoalSummary {
+	let tone = tone(&view, zero_places);
+	let goal = view.goal;
+	GoalSummary {
+		id: goal.id.to_string(),
+		category_id: goal.category.to_string(),
+		name: view.name,
+		target: goal.target.minor(),
+		target_date: goal.target_date.map(|date| date.to_string()),
+		icon: goal.icon,
+		color: goal.color,
+		state: match view.state {
+			CoreState::Active => GoalState::Active,
+			CoreState::Reached => GoalState::Reached,
+			CoreState::ReachedSpent => GoalState::ReachedSpent,
+			CoreState::Closed => GoalState::Closed,
+		},
+		available: view.available.minor(),
+		spent: view.spent.minor(),
+		tone,
+		progress_percent: view.progress_percent,
+		progress_amount: view.progress_amount.minor(),
+		suggested_monthly: view.suggestion.map(|s| s.monthly.minor()),
+		months_left: view.suggestion.map(|s| s.months_left),
+		pace: view.pace.map(|pace| match pace {
+			CorePace::OnTrack { eta_month } => GoalPace::OnTrack {
+				eta_month: eta_month.into(),
+			},
+			CorePace::Behind { needed_monthly } => GoalPace::Behind {
+				needed_monthly: needed_monthly.minor(),
+			},
+			CorePace::NoHistory { needed_monthly } => GoalPace::NoHistory {
+				needed_monthly: needed_monthly.minor(),
+			},
+			CorePace::NotAdding { needed_monthly } => GoalPace::NotAdding {
+				needed_monthly: needed_monthly.minor(),
+			},
+		}),
+		reached_month: goal.reached_month.map(Month::from),
+		closed_month: goal.closed_month.map(Month::from),
+		later_budget: month_amounts(view.later_budget),
+		new_activity: view.new_activity,
 	}
 }
 

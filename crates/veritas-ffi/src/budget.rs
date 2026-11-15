@@ -56,6 +56,9 @@ pub struct BudgetMonth {
 	pub first_month: Month,
 	pub last_month: Month,
 	pub to_budget: i64,
+	/// `overspent` below zero (budgeted more than there is), `neutral` at
+	/// zero, `income` with money left to budget.
+	pub to_budget_tone: MoneyTone,
 	pub income: i64,
 	pub from_last_month: i64,
 	pub overspent_last_month: i64,
@@ -65,6 +68,25 @@ pub struct BudgetMonth {
 	pub spent: i64,
 	pub available: i64,
 	pub groups: Vec<EnvelopeGroup>,
+	/// CLS-12.10's fixed line, set in a 0-place budget, where the sheet adds
+	/// register amounts (2 places) to budget amounts (the currency's).
+	pub mixed_scale_note: Option<String>,
+}
+
+/// CLS-12.10, word for word.
+pub const MIXED_SCALE_NOTE: &str =
+	"Spending is recorded at 2 places and budgets at 0, so these numbers mix both, as in Actual.";
+
+pub(crate) fn mixed_scale_note(data: &BudgetData) -> Option<String> {
+	(data.format.decimal_places() == 0).then(|| MIXED_SCALE_NOTE.to_owned())
+}
+
+fn to_budget_tone(to_budget: Money) -> MoneyTone {
+	match to_budget.minor() {
+		..0 => MoneyTone::Overspent,
+		0 => MoneyTone::Neutral,
+		_ => MoneyTone::Income,
+	}
 }
 
 /// `YYYY-MM-DD`, the local civil date the app passes as today.
@@ -142,6 +164,7 @@ pub(crate) fn budget_month(
 		first_month: first.into(),
 		last_month: last.into(),
 		to_budget: summary.to_budget.minor(),
+		to_budget_tone: to_budget_tone(summary.to_budget),
 		income: summary.total_income.minor(),
 		from_last_month: summary.from_last_month.minor(),
 		overspent_last_month: summary.last_month_overspent.minor(),
@@ -150,6 +173,7 @@ pub(crate) fn budget_month(
 		spent: summary.total_spent.minor(),
 		available: summary.total_balance.minor(),
 		groups,
+		mixed_scale_note: mixed_scale_note(data),
 	})
 }
 
@@ -278,6 +302,28 @@ mod tests {
 		);
 		// A refund bigger than the budget still reads as full, not over 100%.
 		assert_eq!(tone_and_fill(&cell(1_000, 500, 1_500)).1, 1.0);
+	}
+
+	#[test]
+	fn to_budget_reads_overspent_below_zero_and_income_above() {
+		assert_eq!(to_budget_tone(Money::from_minor(-1)), MoneyTone::Overspent);
+		assert_eq!(to_budget_tone(Money::ZERO), MoneyTone::Neutral);
+		assert_eq!(to_budget_tone(Money::from_minor(1)), MoneyTone::Income);
+	}
+
+	#[test]
+	fn only_a_zero_place_budget_carries_the_mixed_scale_line() {
+		let mut data = BudgetData::empty(veritas_domain::BudgetType::Envelope);
+		for (code, note) in [
+			(None, None),
+			(Some("USD"), None),
+			(Some("XYZ"), None),
+			(Some("JPY"), Some(MIXED_SCALE_NOTE)),
+			(Some("krw"), Some(MIXED_SCALE_NOTE)),
+		] {
+			data.format.currency_code = code.map(str::to_owned);
+			assert_eq!(mixed_scale_note(&data).as_deref(), note, "{code:?}");
+		}
 	}
 
 	#[test]

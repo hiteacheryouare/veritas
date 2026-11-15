@@ -508,6 +508,22 @@ impl<B: Backend> Session<B> {
 		read(bus.data(), self.classification.get(bus.data()))
 	}
 
+	/// `with_sheet` and `with_classification` together, for a screen that
+	/// shows envelope figures beside report figures (the Goals screen).
+	pub fn with_sheet_and_classification<T>(
+		&mut self,
+		today: CivilDate,
+		read: impl FnOnce(&BudgetData, &EnvelopeSheet, &Classification) -> Result<T, CoreError>,
+	) -> Result<T, CoreError> {
+		self.today = today;
+		let State::Open(bus) = &self.state else {
+			return Err(closed());
+		};
+		let data = bus.data();
+		let sheet = self.sheet.get(data, today)?;
+		read(data, sheet, self.classification.get(data))
+	}
+
 	/// `with_classification` plus the envelope sheet as of `today`, built
 	/// only when `sheet` asks for it.
 	pub fn with_reports<T>(
@@ -871,6 +887,18 @@ fn rank(reason: Option<ReadOnlyReason>) -> u8 {
 	}
 }
 
+impl<B: Backend> Drop for Session<B> {
+	/// The open check and its snapshot run on connections of their own.
+	/// Waiting for them means a closed budget has nothing left reading or
+	/// writing its files, so the next writer isn't locked out and a deleted
+	/// budget folder stays deleted.
+	fn drop(&mut self) {
+		if let Some(pending) = self.open_check.take() {
+			pending.wait();
+		}
+	}
+}
+
 fn closed() -> CoreError {
 	CoreError::Storage("the budget couldn't be reopened. Close it and open it again".to_owned())
 }
@@ -1061,8 +1089,10 @@ fn reserve_folder(parent: &Path, prefix: &str) -> Result<PathBuf, CoreError> {
 	}
 }
 
-/// What the budget stores in its preferences, with Actual's defaults for what
-/// it doesn't: comma-dot, no currency, fractions shown.
+/// What the budget stores in its preferences, read as Actual's useFormat
+/// reads them: comma-dot, no currency and fractions shown when unset; the
+/// symbol goes before the amount unless the position is `after`, and only
+/// `true` puts a space between them, so an unset pair is before, no space.
 fn number_format(prefs: &veritas_domain::FormatPrefs) -> veritas_domain::NumberFormat {
 	use veritas_domain::NumberStyle;
 	let style = [
@@ -1079,5 +1109,7 @@ fn number_format(prefs: &veritas_domain::FormatPrefs) -> veritas_domain::NumberF
 		currency: prefs.currency_code.clone().filter(|code| !code.is_empty()),
 		style,
 		hide_decimals: prefs.hide_fraction,
+		symbol_first: prefs.symbol_position.as_deref() != Some("after"),
+		symbol_space: prefs.symbol_space.as_deref() == Some("true"),
 	}
 }
