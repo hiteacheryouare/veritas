@@ -69,11 +69,20 @@ public final class BudgetScreenModel {
 		return sheet.month != sheet.lastMonth
 	}
 
+	/// An edit reloads the sheet more than once, and ⌘→ can start the next
+	/// month's load meanwhile. Only the latest load lands, so a slow one never
+	/// takes the screen back a month or shows a sheet from before the edit.
+	@ObservationIgnored private var loadGeneration = 0
+
 	public func load() async {
+		loadGeneration += 1
+		let generation = loadGeneration
 		guard let loaded = await workspace.budgetMonth(month) else { return }
+		let openGoals = await workspace.goals().filter(\.isOpen)
+		guard generation == loadGeneration else { return }
 		sheet = loaded
 		month = loaded.month
-		goals = await workspace.goals().filter(\.isOpen)
+		goals = openGoals
 		if let selection, !envelopeIDs.contains(selection) {
 			self.selection = nil
 		}

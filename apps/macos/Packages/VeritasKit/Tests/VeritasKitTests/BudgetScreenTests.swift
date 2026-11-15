@@ -205,6 +205,22 @@ struct BudgetScreenTests {
 		#expect(session.commands == [.closeGoal(goalId: "tires", releaseToCategoryId: "groceries", alsoMoveLater: false)])
 	}
 
+	@Test func aSlowReloadNeverTakesTheScreenBackAMonth() async {
+		session.echoesMonth = true
+		let workspace = WorkspaceModel(library: BudgetFakeLibrary(session: session), format: MoneyFormat())
+		await workspace.reopen(directory: URL(filePath: "/tmp/budget"))
+		let october = Month(year: 2026, month: 10)
+		let screen = BudgetScreenModel(workspace: workspace, month: october)
+		await screen.load()
+		session.slowMonth = october
+		let reload = Task { await screen.load() }
+		await Task.yield()
+		await screen.nextMonth()
+		await reload.value
+		#expect(screen.month == BudgetFakeSession.month)
+		#expect(screen.sheet?.month == BudgetFakeSession.month, "the October reload that finished last is dropped")
+	}
+
 	@Test func arrowKeysWalkTheGoalGridThenTheArchive() async {
 		session.goals = (1...6).map { Self.goal("open\($0)", state: .active, available: 0, target: 100) }
 			+ (1...2).map { Self.goal("closed\($0)", state: .closed, available: 0, target: 100) }
@@ -265,6 +281,9 @@ final class BudgetFakeSession: BudgetSession, @unchecked Sendable {
 	var hideRent = false
 	var goals: [GoalSummary] = []
 	var history = CategoryHistory(transactions: 0, budgetedMonths: 0, taxBucket: nil)
+	/// Answers with the month asked for instead of always November.
+	var echoesMonth = false
+	var slowMonth: Month?
 
 	func goals(today: String) async throws -> [GoalSummary] {
 		goals
@@ -290,11 +309,14 @@ final class BudgetFakeSession: BudgetSession, @unchecked Sendable {
 	}
 
 	func budgetMonth(_ month: Month, today: String) async throws -> BudgetMonth {
+		if month == slowMonth {
+			try await Task.sleep(for: .milliseconds(300))
+		}
 		let row = { (id: String, budgeted: Int64, spent: Int64, available: Int64, tone: VeritasCore.MoneyTone) in
 			EnvelopeRow(id: id, name: id.capitalized, hidden: false, budgeted: budgeted, spent: spent, available: available, carryover: false, tone: tone, fill: 0.5, note: nil)
 		}
 		return BudgetMonth(
-			month: Self.month, firstMonth: Month(year: 2026, month: 1), lastMonth: Self.month,
+			month: echoesMonth ? month : Self.month, firstMonth: Month(year: 2026, month: 1), lastMonth: Self.month,
 			toBudget: 31_240, income: 400_000, fromLastMonth: 0, overspentLastMonth: 0, budgeted: 0, forNextMonth: 0, spent: 0, available: 0,
 			groups: [
 				EnvelopeGroup(id: "everyday", name: "Everyday", isIncome: false, hidden: false, budgeted: 0, spent: 0, available: 0, envelopes: [

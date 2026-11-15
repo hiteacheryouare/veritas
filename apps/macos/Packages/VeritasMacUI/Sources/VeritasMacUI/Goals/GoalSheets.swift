@@ -203,10 +203,13 @@ struct CloseGoalSheet: View {
 		.frame(width: 520)
 		.task {
 			destinations = await goals.destinations()
-			preview = await goals.preview(close: goal, releaseTo: destination)
 		}
-		.onChange(of: destination) {
-			Task { preview = await goals.preview(close: goal, releaseTo: destination) }
+		// A new destination cancels the previous preview, so a slow one can't
+		// overwrite the warning for the envelope now chosen.
+		.task(id: destination) {
+			let latest = await goals.preview(close: goal, releaseTo: destination)
+			guard !Task.isCancelled else { return }
+			preview = latest
 		}
 		.containerIdentifier("sheet.closeGoal")
 	}

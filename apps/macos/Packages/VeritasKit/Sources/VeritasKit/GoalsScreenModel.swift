@@ -30,8 +30,16 @@ public final class GoalsScreenModel {
 		goals.first { $0.id == selection }
 	}
 
+	/// Each load supersedes the ones before it, so a slow one can't put back
+	/// goals an edit has since changed.
+	@ObservationIgnored private var loadGeneration = 0
+
 	public func load() async {
-		goals = await workspace.goals()
+		loadGeneration += 1
+		let generation = loadGeneration
+		let loaded = await workspace.goals()
+		guard generation == loadGeneration else { return }
+		goals = loaded
 		if let selection, !goals.contains(where: { $0.id == selection }) {
 			self.selection = nil
 		}
