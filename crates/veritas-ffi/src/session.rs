@@ -3997,6 +3997,57 @@ pub(crate) mod tests {
 		}
 
 		#[test]
+		fn restoring_a_snapshot_from_before_the_run_lets_the_service_post_again_today() {
+			let (scratch, core) = imported("bill-restore");
+			core.call(|session| {
+				session.wait_for_open_check();
+				Ok(())
+			})
+			.unwrap();
+			let checking = new_account(&core, "Everyday", crate::NewAccountKind::Checking, 0);
+			add_landlord(&core);
+			core.perform(Command::CreateBill {
+				bill_id: Some("bill-1".to_owned()),
+				bill: rent(
+					&checking,
+					BillAmount::Exact { amount: -150_000 },
+					monthly(TODAY),
+					true,
+				),
+			})
+			.unwrap();
+			core.call(|session| session.snapshot(SnapshotReason::BulkEdit))
+				.unwrap();
+			let before_run = core
+				.snapshots()
+				.unwrap()
+				.into_iter()
+				.find(|snapshot| snapshot.reason == crate::SnapshotKind::BulkEdit)
+				.unwrap();
+			let posted_rent = |core: &Core<veritas_store::Store>| {
+				data(core)
+					.transactions
+					.values()
+					.filter(|t| {
+						!t.tombstone && t.schedule.as_ref().map(|s| s.as_str()) == Some("bill-1")
+					})
+					.count()
+			};
+			let metadata = Path::new(&scratch.budget()).join("metadata.json");
+
+			core.maintain(TODAY).unwrap();
+			assert_eq!(posted_rent(&core), 1);
+			assert_eq!(last_run(&metadata).as_deref(), Some(TODAY));
+
+			core.restore_snapshot(&before_run.id).unwrap();
+			assert_eq!(posted_rent(&core), 0, "the snapshot predates the post");
+			assert_eq!(last_run(&metadata), None);
+			core.maintain(TODAY).unwrap();
+			assert_eq!(posted_rent(&core), 1, "posted again today, not tomorrow");
+			assert_eq!(last_run(&metadata).as_deref(), Some(TODAY));
+		}
+
+		#[test]
 		fn post_now_writes_the_transaction_actual_posts() {
 			// R-BILL-3: "Post transaction" and "Post transaction today", against
 			// schedule/post-transaction on the same base.

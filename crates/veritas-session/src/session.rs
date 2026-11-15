@@ -699,6 +699,10 @@ impl<B: Backend> Session<B> {
 	/// Puts the budget back to a snapshot, named by its file name, and reloads
 	/// it. The current state is snapshotted first, and undo history is
 	/// cleared because it describes a budget that no longer exists.
+	/// `lastScheduleRun` is cleared too: a snapshot holds only the database,
+	/// while Actual's backup brings back metadata.json with it, so restoring
+	/// to before today's run makes Actual's service run again on load
+	/// (`backups.ts` `loadBackup`).
 	pub fn restore(&mut self, snapshot_id: &str) -> Result<ChangeSet, CoreError> {
 		self.ensure_writer()?;
 		let snapshot = self.find_snapshot(snapshot_id)?;
@@ -717,6 +721,7 @@ impl<B: Backend> Session<B> {
 		let reopened = self.reopen(listeners);
 		let safety = restored?;
 		reopened?;
+		self.write_schedule_run(None);
 		if safety.is_some() {
 			self.last_snapshot = Some(self.now());
 		}
