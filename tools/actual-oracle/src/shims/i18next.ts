@@ -1,5 +1,6 @@
-// Report modules translate their labels at import time; the oracle only reads
-// numbers, so a label stays its English key.
-export const t = (key: string) => key;
+// Report modules translate their labels at import time; the oracle reads them
+// as their English keys, with any {{name}} filled in.
+export const t = (key: string, params?: Record<string, unknown>) =>
+	params ? key.replace(/\{\{(\w+)\}\}/g, (whole, name) => (name in params ? String(params[name]) : whole)) : key;
 
 export default { t };

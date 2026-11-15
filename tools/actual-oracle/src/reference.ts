@@ -61,7 +61,9 @@ let hooksFor: string | null = null;
 // that forwards to the running Actual session (see widgets.ts).
 const SHIMS: Record<string, string> = {
 	'@actual-app/core/platform/client/connection': pathToFileURL(resolve(import.meta.dirname, 'shims/connection.ts')).href,
-	i18next: pathToFileURL(resolve(import.meta.dirname, 'shims/i18next.ts')).href
+	i18next: pathToFileURL(resolve(import.meta.dirname, 'shims/i18next.ts')).href,
+	'@actual-app/components/theme': pathToFileURL(resolve(import.meta.dirname, 'shims/theme.ts')).href,
+	react: pathToFileURL(resolve(import.meta.dirname, 'shims/react.ts')).href
 };
 
 const isBare = (specifier: string) => !/^(\.|\/|#|node:|file:|data:)/.test(specifier);

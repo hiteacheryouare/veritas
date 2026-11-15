@@ -11,7 +11,8 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use veritas_domain::{BudgetData, CivilDate, YearMonth};
 use veritas_reports::{
 	Json, Period, age_of_money, balance_sheet, budget_analysis, calendar, cash_flow, classify,
-	crossover, net_profit, net_worth_by_month, owners_equity, sankey, summary, tax_summary,
+	crossover, net_profit, net_worth_by_month, owners_equity, sankey, sankey_card, summary,
+	tax_summary,
 };
 
 fn load_perf_100k() -> BudgetData {
@@ -133,6 +134,8 @@ fn widgets(c: &mut Criterion) {
 	let plain = filtered("");
 	let weekly = filtered(r#","granularity":"weekly""#);
 	let crossover_meta = Json::parse(&format!(r#"{{"timeFrame":{year}}}"#)).unwrap();
+	let sankey_spent = filtered(r#","showTransfers":true,"categorySort":"global""#);
+	let sankey_budgeted = filtered(r#","mode":"budgeted""#);
 
 	let mut group = c.benchmark_group("perf-100k widgets");
 	group.sample_size(20);
@@ -150,6 +153,12 @@ fn widgets(c: &mut Criterion) {
 	});
 	group.bench_function("crossover, one year", |b| {
 		b.iter(|| crossover(&budget, Some(&crossover_meta), today).unwrap())
+	});
+	group.bench_function("sankey card, one year", |b| {
+		b.iter(|| sankey_card(&budget, &sheet, Some(&sankey_spent), today, None).unwrap())
+	});
+	group.bench_function("sankey card, budgeted, one year", |b| {
+		b.iter(|| sankey_card(&budget, &sheet, Some(&sankey_budgeted), today, None).unwrap())
 	});
 	group.finish();
 }

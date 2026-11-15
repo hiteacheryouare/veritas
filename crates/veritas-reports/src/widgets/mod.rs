@@ -8,6 +8,7 @@ mod calendar;
 mod cash_flow;
 mod crossover;
 mod net_worth;
+mod sankey;
 mod spending;
 mod summary;
 mod time_frame;
@@ -18,6 +19,10 @@ pub use calendar::{CalendarDay, CalendarMonth, calendar};
 pub use cash_flow::{CashFlowCard, cash_flow_card};
 pub use crossover::{Crossover, CrossoverPoint, crossover};
 pub use net_worth::{NetWorthCard, NetWorthInterval, NetWorthPeriod, net_worth_card};
+pub use sankey::{
+	SankeyCard, SankeyColor, SankeyLabel, SankeyLayer, SankeyLink, SankeyMode, SankeyNode,
+	SankeySort, sankey_card, sankey_height_limit,
+};
 pub use spending::{Spending, SpendingDay, SpendingMode, spending};
 pub use summary::{SummaryContent, SummaryData, summary};
 pub use time_frame::{TimeRange, calculate_time_range};

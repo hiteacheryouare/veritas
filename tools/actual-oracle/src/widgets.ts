@@ -10,6 +10,7 @@ export interface WidgetRequest {
 	meta: any;
 	firstDayOfWeekIdx?: string;
 	budgetType?: string;
+	cardHeight?: number;
 }
 
 const REPORTS = 'packages/desktop-client/src/components/reports';
@@ -173,6 +174,44 @@ export const widgetData = async ({ internal }: ActualSession, requests: WidgetRe
 				}
 			};
 		},
+		// SankeyCard.tsx's range, category list and graph. topNNodes and
+		// getDefaultLayerRange are Sankey.tsx's, which Node can't load as TSX; a
+		// request without cardHeight stands for a card tall enough for any topN.
+		'sankey-card': async ({ meta, cardHeight }) => {
+			const sankey = await loadSource(`${REPORTS}/spreadsheets/sankey-spreadsheet.ts`);
+			const earliest = await internal.send('get-earliest-transaction');
+			const earliestDay = earliest ? earliest.date : months.currentDay();
+			const [start, end] = ranges.calculateTimeRange(meta?.timeFrame, undefined, latestDay);
+			const [boundedStart, boundedEnd] = ranges.boundMonthRangeFromDates(earliestDay, latestDay, start, end);
+			const { grouped } = await internal.send('get-categories');
+			const categories = grouped.map((group: any) => ({
+				...group,
+				categories: group.categories?.map((cat: any) => ({
+					...cat,
+					name: cat.name?.toLowerCase() === 'starting balances' ? 'Starting Balances' : cat.name
+				}))
+			}));
+			const mode = meta?.mode ?? 'spent';
+			const baseGraph = await run(
+				sankey.createBaseGraphSpreadsheet(
+					boundedStart,
+					boundedEnd,
+					categories,
+					meta?.conditions ?? [],
+					meta?.conditionsOp ?? 'and',
+					mode,
+					meta?.groupAccounts ?? false,
+					meta?.showTransfers ?? false
+				)
+			);
+			const heightBasedTopN = cardHeight === undefined ? Infinity : Math.max(2, Math.floor(cardHeight / 35));
+			const topN = Math.min(meta?.topNcategories ?? 15, heightBasedTopN);
+			const layered = sankey.isGraphLayer(meta?.layerFrom) && sankey.isGraphLayer(meta?.layerTo);
+			const layerFrom = layered ? meta.layerFrom : mode === 'budgeted' ? 'income_category' : 'payee';
+			const layerTo = layered ? meta.layerTo : 'category';
+			const data = sankey.buildSankeyData(baseGraph, topN, categories, meta?.categorySort ?? 'per-group', layerFrom, layerTo);
+			return { start, end, boundedStart, boundedEnd, data };
+		},
 		'calendar-card': async ({ meta, firstDayOfWeekIdx }) => {
 			const { calendarSpreadsheet } = await loadSource(`${REPORTS}/spreadsheets/calendar-spreadsheet.ts`);
 			const [start, end] = fullRange(meta);
@@ -267,6 +306,30 @@ export const widgetData = async ({ internal }: ActualSession, requests: WidgetRe
 
 	const results: Record<string, CanonicalValue> = {};
 	for (const request of requests) {
+		// A budget edit ahead of the cards that read it, made through the handler
+		// the budget screen calls; the sheet recomputes on a later tick.
+		if (request.type === 'budget-amount') {
+			await internal.send('budget/budget-amount', request.meta);
+			await new Promise(resolve => setTimeout(resolve, 0));
+			continue;
+		}
+		// Switches the budget type the way a synced preference change does. Sync
+		// starts setType without awaiting it (loot-core/src/server/sync/index.ts:552),
+		// so this waits until the month's numbers stop changing.
+		if (request.type === 'budget-type') {
+			await internal.send('preferences/save', { id: 'budgetType', value: request.meta.type });
+			const month = months.currentMonth();
+			let previous = '';
+			for (let tries = 0; tries < 200; tries++) {
+				await new Promise(resolve => setTimeout(resolve, 10));
+				const current = JSON.stringify(await internal.send('api/budget-month', { month }));
+				if (current === previous) {
+					break;
+				}
+				previous = current;
+			}
+			continue;
+		}
 		const card = cards[request.type];
 		if (!card) {
 			throw new Error(`The oracle has no card for ${request.type}`);

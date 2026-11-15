@@ -58,7 +58,8 @@ pub use widget_meta::{
 pub use widgets::{
 	AgeOfMoney, AgePoint, BudgetAnalysis, BudgetAnalysisMonth, CalendarDay, CalendarMonth,
 	CashFlowCard, Crossover, CrossoverPoint, Granularity, NetWorthCard, NetWorthInterval,
-	NetWorthPeriod, Spending, SpendingDay, SpendingMode, SummaryContent, SummaryData, TimeRange,
-	Trend, age_of_money, budget_analysis, calculate_time_range, calendar, cash_flow_card,
-	crossover, net_worth_card, spending, summary,
+	NetWorthPeriod, SankeyCard, SankeyColor, SankeyLabel, SankeyLayer, SankeyLink, SankeyMode,
+	SankeyNode, SankeySort, Spending, SpendingDay, SpendingMode, SummaryContent, SummaryData,
+	TimeRange, Trend, age_of_money, budget_analysis, calculate_time_range, calendar,
+	cash_flow_card, crossover, net_worth_card, sankey_card, sankey_height_limit, spending, summary,
 };
