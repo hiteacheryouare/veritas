@@ -3,6 +3,8 @@
 //! including their JavaScript quirks: trailing junk is ignored, a leading `+`
 //! fails, `^` is right-associative and unary minus binds to the literal.
 
+use veritas_domain::is_js_whitespace;
+
 /// Actual's `numberFormat` preference. It decides which separator is the
 /// thousands separator when an amount is parsed or shown for editing.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -146,23 +148,6 @@ fn js_parse_float(text: &str) -> Option<f64> {
 	.parse::<f64>()
 	.ok()
 	.map(|value| sign * value)
-}
-
-/// The characters JavaScript's `\s` matches (WhiteSpace and LineTerminator).
-fn is_js_whitespace(c: char) -> bool {
-	matches!(
-		c,
-		'\u{9}'..='\u{D}'
-			| ' ' | '\u{A0}'
-			| '\u{1680}'
-			| '\u{2000}'..='\u{200A}'
-			| '\u{2028}'
-			| '\u{2029}'
-			| '\u{202F}'
-			| '\u{205F}'
-			| '\u{3000}'
-			| '\u{FEFF}'
-	)
 }
 
 /// Actual's number-token class, `[0-9,.'’   ]|\p{Sc}`. The

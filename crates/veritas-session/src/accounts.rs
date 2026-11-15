@@ -84,6 +84,7 @@ pub fn create_account(
 	let name = account_name(data, &new.name, None)?;
 	let new = NewAccount {
 		name,
+		loan: loan_terms_for(new)?,
 		..new.clone()
 	};
 	let rows = veritas_store::plan_new_account(data, &new, today, now_ms)?;
@@ -95,6 +96,23 @@ pub fn create_account(
 		})
 		.ok_or_else(|| CoreError::Internal("a new account had no account row".to_owned()))?;
 	Ok((rows, id))
+}
+
+/// A new account's loan terms, checked. Only a loan or a mortgage, which
+/// land in the sidebar's Loans group, take them (R-DEBT-1).
+pub fn loan_terms_for(new: &NewAccount) -> Result<Option<veritas_domain::LoanTerms>, CoreError> {
+	let Some(terms) = &new.loan else {
+		return Ok(None);
+	};
+	if !matches!(
+		new.kind,
+		veritas_domain::NewAccountKind::Loan | veritas_domain::NewAccountKind::Mortgage
+	) {
+		return Err(CoreError::Invalid(
+			"Only a loan or a mortgage has loan terms.".to_owned(),
+		));
+	}
+	crate::loans::checked_terms(terms).map(Some)
 }
 
 /// Moves an account before `before`, or to the end, among the accounts it is
@@ -314,7 +332,7 @@ pub fn close_account(
 	let has_rows = data
 		.transactions
 		.values()
-		.any(|row| &row.account == id && !row.tombstone);
+		.any(|row| &row.account == id && alive(data, row));
 	if !has_rows {
 		return Ok(vec![Row::Account(Account {
 			tombstone: true,
