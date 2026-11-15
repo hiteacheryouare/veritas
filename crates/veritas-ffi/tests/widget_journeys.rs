@@ -1169,3 +1169,129 @@ fn saved_filters_select_the_same_rows_as_actual_on_a_budget_both_apps_edited() {
 	}
 	assert!(matched_any);
 }
+
+#[test]
+fn page_order_holds_through_deleting_the_first_page_undo_redo_reopen_and_a_round_trip() {
+	// The first page is the one both apps open. Deleting it, creating and
+	// undoing pages, redoing them, reopening and taking the file through
+	// Actual and back must leave Veritas listing pages exactly as Actual
+	// reads the same file.
+	let scratch = Scratch::new("page-order-edits");
+	let Some(oracle) = oracle() else {
+		return;
+	};
+	let theirs = |zip: &Path| -> Vec<String> {
+		serde_json::from_slice::<Value>(&node(
+			&oracle,
+			&["dashboards", &text(zip)],
+			"2026-11-13",
+			1,
+		))
+		.unwrap()["pages"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.map(|page| page["name"].as_str().unwrap().to_owned())
+			.collect()
+	};
+	let ours = |session: &Session| -> Vec<String> {
+		dashboards(session, "2026-11-13")
+			.into_iter()
+			.map(|page| page.name)
+			.collect()
+	};
+	let mut exports = 0;
+	let mut agrees = |session: &Session, expected: &[&str], what: &str| {
+		assert_eq!(ours(session), expected, "{what}");
+		exports += 1;
+		let zip = scratch.join(&format!("check-{exports}.zip"));
+		export(session, &zip);
+		assert_eq!(theirs(&zip), expected, "Actual reads the export {what}");
+	};
+	let create = |session: &Session, name: &str| -> String {
+		created(
+			&perform(
+				session,
+				Command::CreateDashboard {
+					name: name.to_owned(),
+				},
+			),
+			EntityKind::DashboardPage,
+		)
+	};
+
+	let dir = scratch.join("veritas");
+	let session = import(&all_features(), &dir);
+	perform(
+		&session,
+		Command::DeleteDashboard {
+			page_id: MAIN.to_owned(),
+		},
+	);
+	agrees(&session, &["Deep dive"], "after deleting the first page");
+	for name in ["One", "Two", "Three"] {
+		create(&session, name);
+	}
+	agrees(
+		&session,
+		&["Deep dive", "One", "Two", "Three"],
+		"after three creates",
+	);
+	session.undo().unwrap();
+	session.undo().unwrap();
+	agrees(&session, &["Deep dive", "One"], "after undoing two creates");
+	session.redo().unwrap();
+	agrees(&session, &["Deep dive", "One", "Two"], "after a redo");
+	create(&session, "Four");
+	agrees(
+		&session,
+		&["Deep dive", "One", "Two", "Four"],
+		"a create after undone ones goes last",
+	);
+	for _ in 0..4 {
+		session.undo().unwrap();
+	}
+	agrees(
+		&session,
+		&["Main", "Deep dive"],
+		"undoing back to the start",
+	);
+	for _ in 0..2 {
+		session.redo().unwrap();
+	}
+	agrees(
+		&session,
+		&["Deep dive", "One"],
+		"redoing the delete and a create",
+	);
+	session.close().unwrap();
+	let session = open(&dir);
+	agrees(&session, &["Deep dive", "One"], "after a reopen");
+
+	let ours_zip = scratch.join("veritas.zip");
+	export(&session, &ours_zip);
+	session.close().unwrap();
+	let back = scratch.join("back.zip");
+	apply(
+		&oracle,
+		&ours_zip,
+		json!([
+			{"op": "createDashboardPage", "id": "00000000-0000-4000-8000-0000000000aa", "name": "From Actual"},
+		]),
+		&back,
+		9,
+	);
+	assert_eq!(theirs(&back), ["Deep dive", "One", "From Actual"]);
+	let returned = import(&back, &scratch.join("returned"));
+	agrees(
+		&returned,
+		&["Deep dive", "One", "From Actual"],
+		"after a page made in Actual",
+	);
+	create(&returned, "Five");
+	agrees(
+		&returned,
+		&["Deep dive", "One", "From Actual", "Five"],
+		"a Veritas page after Actual's",
+	);
+}
