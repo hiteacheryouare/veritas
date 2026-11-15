@@ -84,7 +84,7 @@ struct EnvelopePicker: View {
 			Text("To Budget").tag(String?.none)
 			Divider()
 			ForEach(envelopes, id: \.id) { envelope in
-				Text("\(envelope.name)  \(format.amount(envelope.available))").tag(String?.some(envelope.id))
+				Text("\(envelope.name)  \(format.amount(envelope.available, on: .budget))").tag(String?.some(envelope.id))
 			}
 		}
 		.labelsHidden()
@@ -102,7 +102,7 @@ struct CoverPopover: View {
 
 	var body: some View {
 		VStack(alignment: .leading, spacing: Spacing.s3) {
-			Text("Cover \(screen.format.amount(-envelope.available)) overspent")
+			Text("Cover \(screen.format.amount(-envelope.available, on: .budget)) overspent")
 				.font(.text(.heading, weight: .semibold))
 			EnvelopePicker(title: "From", selection: $from, envelopes: screen.sources.filter { $0.id != envelope.id }, format: screen.format)
 			HStack {

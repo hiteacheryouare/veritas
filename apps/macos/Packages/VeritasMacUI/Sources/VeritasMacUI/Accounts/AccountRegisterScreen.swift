@@ -83,7 +83,7 @@ struct AccountRegisterScreen: View {
 		}
 		.background(.surfaceWindow)
 		.navigationTitle(account?.name ?? "Account")
-		.navigationSubtitle(account.map { register.format.currency($0.total) } ?? "")
+		.navigationSubtitle(account.map { register.format.currency($0.total, on: .register) } ?? "")
 		.toolbar { toolbar }
 		.sheet(item: $editing) { TransactionSheet(model: $0) }
 		.sheet(item: $moving) { MoveMoneySheet(model: $0) }
@@ -217,7 +217,7 @@ private struct BalanceGraph: View {
 					.foregroundStyle(.textSecondary)
 			}
 			.accessibilityElement(children: .ignore)
-			.accessibilityLabel("Balance from \(RegisterRow.short(first.date)), \(format.amount(first.balance)), to \(RegisterRow.short(last.date)), \(format.amount(last.balance))")
+			.accessibilityLabel("Balance from \(RegisterRow.short(first.date)), \(format.amount(first.balance, on: .register)), to \(RegisterRow.short(last.date)), \(format.amount(last.balance, on: .register))")
 		} else {
 			Color.clear
 		}
@@ -260,8 +260,8 @@ struct ReconcileBar: View {
 			Button("Check") { check() }
 				.accessibilityIdentifier("reconcile.check")
 			if let result = model.result {
-				LabeledFigure(title: "Cleared", value: format.amount(result.cleared))
-				LabeledFigure(title: "Difference", value: format.amount(result.difference))
+				LabeledFigure(title: "Cleared", value: format.amount(result.cleared, on: .register))
+				LabeledFigure(title: "Difference", value: format.amount(result.difference, on: .register))
 					.foregroundStyle(result.difference == 0 ? Color.moneyAvailable : Color.moneyOverspent)
 					.accessibilityIdentifier("reconcile.difference")
 			}

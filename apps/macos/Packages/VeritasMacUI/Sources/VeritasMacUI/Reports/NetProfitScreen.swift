@@ -182,7 +182,7 @@ private struct NetProfitChart: View {
 
 	/// The mockup's chart shorthand: whole units with a sign, "+1,024", "−414".
 	static func net(_ amount: Int64, format: MoneyFormat) -> String {
-		let whole = format.wholeCurrency(amount).replacingOccurrences(of: format.currencySymbol, with: "")
+		let whole = format.wholeCurrency(amount, on: .register).replacingOccurrences(of: format.currencySymbol, with: "")
 		return amount < 0 ? whole : "+\(whole)"
 	}
 }
@@ -302,7 +302,7 @@ private struct CellButton: View {
 		.buttonStyle(.plain)
 		.onHover { isHovered = $0 }
 		.help(ReportWords.showTransactions(cell.count) ?? "")
-		.accessibilityLabel("\(cell.title), \(format.amount(cell.amount))")
+		.accessibilityLabel("\(cell.title), \(format.amount(cell.amount, on: .register))")
 		.accessibilityHint(ReportWords.showTransactions(cell.count) ?? "")
 	}
 }

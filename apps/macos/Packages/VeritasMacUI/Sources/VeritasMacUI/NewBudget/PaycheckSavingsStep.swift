@@ -13,10 +13,6 @@ struct PaycheckSavingsStep: View {
 				.accessibilityIdentifier("newBudget.retirementPlan")
 			Toggle("I have an HSA", isOn: $setup.hasHealthSavingsAccount)
 				.accessibilityIdentifier("newBudget.healthSavingsAccount")
-			Text("Veritas adds an off-budget account for each one you check, so paycheck contributions to it count as savings.")
-				.font(.text(.body))
-				.foregroundStyle(.textSecondary)
-				.fixedSize(horizontal: false, vertical: true)
 		}
 		.toggleStyle(.checkbox)
 	}

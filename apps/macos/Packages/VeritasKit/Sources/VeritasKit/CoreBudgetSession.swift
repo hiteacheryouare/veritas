@@ -13,7 +13,8 @@ final class CoreBudgetSession: BudgetSession {
 
 	func overview() async throws -> BudgetOverview {
 		let session = session
-		let (state, overview) = try await Core.run { (try session.state(), try session.overview()) }
+		let (state, overview, currencies) = try await Core.run { (try session.state(), try session.overview(), try VeritasCore.currencies()) }
+		let currency = overview.numberFormat?.currency.flatMap { code in currencies.first { $0.code == code } }
 		return BudgetOverview(
 			name: overview.budgetName,
 			directory: URL(filePath: state.directory, directoryHint: .isDirectory),
@@ -26,9 +27,8 @@ final class CoreBudgetSession: BudgetSession {
 					SidebarAccount(id: account.id, name: account.name, balance: account.balance, isInactive: account.closed || account.deleted)
 				})
 			},
-			format: overview.numberFormat.map(MoneyFormat.init),
-			numberStyle: overview.numberFormat?.style ?? .commaDot,
-			currencyCode: overview.numberFormat?.currency
+			format: overview.numberFormat.map { MoneyFormat($0, currency: currency) },
+			numberStyle: overview.numberFormat?.style ?? .commaDot
 		)
 	}
 
@@ -44,7 +44,8 @@ final class CoreBudgetSession: BudgetSession {
 
 	func maintain() async throws {
 		let session = session
-		_ = try await Core.run { try session.maintain() }
+		let today = WorkspaceModel.today()
+		_ = try await Core.run { try session.maintain(today: today) }
 	}
 
 	/// In the sandbox the core writes only in the app's own folders (contract v2), so

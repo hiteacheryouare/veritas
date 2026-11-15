@@ -3,10 +3,10 @@ use std::fmt::Debug;
 
 use crate::{
 	Account, AccountGroup, AccountGroupId, AccountId, AccountMeta, BudgetCell, BudgetData,
-	Category, CategoryGroup, CategoryGroupId, CategoryId, CategoryMeta, CustomReportId,
+	Category, CategoryGroup, CategoryGroupId, CategoryId, CategoryMeta, CivilDate, CustomReportId,
 	CustomReportRow, DashboardPage, DashboardPageId, Goal, GoalId, Money, Payee, PayeeId, Rule,
-	RuleId, Schedule, ScheduleId, Tag, TagId, Transaction, TransactionId, TransactionMeta, Widget,
-	WidgetId, YearMonth,
+	RuleId, Schedule, ScheduleId, ScheduleJsonPaths, ScheduleMeta, Tag, TagId, Transaction,
+	TransactionId, TransactionMeta, Widget, WidgetId, YearMonth,
 };
 
 /// One row a subscriber may need to refetch after a commit.
@@ -83,6 +83,29 @@ pub struct TaxTag {
 pub struct TransactionMetaRow {
 	pub transaction: TransactionId,
 	pub meta: TransactionMeta,
+}
+
+/// The store upserts the four columns by `schedule_id`, never with
+/// `INSERT OR REPLACE` (docs/actual-format.md decision 4).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScheduleJsonPathsRow {
+	pub schedule: ScheduleId,
+	pub paths: ScheduleJsonPaths,
+}
+
+/// `setNextDate({reset: true})`: the date goes into `base_next_date` with a
+/// new `base_next_date_ts`, so `v_schedules` reads the base pair from then
+/// on. A changed `Schedule.next_date` is the other, local, write.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NextDateReset {
+	pub schedule: ScheduleId,
+	pub date: Option<CivilDate>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScheduleMetaRow {
+	pub schedule: ScheduleId,
+	pub meta: ScheduleMeta,
 }
 
 /// What undo writes for a row that a command created.
@@ -244,6 +267,9 @@ rows!(
 	Transaction(Transaction),
 	Rule(Rule),
 	Schedule(Schedule),
+	NextDateReset(NextDateReset),
+	ScheduleJsonPaths(ScheduleJsonPathsRow),
+	ScheduleMeta(ScheduleMetaRow),
 	Tag(Tag),
 	BudgetCell(BudgetCell),
 	Hold(Hold),
@@ -568,6 +594,96 @@ impl Record for TransactionMetaRow {
 
 	fn entity(key: &TransactionId) -> EntityRef {
 		EntityRef::TransactionMeta(key.clone())
+	}
+}
+
+impl Record for NextDateReset {
+	type Key = ScheduleId;
+
+	fn key(&self) -> ScheduleId {
+		self.schedule.clone()
+	}
+
+	fn read(data: &BudgetData, key: &ScheduleId) -> Option<Self> {
+		data.schedules.get(key).map(|schedule| NextDateReset {
+			schedule: key.clone(),
+			date: schedule.next_date,
+		})
+	}
+
+	fn write(data: &mut BudgetData, key: &ScheduleId, value: Option<Self>) {
+		if let (Some(schedule), Some(value)) = (data.schedules.get_mut(key), value) {
+			schedule.next_date = value.date;
+		}
+	}
+
+	fn retired(_: &Self) -> Retired<Self> {
+		Retired::Kept
+	}
+
+	fn entity(key: &ScheduleId) -> EntityRef {
+		EntityRef::Schedule(key.clone())
+	}
+}
+
+impl Record for ScheduleJsonPathsRow {
+	type Key = ScheduleId;
+
+	fn key(&self) -> ScheduleId {
+		self.schedule.clone()
+	}
+
+	fn read(data: &BudgetData, key: &ScheduleId) -> Option<Self> {
+		data.schedule_json_paths
+			.get(key)
+			.map(|paths| ScheduleJsonPathsRow {
+				schedule: key.clone(),
+				paths: paths.clone(),
+			})
+	}
+
+	fn write(data: &mut BudgetData, key: &ScheduleId, value: Option<Self>) {
+		put(
+			&mut data.schedule_json_paths,
+			key,
+			value.map(|row| row.paths),
+		);
+	}
+
+	/// Actual leaves a deleted schedule's row behind too; it is derived.
+	fn retired(_: &Self) -> Retired<Self> {
+		Retired::Kept
+	}
+
+	fn entity(key: &ScheduleId) -> EntityRef {
+		EntityRef::Schedule(key.clone())
+	}
+}
+
+impl Record for ScheduleMetaRow {
+	type Key = ScheduleId;
+
+	fn key(&self) -> ScheduleId {
+		self.schedule.clone()
+	}
+
+	fn read(data: &BudgetData, key: &ScheduleId) -> Option<Self> {
+		data.schedule_meta.get(key).map(|meta| ScheduleMetaRow {
+			schedule: key.clone(),
+			meta: meta.clone(),
+		})
+	}
+
+	fn write(data: &mut BudgetData, key: &ScheduleId, value: Option<Self>) {
+		put(&mut data.schedule_meta, key, value.map(|row| row.meta));
+	}
+
+	fn retired(_: &Self) -> Retired<Self> {
+		Retired::Removed
+	}
+
+	fn entity(key: &ScheduleId) -> EntityRef {
+		EntityRef::Schedule(key.clone())
 	}
 }
 

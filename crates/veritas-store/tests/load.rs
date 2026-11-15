@@ -213,7 +213,7 @@ fn adopting_adds_the_veritas_tables_and_leaves_migrations_alone() {
 			&raw,
 			"SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name LIKE 'veritas\\_%' ESCAPE '\\'"
 		),
-		8
+		9
 	);
 	assert_eq!(
 		count(
@@ -664,33 +664,70 @@ fn a_child_of_a_parent_with_a_null_tombstone_is_left_out_like_actuals_alive_view
 fn a_budget_adopted_by_an_earlier_v1_build_opens_and_is_upgraded_in_place() {
 	let scratch = Scratch::new("old-v1");
 	let db_path = fixture_db("small", &scratch);
-	// veritas_transaction_meta as the first v1 builds created it, before
-	// needs_actual existed.
-	Connection::open(&db_path)
-		.unwrap()
-		.execute_batch(
-			"CREATE TABLE veritas_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-			 INSERT INTO veritas_meta VALUES ('schema_version', '1');
-			 CREATE TABLE veritas_transaction_meta (
-			   transaction_id TEXT PRIMARY KEY,
-			   adjustment INTEGER NOT NULL DEFAULT 0 CHECK (adjustment IN (0, 1)));
-			 INSERT INTO veritas_transaction_meta VALUES ('t-old', 1);",
+	let raw = Connection::open(&db_path).unwrap();
+	let category: String = raw
+		.query_row(
+			"SELECT id FROM categories WHERE tombstone = 0 ORDER BY id LIMIT 1",
+			[],
+			|row| row.get(0),
 		)
 		.unwrap();
+	// veritas_transaction_meta as the first v1 builds created it, before
+	// needs_actual existed, and veritas_goal before D72's dismiss columns.
+	raw.execute_batch(&format!(
+		"CREATE TABLE veritas_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+		 INSERT INTO veritas_meta VALUES ('schema_version', '1');
+		 CREATE TABLE veritas_transaction_meta (
+		   transaction_id TEXT PRIMARY KEY,
+		   adjustment INTEGER NOT NULL DEFAULT 0 CHECK (adjustment IN (0, 1)));
+		 INSERT INTO veritas_transaction_meta VALUES ('t-old', 1);
+		 CREATE TABLE veritas_goal (
+		   id TEXT PRIMARY KEY,
+		   category_id TEXT NOT NULL UNIQUE,
+		   target_cents INTEGER NOT NULL CHECK (target_cents > 0),
+		   target_date INTEGER,
+		   icon TEXT,
+		   color TEXT,
+		   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'reached', 'closed')),
+		   reached_month TEXT,
+		   closed_month TEXT,
+		   released_to_category_id TEXT,
+		   released_cents INTEGER,
+		   created_at INTEGER NOT NULL);
+		 INSERT INTO veritas_goal (id, category_id, target_cents, status, closed_month, created_at)
+		   VALUES ('g-old', '{category}', 50000, 'closed', '2026-04', 0);"
+	))
+	.unwrap();
+	drop(raw);
+
 	let read_only = Store::open(&db_path, Access::ReadOnly(ReadOnlyReason::OpenElsewhere)).unwrap();
-	let meta = &read_only.load().unwrap().data.transaction_meta[&TransactionId::new("t-old")];
+	let old = read_only.load().unwrap().data;
+	let meta = &old.transaction_meta[&TransactionId::new("t-old")];
 	assert!(meta.adjustment);
 	assert_eq!(meta.needs_actual, None);
+	let goal = &old.goals[&veritas_domain::GoalId::new("g-old")];
+	assert_eq!(goal.status, GoalStatus::Closed);
+	assert_eq!(goal.target, Money::from_minor(50000));
+	assert_eq!(goal.activity_seen_through, None);
+	assert_eq!(goal.activity_seen_total, None);
+	assert_eq!(goal.close_month_dismissed_available, None);
 	drop(read_only);
 
 	let mut store = Store::open(&db_path, Access::ReadWrite).unwrap();
 	store.adopt().unwrap();
 	store.adopt().unwrap();
+	let upgraded = Connection::open(&db_path).unwrap();
 	let columns = count(
-		&Connection::open(&db_path).unwrap(),
+		&upgraded,
 		"SELECT count(*) FROM pragma_table_info('veritas_transaction_meta') WHERE name = 'needs_actual'",
 	);
 	assert_eq!(columns, 1);
+	let goal_columns = count(
+		&upgraded,
+		"SELECT count(*) FROM pragma_table_info('veritas_goal') WHERE name IN \
+		 ('activity_seen_through', 'activity_seen_total', 'close_month_dismissed_available')",
+	);
+	assert_eq!(goal_columns, 3);
 	let mut writer = store.writer().unwrap();
 	writer
 		.put_transaction_meta(

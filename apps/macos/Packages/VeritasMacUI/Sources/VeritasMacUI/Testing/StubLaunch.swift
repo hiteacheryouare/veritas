@@ -5,7 +5,8 @@ import VeritasKit
 
 /// UI tests launch the app with `-VeritasStub empty` or `-VeritasStub open`, plus
 /// optionally `-VeritasStubReadOnly <kind>`, `-VeritasStubImportError <kind>`,
-/// `-VeritasStubFindings YES` or `-VeritasStubBackupProblem YES`. The stub keeps
+/// `-VeritasStubFindings YES`, `-VeritasStubBackupProblem YES` or
+/// `-VeritasStubHideDecimals YES`. The stub keeps
 /// the UI tests independent of fixtures, file panels and the sandbox.
 struct StubLaunch {
 	static let budgetDirectory = URL(filePath: "/stub/budget", directoryHint: .isDirectory)
@@ -24,7 +25,8 @@ struct StubLaunch {
 			readOnly: defaults.string(forKey: "VeritasStubReadOnly").flatMap(Self.readOnlyKind),
 			importError: defaults.string(forKey: "VeritasStubImportError").flatMap(Self.error),
 			hasFindings: defaults.bool(forKey: "VeritasStubFindings"),
-			backupFails: defaults.bool(forKey: "VeritasStubBackupProblem")
+			backupFails: defaults.bool(forKey: "VeritasStubBackupProblem"),
+			hidesDecimals: defaults.bool(forKey: "VeritasStubHideDecimals")
 		)
 	}
 
@@ -57,6 +59,7 @@ struct StubLibrary: BudgetLibrary {
 	let importError: FfiError?
 	var hasFindings = false
 	var backupFails = false
+	var hidesDecimals = false
 
 	func listBudgets() async throws -> [BudgetListingItem] {
 		[
@@ -70,12 +73,12 @@ struct StubLibrary: BudgetLibrary {
 	}
 
 	func open(directory: URL) async throws -> any BudgetSession {
-		StubSession(readOnly: readOnly, hasFindings: hasFindings, backupFails: backupFails)
+		StubSession(readOnly: readOnly, hasFindings: hasFindings, backupFails: backupFails, hidesDecimals: hidesDecimals)
 	}
 
 	func importActualZip(_ zip: URL, into directory: URL) async throws -> any BudgetSession {
 		if let importError { throw importError }
-		return StubSession(readOnly: readOnly, hasFindings: hasFindings, backupFails: backupFails)
+		return StubSession(readOnly: readOnly, hasFindings: hasFindings, backupFails: backupFails, hidesDecimals: hidesDecimals)
 	}
 
 	func createBudget(_ budget: NewBudget, into directory: URL) async throws -> any BudgetSession {
@@ -113,6 +116,7 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 	let accountGroups: [SidebarGroup]
 	let hasFindings: Bool
 	let backupFails: Bool
+	let hidesDecimals: Bool
 	private let lock = NSLock()
 	private var backup = BackupStatus.none
 	private var snapshotList = [
@@ -125,10 +129,11 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 	private let accountStore = StubAccounts()
 	private lazy var dashboardStore = StubDashboards(reports: reports)
 
-	init(readOnly: ReadOnlyKind?, hasFindings: Bool = false, backupFails: Bool = false) {
+	init(readOnly: ReadOnlyKind?, hasFindings: Bool = false, backupFails: Bool = false, hidesDecimals: Bool = false) {
 		self.readOnly = readOnly
 		self.hasFindings = hasFindings
 		self.backupFails = backupFails
+		self.hidesDecimals = hidesDecimals
 		name = "Stub"
 		accountGroups = [
 			SidebarGroup(name: "Cash", accounts: [SidebarAccount(id: "checking", name: "Checking", balance: 0)]),
@@ -142,12 +147,19 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 		accountGroups = groups
 		hasFindings = false
 		backupFails = false
+		hidesDecimals = false
 	}
 
 	let canExport = true
 
+	static let hiddenDecimals = NumberFormat(currency: "USD", style: .commaDot, hideDecimals: true)
+	static let dollar = Currency(code: "USD", name: "US Dollar", symbol: "$", decimalPlaces: 2, numberFormat: .commaDot, symbolFirst: true)
+
 	func overview() async throws -> BudgetOverview {
-		BudgetOverview(name: name, directory: StubLaunch.budgetDirectory, readOnly: readOnly, accountGroups: name == "Stub" ? accountStore.sidebar() : accountGroups)
+		BudgetOverview(
+			name: name, directory: StubLaunch.budgetDirectory, readOnly: readOnly, accountGroups: name == "Stub" ? accountStore.sidebar() : accountGroups,
+			format: hidesDecimals ? MoneyFormat(Self.hiddenDecimals, currency: Self.dollar) : nil
+		)
 	}
 
 	func undo() async throws {}

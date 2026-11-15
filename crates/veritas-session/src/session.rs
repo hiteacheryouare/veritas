@@ -110,6 +110,7 @@ pub struct Session<B: Backend> {
 	last_snapshot: Option<DateTime<Utc>>,
 	open_check: Option<Pending>,
 	snapshot_problem: Option<CoreError>,
+	schedule_problem: Option<String>,
 	audit: Option<AuditReport>,
 	backup_folder: Option<PathBuf>,
 	last_backup: Option<BackupResult>,
@@ -152,6 +153,7 @@ impl<B: Backend> Session<B> {
 			last_snapshot: None,
 			open_check: None,
 			snapshot_problem: None,
+			schedule_problem: None,
 			audit: None,
 			backup_folder: None,
 			last_backup: None,
@@ -287,6 +289,12 @@ impl<B: Backend> Session<B> {
 		self.snapshot_problem.as_ref()
 	}
 
+	/// Why the last run of the daily schedule service failed, until a later
+	/// run works. A failed run never stops editing or the rest of `maintain`.
+	pub fn schedule_problem(&self) -> Option<&str> {
+		self.schedule_problem.as_deref()
+	}
+
 	/// What the background check found: SQLite's integrity check and the
 	/// invariant audit. `None` until the check finishes, or when it couldn't
 	/// run. Findings are reported and never fixed; only damage SQLite itself
@@ -328,6 +336,7 @@ impl<B: Backend> Session<B> {
 		if let Some(reason) = command.snapshot_first() {
 			self.snapshot(reason)?;
 		}
+		let clears_schedule_run = command.clears_schedule_run(self.data()?);
 		let rows = if command.reads_sheet() {
 			let today = self.today;
 			let State::Open(bus) = &self.state else {
@@ -364,6 +373,9 @@ impl<B: Backend> Session<B> {
 		self.dirty |= !changed.is_empty();
 		if !changed.is_empty() {
 			self.register = None;
+			if clears_schedule_run {
+				self.write_schedule_run(None);
+			}
 		}
 		if refreshed {
 			self.classification.refresh(&changed);
@@ -371,6 +383,44 @@ impl<B: Backend> Session<B> {
 			self.after_change(&changed);
 		}
 		Ok(changed)
+	}
+
+	/// Actual's daily schedule service (`schedules/app.ts:858-881`): once a
+	/// day, gated by `metadata.json`'s `lastScheduleRun`, post due and missed
+	/// auto-post bills and move paid ones on, as one undo step. The day is
+	/// marked done after the commit, outside SQLite, unless a bill was left
+	/// to Actual (D60), so Actual's own service still runs it. The outcome is
+	/// also kept for `schedule_problem`.
+	pub fn run_schedules(&mut self, today: CivilDate) -> Result<ChangeSet, CoreError> {
+		let ran = self.run_schedule_service(today);
+		self.schedule_problem = ran.as_ref().err().map(ToString::to_string);
+		ran
+	}
+
+	fn run_schedule_service(&mut self, today: CivilDate) -> Result<ChangeSet, CoreError> {
+		self.poll();
+		if self.read_only().is_some() {
+			return Ok(ChangeSet::default());
+		}
+		let metadata = self.dir.join(METADATA_FILE);
+		let day = today.to_string();
+		if veritas_interop::last_schedule_run(&metadata)?.as_deref() == Some(day.as_str()) {
+			return Ok(ChangeSet::default());
+		}
+		let now_ms = self.now().timestamp_millis() as f64;
+		let planned = crate::bills::advance(self.data()?, today, now_ms)?;
+		let rows = planned.rows;
+		let changed = self.perform(&move |_: &BudgetData| Ok(rows.clone()))?;
+		if let Some(crate::bills::ScheduleRun::Done(day)) = planned.schedule_run {
+			self.write_schedule_run(Some(day));
+		}
+		Ok(changed)
+	}
+
+	/// Best effort: the commit already stands, and a missed write only means
+	/// a service run that finds nothing new to post (`app.ts:318-333`).
+	fn write_schedule_run(&self, day: Option<CivilDate>) {
+		let _ = veritas_interop::set_last_schedule_run(&self.dir.join(METADATA_FILE), day);
 	}
 
 	/// A page of the register, from the index kept since the last commit when
@@ -649,6 +699,10 @@ impl<B: Backend> Session<B> {
 	/// Puts the budget back to a snapshot, named by its file name, and reloads
 	/// it. The current state is snapshotted first, and undo history is
 	/// cleared because it describes a budget that no longer exists.
+	/// `lastScheduleRun` is cleared too: a snapshot holds only the database,
+	/// while Actual's backup brings back metadata.json with it, so restoring
+	/// to before today's run makes Actual's service run again on load
+	/// (`backups.ts` `loadBackup`).
 	pub fn restore(&mut self, snapshot_id: &str) -> Result<ChangeSet, CoreError> {
 		self.ensure_writer()?;
 		let snapshot = self.find_snapshot(snapshot_id)?;
@@ -667,6 +721,7 @@ impl<B: Backend> Session<B> {
 		let reopened = self.reopen(listeners);
 		let safety = restored?;
 		reopened?;
+		self.write_schedule_run(None);
 		if safety.is_some() {
 			self.last_snapshot = Some(self.now());
 		}

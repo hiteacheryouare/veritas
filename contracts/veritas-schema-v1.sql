@@ -43,7 +43,11 @@ CREATE TABLE IF NOT EXISTS veritas_goal (
 	closed_month TEXT,
 	released_to_category_id TEXT,
 	released_cents INTEGER,
-	created_at INTEGER NOT NULL
+	created_at INTEGER NOT NULL,
+	-- docs/finance/debt.md GOAL-6 (D72): what the last dismiss of "new activity" saw.
+	activity_seen_through TEXT,
+	activity_seen_total INTEGER,
+	close_month_dismissed_available INTEGER
 );
 
 -- docs/finance/classification.md CLS-5: reconciliation adjustments Veritas made.
@@ -51,6 +55,13 @@ CREATE TABLE IF NOT EXISTS veritas_transaction_meta (
 	transaction_id TEXT PRIMARY KEY,
 	adjustment INTEGER NOT NULL DEFAULT 0 CHECK (adjustment IN (0, 1)),
 	needs_actual TEXT
+);
+
+-- R-BILL-3: Pause and End are both Actual's Complete (completed = 1). paused only
+-- picks the label the bill screen shows for a completed bill; it never changes what posts.
+CREATE TABLE IF NOT EXISTS veritas_schedule_meta (
+	schedule_id TEXT PRIMARY KEY,
+	paused INTEGER NOT NULL DEFAULT 0 CHECK (paused IN (0, 1))
 );
 
 -- docs/finance/tax-buckets.md TAX-1: which Actual tags mean which bucket.

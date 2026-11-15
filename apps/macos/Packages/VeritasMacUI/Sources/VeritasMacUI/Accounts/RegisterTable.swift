@@ -327,11 +327,11 @@ final class RegisterCell: NSTableCellView {
 			label.stringValue = row.notes ?? ""
 			label.textColor = .secondaryLabelColor
 		case .amount:
-			label.stringValue = (row.amount > 0 ? "+" : "") + model.format.amount(row.amount)
+			label.stringValue = (row.amount > 0 ? "+" : "") + model.format.amount(row.amount, on: .register)
 			label.font = NSFont.monospacedDigitSystemFont(ofSize: TextSize.body.rawValue, weight: .semibold)
 			label.textColor = row.amount > 0 && !row.isTransfer ? NSColor(Color(ColorToken.moneyIncome)) : .labelColor
 		case .balance:
-			label.stringValue = row.runningBalance.map(model.format.amount) ?? ""
+			label.stringValue = row.runningBalance.map { model.format.amount($0, on: .register) } ?? ""
 			label.textColor = .secondaryLabelColor
 			label.font = figures
 		}

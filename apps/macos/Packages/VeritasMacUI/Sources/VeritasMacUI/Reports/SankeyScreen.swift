@@ -119,7 +119,7 @@ struct SankeyCanvas: View {
 
 	@ViewBuilder private func label(_ node: SankeyNode, _ placed: SankeyLayout.Node) -> some View {
 		let name = ReportWords.node(node)
-		let value = format.amount(node.value)
+		let value = format.amount(node.value, on: .register)
 		let small = compact || node.column == 3
 		let width: CGFloat = 200
 		switch placed.labelSide {
@@ -200,14 +200,14 @@ private struct SankeyNodeButton: View {
 		.onHover(perform: hover)
 		.help(ReportWords.drillAction(for: node) ?? ReportWords.shortfallCaption)
 		.popover(isPresented: $isExplaining) { explanation }
-		.accessibilityLabel("\(ReportWords.node(node)), \(format.amount(node.value))")
+		.accessibilityLabel("\(ReportWords.node(node)), \(format.amount(node.value, on: .register))")
 		.accessibilityHint(ReportWords.drillAction(for: node) ?? ReportWords.shortfallCaption)
 		.accessibilityIdentifier("sankey.node.\(SankeyCanvas.identifier(node.key))")
 	}
 
 	private var explanation: some View {
 		VStack(alignment: .leading, spacing: 4) {
-			Text("Shortfall \(format.amount(node.value))").font(.text(.body, weight: .semibold))
+			Text("Shortfall \(format.amount(node.value, on: .register))").font(.text(.body, weight: .semibold))
 			Text(ReportWords.shortfallCaption).foregroundStyle(.textSecondary)
 		}
 		.padding(Spacing.s3)

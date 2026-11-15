@@ -14,26 +14,27 @@ struct BudgetScreen: View {
 
 	init(workspace: WorkspaceModel, screen: BudgetScreenModel? = nil) {
 		self.workspace = workspace
-		_screen = State(initialValue: screen ?? BudgetScreenModel(
-			workspace: workspace,
-			reader: CoreAmountReader(budgetDecimalPlaces: workspace.budgetDecimalPlaces)
-		))
+		_screen = State(initialValue: screen ?? BudgetScreenModel(workspace: workspace))
 	}
 
 	var body: some View {
 		ScrollView {
 			VStack(alignment: .leading, spacing: 0) {
 				if let sheet = screen.sheet {
-					HStack(alignment: .center, spacing: Spacing.s4) {
-						ToBudgetHeader(sheet: sheet, dense: workspace.isDense, screen: screen)
-						Spacer(minLength: Spacing.s4)
-						if !workspace.isDense {
-							ForEach(screen.goals.prefix(2)) { goal in
-								GoalCard(goal: goal, format: screen.format)
+					if !screen.isTracking || (!workspace.isDense && !screen.goals.isEmpty) {
+						HStack(alignment: .center, spacing: Spacing.s4) {
+							if !screen.isTracking {
+								ToBudgetHeader(sheet: sheet, dense: workspace.isDense, screen: screen)
+							}
+							Spacer(minLength: Spacing.s4)
+							if !workspace.isDense {
+								ForEach(screen.goals.prefix(2)) { goal in
+									GoalCard(goal: goal, format: screen.format)
+								}
 							}
 						}
+						.padding(.bottom, workspace.isDense ? Spacing.s3 : Spacing.s6)
 					}
-					.padding(.bottom, workspace.isDense ? Spacing.s3 : Spacing.s6)
 					if workspace.isDense {
 						GroupedRows {
 							EnvelopeColumns(dense: true)
@@ -57,6 +58,10 @@ struct BudgetScreen: View {
 						}
 					}
 					.accessibilityIdentifier("budget.newGroup")
+					if let note = workspace.mixedScaleNote {
+						MixedScaleNote(text: note)
+							.padding(.top, Spacing.s4)
+					}
 				}
 			}
 			.padding(.top, Spacing.s2)
@@ -102,14 +107,16 @@ struct BudgetScreen: View {
 				MonthStepper(screen: screen, isEditing: screen.editing != nil)
 			}
 			ToolbarItem(placement: .primaryAction) {
-				Button {
-					isMovingBudget = true
-				} label: {
-					Label("Move budget", systemImage: "arrow.left.arrow.right")
+				if !screen.isTracking {
+					Button {
+						isMovingBudget = true
+					} label: {
+						Label("Move budget", systemImage: "arrow.left.arrow.right")
+					}
+					.labelStyle(.titleAndIcon)
+					.disabled(screen.sheet == nil || screen.isReadOnly)
+					.accessibilityIdentifier("budget.moveBudget")
 				}
-				.labelStyle(.titleAndIcon)
-				.disabled(screen.sheet == nil || workspace.readOnly != nil)
-				.accessibilityIdentifier("budget.moveBudget")
 			}
 		}
 		.sheet(isPresented: $isMovingBudget) {
@@ -180,7 +187,7 @@ private struct ToBudgetHeader: View {
 			HStack(spacing: Spacing.s2) {
 				Image(systemName: tone.symbol ?? "tray.and.arrow.down")
 					.font(.system(size: dense ? 15 : 26, weight: .semibold))
-				Text(screen.format.currency(sheet.toBudget))
+				Text(screen.format.currency(sheet.toBudget, on: .budget))
 					.font(.figures(dense ? .title : .display, weight: .bold))
 					.lineLimit(1)
 					.fixedSize()
@@ -190,7 +197,7 @@ private struct ToBudgetHeader: View {
 				.font(.text(dense ? .body : .heading, weight: .semibold))
 				.fixedSize()
 			if sheet.forNextMonth > 0 {
-				Text("\(screen.format.amount(sheet.forNextMonth)) held for next month")
+				Text("\(screen.format.amount(sheet.forNextMonth, on: .budget)) held for next month")
 					.font(.text(.body))
 					.foregroundStyle(.textSecondary)
 			}
@@ -198,9 +205,9 @@ private struct ToBudgetHeader: View {
 		.contentShape(.rect)
 		.contextMenu {
 			Button("Hold for Next Month…") { isHolding = true }
-				.disabled(sheet.toBudget <= 0)
+				.disabled(sheet.toBudget <= 0 || screen.isReadOnly)
 			Button("Reset Hold") { Task { await screen.resetHold() } }
-				.disabled(sheet.forNextMonth == 0)
+				.disabled(sheet.forNextMonth == 0 || screen.isReadOnly)
 		}
 		.popover(isPresented: $isHolding, arrowEdge: .bottom) {
 			HoldPopover(screen: screen, toBudget: sheet.toBudget)
@@ -210,7 +217,7 @@ private struct ToBudgetHeader: View {
 	}
 
 	private var tone: VeritasDesign.MoneyTone {
-		sheet.toBudget < 0 ? .overspent : sheet.toBudget == 0 ? .neutral : .income
+		sheet.toBudgetTone.design
 	}
 }
 
@@ -255,5 +262,18 @@ struct EnvelopeGrid<Name: View, Bar: View, Budgeted: View, Spent: View, Availabl
 			available.frame(width: 150, alignment: .trailing)
 		}
 		.padding(.horizontal, Spacing.s4)
+	}
+}
+
+/// CLS-12.10's fixed line under a 0-place budget's envelope numbers.
+struct MixedScaleNote: View {
+	let text: String
+
+	var body: some View {
+		Text(text)
+			.font(.text(.caption))
+			.foregroundStyle(.textSecondary)
+			.fixedSize(horizontal: false, vertical: true)
+			.accessibilityIdentifier("mixedScaleNote")
 	}
 }

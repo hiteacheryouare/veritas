@@ -7,8 +7,8 @@ use veritas_domain::{
 	BudgetData, BudgetType, Category, CategoryGroup, CategoryGroupId, CategoryId, CategoryKind,
 	CategoryMeta, CivilDate, ConditionsOp, CoreError, CustomReportId, CustomReportRow,
 	DashboardPage, DashboardPageId, FormatPrefs, Goal, GoalId, GoalStatus, Money, Payee, PayeeId,
-	Rule, RuleId, RuleStage, Schedule, ScheduleId, SplitRole, Tag, TagId, Transaction,
-	TransactionId, TransactionMeta, Widget, WidgetId,
+	Rule, RuleId, RuleStage, Schedule, ScheduleId, ScheduleJsonPaths, ScheduleMeta, SplitRole, Tag,
+	TagId, Transaction, TransactionId, TransactionMeta, Widget, WidgetId,
 };
 
 use crate::cells::{
@@ -401,6 +401,25 @@ fn load_tables(conn: &Connection) -> Result<Loaded, CoreError> {
 
 	each_row(
 		conn,
+		"schedules_json_paths",
+		"SELECT schedule_id, payee, account, amount, date FROM schedules_json_paths",
+		&mut skipped,
+		|row| {
+			let schedule =
+				ScheduleId::new(required_text(at(row, 0)?, "the row names no schedule")?);
+			let paths = ScheduleJsonPaths {
+				payee: text(at(row, 1)?)?,
+				account: text(at(row, 2)?)?,
+				amount: text(at(row, 3)?)?,
+				date: text(at(row, 4)?)?,
+			};
+			data.schedule_json_paths.insert(schedule, paths);
+			Ok(())
+		},
+	)?;
+
+	each_row(
+		conn,
 		"tags",
 		"SELECT id, tag, color, description, hidden, tombstone FROM tags",
 		&mut skipped,
@@ -608,7 +627,7 @@ fn load_reports(
 	each_row(
 		conn,
 		"dashboard_pages",
-		"SELECT id, name, tombstone FROM dashboard_pages",
+		"SELECT id, name, tombstone, rowid FROM dashboard_pages",
 		skipped,
 		|row| {
 			let id = DashboardPageId::new(id(row, 0)?);
@@ -616,6 +635,7 @@ fn load_reports(
 				id: id.clone(),
 				name: text(at(row, 1)?)?,
 				tombstone: tombstone(at(row, 2)?),
+				position: integer(at(row, 3)?)?.unwrap_or_default(),
 			};
 			data.dashboard_pages.insert(id, page);
 			Ok(())
@@ -737,6 +757,23 @@ fn load_veritas_tables(
 		)?;
 	}
 
+	if table_exists(conn, "veritas_schedule_meta")? {
+		each_row(
+			conn,
+			"veritas_schedule_meta",
+			"SELECT schedule_id, paused FROM veritas_schedule_meta",
+			skipped,
+			|row| {
+				let schedule = ScheduleId::new(id(row, 0)?);
+				let meta = ScheduleMeta {
+					paused: flag(at(row, 1)?),
+				};
+				data.schedule_meta.insert(schedule, meta);
+				Ok(())
+			},
+		)?;
+	}
+
 	if table_exists(conn, "veritas_tax_tag")? {
 		each_row(
 			conn,
@@ -756,8 +793,14 @@ fn load_veritas_tables(
 		each_row(
 			conn,
 			"veritas_goal",
-			"SELECT id, category_id, target_cents, target_date, icon, color, status, \
-			 reached_month, closed_month, released_to_category_id, released_cents FROM veritas_goal",
+			&format!(
+				"SELECT id, category_id, target_cents, target_date, icon, color, status, \
+				 reached_month, closed_month, released_to_category_id, released_cents, \
+				 {}, {}, {} FROM veritas_goal",
+				column_or_null(conn, "veritas_goal", "activity_seen_through")?,
+				column_or_null(conn, "veritas_goal", "activity_seen_total")?,
+				column_or_null(conn, "veritas_goal", "close_month_dismissed_available")?,
+			),
 			skipped,
 			|row| {
 				let id = GoalId::new(id(row, 0)?);
@@ -781,6 +824,9 @@ fn load_veritas_tables(
 					closed_month: text_month(at(row, 8)?)?,
 					released_to: text(at(row, 9)?)?.map(CategoryId::new),
 					released: money(at(row, 10)?)?,
+					activity_seen_through: text_month(at(row, 11)?)?,
+					activity_seen_total: money(at(row, 12)?)?,
+					close_month_dismissed_available: money(at(row, 13)?)?,
 				};
 				data.goals.insert(id, goal);
 				Ok(())

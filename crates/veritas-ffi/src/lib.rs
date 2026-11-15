@@ -1,6 +1,7 @@
 //! The only surface the apps see: commands, queries and the change-event stream, exported through UniFFI.
 
 mod accounts;
+mod bills;
 mod blocking;
 mod budget;
 mod commands;
@@ -9,6 +10,7 @@ mod dashboards;
 mod goals;
 mod records;
 mod reports;
+mod rules;
 mod session;
 #[cfg(test)]
 mod test_support;
@@ -21,6 +23,10 @@ pub use accounts::{
 	AccountDetail, AccountGroupDetail, AccountList, ClearedStatus, PayeeDetail, PayeeMemory,
 	Reconciliation, RegisterFilter, RegisterLine, RegisterPage, RegisterRow, RegisterScope,
 	RegisterSort, RegisterSortKey, SplitLineDraft, TransactionDraft,
+};
+pub use bills::{
+	BillAmount, BillDate, BillDetail, BillDraft, BillFrequency, BillRepeat, BillRepeatEnd,
+	BillRepeatPattern, BillState, BillStatus, BillSummary, BillWeekday, BillWeekend, UpcomingBill,
 };
 pub use blocking::CancelToken;
 pub use budget::{BudgetMonth, EnvelopeGroup, EnvelopeRow, MoneyTone};
@@ -47,6 +53,11 @@ pub use reports::{
 	NetWorthMonth, OwnersEquity, ReportCategory, ReportDrill, ReportLabels, ReportLine,
 	ReportSection, ReportTransaction, SankeyFlow, SankeyNode, SankeyNodeKey, SankeyNodeKind,
 	SankeyReport, SheetAccount, SheetSection, TaxBucket, TaxBucketTotal, TaxDetailRow, TaxSummary,
+};
+pub use rules::{
+	RuleAccess, RuleAction, RuleActionOp, RuleChangedField, RuleCondition, RuleConditionOp,
+	RuleConditionsOp, RuleDraft, RuleField, RuleFieldChange, RuleMatch, RuleSentence, RuleSource,
+	RuleSplitLine, RuleStage, RuleValue,
 };
 pub use session::{ChangeListener, Session};
 

@@ -226,15 +226,26 @@ public final class WorkspaceModel {
 		return overview?.accounts.first { !$0.isInactive }?.id ?? ""
 	}
 
-	/// D62: a code Actual doesn't know uses 2 places.
-	private func decimalPlaces(for code: String?) async -> UInt8 {
-		guard let code, let currencies = try? await library.currencies() else { return 2 }
-		return currencies.first { $0.code == code }?.decimalPlaces ?? 2
+	/// The budget currency's decimal places (D63): budget cells and goal
+	/// amounts use them; the register always uses two. They arrive with the
+	/// overview, so they are never another budget's.
+	public var budgetDecimalPlaces: UInt8 {
+		format.decimalPlaces
 	}
 
-	/// The budget currency's decimal places (D63): budget cells and goal
-	/// amounts use them; the register always uses two.
-	public private(set) var budgetDecimalPlaces: UInt8 = 2
+	/// CLS-12.10 and CLS-12.11: the line the budget and goal views show in a
+	/// 0-place budget, whose envelope numbers add both scales as Actual does.
+	public var mixedScaleNote: String? {
+		phase == .open && budgetDecimalPlaces == 0
+			? "Spending is recorded at 2 places and budgets at 0, so these numbers mix both, as in Actual."
+			: nil
+	}
+
+	/// What every budget-cell and goal amount field asks the core, at the
+	/// open budget's places. Fields build it when they open, never earlier.
+	public var budgetAmountReader: any AmountReader {
+		CoreAmountReader(budgetDecimalPlaces: budgetDecimalPlaces)
+	}
 
 	/// Runs one command. Errors are shown here; `false` means nothing changed.
 	@discardableResult
@@ -252,7 +263,7 @@ public final class WorkspaceModel {
 	}
 
 	/// The local civil date (PLAN §9 #14): time zones never shift it.
-	public static func today(_ now: Date = .now, calendar: Calendar = .current) -> String {
+	public nonisolated static func today(_ now: Date = .now, calendar: Calendar = .current) -> String {
 		let parts = calendar.dateComponents([.year, .month, .day], from: now)
 		return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 1, parts.day ?? 1)
 	}
@@ -411,8 +422,12 @@ public final class WorkspaceModel {
 				self?.present(error)
 			}
 			self.settings = settings
+			do {
+				try await opened.maintain()
+			} catch {
+				present(error)
+			}
 			startMaintenance(of: opened)
-			budgetDecimalPlaces = await decimalPlaces(for: overview.currencyCode)
 			await settings.connectBackupFolder()
 			await settings.backUpIfDue()
 		} catch {

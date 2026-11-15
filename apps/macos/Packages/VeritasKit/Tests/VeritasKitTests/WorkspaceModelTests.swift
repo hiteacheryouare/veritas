@@ -173,7 +173,7 @@ struct WorkspaceModelTests {
 			turns += 1
 		}
 		#expect(model.readOnly == .auditFailed)
-		#expect(library.session.maintained == 1)
+		#expect(library.session.maintained == 2, "once on open, so due bills post right away, then once on the timer")
 		await model.closeBudget()
 	}
 

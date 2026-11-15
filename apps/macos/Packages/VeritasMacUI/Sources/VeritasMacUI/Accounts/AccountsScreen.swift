@@ -159,13 +159,13 @@ private struct AccountRow: View {
 		.buttonStyle(.plain)
 		.foregroundStyle(account.closed ? Color.textSecondary : Color.textPrimary)
 		.accessibilityElement(children: .ignore)
-		.accessibilityLabel("\(account.name), balance \(format.amount(account.total)), cleared \(format.amount(account.cleared)), uncleared \(format.amount(account.uncleared))")
+		.accessibilityLabel("\(account.name), balance \(format.amount(account.total, on: .register)), cleared \(format.amount(account.cleared, on: .register)), uncleared \(format.amount(account.uncleared, on: .register))")
 		.accessibilityAddTraits(.isButton)
 		.accessibilityIdentifier("account.\(account.id)")
 	}
 
 	private func figure(_ amount: Int64, weight: Font.Weight) -> some View {
-		Text(format.amount(amount))
+		Text(format.amount(amount, on: .register))
 			.font(.figures(.body, weight: weight))
 			.frame(width: 110, alignment: .trailing)
 	}
@@ -279,7 +279,7 @@ private struct CloseAccountSheet: View {
 		VStack(alignment: .leading, spacing: Spacing.s4) {
 			Text("Close \(account.name)?").font(.text(.title, weight: .semibold))
 			if account.total != 0 {
-				Text("\(model.format.currency(account.total)) is in it. Move it to")
+				Text("\(model.format.currency(account.total, on: .register)) is in it. Move it to")
 				Picker("Move it to", selection: $destination) {
 					Text("Choose an account").tag(String?.none)
 					ForEach(model.open.filter { $0.id != account.id }) { Text($0.name).tag(String?.some($0.id)) }

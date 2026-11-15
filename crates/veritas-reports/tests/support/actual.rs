@@ -116,7 +116,7 @@ pub fn fixture(name: &str) -> BudgetData {
 		budget.custom_reports.insert(report.id.clone(), report);
 	}
 	let mut pages = conn
-		.prepare("SELECT id, name, tombstone FROM dashboard_pages")
+		.prepare("SELECT id, name, tombstone, rowid FROM dashboard_pages")
 		.unwrap();
 	let mut rows = pages.query([]).unwrap();
 	while let Some(row) = rows.next().unwrap() {
@@ -127,6 +127,7 @@ pub fn fixture(name: &str) -> BudgetData {
 				id,
 				name: text(row, "name"),
 				tombstone: int(row, "tombstone") == Some(1),
+				position: int(row, "rowid").unwrap(),
 			},
 		);
 	}

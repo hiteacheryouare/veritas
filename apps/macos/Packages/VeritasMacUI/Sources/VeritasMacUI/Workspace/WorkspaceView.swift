@@ -35,6 +35,7 @@ struct WorkspaceView: View {
 					ScreenView(destination: model.destination, title: model.title(of: model.destination))
 				}
 			}
+				.id(model.overview?.directory)
 				.safeAreaInset(edge: .top, spacing: 0) {
 					VStack(spacing: 0) {
 						if let readOnly = model.readOnly {

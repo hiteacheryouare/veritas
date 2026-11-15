@@ -89,7 +89,7 @@ struct MoveMoneySheet: View {
 					Text("Choose an account").tag("")
 				}
 				ForEach(model.accounts) { account in
-					Text("\(account.name)  \(model.format.currency(account.total))").tag(account.id)
+					Text("\(account.name)  \(model.format.currency(account.total, on: .register))").tag(account.id)
 				}
 			}
 			.labelsHidden()
@@ -98,11 +98,11 @@ struct MoveMoneySheet: View {
 				Grid(alignment: .leading, horizontalSpacing: Spacing.s3, verticalSpacing: 2) {
 					GridRow {
 						Text("Now")
-						Text(model.format.currency(balance.now)).font(.figures(.body))
+						Text(model.format.currency(balance.now, on: .register)).font(.figures(.body))
 					}
 					GridRow {
 						Text("After")
-						Text(model.format.currency(balance.after))
+						Text(model.format.currency(balance.after, on: .register))
 							.font(.figures(.body, weight: .semibold))
 							.foregroundStyle(.textPrimary)
 					}
@@ -144,7 +144,7 @@ private struct LoanSplit: View {
 				HStack(spacing: Spacing.s3) {
 					Text("Principal")
 					Spacer()
-					Text(model.loan.map { model.format.amount($0.principal) } ?? "")
+					Text(model.loan.map { model.format.amount($0.principal, on: .register) } ?? "")
 						.font(.figures(.body))
 						.foregroundStyle(.textSecondary)
 						.frame(width: 120, alignment: .trailing)
@@ -158,15 +158,15 @@ private struct LoanSplit: View {
 			if let loan = model.loan {
 				switch loan.problem {
 				case .interestAbovePayment(let shortBy)?:
-					Text("The interest is \(model.format.currency(shortBy)) more than the payment.")
+					Text("The interest is \(model.format.currency(shortBy, on: .register)) more than the payment.")
 						.foregroundStyle(Color.moneyOverspent)
 						.accessibilityIdentifier("moveMoney.loanProblem")
 				case .paysOff(let credit)?:
-					Text("This pays off the loan and leaves a credit of \(model.format.currency(credit)).")
+					Text("This pays off the loan and leaves a credit of \(model.format.currency(credit, on: .register)).")
 						.accessibilityIdentifier("moveMoney.loanProblem")
 				case nil:
 					if let estimate = loan.estimate, let rate = loan.rateBps {
-						Text("About \(model.format.currency(estimate)) is probably interest at \(Self.percent(rate)) a year.")
+						Text("About \(model.format.currency(estimate, on: .register)) is probably interest at \(Self.percent(rate)) a year.")
 							.font(.text(.caption))
 							.foregroundStyle(.textSecondary)
 							.accessibilityIdentifier("moveMoney.estimate")

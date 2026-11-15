@@ -166,6 +166,20 @@ final class BudgetJourneyTests: XCTestCase {
 		attachScreenshot(of: app, named: "budget-goals-and-hidden")
 	}
 
+	/// design/interaction.md: typing any digit or operator on a selected row opens
+	/// its field with what was typed.
+	@MainActor
+	func testTypingPlusFortyOnASelectedEnvelopeAppendsToItsValue() {
+		let app = openBudget()
+		app.descendants(matching: .any)["envelope.groceries"].click()
+		app.typeText("+40")
+		let field = app.textFields["amountField"]
+		XCTAssertTrue(field.waitForExistence(timeout: 5))
+		XCTAssertEqual(field.value as? String, "412.00+40")
+		field.typeKey(.return, modifierFlags: [])
+		XCTAssertTrue(waitUntil { app.buttons["envelope.groceries.budgeted"].label == "Budgeted 452.00" })
+	}
+
 	@MainActor
 	func testCommandLeftInTheFindFieldMovesTheCaret() {
 		let app = openBudget()
@@ -178,6 +192,70 @@ final class BudgetJourneyTests: XCTestCase {
 		find.typeText("X")
 		XCTAssertEqual(find.value as? String, "Xabc")
 		XCTAssertEqual(app.windows.firstMatch.title, title, "the month stays put")
+	}
+
+	/// Interaction rules 6 to 8: Tab and Shift-Tab commit and move like Return
+	/// and Shift-Return, and Esc puts the old value back with nothing written.
+	@MainActor
+	func testTabAndShiftTabCommitAndMoveAndEscWritesNothing() {
+		let app = openBudget()
+		let groceries = app.buttons["envelope.groceries.budgeted"]
+		groceries.click()
+		let field = app.textFields["amountField"]
+		XCTAssertTrue(field.waitForExistence(timeout: 5))
+		field.typeText("450")
+		field.typeKey(.tab, modifierFlags: [])
+		XCTAssertTrue(waitUntil { groceries.label == "Budgeted 450.00" }, groceries.label)
+		XCTAssertTrue(waitUntil { field.value as? String == "180.00" }, "Tab moves to Dining out's field")
+		field.typeKey(.tab, modifierFlags: .shift)
+		XCTAssertTrue(waitUntil { field.value as? String == "450.00" }, "Shift-Tab moves back to Groceries")
+		XCTAssertEqual(app.buttons["envelope.dining.budgeted"].label, "Budgeted 180.00", "an untouched field writes nothing")
+		field.typeText("1")
+		field.typeKey(.escape, modifierFlags: [])
+		XCTAssertTrue(field.waitForDisappearance())
+		XCTAssertEqual(groceries.label, "Budgeted 450.00", "Esc keeps the value from before editing")
+	}
+
+	/// With the amount field open, ⌘← and ⌘→ move the caret, not the month.
+	@MainActor
+	func testCommandArrowsInTheAmountFieldMoveTheCaret() {
+		let app = openBudget()
+		let title = app.windows.firstMatch.title
+		app.buttons["envelope.groceries.budgeted"].click()
+		let field = app.textFields["amountField"]
+		XCTAssertTrue(field.waitForExistence(timeout: 5))
+		field.typeKey(.leftArrow, modifierFlags: .command)
+		field.typeText("9")
+		XCTAssertEqual(field.value as? String, "9412.00")
+		field.typeKey(.rightArrow, modifierFlags: .command)
+		field.typeText("1")
+		XCTAssertEqual(field.value as? String, "9412.001")
+		XCTAssertEqual(app.windows.firstMatch.title, title, "the month stays put")
+		field.typeKey(.escape, modifierFlags: [])
+	}
+
+	/// design/interaction.md: VoiceOver reads a row's state as a word, not just its color.
+	@MainActor
+	func testARowReadsItsStateWord() {
+		let app = openBudget()
+		let dining = app.descendants(matching: .any)["envelope.dining"]
+		XCTAssertTrue(dining.waitForExistence(timeout: 5))
+		XCTAssertEqual(dining.label, "Dining out, budgeted 180.00, spent 214.75, overspent by 34.75")
+		XCTAssertEqual(app.descendants(matching: .any)["envelope.rent"].label, "Rent, budgeted 1,650.00, spent 1,650.00, nothing left")
+	}
+
+	/// Actual's hide-fraction preference: no decimals anywhere on the screen.
+	@MainActor
+	func testABudgetThatHidesDecimalsShowsNone() {
+		let app = XCUIApplication.veritas(stub: "open", ["-VeritasStubHideDecimals", "YES"])
+		let groceries = app.buttons["envelope.groceries.budgeted"]
+		XCTAssertTrue(groceries.waitForExistence(timeout: 10))
+		XCTAssertEqual(groceries.label, "Budgeted 412")
+		XCTAssertEqual(app.descendants(matching: .any)["envelope.dining"].label, "Dining out, budgeted 180, spent 215, overspent by 35")
+		let toBudget = app.descendants(matching: .any)["budget.toBudget"]
+		let toBudgetText = [toBudget.label, toBudget.value as? String].compactMap(\.self).joined(separator: " ")
+		XCTAssertFalse(toBudgetText.contains("."), toBudgetText)
+		attachScreenshot(of: app, named: "budget-hidden-decimals")
 	}
 
 	@MainActor

@@ -1,23 +1,53 @@
 import Foundation
 import VeritasCore
 
-/// Formats amounts that cross the bridge as integer minor units (cents).
-/// Negatives use a real minus sign, U+2212.
+/// Formats amounts that cross the bridge as integer minor units, with the
+/// budget's number format and its currency's row from the core (CLS-12.3).
+/// Negatives use a real minus sign, U+2212. Integer arithmetic only (CLS-12.5).
 public struct MoneyFormat: Hashable, Sendable {
 	public static let minus = "\u{2212}"
 
+	/// D63 stores a 0-place budget's numbers on two scales 100 times apart, so
+	/// every call names the scale of the number it shows (CLS-12.9).
+	public enum Scale: Hashable, Sendable {
+		/// Transaction amounts and everything summed from them alone, such as
+		/// account balances: always two implied places.
+		case register
+		/// Budget cells, holds and goal amounts, and every number on the
+		/// envelope sheet, mixed ones included (CLS-12.10): the currency's places.
+		case budget
+	}
+
 	public var currencySymbol: String
+	public var symbolFirst: Bool
 	public var groupingSeparator: String
 	public var decimalSeparator: String
 	/// Lakh and crore grouping (`1,00,000.33`): three digits, then twos.
-	public var groupsInTwosAfterThousands = false
+	public var groupsInTwosAfterThousands: Bool
+	/// The currency's places from Actual's table: 2 for most, 0 for JPY, KRW and IRR.
+	public var decimalPlaces: UInt8
+	/// Actual's hide-fraction preference: amounts show no decimals at all.
+	public var hidesDecimals: Bool
 
-	public init(currencySymbol: String = "$", groupingSeparator: String = ",", decimalSeparator: String = ".") {
+	public init(
+		currencySymbol: String = "$",
+		symbolFirst: Bool = true,
+		groupingSeparator: String = ",",
+		decimalSeparator: String = ".",
+		groupsInTwosAfterThousands: Bool = false,
+		decimalPlaces: UInt8 = 2,
+		hidesDecimals: Bool = false
+	) {
 		self.currencySymbol = currencySymbol
+		self.symbolFirst = symbolFirst
 		self.groupingSeparator = groupingSeparator
 		self.decimalSeparator = decimalSeparator
+		self.groupsInTwosAfterThousands = groupsInTwosAfterThousands
+		self.decimalPlaces = decimalPlaces
+		self.hidesDecimals = hidesDecimals
 	}
 
+	/// Before a budget is open: the Mac's separators, two places.
 	public init(locale: Locale, currencySymbol: String = "$") {
 		self.init(
 			currencySymbol: currencySymbol,
@@ -26,8 +56,10 @@ public struct MoneyFormat: Hashable, Sendable {
 		)
 	}
 
-	/// The budget's own preference from the core. The symbol comes from the Mac's currency data.
-	public init(_ format: NumberFormat) {
+	/// The budget's own preferences and its currency's row in `currencies()`.
+	/// A budget with no currency, or one Actual's table doesn't list, has no
+	/// symbol and two places, as in Actual (`getCurrency`, CLS-12.7).
+	public init(_ format: NumberFormat, currency: Currency?) {
 		let separators: (grouping: String, decimal: String) = switch format.style {
 		case .commaDot: (",", ".")
 		case .dotComma: (".", ",")
@@ -36,45 +68,68 @@ public struct MoneyFormat: Hashable, Sendable {
 		case .commaDotIn: (",", ".")
 		}
 		self.init(
-			currencySymbol: format.currency.map(Self.symbol(forCurrency:)) ?? "",
+			currencySymbol: currency?.symbol ?? "",
+			symbolFirst: currency?.symbolFirst ?? true,
 			groupingSeparator: separators.grouping,
-			decimalSeparator: separators.decimal
+			decimalSeparator: separators.decimal,
+			groupsInTwosAfterThousands: format.style == .commaDotIn,
+			decimalPlaces: currency?.decimalPlaces ?? 2,
+			hidesDecimals: format.hideDecimals
 		)
-		groupsInTwosAfterThousands = format.style == .commaDotIn
-	}
-
-	static func symbol(forCurrency code: String) -> String {
-		let formatter = NumberFormatter()
-		formatter.numberStyle = .currency
-		formatter.currencyCode = code
-		return formatter.currencySymbol
 	}
 
 	/// `2,140.18`, `−612.33`: rows, columns and the sidebar.
-	public func amount(_ minorUnits: Int64) -> String {
-		sign(minorUnits) + digits(minorUnits.magnitude)
+	public func amount(_ minorUnits: Int64, on scale: Scale) -> String {
+		let shown = shownPlaces
+		let magnitude = Self.rounded(minorUnits.magnitude, from: impliedPlaces(scale), to: shown)
+		return sign(minorUnits, magnitude) + digits(magnitude, places: shown)
 	}
 
-	/// `$312.40`, `−$34.75`: titles and hero figures.
-	public func currency(_ minorUnits: Int64) -> String {
-		sign(minorUnits) + currencySymbol + digits(minorUnits.magnitude)
+	/// `$312.40`, `−$34.75`, `12,50€`: titles and hero figures.
+	public func currency(_ minorUnits: Int64, on scale: Scale) -> String {
+		let shown = shownPlaces
+		let magnitude = Self.rounded(minorUnits.magnitude, from: impliedPlaces(scale), to: shown)
+		return sign(minorUnits, magnitude) + withSymbol(digits(magnitude, places: shown))
 	}
 
-	/// `$1,120`: goal cards, rounded half away from zero to the whole unit.
-	public func wholeCurrency(_ minorUnits: Int64) -> String {
-		let whole = (minorUnits.magnitude + 50) / 100 * 100
-		let text = digits(whole)
-		let wholePart = text.split(separator: Character(decimalSeparator)).first.map(String.init) ?? text
-		return sign(minorUnits) + currencySymbol + wholePart
+	/// `$1,120`: goal cards, rounded half away from zero to the whole unit (CLS-12.4).
+	public func wholeCurrency(_ minorUnits: Int64, on scale: Scale) -> String {
+		let magnitude = Self.rounded(minorUnits.magnitude, from: impliedPlaces(scale), to: 0)
+		return sign(minorUnits, magnitude) + withSymbol(digits(magnitude, places: 0))
 	}
 
-	private func sign(_ minorUnits: Int64) -> String {
-		minorUnits < 0 ? Self.minus : ""
+	private var shownPlaces: Int {
+		hidesDecimals ? 0 : Int(decimalPlaces)
 	}
 
-	private func digits(_ magnitude: UInt64) -> String {
-		let whole = String(magnitude / 100)
-		let cents = magnitude % 100
+	private func impliedPlaces(_ scale: Scale) -> Int {
+		switch scale {
+		case .register: 2
+		case .budget: Int(decimalPlaces)
+		}
+	}
+
+	private func withSymbol(_ digits: String) -> String {
+		symbolFirst ? currencySymbol + digits : digits + currencySymbol
+	}
+
+	/// No minus on an amount that rounds to zero.
+	private func sign(_ minorUnits: Int64, _ shownMagnitude: UInt64) -> String {
+		minorUnits < 0 && shownMagnitude > 0 ? Self.minus : ""
+	}
+
+	/// The magnitude with `implied` decimals, re-expressed with `shown`
+	/// decimals, rounding half away from zero when places are dropped.
+	static func rounded(_ magnitude: UInt64, from implied: Int, to shown: Int) -> UInt64 {
+		guard shown < implied else { return magnitude * power(of: 10, shown - implied) }
+		let divisor = power(of: 10, implied - shown)
+		return magnitude / divisor + (magnitude % divisor >= divisor / 2 ? 1 : 0)
+	}
+
+	/// `magnitude` already carries exactly `places` decimals.
+	private func digits(_ magnitude: UInt64, places: Int) -> String {
+		let unit = Self.power(of: 10, places)
+		let whole = String(magnitude / unit)
 		var grouped = ""
 		for (index, digit) in whole.enumerated() {
 			let remaining = whole.count - index
@@ -86,6 +141,12 @@ public struct MoneyFormat: Hashable, Sendable {
 			}
 			grouped.append(digit)
 		}
-		return grouped + decimalSeparator + (cents < 10 ? "0" : "") + String(cents)
+		guard places > 0 else { return grouped }
+		let fraction = String(magnitude % unit)
+		return grouped + decimalSeparator + String(repeating: "0", count: places - fraction.count) + fraction
+	}
+
+	private static func power(of base: UInt64, _ exponent: Int) -> UInt64 {
+		(0..<exponent).reduce(1) { result, _ in result * base }
 	}
 }

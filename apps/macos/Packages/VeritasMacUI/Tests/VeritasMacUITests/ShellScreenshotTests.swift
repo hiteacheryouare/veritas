@@ -155,7 +155,7 @@ struct BudgetScreenshotTests {
 	private func openGoals() async -> (WorkspaceModel, GoalsScreenModel) {
 		let workspace = WorkspaceModel(library: StubLibrary(readOnly: nil, importError: nil), localSettings: InMemoryBudgetSettings(), format: MoneyFormat())
 		await workspace.reopen(directory: StubLaunch.budgetDirectory)
-		let goals = GoalsScreenModel(workspace: workspace, reader: CoreAmountReader(budgetDecimalPlaces: 2))
+		let goals = GoalsScreenModel(workspace: workspace)
 		await goals.load()
 		return (workspace, goals)
 	}
@@ -163,7 +163,7 @@ struct BudgetScreenshotTests {
 	private func openBudget() async -> (WorkspaceModel, BudgetScreenModel) {
 		let workspace = WorkspaceModel(library: StubLibrary(readOnly: nil, importError: nil), localSettings: InMemoryBudgetSettings(), format: MoneyFormat())
 		await workspace.reopen(directory: StubLaunch.budgetDirectory)
-		let screen = BudgetScreenModel(workspace: workspace, reader: CoreAmountReader(), month: StubBudget.month)
+		let screen = BudgetScreenModel(workspace: workspace, month: StubBudget.month)
 		return (workspace, screen)
 	}
 
