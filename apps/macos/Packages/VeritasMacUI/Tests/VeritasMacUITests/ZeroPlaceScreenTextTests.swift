@@ -25,6 +25,14 @@ struct ZeroPlaceScreenTextTests {
 		#expect(words.detail == "¥500 spent, Available \u{2212}¥20,000")
 	}
 
+	@Test func aSpentGoalWithMoneyStillInItReadsAvailableNotLeft() {
+		// CLS-12.14: ¥100,000 budgeted and a ¥500 purchase leave a mixed 50,000,
+		// which is never "left" (the real position is ¥99,500).
+		let bike = StubBudget.goal("bike", "Bike", target: 100_000, available: 50_000, date: nil, state: .reachedSpent, spent: 50_000, zeroPlaces: true)
+		let words = GoalWords(bike, format: yen)
+		#expect(words.detail == "¥500 spent, Available ¥50,000")
+	}
+
 	@Test func aSuggestionIsAlreadyWholeYen() {
 		let laptop = StubBudget.goal("laptop", "Laptop", target: 150_000, available: 0, date: "2027-03-01", state: .active, monthly: 7_089, pace: .behind(neededMonthly: 7_089))
 		#expect(GoalWords(laptop, format: yen).note == "Behind, needs ¥7,089 a month")
