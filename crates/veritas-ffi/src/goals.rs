@@ -138,6 +138,8 @@ pub(crate) fn close_preview(
 /// negative one isn't shown as overspent (CLS-12.14: never "over").
 fn tone(view: &GoalView, zero_places: bool) -> MoneyTone {
 	match view.state {
+		CoreState::Active if view.available < Money::ZERO && zero_places => MoneyTone::Neutral,
+		CoreState::Active if view.available < Money::ZERO => MoneyTone::Overspent,
 		CoreState::Active => match view.pace {
 			None | Some(CorePace::OnTrack { .. }) => MoneyTone::Available,
 			Some(CorePace::Behind { .. } | CorePace::NotAdding { .. }) => MoneyTone::Low,

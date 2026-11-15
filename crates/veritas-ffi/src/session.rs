@@ -2097,6 +2097,21 @@ pub(crate) mod tests {
 		assert_eq!(month.to_budget_tone, expected);
 	}
 
+	#[test]
+	fn an_active_goal_overspent_this_month_reads_overspent_in_a_two_place_budget() {
+		let (_scratch, core) = imported("goal-progress");
+		let id = new_goal(&core, "New laptop", 150_000, None);
+		let category = goal_of(&core, &id).category_id;
+		budget(&core, NOVEMBER, &category, 50_000);
+		let checking = new_account(&core, "Goal checking", crate::NewAccountKind::Checking, 0);
+		add(&core, bought(&checking, &category, "2026-11-14", -80_000));
+		let goal = goal_of(&core, &id);
+		assert_eq!(goal.state, crate::GoalState::Active);
+		assert_eq!(goal.available, -30_000);
+		assert_eq!(goal.tone, crate::MoneyTone::Overspent);
+		assert_eq!(goal.progress_percent, 0);
+	}
+
 	pub(crate) struct Rows(pub(crate) Vec<veritas_domain::Row>);
 
 	impl veritas_session::Command for Rows {
