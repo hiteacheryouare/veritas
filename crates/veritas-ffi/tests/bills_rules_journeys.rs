@@ -973,7 +973,8 @@ fn pausing_resuming_skipping_editing_and_ending_bills_matches_actual_over_a_mont
 fn a_failed_service_commit_or_bill_save_never_touches_last_schedule_run() {
 	// §10, contract v8: lastScheduleRun is written after the commit, so a
 	// commit that fails leaves the day to run again, and a bill save that
-	// fails doesn't clear it.
+	// fails doesn't clear it. A failed run never fails `maintain`: the shell
+	// reads it from state() until a later run works.
 	let scratch = Scratch::new("failed-commit");
 	let base = household_base(&scratch);
 	let session = import(&scratch, &base, "veritas");
@@ -988,15 +989,25 @@ fn a_failed_service_commit_or_bill_save_never_touches_last_schedule_run() {
 		.unwrap();
 	let session = reopen(&scratch, "veritas");
 	see(&session, "2026-11-02");
-	let failed = session.maintain("2026-11-02".to_owned());
+	let failed = session.maintain("2026-11-02".to_owned()).unwrap();
+	assert!(failed.entities.is_empty(), "{failed:?}");
+	let problem = session.state().unwrap().schedule_problem;
 	assert!(
-		matches!(failed, Err(FfiError::Storage { .. })),
-		"{failed:?}"
+		problem
+			.as_deref()
+			.is_some_and(|problem| problem.contains("the disk said no")),
+		"{problem:?}"
 	);
 	assert_eq!(
 		last_run(&scratch, "veritas"),
 		None,
 		"a failed run doesn't mark the day done"
+	);
+	let again = session.maintain("2026-11-02".to_owned()).unwrap();
+	assert!(again.entities.is_empty());
+	assert!(
+		session.state().unwrap().schedule_problem.is_some(),
+		"each tick tries again and keeps the problem while it lasts"
 	);
 	assert_eq!(
 		bill_on(&session, "rent", "2026-11-02").status,
@@ -1007,6 +1018,7 @@ fn a_failed_service_commit_or_bill_save_never_touches_last_schedule_run() {
 		.execute_batch("DROP TRIGGER cowboy_veto")
 		.unwrap();
 	session.maintain("2026-11-02".to_owned()).unwrap();
+	assert_eq!(session.state().unwrap().schedule_problem, None);
 	assert_eq!(last_run(&scratch, "veritas").as_deref(), Some("2026-11-02"));
 	assert_eq!(
 		bill_on(&session, "rent", "2026-11-02").status,
@@ -1817,4 +1829,244 @@ fn the_preview_finds_what_actuals_rule_editor_finds_for_each_kind_of_condition()
 	}
 	assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 	session.close().unwrap();
+}
+
+/// The full integrity check and the open snapshot run in the background.
+fn settled(session: &Session) {
+	for _ in 0..400 {
+		if !session.state().unwrap().checking {
+			return;
+		}
+		std::thread::sleep(std::time::Duration::from_millis(25));
+	}
+	panic!("the background check never finished");
+}
+
+fn posts_of(session: &Session, bill: &str) -> Vec<(String, i64)> {
+	let mut rows: Vec<(String, i64)> = session
+		.register(
+			veritas_ffi::RegisterScope::All,
+			veritas_ffi::RegisterFilter::default(),
+			veritas_ffi::RegisterSort {
+				key: veritas_ffi::RegisterSortKey::Date,
+				ascending: true,
+			},
+			0,
+			1_000,
+		)
+		.unwrap()
+		.rows
+		.into_iter()
+		.filter(|r| r.schedule_id.as_deref() == Some(bill))
+		.map(|r| (r.date, r.amount))
+		.collect();
+	rows.sort();
+	rows
+}
+
+fn newest_snapshot(session: &Session, kind: veritas_ffi::SnapshotKind) -> String {
+	session
+		.snapshots()
+		.unwrap()
+		.into_iter()
+		.find(|s| s.reason == kind)
+		.unwrap_or_else(|| panic!("no {kind:?} snapshot"))
+		.id
+}
+
+#[test]
+fn restoring_a_snapshot_lets_the_service_run_again_without_posting_anything_twice() {
+	// R-BILL-2, R-REL-3: a restore clears lastScheduleRun, as Actual's
+	// loadBackup leads to. Restoring from before the day's run reposts what
+	// the restore took away; restoring from after it posts nothing again.
+	let scratch = Scratch::new("restore");
+	let base = household_base(&scratch);
+	let session = import(&scratch, &base, "veritas");
+	see(&session, "2026-11-02");
+	settled(&session);
+	let before_run = session
+		.snapshots()
+		.unwrap()
+		.first()
+		.expect("the open takes a snapshot")
+		.id
+		.clone();
+
+	session.maintain("2026-11-02".to_owned()).unwrap();
+	assert_eq!(
+		posts_of(&session, "rent"),
+		[("2026-11-02".to_owned(), -150_000)]
+	);
+	assert_eq!(last_run(&scratch, "veritas").as_deref(), Some("2026-11-02"));
+
+	session.restore_snapshot(before_run).unwrap();
+	assert!(
+		posts_of(&session, "rent").is_empty(),
+		"the restore took the post away"
+	);
+	assert_eq!(
+		last_run(&scratch, "veritas"),
+		None,
+		"so the day can run again"
+	);
+	session.maintain("2026-11-02".to_owned()).unwrap();
+	assert_eq!(
+		posts_of(&session, "rent"),
+		[("2026-11-02".to_owned(), -150_000)]
+	);
+
+	// Exporting snapshots the budget first, with the rent posted.
+	export(&session, &scratch.join("midday.zip"));
+	let after_run = newest_snapshot(&session, veritas_ffi::SnapshotKind::Export);
+	session.restore_snapshot(after_run).unwrap();
+	assert_eq!(last_run(&scratch, "veritas"), None);
+	session.maintain("2026-11-02".to_owned()).unwrap();
+	assert_eq!(
+		posts_of(&session, "rent"),
+		[("2026-11-02".to_owned(), -150_000)],
+		"the restored budget already paid rent"
+	);
+	assert_eq!(last_run(&scratch, "veritas").as_deref(), Some("2026-11-02"));
+
+	see(&session, "2026-11-06");
+	session.maintain("2026-11-06".to_owned()).unwrap();
+	let ours = scratch.join("ours.zip");
+	export(&session, &ours);
+	session.close().unwrap();
+
+	let Some(oracle) = oracle() else { return };
+	let open = json!([{"op": "openBudgetSchedules"}]);
+	let ours_later = scratch.join("ours-later.zip");
+	actual_apply(&oracle, &ours, open.clone(), &ours_later, "2026-11-10", 60);
+	let mut zip = base;
+	for (seed, day) in ["2026-11-02", "2026-11-06", "2026-11-10"]
+		.iter()
+		.enumerate()
+	{
+		let out = scratch.join(&format!("actual-{day}.zip"));
+		actual_apply(&oracle, &zip, open.clone(), &out, day, seed as u32 + 70);
+		zip = out;
+	}
+	let (ours, theirs) = (
+		actual_reads(&oracle, &ours_later, "2026-11-10"),
+		actual_reads(&oracle, &zip, "2026-11-10"),
+	);
+	assert_eq!(
+		posted(&ours),
+		posted(&theirs),
+		"nothing Actual alone wouldn't post"
+	);
+	assert_eq!(schedules(&ours), schedules(&theirs));
+}
+
+#[test]
+fn an_older_budget_opened_read_only_shows_its_goals_and_bills_and_stays_as_it_was() {
+	// 46e3016: a read-only open can't add the D72 goal columns or the
+	// schedule labels table, so it reads them as empty and changes nothing.
+	let scratch = Scratch::new("old-read-only");
+	let session = import(&scratch, &small_zip(), "old");
+	see(&session, "2026-11-02");
+	let goal = created(
+		&perform(
+			&session,
+			Command::CreateGoal {
+				name: "Bike".to_owned(),
+				target: 60_000,
+				target_date: None,
+				icon: None,
+				color: None,
+			},
+		),
+		EntityKind::Goal,
+	);
+	perform(
+		&session,
+		Command::CloseGoal {
+			goal_id: goal.clone(),
+			release_to_category_id: None,
+			also_move_later: false,
+		},
+	);
+	household_bills(&session);
+	perform(
+		&session,
+		Command::PauseBill {
+			bill_id: "gym".to_owned(),
+		},
+	);
+	settled(&session);
+	session.close().unwrap();
+
+	let db = sqlite(&scratch, "old");
+	db.execute_batch(
+		"ALTER TABLE veritas_goal DROP COLUMN activity_seen_through;
+		 ALTER TABLE veritas_goal DROP COLUMN activity_seen_total;
+		 ALTER TABLE veritas_goal DROP COLUMN close_month_dismissed_available;
+		 DROP TABLE veritas_schedule_meta;
+		 INSERT OR REPLACE INTO preferences (id, value) VALUES ('budgetType', 'tracking');",
+	)
+	.unwrap();
+	let fingerprint = |db: &rusqlite::Connection| -> Vec<String> {
+		let mut rows: Vec<String> = db
+			.prepare(
+				"SELECT name || ':' || sql FROM sqlite_master WHERE name LIKE 'veritas_%' ORDER BY name",
+			)
+			.unwrap()
+			.query_map([], |row| row.get(0))
+			.unwrap()
+			.map(Result::unwrap)
+			.collect();
+		rows.extend(
+			db.prepare(
+				"SELECT quote(id) || quote(status) || quote(closed_month) FROM veritas_goal ORDER BY id",
+			)
+			.unwrap()
+			.query_map([], |row| row.get::<_, String>(0))
+			.unwrap()
+			.map(Result::unwrap),
+		);
+		rows
+	};
+	let before = fingerprint(&db);
+	drop(db);
+	let metadata_before = std::fs::read(scratch.join("old").join("metadata.json")).unwrap();
+
+	let session = reopen(&scratch, "old");
+	assert_eq!(
+		session.state().unwrap().read_only,
+		Some(veritas_ffi::ReadOnlyKind::TrackingBudget)
+	);
+	see(&session, "2026-11-02");
+	let goals = session.goals("2026-11-02".to_owned()).unwrap();
+	let bike = goals.iter().find(|g| g.id == goal).unwrap();
+	assert_eq!(bike.state, veritas_ffi::GoalState::Closed);
+	assert!(!bike.new_activity);
+	let bills = session.bills("2026-11-02".to_owned()).unwrap();
+	assert_eq!(bills.len(), 5);
+	assert_ne!(
+		bills.iter().find(|b| b.id == "gym").unwrap().state,
+		BillState::Active,
+		"without its label the paused bill still reads as not active"
+	);
+	session.upcoming(30, "2026-11-02".to_owned()).unwrap();
+	session.rules().unwrap();
+	session.maintain("2026-11-02".to_owned()).unwrap();
+	assert!(
+		posts_of(&session, "rent").is_empty(),
+		"a read-only budget posts nothing"
+	);
+	assert_eq!(session.state().unwrap().schedule_problem, None);
+	settled(&session);
+	session.close().unwrap();
+
+	assert_eq!(
+		fingerprint(&sqlite(&scratch, "old")),
+		before,
+		"nothing was added or changed"
+	);
+	assert_eq!(
+		std::fs::read(scratch.join("old").join("metadata.json")).unwrap(),
+		metadata_before,
+		"lastScheduleRun isn't touched either"
+	);
 }

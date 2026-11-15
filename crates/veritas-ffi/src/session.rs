@@ -160,6 +160,7 @@ impl<B: Backend> Core<B> {
 				can_redo: session.can_redo(),
 				checking: session.open_check_pending(),
 				snapshot_problem: session.snapshot_problem().map(ToString::to_string),
+				schedule_problem: session.schedule_problem().map(ToOwned::to_owned),
 				skipped_rows: session.load_report().skipped.len() as u64,
 				audit_findings: session
 					.audit_report()
@@ -357,7 +358,7 @@ impl<B: Backend> Core<B> {
 			let today = crate::budget::civil_date(today)?;
 			let flipped = session.poll();
 			session.snapshot_if_due()?;
-			let posted = session.run_schedules(today)?;
+			let posted = session.run_schedules(today).unwrap_or_default();
 			Ok(match flipped {
 				Some(flipped) => flipped,
 				None => posted,
@@ -4006,6 +4007,57 @@ pub(crate) mod tests {
 			})
 			.unwrap();
 			assert_eq!(bills(&core)[0].state, BillState::Active);
+		}
+
+		#[test]
+		fn restoring_a_snapshot_from_before_the_run_lets_the_service_post_again_today() {
+			let (scratch, core) = imported("bill-restore");
+			core.call(|session| {
+				session.wait_for_open_check();
+				Ok(())
+			})
+			.unwrap();
+			let checking = new_account(&core, "Everyday", crate::NewAccountKind::Checking, 0);
+			add_landlord(&core);
+			core.perform(Command::CreateBill {
+				bill_id: Some("bill-1".to_owned()),
+				bill: rent(
+					&checking,
+					BillAmount::Exact { amount: -150_000 },
+					monthly(TODAY),
+					true,
+				),
+			})
+			.unwrap();
+			core.call(|session| session.snapshot(SnapshotReason::BulkEdit))
+				.unwrap();
+			let before_run = core
+				.snapshots()
+				.unwrap()
+				.into_iter()
+				.find(|snapshot| snapshot.reason == crate::SnapshotKind::BulkEdit)
+				.unwrap();
+			let posted_rent = |core: &Core<veritas_store::Store>| {
+				data(core)
+					.transactions
+					.values()
+					.filter(|t| {
+						!t.tombstone && t.schedule.as_ref().map(|s| s.as_str()) == Some("bill-1")
+					})
+					.count()
+			};
+			let metadata = Path::new(&scratch.budget()).join("metadata.json");
+
+			core.maintain(TODAY).unwrap();
+			assert_eq!(posted_rent(&core), 1);
+			assert_eq!(last_run(&metadata).as_deref(), Some(TODAY));
+
+			core.restore_snapshot(&before_run.id).unwrap();
+			assert_eq!(posted_rent(&core), 0, "the snapshot predates the post");
+			assert_eq!(last_run(&metadata), None);
+			core.maintain(TODAY).unwrap();
+			assert_eq!(posted_rent(&core), 1, "posted again today, not tomorrow");
+			assert_eq!(last_run(&metadata).as_deref(), Some(TODAY));
 		}
 
 		#[test]

@@ -140,6 +140,9 @@ pub struct SessionState {
 	/// The budget is usable meanwhile.
 	pub checking: bool,
 	pub snapshot_problem: Option<String>,
+	/// Why the last daily schedule service run failed, until one works. It
+	/// never fails `maintain`; the service tries again on the next call.
+	pub schedule_problem: Option<String>,
 	/// Rows the loader couldn't represent. They stay in the file untouched.
 	pub skipped_rows: u64,
 	/// What the invariant audit found, once the background check is done.

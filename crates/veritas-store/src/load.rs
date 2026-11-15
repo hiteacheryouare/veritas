@@ -633,7 +633,7 @@ fn load_reports(
 	each_row(
 		conn,
 		"dashboard_pages",
-		"SELECT id, name, tombstone FROM dashboard_pages",
+		"SELECT id, name, tombstone, rowid FROM dashboard_pages",
 		skipped,
 		|row| {
 			let id = DashboardPageId::new(id(row, 0)?);
@@ -641,6 +641,7 @@ fn load_reports(
 				id: id.clone(),
 				name: text(at(row, 1)?)?,
 				tombstone: tombstone(at(row, 2)?),
+				position: integer(at(row, 3)?)?.unwrap_or_default(),
 			};
 			data.dashboard_pages.insert(id, page);
 			Ok(())
@@ -798,10 +799,14 @@ fn load_veritas_tables(
 		each_row(
 			conn,
 			"veritas_goal",
-			"SELECT id, category_id, target_cents, target_date, icon, color, status, \
-			 reached_month, closed_month, released_to_category_id, released_cents, \
-			 activity_seen_through, activity_seen_total, close_month_dismissed_available \
-			 FROM veritas_goal",
+			&format!(
+				"SELECT id, category_id, target_cents, target_date, icon, color, status, \
+				 reached_month, closed_month, released_to_category_id, released_cents, \
+				 {}, {}, {} FROM veritas_goal",
+				column_or_null(conn, "veritas_goal", "activity_seen_through")?,
+				column_or_null(conn, "veritas_goal", "activity_seen_total")?,
+				column_or_null(conn, "veritas_goal", "close_month_dismissed_available")?,
+			),
 			skipped,
 			|row| {
 				let id = GoalId::new(id(row, 0)?);

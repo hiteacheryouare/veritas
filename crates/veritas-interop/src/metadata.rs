@@ -63,12 +63,25 @@ pub fn set_last_schedule_run(path: &Path, day: Option<CivilDate>) -> Result<(), 
 	let mut out = Vec::new();
 	json::stringify(&mut out, &Value::Object(entries))
 		.map_err(|error| CoreError::Internal(error.to_string()))?;
-	let partial = path.with_extension("json.partial");
-	let mut file = std::fs::File::create(&partial).map_err(|error| io_error(&partial, &error))?;
-	file.write_all(&out)
-		.and_then(|()| file.sync_all())
-		.map_err(|error| io_error(&partial, &error))?;
-	std::fs::rename(&partial, path).map_err(|error| io_error(path, &error))
+	let partial = crate::export::partial_path(path)?;
+	let written = std::fs::File::create_new(&partial)
+		.and_then(|mut file| file.write_all(&out).and_then(|()| file.sync_all()))
+		.map_err(|error| io_error(&partial, &error))
+		.and_then(|()| std::fs::rename(&partial, path).map_err(|error| io_error(path, &error)));
+	if written.is_err() {
+		let _ = std::fs::remove_file(&partial);
+	}
+	written?;
+	sync_parent(path);
+	Ok(())
+}
+
+/// Makes the rename durable. Some filesystems refuse to fsync a directory,
+/// and by then the rename has already happened, so a refusal isn't a failure.
+fn sync_parent(path: &Path) {
+	if let Some(handle) = path.parent().and_then(|dir| std::fs::File::open(dir).ok()) {
+		let _ = handle.sync_all();
+	}
 }
 
 #[cfg(test)]
@@ -117,6 +130,11 @@ mod tests {
 		assert_eq!(
 			std::fs::read_to_string(&path).unwrap(),
 			r#"{"id":"b","budgetName":"Home"}"#
+		);
+		assert_eq!(
+			std::fs::read_dir(&dir).unwrap().count(),
+			1,
+			"no temp file is left beside metadata.json"
 		);
 		std::fs::remove_dir_all(&dir).unwrap();
 	}

@@ -974,7 +974,7 @@ impl Command {
 			Command::SetWidgetConfig { widget_id, config } => {
 				dashboards::set_widget_config(data, widget_id, config)
 			}
-			Command::CreateDashboard { name } => dashboards::create_dashboard(name),
+			Command::CreateDashboard { name } => dashboards::create_dashboard(data, name),
 			Command::RenameDashboard { page_id, name } => reports::rename_page(data, page_id, name),
 			Command::DeleteDashboard { page_id } => reports::delete_page(data, page_id),
 			Command::CreateCustomReport { settings } => {
