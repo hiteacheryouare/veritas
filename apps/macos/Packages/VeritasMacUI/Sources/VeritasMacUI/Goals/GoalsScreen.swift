@@ -84,6 +84,9 @@ struct GoalsScreen: View {
 		.sheet(item: $closing) { goal in CloseGoalSheet(goals: goals, goal: goal) }
 		.sheet(item: $retargeting) { goal in RetargetGoalSheet(goals: goals, goal: goal) }
 		.task(id: workspace.changeCount) { await goals.load() }
+		// Reached from another screen with ⌘4, the sidebar still holds the
+		// keys; defaultFocus only applies when the window first opens.
+		.onAppear { Task { @MainActor in hasKeyFocus = true } }
 		.containerIdentifier("screen.goals")
 	}
 
