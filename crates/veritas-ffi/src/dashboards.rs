@@ -60,9 +60,9 @@ pub struct WidgetConfig {
 pub struct CalendarDayCell {
 	pub date: String,
 	pub income: i64,
-	/// Negative, as Actual sums it.
+	/// A positive magnitude, as Actual takes `Math.abs`.
 	pub expense: i64,
-	/// Each bar's height against the month's largest day, 0 to 1.
+	/// Each day's percentage, 0 to 100, of the month's income or expense total.
 	pub income_size: f64,
 	pub expense_size: f64,
 }
