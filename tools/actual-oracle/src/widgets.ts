@@ -1,7 +1,7 @@
 import type { CanonicalValue } from './canonicalJson.ts';
 import type { ActualSession } from './environment.ts';
 import { loadSource } from './reference.ts';
-import { connectTo } from './shims/connection.ts';
+import { connectTo, send } from './shims/connection.ts';
 
 // One dashboard card, as the dashboard stores it.
 export interface WidgetRequest {
@@ -296,6 +296,17 @@ export const widgetData = async ({ internal }: ActualSession, requests: WidgetRe
 				lowest: chart.getLowestChartDataPoint(points) ?? null
 			};
 		},
+		// FormulaCard.tsx's defaults and useFormulaExecution's evaluation; see
+		// executeFormula below.
+		'formula-card': async ({ meta }) => {
+			const formula = meta?.formula || '=SUM(1, 2, 3)';
+			const accounts = await internal.send('accounts-get');
+			const simpleAccounts = accounts
+				.filter((account: any) => !account.tombstone)
+				.map((account: any) => ({ id: account.id, name: account.name }));
+			const { result, error } = await executeFormula(formula, meta?.queries ?? {}, undefined, simpleAccounts);
+			return { value: result, type: result === null ? 'null' : typeof result, error };
+		},
 		// CrossoverCard.tsx's range effect and props; defaultTimeFrame is
 		// Crossover.tsx's, which Node can't load as TSX.
 		'crossover-card': async ({ meta }) => {
@@ -391,3 +402,504 @@ export const widgetData = async ({ internal }: ActualSession, requests: WidgetRe
 	}
 	return results;
 };
+
+// useFormulaExecution's non-React flow, verbatim apart from returning
+// {result, error} where the hook calls setResult and setError, and pinning
+// the locale to en-US, since Node can't run the hook
+// (reference/actual/packages/desktop-client/src/hooks/useFormulaExecution.ts).
+// HyperFormula is bootstrapped the way bootstrapHyperFormula does it.
+let formulaModules: any = null;
+const loadFormulaModules = async () => {
+	if (formulaModules) {
+		return formulaModules;
+	}
+	const { HyperFormula } = await import('hyperformula');
+	const { default: enUS } = await import('hyperformula/i18n/languages/enUS');
+	const custom = await loadSource('packages/loot-core/src/shared/formulas/customFunctions.ts');
+	if (!HyperFormula.getRegisteredLanguagesCodes().includes('enUS')) {
+		HyperFormula.registerLanguage('enUS', enUS);
+	}
+	HyperFormula.registerFunctionPlugin(custom.CustomFunctionsPlugin, custom.customFunctionsTranslations);
+	formulaModules = {
+		HyperFormula,
+		custom,
+		monthUtils: await loadSource('packages/loot-core/src/shared/months.ts'),
+		util: await loadSource('packages/loot-core/src/shared/util.ts'),
+		query: await loadSource('packages/loot-core/src/shared/query.ts'),
+		ranges: await loadSource(`${REPORTS}/reportRanges.ts`),
+		queryTimeFrame: await loadSource('packages/desktop-client/src/components/formula/queryTimeFrame.ts')
+	};
+	return formulaModules;
+};
+
+function createFormulaQueryContext() {
+	return {
+		queryNames: new Set(),
+		queryCountNames: new Set(),
+		queryExtractCategoryNames: new Set(),
+		queryExtractTimeframeStartNames: new Set(),
+		queryExtractTimeframeEndNames: new Set(),
+		balanceOfNames: new Set(),
+		budgetQueryRequests: new Map(),
+		querySumPrefetch: new Map(),
+		queryCountPrefetch: new Map(),
+		queryExtractCategoriesPrefetch: new Map(),
+		queryExtractTimeframeStartPrefetch: new Map(),
+		queryExtractTimeframeEndPrefetch: new Map(),
+		balanceOfPrefetch: new Map(),
+		budgetQueryPrefetch: new Map(),
+		budgetQueryErrors: new Map()
+	};
+}
+
+function isHyperFormulaError(cellValue: unknown): cellValue is { type: string; message?: string } {
+	return Boolean(cellValue && typeof cellValue === 'object' && 'type' in cellValue);
+}
+
+function evaluateFormulaWithContext({ formula, formulaQueryContext, locale, namedExpressions, throwOnCellError = true }: any) {
+	const { HyperFormula } = formulaModules;
+	let hfInstance: any = null;
+
+	try {
+		hfInstance = HyperFormula.buildEmpty({
+			licenseKey: 'gpl-v3',
+			language: 'enUS',
+			localeLang: typeof locale === 'string' ? locale : 'en-US',
+			dateFormats: ['DD/MM/YYYY', 'YYYY-MM-DD', 'YYYY/MM/DD'],
+			context: {
+				formulaQuery: formulaQueryContext
+			}
+		});
+
+		const sheetName = hfInstance.addSheet('Sheet1');
+		const sheetId = hfInstance.getSheetId(sheetName);
+
+		if (sheetId === undefined) {
+			throw new Error('Failed to create sheet');
+		}
+
+		if (namedExpressions) {
+			for (const [name, value] of Object.entries(namedExpressions)) {
+				hfInstance.addNamedExpression(name, typeof value === 'number' ? value : String(value));
+			}
+		}
+
+		hfInstance.setCellContents({ sheet: sheetId, col: 0, row: 0 }, [[formula]]);
+
+		const cellValue = hfInstance.getCellValue({
+			sheet: sheetId,
+			col: 0,
+			row: 0
+		});
+
+		if (isHyperFormulaError(cellValue)) {
+			if (throwOnCellError) {
+				throw new Error(`Formula error: ${cellValue.type}`);
+			}
+			return null;
+		}
+
+		return cellValue;
+	} finally {
+		hfInstance?.destroy();
+	}
+}
+
+async function executeFormula(formula: string, currentQueries: any, currentNamedExpressions: any, currentAccounts: any) {
+	await loadFormulaModules();
+	const { custom } = formulaModules;
+	const language = undefined;
+	const locale = 'en-US';
+	if (!formula || !formula.startsWith('=')) {
+		return { result: null, error: 'Formula must start with =' };
+	}
+
+	try {
+		const browserLocale = undefined;
+		const formulaLocale = language || browserLocale || locale || 'en-US';
+
+		try {
+			custom.setCachedUserPreferences(
+				await send('formula-load-user-preferences', {
+					selectedLocale: language,
+					browserLocale
+				})
+			);
+		} catch (err) {
+			console.error('Error loading formula preferences:', err);
+		}
+
+		const formulaQueryContext = createFormulaQueryContext();
+
+		evaluateFormulaWithContext({
+			formula,
+			formulaQueryContext,
+			locale: formulaLocale,
+			namedExpressions: currentNamedExpressions,
+			throwOnCellError: false
+		});
+
+		await prefetchFormulaQueries(formulaQueryContext, currentQueries);
+		await prefetchAccountBalances(formulaQueryContext, currentAccounts ?? []);
+
+		formulaQueryContext.budgetQueryRequests.clear();
+		evaluateFormulaWithContext({
+			formula,
+			formulaQueryContext,
+			locale: formulaLocale,
+			namedExpressions: currentNamedExpressions,
+			throwOnCellError: false
+		});
+
+		await prefetchBudgetQueries(formulaQueryContext);
+
+		const cellValue = evaluateFormulaWithContext({
+			formula,
+			formulaQueryContext,
+			locale: formulaLocale,
+			namedExpressions: currentNamedExpressions
+		});
+
+		return { result: cellValue, error: null };
+	} catch (err) {
+		return { result: null, error: err instanceof Error ? err.message : 'Unknown error' };
+	}
+}
+
+async function prefetchFormulaQueries(formulaQueryContext: any, queries: any) {
+	const { util } = formulaModules;
+	for (const queryName of formulaQueryContext.queryNames) {
+		const queryConfig = queries[queryName];
+
+		if (!queryConfig) {
+			console.warn(`Query "${queryName}" not found in queries config`);
+			formulaQueryContext.querySumPrefetch.set(queryName, 0);
+			continue;
+		}
+
+		const data = await fetchQuerySum(queryConfig);
+		formulaQueryContext.querySumPrefetch.set(queryName, util.integerToAmount(data, 2));
+	}
+
+	for (const queryName of formulaQueryContext.queryCountNames) {
+		const queryConfig = queries[queryName];
+
+		if (!queryConfig) {
+			console.warn(`Query "${queryName}" not found in queries config`);
+			formulaQueryContext.queryCountPrefetch.set(queryName, 0);
+			continue;
+		}
+
+		formulaQueryContext.queryCountPrefetch.set(queryName, await fetchQueryCount(queryConfig));
+	}
+
+	for (const queryName of formulaQueryContext.queryExtractCategoryNames) {
+		formulaQueryContext.queryExtractCategoriesPrefetch.set(queryName, await extractQueryCategories(queryName, queries));
+	}
+
+	for (const queryName of formulaQueryContext.queryExtractTimeframeStartNames) {
+		formulaQueryContext.queryExtractTimeframeStartPrefetch.set(queryName, await extractQueryTimeframeStart(queryName, queries));
+	}
+
+	for (const queryName of formulaQueryContext.queryExtractTimeframeEndNames) {
+		formulaQueryContext.queryExtractTimeframeEndPrefetch.set(queryName, await extractQueryTimeframeEnd(queryName, queries));
+	}
+}
+
+async function prefetchAccountBalances(formulaQueryContext: any, accounts: any[]) {
+	for (const literal of formulaQueryContext.balanceOfNames) {
+		const account = accounts.find(candidate => candidate.id === literal) ?? accounts.find(candidate => candidate.name === literal);
+
+		if (!account) {
+			formulaQueryContext.balanceOfPrefetch.set(literal, 0);
+			continue;
+		}
+
+		formulaQueryContext.balanceOfPrefetch.set(literal, await fetchAccountBalance(account.id));
+	}
+}
+
+async function fetchAccountBalance(accountId: string): Promise<number> {
+	const { query, util } = formulaModules;
+	try {
+		const balanceQuery = query.q('transactions').filter({ account: accountId }).calculate({ $sum: '$amount' });
+		const { data } = await send('query', balanceQuery.serialize());
+		return util.integerToAmount(data || 0, 2);
+	} catch (err) {
+		console.error('Error fetching account balance:', err);
+		return 0;
+	}
+}
+
+async function prefetchBudgetQueries(formulaQueryContext: any) {
+	const { custom } = formulaModules;
+	for (const request of formulaQueryContext.budgetQueryRequests.values()) {
+		const key = custom.createBudgetQueryPrefetchKey(request);
+
+		try {
+			formulaQueryContext.budgetQueryPrefetch.set(
+				key,
+				await fetchBudgetDimensionValueDirect(request.dimension, request.categoryIds, request.startMonth, request.endMonth)
+			);
+			formulaQueryContext.budgetQueryErrors.delete(key);
+		} catch (err) {
+			console.error('Error evaluating BUDGET_QUERY', err);
+			formulaQueryContext.budgetQueryPrefetch.delete(key);
+			formulaQueryContext.budgetQueryErrors.set(key, err instanceof Error ? err.message : String(err));
+		}
+	}
+}
+
+async function buildFilteredTransactionsQuery(config: any) {
+	const { query, ranges, queryTimeFrame } = formulaModules;
+	const conditions = config.conditions || [];
+	const conditionsOp = config.conditionsOp || 'and';
+	const timeFrame = config.timeFrame;
+
+	const { filters: queryFilters } = await send('make-filters-from-conditions', {
+		conditions
+	});
+
+	const conditionsOpKey = conditionsOp === 'or' ? '$or' : '$and';
+
+	let transQuery = query.q('transactions');
+
+	if (timeFrame && timeFrame.mode) {
+		const [calculatedStart, calculatedEnd] = ranges.calculateTimeRange(ranges.asMonthSlidingTimeFrame(timeFrame));
+		const startDate = queryTimeFrame.normalizeQueryTimeFrameStart(calculatedStart);
+		const endDate = queryTimeFrame.normalizeQueryTimeFrameEnd(calculatedEnd);
+
+		transQuery = transQuery.filter({
+			$and: [{ date: { $gte: startDate } }, { date: { $lte: endDate } }]
+		});
+	}
+
+	if (queryFilters.length > 0) {
+		transQuery = transQuery.filter({ [conditionsOpKey]: queryFilters });
+	}
+
+	return transQuery;
+}
+
+async function fetchQuerySum(config: any): Promise<number> {
+	try {
+		const transQuery = await buildFilteredTransactionsQuery(config);
+		const summedQuery = transQuery.calculate({ $sum: '$amount' });
+		const { data } = await send('query', summedQuery.serialize());
+		return data || 0;
+	} catch (err) {
+		console.error('Error fetching query sum:', err);
+		return 0;
+	}
+}
+
+async function fetchQueryCount(config: any): Promise<number> {
+	try {
+		const transQuery = await buildFilteredTransactionsQuery(config);
+		const countQuery = transQuery.calculate({ $count: '*' });
+		const { data } = await send('query', countQuery.serialize());
+		return data || 0;
+	} catch (err) {
+		console.error('Error fetching query count:', err);
+		return 0;
+	}
+}
+
+function extractCategoryConditions(conditions: any[]) {
+	return conditions.filter(cond => !cond.customName && (cond.field === 'category' || cond.field === 'category_group'));
+}
+
+async function getCategoriesFromConditions(allCategories: any[], conditions: any[], conditionsOp: 'and' | 'or'): Promise<string[]> {
+	if (conditions.length === 0) {
+		return allCategories.filter((cat: any) => !cat.is_income && !cat.hidden).map((cat: any) => cat.id);
+	}
+
+	const { grouped: categoryGroups } = await send('get-categories');
+	const groupNameById = new Map(categoryGroups.map((g: { id: string; name: string }) => [g.id, g.name]));
+
+	const conditionResults = conditions.map(cond => {
+		const getKey = (cat: any) => (cond.field === 'category_group' ? cat.group : cat.id);
+
+		const matching = allCategories.filter((cat: any) => {
+			const key = getKey(cat);
+
+			const textValue = cond.field === 'category_group' ? (groupNameById.get(key) ?? key) : cat.name;
+
+			if (cond.op === 'is') {
+				return cond.value === key;
+			} else if (cond.op === 'isNot') {
+				return cond.value !== key;
+			} else if (cond.op === 'oneOf') {
+				return cond.value.includes(key);
+			} else if (cond.op === 'notOneOf') {
+				return !cond.value.includes(key);
+			} else if (cond.op === 'contains') {
+				return textValue.toLowerCase().includes((cond.value as string).toLowerCase());
+			} else if (cond.op === 'doesNotContain') {
+				return !textValue.toLowerCase().includes((cond.value as string).toLowerCase());
+			} else if (cond.op === 'matches') {
+				try {
+					return new RegExp(cond.value as string, 'i').test(textValue);
+				} catch (e) {
+					console.warn('Invalid regexp in matches condition', e);
+					return false;
+				}
+			}
+			console.warn(`Unknown category condition operator: ${cond.op}`);
+			return false;
+		});
+		return matching.map((cat: any) => cat.id);
+	});
+
+	if (conditionsOp === 'or') {
+		const categoryIds = new Set(conditionResults.flat());
+		return Array.from(categoryIds);
+	} else {
+		if (conditionResults.length === 0) {
+			return [];
+		}
+		const firstSet = new Set(conditionResults[0]);
+		for (let i = 1; i < conditionResults.length; i++) {
+			const currentIds = new Set(conditionResults[i]);
+			const toRemove: string[] = [];
+			firstSet.forEach(id => {
+				if (!currentIds.has(id)) {
+					toRemove.push(id);
+				}
+			});
+			toRemove.forEach(id => firstSet.delete(id));
+		}
+		return Array.from(firstSet);
+	}
+}
+
+async function getMonthBudgetData(month: string): Promise<Array<{ name: string; value: string | number | boolean }>> {
+	const monthData = await send('envelope-budget-month', { month });
+	return monthData || [];
+}
+
+function getMonthDataValue(monthData: Array<{ name: string; value: string | number | boolean }>, pattern: string, catId: string) {
+	const fieldName = pattern.replace('{catId}', catId);
+	const cell = monthData.find(c => c.name.endsWith(fieldName));
+	return cell?.value ?? 0;
+}
+
+async function extractQueryCategories(queryName: string, queries: any): Promise<string[]> {
+	const queryConfig = queries[queryName];
+	if (!queryConfig) {
+		console.warn(`Query "${queryName}" not found in queries config`);
+		return [];
+	}
+
+	const categoryConditions = extractCategoryConditions(queryConfig.conditions || []);
+	const { list: allCategories } = await send('get-categories');
+	return getCategoriesFromConditions(allCategories, categoryConditions, queryConfig.conditionsOp || 'and');
+}
+
+async function extractQueryTimeframeStart(queryName: string, queries: any): Promise<string> {
+	const { monthUtils, ranges } = formulaModules;
+	const queryConfig = queries[queryName];
+	if (!queryConfig || !queryConfig.timeFrame) {
+		console.warn(`Query "${queryName}" not found or has no timeframe; cannot extract start`);
+		return monthUtils.currentMonth();
+	}
+
+	const [startMonth] = ranges.calculateTimeRange(ranges.asMonthSlidingTimeFrame(queryConfig.timeFrame));
+	return startMonth;
+}
+
+async function extractQueryTimeframeEnd(queryName: string, queries: any): Promise<string> {
+	const { monthUtils, ranges } = formulaModules;
+	const queryConfig = queries[queryName];
+	if (!queryConfig || !queryConfig.timeFrame) {
+		console.warn(`Query "${queryName}" not found or has no timeframe; cannot extract end`);
+		return monthUtils.currentMonth();
+	}
+
+	const [, endMonth] = ranges.calculateTimeRange(ranges.asMonthSlidingTimeFrame(queryConfig.timeFrame));
+	return endMonth;
+}
+
+async function fetchBudgetDimensionValueDirect(dimension: string, categoryIds: string[], startMonth: string, endMonth: string): Promise<number> {
+	const { monthUtils, util } = formulaModules;
+	const allowed = new Set(['budgeted', 'spent', 'balance_start', 'balance_end', 'goal']);
+	const dim = dimension.toLowerCase();
+	if (!allowed.has(dim)) {
+		throw new Error(`Invalid BUDGET_QUERY dimension: ${dimension}`);
+	}
+
+	const intervals = monthUtils.rangeInclusive(startMonth, endMonth);
+
+	const sumDimension = async (fieldPattern: string): Promise<number> => {
+		let total = 0;
+		for (const month of intervals) {
+			const monthData = await getMonthBudgetData(month);
+			for (const catId of categoryIds) {
+				total += getMonthDataValue(monthData, fieldPattern, catId) as number;
+			}
+		}
+		return total;
+	};
+
+	if (dim === 'budgeted') {
+		return util.integerToAmount(await sumDimension('budget-{catId}'), 2);
+	}
+
+	if (dim === 'spent') {
+		return util.integerToAmount(await sumDimension('sum-amount-{catId}'), 2);
+	}
+
+	if (dim === 'goal') {
+		return util.integerToAmount(await sumDimension('goal-{catId}'), 2);
+	}
+
+	if (dim === 'balance_start' || dim === 'balance_end') {
+		let runningBalance = 0;
+		const monthBeforeStart = monthUtils.subMonths(startMonth, 1);
+		const prevMonthData = await getMonthBudgetData(monthBeforeStart);
+
+		for (const catId of categoryIds) {
+			const catBalance = getMonthDataValue(prevMonthData, 'leftover-{catId}', catId) as number;
+			const hasCarryover = Boolean(getMonthDataValue(prevMonthData, 'carryover-{catId}', catId));
+			if (catBalance > 0 || (catBalance < 0 && hasCarryover)) {
+				runningBalance += catBalance;
+			}
+		}
+
+		const balances: Record<string, { start: number; end: number }> = {};
+
+		for (const month of intervals) {
+			const monthData = await getMonthBudgetData(month);
+			let budgeted = 0;
+			let spent = 0;
+			let carryoverToNextMonth = 0;
+
+			for (const catId of categoryIds) {
+				const catBudgeted = Number(getMonthDataValue(monthData, 'budget-{catId}', catId)) || 0;
+				const catSpent = Number(getMonthDataValue(monthData, 'sum-amount-{catId}', catId)) || 0;
+				const catBalance = Number(getMonthDataValue(monthData, 'leftover-{catId}', catId)) || 0;
+				const hasCarryover = Boolean(getMonthDataValue(monthData, 'carryover-{catId}', catId));
+
+				budgeted += catBudgeted;
+				spent += catSpent;
+
+				if (catBalance > 0 || (catBalance < 0 && hasCarryover)) {
+					carryoverToNextMonth += catBalance;
+				}
+			}
+
+			const balanceStart = runningBalance;
+			const balanceEnd = budgeted + spent + runningBalance;
+
+			balances[month] = { start: balanceStart, end: balanceEnd };
+			runningBalance = carryoverToNextMonth;
+		}
+
+		if (dim === 'balance_start') {
+			return util.integerToAmount(balances[intervals[0]]?.start || 0, 2);
+		}
+		return util.integerToAmount(balances[intervals[intervals.length - 1]]?.end || 0, 2);
+	}
+
+	return 0;
+}

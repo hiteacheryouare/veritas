@@ -11,8 +11,8 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use veritas_domain::{BudgetData, CivilDate, YearMonth};
 use veritas_reports::{
 	Json, Period, age_of_money, balance_forecast_card, balance_sheet, budget_analysis, calendar,
-	cash_flow, classify, crossover, net_profit, net_worth_by_month, owners_equity, sankey,
-	sankey_card, summary, tax_summary,
+	cash_flow, classify, crossover, formula_card, net_profit, net_worth_by_month, owners_equity,
+	sankey, sankey_card, summary, tax_summary,
 };
 
 fn load_perf_100k() -> BudgetData {
@@ -140,6 +140,19 @@ fn widgets(c: &mut Criterion) {
 		r#"{{"granularity":"Daily","conditions":[{{"field":"category","op":"isNot","value":"{category}","type":"id"}},{{"field":"notes","op":"doesNotContain","value":"zzz","type":"string"}}]}}"#
 	))
 	.unwrap();
+	let query = format!(
+		r#"{{"timeFrame":{year},"conditions":[{{"field":"category","op":"isNot","value":"{category}","type":"id"}},{{"field":"notes","op":"doesNotContain","value":"zzz","type":"string"}}]}}"#
+	);
+	let formula = |text: &str| {
+		Json::parse(&format!(
+			r#"{{"formula":{text:?},"queries":{{"spent":{query}}}}}"#
+		))
+		.unwrap()
+	};
+	let formula_query = formula(r#"=ROUND(QUERY("spent")/12, 2)"#);
+	let formula_budget = formula(
+		r#"=BUDGET_QUERY("balance_end", QUERY_EXTRACT_CATEGORIES("spent"), QUERY_EXTRACT_TIMEFRAME_START("spent"), QUERY_EXTRACT_TIMEFRAME_END("spent"))"#,
+	);
 
 	let mut group = c.benchmark_group("perf-100k widgets");
 	group.sample_size(20);
@@ -169,6 +182,12 @@ fn widgets(c: &mut Criterion) {
 	});
 	group.bench_function("balance forecast, daily, filtered", |b| {
 		b.iter(|| balance_forecast_card(&budget, &sheet, Some(&forecast_daily), today).unwrap())
+	});
+	group.bench_function("formula, QUERY over a year", |b| {
+		b.iter(|| formula_card(&budget, &sheet, Some(&formula_query), today).unwrap())
+	});
+	group.bench_function("formula, BUDGET_QUERY over a year", |b| {
+		b.iter(|| formula_card(&budget, &sheet, Some(&formula_budget), today).unwrap())
 	});
 	group.finish();
 }

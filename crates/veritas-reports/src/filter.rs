@@ -569,7 +569,7 @@ fn regex_test(condition: &Condition, column: Option<&str>) -> Result<bool, CoreE
 }
 
 /// JavaScript's `\s`, outside Unicode mode.
-fn is_js_space(c: char) -> bool {
+pub(crate) fn is_js_space(c: char) -> bool {
 	matches!(
 		c,
 		'\t' | '\n' | '\u{0B}' | '\u{0C}' | '\r' | ' ' | '\u{A0}' | '\u{1680}' | '\u{2000}'
