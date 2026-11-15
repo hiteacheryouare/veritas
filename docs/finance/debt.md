@@ -27,7 +27,7 @@ Rules:
 
 - **DEBT-2.1** Principal, interest, escrow and fees are integers >= 0. The sum must equal the payment total exactly. The wizard computes principal as the remainder, so a leftover cent can never go missing: `principal = total - interest - escrow - fees`.
 - **DEBT-2.1a** When a payment total is allocated to parts, as in a forecast (forecasting.md FC-2), it covers interest first, then escrow, then fees, then principal. Principal is what is left, floored at 0.
-- **DEBT-2.2** Principal must not be negative. If a payment is smaller than the interest owed, the wizard blocks and says so. Unpaid interest added to the loan balance is recorded by the user as an `adjustment` on the loan account (a non-cash change), never as a negative principal.
+- **DEBT-2.2** Principal must not be negative. If a payment is smaller than the interest owed, the wizard blocks and says so, naming the shortfall in the budget's currency format (CLS-12.3), for example "This payment is $30.00 less than the interest owed." Unpaid interest added to the loan balance is recorded by the user as an `adjustment` on the loan account (a non-cash change), never as a negative principal.
 - **DEBT-2.3** Principal larger than outstanding principal is a warning, not an error (a refund or escrow credit can explain it). The loan balance would turn positive and the account is listed as an asset that day by ST-2 (the side follows the sign of the balance, whatever the metadata says). The wizard shows "This pays off the loan and leaves a credit of $X".
 - **DEBT-2.4** Net Profit sees interest, escrow and fees as expenses and principal as Debt paydown (ST-1). Escrow is its own category and never lands in principal or interest.
 - **DEBT-2.5** Escrow is booked as an expense when paid to the servicer (simple, matches how a household budgets). It is not modeled as an off-budget escrow asset in v1. Resolved by Ryan at Gate 0 (FIN-3 in classification.md CLS-11). The alternative is an off-budget escrow asset account.
@@ -38,7 +38,7 @@ Rules:
 Order of sources for the wizard's defaults:
 
 1. The most recent loan payment to this loan account (the last row of kind `debt_principal` in this loan account, grouped with its sibling parts): `total`, `interest`, `escrow`. `fees` is never pre-filled (0).
-2. If no earlier payment exists, `payment_cents` from the loan metadata as the total, with interest as the estimate in DEBT-4 if `rate_bps` is set, escrow 0.
+2. If no earlier payment exists, `payment_cents` from the loan metadata as the total, with interest left blank and escrow 0. If `rate_bps` is set, DEBT-4's estimate is shown beside the interest field as a hint the user can accept, and is never pre-filled.
 3. Otherwise nothing is pre-filled.
 
 Then `principal = total - interest - escrow - fees` (DEBT-2.1). If principal exceeds outstanding principal, principal is capped at outstanding principal and the total is reduced by the same amount (a final, smaller payment). The user can overwrite every field.
