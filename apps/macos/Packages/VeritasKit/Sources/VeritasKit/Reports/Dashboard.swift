@@ -190,12 +190,15 @@ public enum CardFigure: Hashable, Sendable {
 	case percent(Double)
 	case number(Double)
 	case days(Int)
+	/// A NaN or infinite result, such as a percentage of nothing. Drawn blank.
+	case undefined
 
 	public var isNegative: Bool {
 		switch self {
 		case .money(let value): value < 0
 		case .percent(let value), .number(let value): value < 0
 		case .days(let value): value < 0
+		case .undefined: false
 		}
 	}
 }
@@ -402,8 +405,8 @@ extension DashboardCard {
 
 	/// The summary card's value is unrounded and can be NaN or infinite, as in Actual.
 	static func figure(_ value: Double, percentage: Bool) -> CardFigure {
+		guard value.isFinite else { return .undefined }
 		if percentage { return .percent(value) }
-		guard value.isFinite else { return .number(value) }
 		return .money(Int64(value.rounded()))
 	}
 }

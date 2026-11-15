@@ -15,7 +15,7 @@ struct DashboardOnRealBudgetTests {
 
 	@Test func aPercentageCardWithAZeroDivisorShowsNoDataRatherThanInfinity() async throws {
 		// Fred on #60: a percentage card with a zero divisor shows a plain
-		// "no data", never "NaN%" or "∞%". This PR says such a card stays blank.
+		// "no data", never "NaN%" or "∞%". The Architect's call: the figure is blank.
 		// The card is stored as Actual stores it: a divisor filter that matches nothing.
 		let content = #"{\"type\":\"percentage\",\"divisorConditions\":[{\"field\":\"notes\",\"op\":\"contains\",\"value\":\"zzz-no-such-note\"}],\"divisorConditionsOp\":\"and\",\"divisorAllTimeDateRange\":false}"#
 		let meta = #"{"name":"Share of nothing","content":""# + content + #"","timeFrame":{"start":"2026-01-01","end":"2026-11-30","mode":"yearToDate"}}"#
@@ -23,19 +23,13 @@ struct DashboardOnRealBudgetTests {
 			let model = DashboardModel(workspace: workspace)
 			await model.load()
 			let card = try #require(model.sheet?.cards.first { $0.id == "pct-zero" })
-			guard case .summary(.percent(let value)) = card.content else {
-				Issue.record("expected a percentage figure, got \(card.content)")
-				return
-			}
-			#expect(!value.isFinite, "the core sends Actual's own result for a zero divisor")
+			#expect(card.content == .summary(.undefined), "the core's non-finite result arrives as an undefined figure")
 
 			#expect(model.sheet?.cards.map(\.id) == ["pct-zero"], "the card is alone on its page")
 			let texts = try await Self.texts(in: DashboardScreen(workspace: workspace, model: model), size: CGSize(width: 700, height: 360))
 			#expect(texts.contains("Share of nothing"), "the card is drawn: \(texts)")
 			let figure = texts.filter { $0.contains("%") || $0.contains("∞") || $0.contains("NaN") }
-			withKnownIssue("Known bug: the summary card prints the core's non-finite percentage as ∞% instead of no data") {
-				#expect(figure.isEmpty, "\(figure)")
-			}
+			#expect(figure.isEmpty, "\(figure)")
 		}
 	}
 
