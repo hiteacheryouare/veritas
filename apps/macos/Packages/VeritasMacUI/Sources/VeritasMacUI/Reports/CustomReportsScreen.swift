@@ -31,6 +31,11 @@ struct CustomReportsScreen: View {
 					case .custom:
 						if let view = model.shown {
 							CustomReportDetail(view: view, format: model.format)
+						} else if model.isEditing, let problem = model.previewProblem {
+							Text("Couldn't preview: \(problem)")
+								.foregroundStyle(.textSecondary)
+								.frame(maxWidth: .infinity, minHeight: 200)
+								.accessibilityIdentifier("customReport.previewProblem")
 						} else {
 							ProgressView().frame(maxWidth: .infinity, minHeight: 200)
 						}

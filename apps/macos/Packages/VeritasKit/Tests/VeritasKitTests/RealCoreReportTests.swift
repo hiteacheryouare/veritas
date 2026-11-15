@@ -75,6 +75,7 @@ struct RealCoreReportTests {
 			withKnownIssue("Known bug: an unsaved report has no id, the core's previewCustomReport answers NotFound for it, and the editor drops that quietly, so a new report shows no preview until it's saved") {
 				#expect(model.preview != nil)
 			}
+			#expect(model.preview != nil || model.previewProblem != nil, "the editor shows a preview or the core's error, never nothing")
 			#expect(await model.save())
 			let freshSaved = try #require(model.view)
 			#expect(freshSaved.data != nil && freshSaved.problem == nil, "saved, the new report computes")

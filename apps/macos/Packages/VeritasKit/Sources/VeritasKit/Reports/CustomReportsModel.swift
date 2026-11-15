@@ -112,6 +112,8 @@ public final class CustomReportsModel {
 	/// True while the draft is a new report that isn't saved yet.
 	public private(set) var isCreating = false
 	public private(set) var preview: CustomReportView?
+	/// The core's error when the draft can't be previewed, shown in place of the preview.
+	public private(set) var previewProblem: String?
 
 	@ObservationIgnored let workspace: WorkspaceModel
 	@ObservationIgnored public let standard: StandardReportModel
@@ -154,6 +156,7 @@ public final class CustomReportsModel {
 		isCreating = false
 		self.draft = draft
 		preview = view
+		previewProblem = nil
 	}
 
 	/// A new report with Actual's defaults: spending by category over the
@@ -168,6 +171,7 @@ public final class CustomReportsModel {
 		isCreating = true
 		draft = ReportDraft(settings: settings)
 		preview = nil
+		previewProblem = nil
 		await refreshPreview()
 	}
 
@@ -191,14 +195,21 @@ public final class CustomReportsModel {
 	public func cancelEditing() {
 		draft = nil
 		preview = nil
+		previewProblem = nil
 		isCreating = false
 	}
 
 	public func refreshPreview() async {
 		guard let draft else { return }
 		let today = WorkspaceModel.today()
-		if let preview = await workspace.report({ try await $0.previewReport(draft, today: today) }), self.draft == draft {
+		guard let result = await workspace.attempt({ try await $0.previewReport(draft, today: today) }), self.draft == draft else { return }
+		switch result {
+		case .success(let preview):
 			self.preview = preview
+			previewProblem = nil
+		case .failure(let error):
+			preview = nil
+			previewProblem = ErrorPresentation.coreMessage(error)
 		}
 	}
 
@@ -213,6 +224,7 @@ public final class CustomReportsModel {
 		}
 		self.draft = nil
 		preview = nil
+		previewProblem = nil
 		isCreating = false
 		await load()
 		return true
