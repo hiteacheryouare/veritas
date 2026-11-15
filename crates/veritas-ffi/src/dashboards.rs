@@ -614,8 +614,9 @@ pub(crate) fn place_widget(
 	)?)])
 }
 
-pub(crate) fn create_dashboard(name: &str) -> Result<Vec<Row>, CoreError> {
+pub(crate) fn create_dashboard(budget: &BudgetData, name: &str) -> Result<Vec<Row>, CoreError> {
 	Ok(vec![reports::create_page(
+		budget,
 		DashboardPageId::new(veritas_store::new_id()),
 		name,
 	)?])
