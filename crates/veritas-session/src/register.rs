@@ -4,7 +4,7 @@
 
 use veritas_domain::{
 	AccountId, BudgetData, CategoryId, CivilDate, CoreError, Money, PayeeId, ScheduleId, SplitRole,
-	Transaction, TransactionId,
+	Transaction, TransactionId, is_js_whitespace,
 };
 
 use crate::transactions::{alive, children, register_order, transfer_account};
@@ -173,8 +173,8 @@ fn category_name(
 }
 
 /// Actual's `extractTagsFromText` (shared/tags.ts:34-48): each `#word` in
-/// the notes once, in order. A tag ends at whitespace or another `#`, and a
-/// doubled `#` escapes it.
+/// the notes once, in order. A tag ends at JavaScript's whitespace or
+/// another `#`, and a doubled `#` escapes it.
 pub fn tags(notes: Option<&str>) -> Vec<String> {
 	let mut found: Vec<String> = Vec::new();
 	let text = notes.unwrap_or_default();
@@ -185,7 +185,7 @@ pub fn tags(notes: Option<&str>) -> Vec<String> {
 			let start = at + 1;
 			let mut end = start;
 			while let Some(&(next_at, next)) = chars.peek() {
-				if next == '#' || next.is_whitespace() {
+				if next == '#' || is_js_whitespace(next) {
 					break;
 				}
 				end = next_at + next.len_utf8();
@@ -679,5 +679,8 @@ mod tests {
 		assert_eq!(read("a#b #b"), ["b"]);
 		assert_eq!(read("## # #"), Vec::<String>::new());
 		assert_eq!(read("#café ok"), ["café"]);
+		assert_eq!(read("#a\u{feff}b"), ["a"], "U+FEFF is JS whitespace");
+		assert_eq!(read("#a\u{85}b"), ["a\u{85}b"], "U+0085 isn't");
+		assert_eq!(read("#a\u{a0}#b\u{2028}c"), ["a", "b"]);
 	}
 }
