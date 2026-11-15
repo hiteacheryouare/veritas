@@ -1,11 +1,29 @@
+import AppKit
 import SwiftUI
 import VeritasKit
 
 struct VeritasCommands: Commands {
 	@FocusedValue(\.workspace) private var model
+	@FocusedValue(\.budgetMonths) private var budgetMonths
+	@FocusedValue(\.goalActions) private var goalActions
 	@Environment(\.openWindow) private var openWindow
 
 	private var isOpen: Bool { model?.phase == .open }
+
+	/// ⌘← and ⌘→ step the month wherever focus is in the window, except in a
+	/// text field, where they move the caret to the line's ends as usual, and
+	/// in a sheet, which is about something else.
+	private func step(back: Bool) {
+		let window = NSApp.keyWindow
+		// A field that just closed can leave its detached editor as first
+		// responder; only a field still on screen keeps the keys.
+		if let editor = window?.firstResponder as? NSTextView, editor.superview != nil, editor.isEditable {
+			if back { editor.moveToLeftEndOfLine(nil) } else { editor.moveToRightEndOfLine(nil) }
+			return
+		}
+		guard window?.sheetParent == nil else { return }
+		if back { budgetMonths?.previous() } else { budgetMonths?.next() }
+	}
 
 	var body: some Commands {
 		CommandGroup(replacing: .appSettings) {
@@ -20,18 +38,31 @@ struct VeritasCommands: Commands {
 			Button("New Window") { openWindow(id: WorkspaceWindow.id) }
 				.keyboardShortcut("n", modifiers: [.command, .option])
 			Divider()
+			Button("New Budget…") { model?.startNewBudget() }
+				.disabled(model == nil || model?.phase == .working)
+			Button("Open Budget…") { model?.showOpenPicker() }
+				.keyboardShortcut("o")
+				.disabled(model == nil || model?.phase == .working)
 			Button("Import from Actual…") { model?.isImportPanelShown = true }
 				.disabled(model == nil || model?.phase == .working)
 			Button("Export to Actual…") {
 				guard let model else { return }
 				Task { await ExportPanel.run(for: model) }
 			}
-			.disabled(!isOpen)
+			.disabled(!isOpen || model?.canExport != true)
 			Button("Close Budget") {
 				guard let model else { return }
 				Task { await model.closeBudget() }
 			}
 			.disabled(!isOpen)
+		}
+		CommandGroup(replacing: .undoRedo) {
+			Button("Undo") { undo(redo: false) }
+				.keyboardShortcut("z")
+				.disabled(model?.canUndo != true)
+			Button("Redo") { undo(redo: true) }
+				.keyboardShortcut("z", modifiers: [.command, .shift])
+				.disabled(model?.canRedo != true)
 		}
 		CommandGroup(after: .pasteboard) {
 			Divider()
@@ -43,6 +74,8 @@ struct VeritasCommands: Commands {
 			Toggle("Dense", isOn: Binding(get: { model?.isDense ?? false }, set: { _ in model?.toggleDense() }))
 				.keyboardShortcut("d")
 				.disabled(model?.canToggleDense != true)
+			Toggle("Show Hidden Envelopes", isOn: Binding(get: { model?.showsHiddenEnvelopes ?? false }, set: { model?.showsHiddenEnvelopes = $0 }))
+				.disabled(model?.canToggleDense != true)
 			Divider()
 		}
 		CommandMenu("Go") {
@@ -52,9 +85,36 @@ struct VeritasCommands: Commands {
 					.disabled(!isOpen)
 			}
 			Divider()
+			Button("Previous Month") { step(back: true) }
+				.keyboardShortcut(.leftArrow, modifiers: .command)
+				.disabled(budgetMonths?.canGoBack != true)
+			Button("Next Month") { step(back: false) }
+				.keyboardShortcut(.rightArrow, modifiers: .command)
+				.disabled(budgetMonths?.canGoForward != true)
+			Divider()
 			Button("Go to Anything…") { model?.isPaletteShown = true }
 				.keyboardShortcut("k")
 				.disabled(!isOpen)
 		}
+		CommandMenu("Goal") {
+			Button("Close Goal…") { goalActions?.close?() }
+				.disabled(goalActions?.close == nil)
+			Button("Change Target…") { goalActions?.changeTarget?() }
+				.disabled(goalActions?.changeTarget == nil)
+			Button("Reopen Goal") { goalActions?.reopen?() }
+				.disabled(goalActions?.reopen == nil)
+		}
+	}
+
+	/// While a text field is editing, ⌘Z belongs to its own text undo.
+	private func undo(redo: Bool) {
+		if let editor = NSApp.keyWindow?.firstResponder as? NSTextView, let undoManager = editor.undoManager,
+			redo ? undoManager.canRedo : undoManager.canUndo
+		{
+			redo ? undoManager.redo() : undoManager.undo()
+			return
+		}
+		guard let model else { return }
+		Task { redo ? await model.redo() : await model.undo() }
 	}
 }

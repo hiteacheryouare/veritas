@@ -18,6 +18,6 @@ struct PlaceholderSheet: View {
 		}
 		.padding(Spacing.s5)
 		.frame(width: 440)
-		.accessibilityIdentifier("sheet.\(sheet.rawValue)")
+		.containerIdentifier("sheet.\(sheet.rawValue)")
 	}
 }

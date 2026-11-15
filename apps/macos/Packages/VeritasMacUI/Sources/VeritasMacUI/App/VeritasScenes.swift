@@ -7,6 +7,7 @@ public struct VeritasScenes: Scene {
 	public var body: some Scene {
 		WindowGroup(id: WorkspaceWindow.id) {
 			WorkspaceWindow()
+				.onAppear { AppearanceSetting.stored.apply() }
 		}
 		.defaultSize(width: 1280, height: 800)
 		.commands {
