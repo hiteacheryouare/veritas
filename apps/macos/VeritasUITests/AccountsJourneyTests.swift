@@ -44,7 +44,8 @@ final class AccountsJourneyTests: XCTestCase {
 		XCTAssertTrue(sheet.waitForExistence(timeout: 5))
 		sheet.popUpButtons["moveMoney.to"].click()
 		app.menuItems.matching(NSPredicate(format: "title BEGINSWITH 'Brokerage'")).firstMatch.click()
-		let amount = sheet.textFields["amountField"].firstMatch
+		// The sheet names its amount field, which replaces AmountTextField's own identifier.
+		let amount = sheet.textFields["moveMoney.amount"]
 		amount.click()
 		amount.typeKey("a", modifierFlags: .command)
 		amount.typeText("500\t")
@@ -70,7 +71,7 @@ final class AccountsJourneyTests: XCTestCase {
 		sheet.popUpButtons["moveMoney.to"].click()
 		app.menuItems.matching(NSPredicate(format: "title BEGINSWITH 'Car loan'")).firstMatch.click()
 		let principal = sheet.staticTexts["moveMoney.principal"]
-		XCTAssertTrue(waitUntil { self.text(principal) == "331.80" }, text(principal))
+		XCTAssertTrue(waitUntil(timeout: 15) { self.text(principal) == "331.80" }, text(principal))
 		XCTAssertTrue(sheet.staticTexts["moveMoney.estimate"].exists)
 		attachScreenshot(of: app, named: "move-money-loan")
 		sheet.buttons["moveMoney.save"].click()
@@ -87,7 +88,7 @@ final class AccountsJourneyTests: XCTestCase {
 		table.staticTexts["→ To Savings"].firstMatch.doubleClick()
 		let sheet = app.descendants(matching: .any)["sheet.moveMoney"]
 		XCTAssertTrue(sheet.waitForExistence(timeout: 5))
-		XCTAssertEqual(sheet.buttons["moveMoney.save"].title, "Save")
+		XCTAssertEqual(sheet.buttons["moveMoney.save"].label, "Save")
 		sheet.buttons["Cancel"].click()
 	}
 
@@ -179,8 +180,10 @@ final class AccountsJourneyTests: XCTestCase {
 		element.label.isEmpty ? (element.value as? String ?? "") : element.label
 	}
 
-	private func waitUntil(_ condition: @escaping () -> Bool) -> Bool {
+	/// The loan sheet fills from the last payment and then asks the core for
+	/// the split, so its figures can take longer than a plain screen.
+	private func waitUntil(timeout: TimeInterval = 5, _ condition: @escaping () -> Bool) -> Bool {
 		let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: nil)
-		return XCTWaiter().wait(for: [expectation], timeout: 5) == .completed
+		return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
 	}
 }
