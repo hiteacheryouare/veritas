@@ -8,6 +8,8 @@ import VeritasCore
 @Observable
 public final class GoalsScreenModel {
 	public private(set) var goals: [GoalSummary] = []
+	/// The goal the arrow keys and the Goal menu act on.
+	public var selection: String?
 
 	@ObservationIgnored let workspace: WorkspaceModel
 
@@ -24,8 +26,45 @@ public final class GoalsScreenModel {
 	public var numberStyle: NumberStyle { workspace.numberStyle }
 	public var isReadOnly: Bool { workspace.readOnly != nil }
 
+	public var selectedGoal: GoalSummary? {
+		goals.first { $0.id == selection }
+	}
+
 	public func load() async {
 		goals = await workspace.goals()
+		if let selection, !goals.contains(where: { $0.id == selection }) {
+			self.selection = nil
+		}
+	}
+
+	public enum Move: Hashable, Sendable {
+		case left, right, up, down
+	}
+
+	/// Arrow keys on the Goals screen: open goals sit in a grid of `columns`,
+	/// then the archive is a list below it.
+	public func moveSelection(_ move: Move, columns: Int) {
+		let open = self.open.map(\.id)
+		let all = open + archive.map(\.id)
+		guard !all.isEmpty else { return }
+		guard let current = selection.flatMap(all.firstIndex) else {
+			selection = move == .left || move == .up ? all.last : all.first
+			return
+		}
+		let inGrid = current < open.count
+		let target: Int = switch move {
+		case .left: current - 1
+		case .right: current + 1
+		case .up where inGrid: current - columns
+		case .up: current == open.count ? (open.isEmpty ? current : open.count - 1) : current - 1
+		case .down where inGrid:
+			current + columns < open.count ? current + columns
+				: current / columns == (open.count - 1) / columns ? open.count
+				: open.count - 1
+		case .down: current + 1
+		}
+		guard all.indices.contains(target) else { return }
+		selection = all[target]
 	}
 
 	public func create(name: String, target: Int64, date: Date?, icon: String?, color: String?) async -> Bool {

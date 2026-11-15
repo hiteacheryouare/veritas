@@ -205,6 +205,28 @@ struct BudgetScreenTests {
 		#expect(session.commands == [.closeGoal(goalId: "tires", releaseToCategoryId: "groceries", alsoMoveLater: false)])
 	}
 
+	@Test func arrowKeysWalkTheGoalGridThenTheArchive() async {
+		session.goals = (1...6).map { Self.goal("open\($0)", state: .active, available: 0, target: 100) }
+			+ (1...2).map { Self.goal("closed\($0)", state: .closed, available: 0, target: 100) }
+		let workspace = WorkspaceModel(library: BudgetFakeLibrary(session: session), format: MoneyFormat())
+		await workspace.reopen(directory: URL(filePath: "/tmp/budget"))
+		let goals = GoalsScreenModel(workspace: workspace)
+		await goals.load()
+		var visited: [String?] = []
+		for move: GoalsScreenModel.Move in [.down, .right, .down, .down, .up, .left, .up, .right, .down, .down, .down, .down] {
+			goals.moveSelection(move, columns: 4)
+			visited.append(goals.selection)
+		}
+		#expect(visited == [
+			"open1", "open2", "open6", "closed1", "open6", "open5", "open1", "open2",
+			"open6", "closed1", "closed2", "closed2"
+		])
+		goals.selection = "open3"
+		goals.moveSelection(.down, columns: 4)
+		#expect(goals.selection == "open6", "down from a row above a short last row lands on its last card")
+		#expect(goals.selectedGoal?.id == "open6")
+	}
+
 	@Test func budgetCellsUseTheCurrencysPlaces() async throws {
 		// D63: a 0-place currency shows and reads whole units.
 		let field = AmountFieldModel(amount: 5_000, style: .commaDot, reader: CoreAmountReader(budgetDecimalPlaces: 0))

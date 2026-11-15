@@ -5,6 +5,7 @@ import VeritasKit
 struct VeritasCommands: Commands {
 	@FocusedValue(\.workspace) private var model
 	@FocusedValue(\.budgetMonths) private var budgetMonths
+	@FocusedValue(\.goalActions) private var goalActions
 	@Environment(\.openWindow) private var openWindow
 
 	private var isOpen: Bool { model?.phase == .open }
@@ -94,6 +95,14 @@ struct VeritasCommands: Commands {
 			Button("Go to Anything…") { model?.isPaletteShown = true }
 				.keyboardShortcut("k")
 				.disabled(!isOpen)
+		}
+		CommandMenu("Goal") {
+			Button("Close Goal…") { goalActions?.close?() }
+				.disabled(goalActions?.close == nil)
+			Button("Change Target…") { goalActions?.changeTarget?() }
+				.disabled(goalActions?.changeTarget == nil)
+			Button("Reopen Goal") { goalActions?.reopen?() }
+				.disabled(goalActions?.reopen == nil)
 		}
 	}
 
