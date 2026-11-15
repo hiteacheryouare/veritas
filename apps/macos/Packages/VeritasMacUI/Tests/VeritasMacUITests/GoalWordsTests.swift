@@ -44,4 +44,15 @@ struct GoalWordsTests {
 		let undated = GoalWords(active(pace: nil, monthly: nil), format: MoneyFormat(), thisMonth: november)
 		#expect(undated.note == "No target date")
 	}
+
+	@Test func aReachedGoalSpentPastZeroReadsOverAndOneWithMoneyLeftReadsLeft() {
+		let over = GoalWords(StubBudget.goal("tires", "Winter tires", target: 85_000, available: -2_000, date: nil, state: .reachedSpent, spent: 87_000), format: MoneyFormat())
+		#expect(over.note == "Reached → Spent, overspent")
+		#expect(over.tone == .overspent)
+		#expect(over.detail == "$870.00 spent, \u{2212}$20.00 over")
+		let left = GoalWords(StubBudget.goal("tires", "Winter tires", target: 85_000, available: 2_000, date: nil, state: .reachedSpent, spent: 83_000), format: MoneyFormat())
+		#expect(left.note == "Reached → Spent")
+		#expect(left.tone == .available)
+		#expect(left.detail == "$830.00 spent, $20.00 left")
+	}
 }
