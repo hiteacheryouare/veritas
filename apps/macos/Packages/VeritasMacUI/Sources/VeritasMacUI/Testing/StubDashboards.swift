@@ -99,9 +99,13 @@ final class StubDashboards: @unchecked Sendable {
 		let november = Self.november
 		let months = ReportPeriod(first: november.adding(months: -5), last: november).months
 		switch kind {
-		case .netWorth: return .netWorth(reports.netWorth(first: months[0], last: november))
+		case .netWorth:
+			let points = reports.netWorth(first: months[0], last: november)
+			return .netWorth(points, change: WidgetView.netWorth(points: points).change)
 		case .cashFlow: return .cashFlow(income: 387_440, expenses: 310_566, netProfit: 76_874, classified: false)
-		case .spending: return .spending(month: november, spent: 310_566, compareMonth: november.adding(months: -1), compareSpent: 461_844, classified: false)
+		case .spending:
+			let view = WidgetView.spending(month: november, spent: 310_566, compareMonth: november.adding(months: -1), compareSpent: 461_844)
+			return .spending(month: november, spent: 310_566, compareMonth: november.adding(months: -1), compareSpent: 461_844, difference: view.difference ?? 0, classified: false)
 		case .sankey: return .sankey(reports.sankey(first: "2026-10-01", last: "2026-10-31"))
 		case .customReport:
 			let id = config.reportId ?? "spending"
