@@ -395,14 +395,19 @@ fn budgeted(data: &BudgetData, month: YearMonth, category: &CategoryId) -> Money
 
 /// Actual refuses a second live group with the same name, ignoring case
 /// (db/index.ts:364-379, `:402-416`).
+pub(crate) fn same_group_name(a: &str, b: &str) -> bool {
+	a.to_uppercase() == b.to_uppercase()
+}
+
 fn ensure_free_group_name(
 	data: &BudgetData,
 	name: &str,
 	except: Option<&CategoryGroupId>,
 ) -> Result<(), CoreError> {
-	let taken = data.category_groups.values().any(|g| {
-		!g.tombstone && Some(&g.id) != except && g.name.to_uppercase() == name.to_uppercase()
-	});
+	let taken = data
+		.category_groups
+		.values()
+		.any(|g| !g.tombstone && Some(&g.id) != except && same_group_name(&g.name, name));
 	if taken {
 		return Err(CoreError::Invalid(
 			"There's already a group with that name. Choose a different one.".to_owned(),

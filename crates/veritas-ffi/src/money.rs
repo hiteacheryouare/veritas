@@ -45,6 +45,14 @@ pub enum KindTarget {
 	},
 }
 
+/// Where `createKindCategory` would put the new category. When
+/// `group_is_hidden`, the shell asks before unhiding that group (CLS-4.1).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct KindCategoryPlan {
+	pub group_name: String,
+	pub group_is_hidden: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct BalanceAfter {
 	pub account_id: String,
@@ -290,6 +298,18 @@ impl Session {
 				CoreKindTarget::Several(ids) => KindTarget::Several {
 					category_ids: ids.iter().map(ToString::to_string).collect(),
 				},
+			})
+		})
+	}
+
+	/// v9. CLS-4.1's confirm step before `createKindCategory`: the group the
+	/// new category goes in, and whether it exists but is hidden.
+	pub fn kind_category_plan(&self, kind: CategoryKind) -> Result<KindCategoryPlan, FfiError> {
+		self.core.call(|session| {
+			let plan = kinds::kind_category_plan(session.data()?, kind.into())?;
+			Ok(KindCategoryPlan {
+				group_name: plan.group_name,
+				group_is_hidden: plan.group_is_hidden,
 			})
 		})
 	}

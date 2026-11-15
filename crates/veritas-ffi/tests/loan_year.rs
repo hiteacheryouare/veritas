@@ -343,6 +343,7 @@ fn a_year_of_mortgage_payments_with_escrow_a_fee_edits_deletes_and_a_payoff_read
 			Command::CreateKindCategory {
 				kind: CategoryKind::DebtPrincipal,
 				name: "Mortgage principal".to_owned(),
+				unhide_group: false,
 			},
 		),
 		EntityKind::Category,
@@ -948,6 +949,7 @@ fn a_new_principal_or_savings_category_goes_into_cls_4_1s_group() {
 			.perform(Command::CreateKindCategory {
 				kind,
 				name: name.to_owned(),
+				unhide_group: false,
 			})
 			.map(|change| created(&change, EntityKind::Category))
 	};
@@ -1014,15 +1016,13 @@ fn a_new_principal_or_savings_category_goes_into_cls_4_1s_group() {
 }
 
 #[test]
-#[ignore = "known bug on PR #65: a hidden group named Debt or Savings makes createKindCategory fail on the duplicate group name"]
 fn a_hidden_debt_or_savings_group_does_not_stop_cls_4_1_creating_the_category() {
-	// CLS-4.1 names a "Debt" or "Savings" group, "reusing or creating it".
-	// Someone who hid an old "Debt" group must still be able to answer
-	// "Loan/debt payment": today the create step fails because Actual's
-	// group names are unique, and the user is stuck at "There's already a
-	// group with that name".
-	use veritas_ffi::CategoryKind;
-	let group_of = |session: &Session, category: &str| -> (String, String) {
+	// CLS-4.1: a hidden "Debt" or "Savings" group is reused and unhidden
+	// after a confirm step, never shadowed by a second group. On "no" nothing
+	// is written; on "yes" one undo step unhides the group and adds the
+	// category, and the group's other categories keep their own flags.
+	use veritas_ffi::{CategoryKind, EnvelopeGroup, KindCategoryPlan, KindTarget};
+	let groups = |session: &Session| -> Vec<EnvelopeGroup> {
 		session
 			.budget_month(
 				Month {
@@ -1033,21 +1033,21 @@ fn a_hidden_debt_or_savings_group_does_not_stop_cls_4_1_creating_the_category() 
 			)
 			.unwrap()
 			.groups
-			.into_iter()
-			.find(|g| g.envelopes.iter().any(|e| e.id == category))
-			.map(|g| (g.id, g.name))
-			.unwrap()
 	};
-	let make = |session: &Session, kind, name: &str| -> Result<String, FfiError> {
+	let group_by_id = |session: &Session, id: &str| -> EnvelopeGroup {
+		groups(session).into_iter().find(|g| g.id == id).unwrap()
+	};
+	let make = |session: &Session, kind, name: &str, unhide_group| {
 		session
 			.perform(Command::CreateKindCategory {
 				kind,
 				name: name.to_owned(),
+				unhide_group,
 			})
 			.map(|change| created(&change, EntityKind::Category))
 	};
-	let group = |session: &Session, name: &str| {
-		created(
+	let hidden_group = |session: &Session, name: &str| {
+		let id = created(
 			&perform(
 				session,
 				Command::CreateCategoryGroup {
@@ -1055,39 +1055,180 @@ fn a_hidden_debt_or_savings_group_does_not_stop_cls_4_1_creating_the_category() 
 				},
 			),
 			EntityKind::CategoryGroup,
-		)
+		);
+		perform(
+			session,
+			Command::SetCategoryGroupHidden {
+				group_id: id.clone(),
+				hidden: true,
+			},
+		);
+		id
 	};
+
 	let scratch = Scratch::new("cls41-hidden");
 	let session = import(&scratch, "small");
-	let hidden = group(&session, "Debt");
+	let debt = hidden_group(&session, "Debt");
+	let old_loan = new_category(&session, &debt, "Old car loan");
 	perform(
 		&session,
-		Command::SetCategoryGroupHidden {
-			group_id: hidden.clone(),
+		Command::SetCategoryHidden {
+			category_id: old_loan.clone(),
 			hidden: true,
 		},
 	);
-	let principal = make(&session, CategoryKind::DebtPrincipal, "Loan principal");
-	match principal {
-		Ok(principal) => {
-			let (home, name) = group_of(&session, &principal);
-			assert_ne!(home, hidden, "never the hidden group");
-			assert!(name.eq_ignore_ascii_case("debt"), "{name}");
+	let student = new_category(&session, &debt, "Student loan");
+	assert_eq!(
+		session.kind_target(CategoryKind::DebtPrincipal).unwrap(),
+		KindTarget::None
+	);
+	assert_eq!(
+		session
+			.kind_category_plan(CategoryKind::DebtPrincipal)
+			.unwrap(),
+		KindCategoryPlan {
+			group_name: "Debt".to_owned(),
+			group_is_hidden: true,
 		}
-		Err(error) => panic!(
-			"a hidden Debt group must not stop the principal category being created: {error:?}"
+	);
+
+	let before = groups(&session);
+	assert!(
+		matches!(
+			make(
+				&session,
+				CategoryKind::DebtPrincipal,
+				"Loan Principal",
+				false
+			),
+			Err(FfiError::Invalid { .. })
 		),
-	}
-	let old_savings = group(&session, "Savings");
-	perform(
+		"without the user's yes the hidden group stays hidden"
+	);
+	assert_eq!(groups(&session), before, "cancel writes nothing");
+
+	let principal = make(
 		&session,
-		Command::SetCategoryGroupHidden {
-			group_id: old_savings.clone(),
-			hidden: true,
+		CategoryKind::DebtPrincipal,
+		"Loan Principal",
+		true,
+	)
+	.unwrap();
+	let home = group_by_id(&session, &debt);
+	assert!(!home.hidden, "unhidden");
+	assert_eq!(home.name, "Debt");
+	let flags: BTreeMap<String, bool> = home
+		.envelopes
+		.iter()
+		.map(|e| (e.id.clone(), e.hidden))
+		.collect();
+	assert_eq!(
+		flags,
+		BTreeMap::from([
+			(principal.clone(), false),
+			(old_loan.clone(), true),
+			(student.clone(), false),
+		]),
+		"the new category lands in it, and the others keep their own flags"
+	);
+	assert_eq!(
+		groups(&session)
+			.iter()
+			.filter(|g| g.name.eq_ignore_ascii_case("debt"))
+			.count(),
+		1,
+		"never a second group"
+	);
+	assert_eq!(
+		session.kind_target(CategoryKind::DebtPrincipal).unwrap(),
+		KindTarget::One {
+			category_id: principal.clone()
+		}
+	);
+
+	session.undo().unwrap();
+	let undone = group_by_id(&session, &debt);
+	assert!(undone.hidden, "one undo hides the group again");
+	assert!(undone.envelopes.iter().all(|e| e.id != principal));
+	session.redo().unwrap();
+	assert!(!group_by_id(&session, &debt).hidden);
+
+	let savings = hidden_group(&session, "sAVINGS");
+	assert_eq!(
+		session.kind_category_plan(CategoryKind::Savings).unwrap(),
+		KindCategoryPlan {
+			group_name: "sAVINGS".to_owned(),
+			group_is_hidden: true,
+		},
+		"matched ignoring case, as Actual matches group names"
+	);
+	assert!(make(&session, CategoryKind::Savings, "Rainy day fund", false).is_err());
+	let saving = make(&session, CategoryKind::Savings, "Rainy day fund", true).unwrap();
+	let home = group_by_id(&session, &savings);
+	assert!(!home.hidden);
+	assert!(home.envelopes.iter().any(|e| e.id == saving && !e.hidden));
+
+	let scratch_income = Scratch::new("cls41-income");
+	let renamed = import(&scratch_income, "small");
+	let income = groups(&renamed).into_iter().find(|g| g.is_income).unwrap();
+	perform(
+		&renamed,
+		Command::RenameCategoryGroup {
+			group_id: income.id,
+			name: "debt".to_owned(),
 		},
 	);
-	let saving = make(&session, CategoryKind::Savings, "Rainy day fund").unwrap();
-	assert_ne!(group_of(&session, &saving).0, old_savings);
+	assert!(
+		matches!(
+			renamed.kind_category_plan(CategoryKind::DebtPrincipal),
+			Err(FfiError::Invalid { .. })
+		),
+		"an income group can't hold principal, and no second Debt group is made"
+	);
+
+	let zip = scratch.join("hidden.zip");
+	block_on(session.export_actual_zip(text(&zip), CancelToken::new())).unwrap();
+	let Some(oracle) = oracle() else {
+		return;
+	};
+	let actual = actual_reads(&oracle, &zip);
+	let group_rows = by_id(&actual, "category_groups");
+	let category_rows = by_id(&actual, "categories");
+	for group in [&debt, &savings] {
+		assert_eq!(group_rows[group.as_str()]["hidden"], 0, "{group}");
+		assert_eq!(group_rows[group.as_str()]["tombstone"], 0, "{group}");
+	}
+	assert_eq!(
+		group_rows
+			.values()
+			.filter(|g| g["tombstone"] == 0)
+			.filter(|g| g["name"]
+				.as_str()
+				.is_some_and(|n| n.eq_ignore_ascii_case("debt")))
+			.count(),
+		1
+	);
+	for (category, group, hidden) in [
+		(&principal, &debt, 0),
+		(&old_loan, &debt, 1),
+		(&student, &debt, 0),
+		(&saving, &savings, 0),
+	] {
+		let row = category_rows[category.as_str()];
+		assert_eq!(row["cat_group"], group.as_str(), "{category}");
+		assert_eq!(row["hidden"], hidden, "{category}");
+		assert_eq!(row["tombstone"], 0, "{category}");
+	}
+	let december = &actual["computed"]["months"]["2026-12"];
+	for group in [&debt, &savings] {
+		assert!(december["groups"][group.as_str()].is_object(), "{group}");
+	}
+	for category in [&principal, &saving] {
+		assert!(
+			december["categories"][category.as_str()].is_object(),
+			"{category}"
+		);
+	}
 }
 
 #[test]
