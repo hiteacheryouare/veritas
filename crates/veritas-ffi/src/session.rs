@@ -889,6 +889,89 @@ pub(crate) mod tests {
 	}
 
 	#[test]
+	fn the_number_format_places_the_symbol_where_actual_does() {
+		// Actual keeps the symbol's side and spacing as budget preferences
+		// (currencySymbolPosition, currencySpaceBetweenAmountAndSymbol), set
+		// from the currency table when a currency is picked. EUR reads
+		// `1.234,56 €` there. Unset preferences fall back to the table.
+		let scratch = Scratch::new("symbol-placement");
+		let format = crate::NumberFormat {
+			currency: Some("EUR".to_owned()),
+			style: crate::NumberStyle::DotComma,
+			hide_decimals: false,
+			symbol_first: None,
+			symbol_space: None,
+		};
+		let options = crate::NewBudgetOptions {
+			retirement_401k: false,
+			hsa: false,
+			accounts: Vec::new(),
+		};
+		let core = Core::<veritas_store::Store>::create_budget(
+			"Euro",
+			&scratch.budget(),
+			&format,
+			&options,
+			&CancelToken::default(),
+		)
+		.unwrap();
+		let placement = |core: &Core<veritas_store::Store>| {
+			let format = core.overview().unwrap().number_format.unwrap();
+			(format.symbol_first, format.symbol_space)
+		};
+		assert_eq!(placement(&core), (Some(false), Some(true)));
+		core.close().unwrap();
+
+		let db = scratch.0.join("budget").join("db.sqlite");
+		let prefs = |sql: &str| {
+			let connection = rusqlite::Connection::open(&db).unwrap();
+			connection.execute_batch(sql).unwrap();
+		};
+		let stored: Vec<(String, String)> = rusqlite::Connection::open(&db)
+			.unwrap()
+			.prepare("SELECT id, value FROM preferences WHERE id LIKE 'currency%' ORDER BY id")
+			.unwrap()
+			.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+			.unwrap()
+			.collect::<Result<_, _>>()
+			.unwrap();
+		assert_eq!(
+			stored,
+			[
+				(
+					"currencySpaceBetweenAmountAndSymbol".to_owned(),
+					"true".to_owned()
+				),
+				("currencySymbolPosition".to_owned(), "after".to_owned()),
+			]
+		);
+		let reopened = || {
+			Core::<veritas_store::Store>::open(&scratch.budget(), &CancelToken::default()).unwrap()
+		};
+
+		prefs(
+			"UPDATE preferences SET value = 'before' WHERE id = 'currencySymbolPosition'; \
+			 UPDATE preferences SET value = 'false' WHERE id = 'currencySpaceBetweenAmountAndSymbol';",
+		);
+		let core = reopened();
+		assert_eq!(
+			placement(&core),
+			(Some(true), Some(false)),
+			"the user's choice wins"
+		);
+		core.close().unwrap();
+
+		prefs("DELETE FROM preferences WHERE id LIKE 'currencyS%';");
+		let core = reopened();
+		assert_eq!(
+			placement(&core),
+			(Some(false), Some(true)),
+			"unset: the table"
+		);
+		core.close().unwrap();
+	}
+
+	#[test]
 	fn the_shell_gets_an_overview_an_export_a_backup_and_the_budget_list() {
 		// R-IO-2, R-REL-4, docs/finance/statements.md ST-9
 		let (scratch, core) = imported("shell");
@@ -989,6 +1072,8 @@ pub(crate) mod tests {
 			currency: Some("USD".to_owned()),
 			style: NumberStyle::CommaDot,
 			hide_decimals: false,
+			symbol_first: None,
+			symbol_space: None,
 		};
 		let core = Core::<veritas_store::Store>::create_budget(
 			"Household",
@@ -1080,6 +1165,8 @@ pub(crate) mod tests {
 			currency: Some("USD".to_owned()),
 			style: NumberStyle::CommaDot,
 			hide_decimals: false,
+			symbol_first: None,
+			symbol_space: None,
 		};
 		let options = NewBudgetOptions {
 			retirement_401k: true,
@@ -1918,6 +2005,8 @@ pub(crate) mod tests {
 			currency: Some("JPY".to_owned()),
 			style: crate::NumberStyle::CommaDot,
 			hide_decimals: true,
+			symbol_first: None,
+			symbol_space: None,
 		};
 		let core = Core::<veritas_store::Store>::create_budget(
 			"Yen",

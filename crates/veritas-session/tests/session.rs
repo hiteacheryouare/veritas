@@ -940,6 +940,8 @@ fn new_budget(name: &str) -> veritas_domain::NewBudget {
 			currency: Some("USD".to_owned()),
 			style: veritas_domain::NumberStyle::CommaDot,
 			hide_decimals: false,
+			symbol_first: true,
+			symbol_space: false,
 		},
 		retirement_401k: true,
 		hsa: false,
