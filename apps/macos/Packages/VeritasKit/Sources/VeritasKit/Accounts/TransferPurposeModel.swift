@@ -53,6 +53,8 @@ public final class TransferPurposeModel {
 	public private(set) var debt: KindTarget = .none
 	public private(set) var savings: KindTarget = .none
 	public private(set) var envelopes: [EnvelopeGroup] = []
+	/// Where a new envelope would go (CLS-4.1).
+	public private(set) var plan: KindCategoryPlan?
 
 	@ObservationIgnored private let workspace: WorkspaceModel
 
@@ -117,10 +119,20 @@ public final class TransferPurposeModel {
 		reclassifies = await workspace.report { try await $0.kindChangePreview(categoryID, kind: kind) }
 	}
 
-	public func chooseNewEnvelope() {
+	public func chooseNewEnvelope() async {
 		categoryID = nil
 		createsEnvelope = true
 		reclassifies = nil
+		guard let kind = answer?.kind else { return }
+		plan = await workspace.report { try await $0.kindCategoryPlan(kind) }
+	}
+
+	/// Asked before saving when the new envelope's group is hidden; the
+	/// answer is the only way it's shown again.
+	public var unhidePrompt: String? {
+		guard createsEnvelope, let plan, plan.groupIsHidden else { return nil }
+		let name = newEnvelopeName.trimmingCharacters(in: .whitespaces)
+		return "Your group \"\(plan.groupName)\" is hidden. Show it again and add \"\(name)\" to it?"
 	}
 
 	public func name(of categoryID: String) -> String? {
@@ -132,7 +144,7 @@ public final class TransferPurposeModel {
 	func resolve(using session: any BudgetSession) async throws -> String? {
 		guard let answer else { return nil }
 		if createsEnvelope, let kind = answer.kind {
-			return try await session.createKindCategory(kind: kind, name: newEnvelopeName.trimmingCharacters(in: .whitespaces))
+			return try await session.createKindCategory(kind: kind, name: newEnvelopeName.trimmingCharacters(in: .whitespaces), unhideGroup: unhidePrompt != nil)
 		}
 		if needsKind, let kind = answer.kind, let categoryID {
 			try await session.setCategoryKind(categoryID, kind: kind)

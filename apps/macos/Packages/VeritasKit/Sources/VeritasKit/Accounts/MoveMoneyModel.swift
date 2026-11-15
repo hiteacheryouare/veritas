@@ -15,6 +15,8 @@ public final class MoveMoneyModel: Identifiable {
 		let to: String?
 		let amount: String
 		let interest: String
+		let escrow: String
+		let fees: String
 		let date: Date
 	}
 
@@ -26,12 +28,23 @@ public final class MoveMoneyModel: Identifiable {
 	public let interest: AmountFieldModel
 	public var interestCategoryID: String?
 	public var principalCategoryID: String?
+	/// DEBT-2's other parts, behind a disclosure.
+	public let escrow: AmountFieldModel
+	public let fees: AmountFieldModel
+	public var escrowCategoryID: String?
+	public var feesCategoryID: String?
+	public var showsEscrowAndFees = false
+	/// DEBT-6 A.6: the principal envelope is spending in Actual's budget, so
+	/// the payment can fund it from To Budget in the same go.
+	public var budgetsPrincipal = false
 	public var date: Date
 	public var notes: String
 	public let purpose: TransferPurposeModel
 	public private(set) var accounts: [AccountDetail] = []
 	public private(set) var envelopes: [EnvelopeGroup] = []
 	public private(set) var preview: TransferPreview?
+	/// False until an amount is typed: the preview then only says what kind of move it is.
+	public private(set) var showsAfter = false
 	public private(set) var loan: LoanPaymentPreview?
 	public private(set) var problem: String?
 
@@ -57,6 +70,8 @@ public final class MoveMoneyModel: Identifiable {
 		}
 		amount = AmountFieldModel(amount: abs(editing?.amount ?? 0), style: workspace.numberStyle, reader: reader)
 		interest = AmountFieldModel(amount: 0, style: workspace.numberStyle, reader: reader)
+		escrow = AmountFieldModel(amount: 0, style: workspace.numberStyle, reader: reader)
+		fees = AmountFieldModel(amount: 0, style: workspace.numberStyle, reader: reader)
 		date = editing.flatMap { TransactionEditorModel.date($0.date) } ?? .now
 		notes = editing?.notes ?? ""
 		purpose = TransferPurposeModel(workspace: workspace, categoryID: editing?.categoryId)
@@ -68,11 +83,19 @@ public final class MoveMoneyModel: Identifiable {
 	public var format: MoneyFormat { workspace.format }
 	public var canPlan: Bool { workspace.canPlanTransfers }
 	public var previewKey: PreviewKey {
-		PreviewKey(from: fromID, to: toID, amount: amount.text, interest: interest.text, date: date)
+		PreviewKey(from: fromID, to: toID, amount: amount.text, interest: interest.text, escrow: escrow.text, fees: fees.text, date: date)
 	}
 
 	public var isLoanPayment: Bool { preview?.toLoan == true }
 	public var asksPurpose: Bool { preview?.purpose == .ask && !isLoanPayment }
+
+	/// The payment's principal is at the register's 2 places and a budget
+	/// move at the currency's (CLS-12.9), so it's offered only where the two agree.
+	public var canBudgetPrincipal: Bool { workspace.budgetDecimalPlaces == 2 }
+
+	public func envelopeName(_ id: String) -> String? {
+		envelopes.lazy.flatMap(\.envelopes).first { $0.id == id }?.name
+	}
 
 	public func account(_ id: String?) -> AccountDetail? {
 		accounts.first { $0.id == id }
@@ -81,7 +104,10 @@ public final class MoveMoneyModel: Identifiable {
 	public var canSave: Bool {
 		guard let toID, toID != fromID, workspace.readOnly == nil else { return false }
 		if asksPurpose, !purpose.isAnswered { return false }
-		if case .interestAbovePayment? = loan?.problem { return false }
+		if isLoanPayment, isNew {
+			if case .interestAbovePayment? = loan?.problem { return false }
+			if principalCategoryID == nil || interestCategoryID == nil { return false }
+		}
 		return true
 	}
 
@@ -122,7 +148,10 @@ public final class MoveMoneyModel: Identifiable {
 		}
 		let fromID = fromID
 		let moved = max(await amount.peek() ?? 0, 0)
-		preview = await workspace.report { try await $0.transferPreview(from: fromID, to: toID, amount: moved) }
+		// The core refuses a zero move, so an empty amount asks about one cent
+		// to learn the purpose and whether it pays a loan, and hides After.
+		preview = await workspace.report { try await $0.transferPreview(from: fromID, to: toID, amount: max(moved, 1)) }
+		showsAfter = moved > 0
 		guard isLoanPayment else {
 			loan = nil
 			return
@@ -133,8 +162,10 @@ public final class MoveMoneyModel: Identifiable {
 		}
 		let total = max(await amount.peek() ?? 0, 0)
 		let interestPart = max(await interest.peek() ?? 0, 0)
+		let escrowPart = max(await escrow.peek() ?? 0, 0)
+		let feesPart = max(await fees.peek() ?? 0, 0)
 		let day = TransactionEditorModel.civilDate(date)
-		loan = await workspace.report { try await $0.loanPaymentPreview(toID, date: day, total: total, interest: interestPart, escrow: 0, fees: 0) }
+		loan = await workspace.report { try await $0.loanPaymentPreview(toID, date: day, total: total, interest: interestPart, escrow: escrowPart, fees: feesPart) }
 	}
 
 	/// DEBT-3: the last payment's figures, where nothing was typed yet.
@@ -143,6 +174,11 @@ public final class MoveMoneyModel: Identifiable {
 		let style = workspace.numberStyle
 		if !amountTouched, let total = defaults.total { amount.type(reader.editText(total, style: style)) }
 		if let part = defaults.interest { interest.type(reader.editText(part, style: style)) }
+		if let part = defaults.escrow, part != 0 {
+			escrow.type(reader.editText(part, style: style))
+			showsEscrowAndFees = true
+		}
+		escrowCategoryID = escrowCategoryID ?? defaults.escrowCategoryId
 		interestCategoryID = interestCategoryID ?? defaults.interestCategoryId
 		principalCategoryID = principalCategoryID ?? defaults.principalCategoryId ?? purpose.fixedDebtEnvelope
 	}
@@ -164,16 +200,26 @@ public final class MoveMoneyModel: Identifiable {
 		let text = notes.trimmingCharacters(in: .whitespaces)
 		let note = text.isEmpty ? nil : text
 		if isLoanPayment, isNew {
-			guard let interestPart = await interest.commit() else {
-				problem = interest.problem
-				return false
+			var parts: [Int64] = []
+			for field in [interest, escrow, fees] {
+				guard let part = await field.commit() else {
+					problem = field.problem
+					return false
+				}
+				parts.append(part)
 			}
+			guard let principalCategory = principalCategoryID, let interestCategory = interestCategoryID else { return false }
 			let payment = LoanPaymentDraft(
 				id: UUID().uuidString.lowercased(), fromAccountId: fromID, loanAccountId: toID, date: day, total: moved,
-				interest: interestPart, principalCategoryId: principalCategoryID, interestCategoryId: interestCategoryID, notes: note
+				interest: parts[0], escrow: parts[1], fees: parts[2], principalCategoryId: principalCategory, interestCategoryId: interestCategory,
+				escrowCategoryId: escrowCategoryID, feesCategoryId: feesCategoryID, notes: note, cleared: false
 			)
+			let funding = budgetsPrincipal && canBudgetPrincipal ? loan.map { (Month(date: day), $0.principal, principalCategory) } : nil
 			return await workspace.change { session -> Bool in
 				try await session.recordLoanPayment(payment)
+				if let (month, principal, envelope) = funding, let month, principal > 0 {
+					try await session.perform(.moveBudget(month: month, amount: principal, fromCategoryId: nil, toCategoryId: envelope))
+				}
 				return true
 			} ?? false
 		}

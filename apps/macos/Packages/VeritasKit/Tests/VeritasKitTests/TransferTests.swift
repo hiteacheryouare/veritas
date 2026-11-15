@@ -13,7 +13,7 @@ final class TransferFakeSession: BudgetSession, @unchecked Sendable {
 	var debt = KindTarget.none
 	var savings = KindTarget.none
 	var reclassified: UInt64 = 0
-	var defaults = LoanPaymentDefaults()
+	var defaults = LoanPaymentDefaults.filled()
 	var payments: [LoanPaymentDraft] = []
 	var rows: [String: RegisterRow] = [:]
 	var list = AccountList(accounts: [
@@ -70,13 +70,15 @@ final class TransferFakeSession: BudgetSession, @unchecked Sendable {
 	func kindTarget(_ kind: CategoryKind) async throws -> KindTarget { kind == .savings ? savings : debt }
 	func kindChangePreview(_ categoryID: String, kind: CategoryKind) async throws -> UInt64 { reclassified }
 	func setCategoryKind(_ categoryID: String, kind: CategoryKind) async throws { calls.append("kind \(categoryID) \(kind)") }
-	func createKindCategory(kind: CategoryKind, name: String) async throws -> String {
-		calls.append("create \(name) \(kind)")
+	var groupHidden = false
+	func kindCategoryPlan(_ kind: CategoryKind) async throws -> KindCategoryPlan { KindCategoryPlan(groupName: "Savings and Debt", groupIsHidden: groupHidden) }
+	func createKindCategory(kind: CategoryKind, name: String, unhideGroup: Bool) async throws -> String {
+		calls.append("create \(name) \(kind)\(unhideGroup ? " unhiding" : "")")
 		return "made"
 	}
 	func loanPaymentDefaults(_ loanAccountID: String, today: String) async throws -> LoanPaymentDefaults { defaults }
 	func loanPaymentPreview(_ loanAccountID: String, date: String, total: Int64, interest: Int64, escrow: Int64, fees: Int64) async throws -> LoanPaymentPreview {
-		let principal = total - interest
+		let principal = total - interest - escrow - fees
 		return LoanPaymentPreview(principal: principal, outstanding: 980_000, estimate: 8_003, rateBps: 980, problem: principal < 0 ? .interestAbovePayment(shortBy: -principal) : nil)
 	}
 	func recordLoanPayment(_ payment: LoanPaymentDraft) async throws { payments.append(payment) }
@@ -97,7 +99,7 @@ final class TransferFakeSession: BudgetSession, @unchecked Sendable {
 		RegisterRow(
 			id: id, accountId: account, accountName: account, date: "2026-11-04", amount: amount, payeeId: "to-\(other)", payeeName: other,
 			categoryId: category, categoryName: nil, notes: nil, tags: [], cleared: true, reconciled: false,
-			transferAccountId: other, counterpartId: counterpart, lines: [], splitDifference: nil, startingBalance: false,
+			transferAccountId: other, counterpartId: counterpart, counterpartParentId: nil, lines: [], splitDifference: nil, startingBalance: false,
 			scheduleId: nil, needsActual: nil, runningBalance: nil
 		)
 	}
@@ -199,11 +201,13 @@ struct TransferTests {
 		session.purpose = .ask
 		let model = await move(to: "brokerage", amount: "50.00")
 		model.purpose.answer = .saving
-		model.purpose.chooseNewEnvelope()
+		session.groupHidden = true
+		await model.purpose.chooseNewEnvelope()
 		#expect(model.purpose.newEnvelopeName == "Savings")
+		#expect(model.purpose.unhidePrompt == "Your group \"Savings and Debt\" is hidden. Show it again and add \"Savings\" to it?")
 		#expect(model.canSave)
 		#expect(await model.save())
-		#expect(session.calls.last == "create Savings savings")
+		#expect(session.calls.last == "create Savings savings unhiding")
 		guard case .addTransaction(let draft) = session.commands.last else { Issue.record("no add"); return }
 		#expect(draft.categoryId == "made")
 	}
@@ -212,7 +216,7 @@ struct TransferTests {
 		// R-DEBT-2, DEBT-3, DEBT-6
 		session.purpose = .ask
 		session.toLoan = true
-		session.defaults = LoanPaymentDefaults(total: 41_200, interest: 8_020, principalCategoryId: "carloan-cat", interestCategoryId: "interest")
+		session.defaults = LoanPaymentDefaults.filled(total: 41_200, interest: 8_020, principalCategoryId: "carloan-cat", interestCategoryId: "interest")
 		let model = MoveMoneyModel(workspace: await workspace(), fromID: "checking", reader: FakeAmounts.reader)
 		await model.load()
 		model.toID = "carloan"
@@ -234,7 +238,7 @@ struct TransferTests {
 	}
 
 	@Test func movingMoneyFromALoansRegisterPaysTheLoan() async {
-		session.defaults = LoanPaymentDefaults(fromAccountId: "savings")
+		session.defaults = LoanPaymentDefaults.filled(fromAccountId: "savings")
 		let model = MoveMoneyModel(workspace: await workspace(), fromID: "carloan", reader: FakeAmounts.reader)
 		await model.load()
 		#expect(model.toID == "carloan")
@@ -261,6 +265,31 @@ struct TransferTests {
 		existing.rateText = "abc"
 		#expect(await existing.save(to: "carloan") == false)
 		#expect(existing.problem == "Can't read abc as a rate.")
+	}
+
+	@Test func escrowAndFeesGoToTheCoreAndThePrincipalCanBeBudgeted() async {
+		// DEBT-2's parts and DEBT-6 A.6.
+		session.toLoan = true
+		session.defaults = .filled(total: 200_000, interest: 100_000, escrow: 40_000, principalCategoryId: "carloan-cat", interestCategoryId: "interest", escrowCategoryId: "savings-a")
+		let model = MoveMoneyModel(workspace: await workspace(), fromID: "checking", reader: FakeAmounts.reader)
+		await model.load()
+		model.toID = "carloan"
+		await model.refreshPreview()
+		await model.refreshPreview()
+		#expect(model.showsEscrowAndFees, "a last payment with escrow opens the escrow row")
+		model.fees.type("25.00")
+		await model.refreshPreview()
+		#expect(model.loan?.principal == 57_500)
+		model.budgetsPrincipal = true
+		#expect(await model.save())
+		let payment = session.payments.last
+		#expect(payment?.escrow == 40_000)
+		#expect(payment?.fees == 2_500)
+		#expect(payment?.escrowCategoryId == "savings-a")
+		guard case .moveBudget(_, let amount, let from, let to) = session.commands.last else { Issue.record("no budget move"); return }
+		#expect(amount == model.loan?.principal)
+		#expect(from == nil)
+		#expect(to == "carloan-cat")
 	}
 
 	@Test func interestAboveThePaymentCantBeSaved() async {
@@ -303,11 +332,28 @@ struct TransferTests {
 		#expect(draft.payeeId == "to-savings")
 	}
 
+	@Test func deletingTheLoansSideNamesTheWholePayment() async {
+		// DEBT-6 A.5: the core deletes the split the counterpart came from.
+		var loanSide = TransferFakeSession.transfer("m", account: "carloan", other: "checking", amount: 33_180, counterpart: "l1")
+		loanSide.counterpartParentId = "p"
+		var payment = TransferFakeSession.transfer("p", account: "checking", other: "carloan", amount: -41_200, counterpart: nil)
+		payment.transferAccountId = nil
+		payment.lines = [
+			RegisterLine(id: "l1", amount: -33_180, payeeId: "to-carloan", payeeName: "Car loan", categoryId: "carloan-cat", categoryName: "Car Loan", notes: nil, transferAccountId: "carloan", counterpartId: "m"),
+			RegisterLine(id: "l2", amount: -8_020, payeeId: "lender", payeeName: "Lender", categoryId: "interest", categoryName: "Loan interest", notes: nil, transferAccountId: nil, counterpartId: nil)
+		]
+		session.rows["p"] = payment
+		let register = RegisterModel(workspace: await workspace(), scope: .account(accountId: "carloan"))
+		let payments = await register.paymentsDeleted(with: [loanSide])
+		#expect(payments.map(\.id) == ["p"])
+		#expect(register.describe(payments[0]) == "checking: To Car loan 331.80, Loan interest 80.20")
+	}
+
 	@Test func editingASplitKeepsItsTransferLine() async {
 		// DEBT-6: re-saving a loan payment must not turn its principal line into an expense.
 		let payment = RegisterRow(
 			id: "p", accountId: "checking", accountName: "Checking", date: "2026-10-12", amount: -41_200, payeeId: "lender", payeeName: "Lender",
-			categoryId: nil, categoryName: nil, notes: nil, tags: [], cleared: false, reconciled: false, transferAccountId: nil, counterpartId: nil,
+			categoryId: nil, categoryName: nil, notes: nil, tags: [], cleared: false, reconciled: false, transferAccountId: nil, counterpartId: nil, counterpartParentId: nil,
 			lines: [
 				RegisterLine(id: "l1", amount: -33_180, payeeId: "to-carloan", payeeName: "Car loan", categoryId: "carloan-cat", categoryName: "Car Loan", notes: nil, transferAccountId: "carloan", counterpartId: "m"),
 				RegisterLine(id: "l2", amount: -8_020, payeeId: "lender", payeeName: "Lender", categoryId: "interest", categoryName: "Loan interest", notes: nil, transferAccountId: nil, counterpartId: nil)
@@ -332,7 +378,7 @@ struct TransferTests {
 		editor.typeAmount("300.00")
 		await editor.refreshTransfer()
 		#expect(editor.transferAsks)
-		#expect(session.calls.last == "preview checking→brokerage 0")
+		#expect(session.calls.last == "preview checking→brokerage 1", "the core refuses a zero move, so the purpose is asked about one cent")
 		editor.transferPurpose.answer = .saving
 		#expect(await editor.save())
 		guard case .addTransaction(let draft) = session.commands.last else { Issue.record("no add"); return }

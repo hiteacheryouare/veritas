@@ -148,7 +148,8 @@ final class StubAccounts: @unchecked Sendable {
 			id: txn.id, accountId: txn.account, accountName: accounts.first { $0.id == txn.account }?.name ?? "",
 			date: txn.date, amount: txn.amount, payeeId: txn.payee, payeeName: payee?.name, categoryId: txn.category,
 			categoryName: txn.category.flatMap(categoryName), notes: txn.notes, tags: tags, cleared: txn.cleared,
-			reconciled: txn.reconciled, transferAccountId: txn.transfer, counterpartId: txn.counterpart, lines: txn.lines,
+			reconciled: txn.reconciled, transferAccountId: txn.transfer, counterpartId: txn.counterpart,
+			counterpartParentId: txn.counterpart.flatMap { line in txns.first { $0.lines.contains { $0.id == line } }?.id }, lines: txn.lines,
 			splitDifference: nil, startingBalance: txn.startingBalance, scheduleId: nil, needsActual: nil, runningBalance: balance
 		)
 	}
@@ -282,7 +283,7 @@ final class StubAccounts: @unchecked Sendable {
 				let id = "acct-\(accounts.count)"
 				let offBudget = [.investment, .retirement, .property, .loan, .mortgage].contains(new.kind)
 				accounts.append(Self.account(id, new.name, offBudget: offBudget))
-				if [.loan, .mortgage].contains(new.kind) { loans[id] = LoanTerms() }
+				if [.loan, .mortgage].contains(new.kind) { loans[id] = new.loan ?? LoanTerms(rateBps: nil, payment: nil, paymentDay: nil, lender: nil) }
 				payees["to-\(id)"] = PayeeDetail(id: "to-\(id)", name: new.name, transferAccountId: id, favorite: false, learnCategories: false, transactions: 0)
 				if new.startingBalance != 0 {
 					let owed = [.creditCard, .lineOfCredit, .loan, .mortgage].contains(new.kind)
@@ -375,6 +376,31 @@ final class StubAccounts: @unchecked Sendable {
 		}
 	}
 
+	/// End-of-day balances, as contract v9's chart reads them.
+	func balanceHistory(_ account: String, from: String, to: String) -> BalanceHistory {
+		lock.withLock {
+			let rows = txns.filter { $0.account == account }
+			func balance(_ day: String) -> Int64 { rows.filter { $0.date <= day }.reduce(0) { $0 + $1.amount } }
+			let days = Set(rows.map(\.date).filter { $0 >= from && $0 <= to } + [from, to]).sorted()
+			let points = days.map { BalancePoint(date: $0, balance: balance($0)) }
+			let first = points.first?.balance ?? 0
+			let last = points.last?.balance ?? 0
+			return BalanceHistory(points: points, change: first == 0 ? nil : Double(last - first) / Double(abs(first)))
+		}
+	}
+
+	/// The register mockup's tags, with invented counts.
+	func tagSummaries() -> [TagSummary] {
+		[
+			TagSummary(name: "medical", color: "#0f8a9a", hidden: false, count: 14),
+			TagSummary(name: "gift", color: "#5a6614", hidden: false, count: 11),
+			TagSummary(name: "reimbursable", color: "#5d6b82", hidden: false, count: 9),
+			TagSummary(name: "donation", color: nil, hidden: false, count: 6),
+			TagSummary(name: "japan-trip", color: nil, hidden: false, count: 4),
+			TagSummary(name: "side-gig", color: nil, hidden: false, count: 3)
+		]
+	}
+
 	func transferPreview(from: String, to: String, amount: Int64) throws -> TransferPreview {
 		try lock.withLock {
 			guard let source = accounts.first(where: { $0.id == from }), let target = accounts.first(where: { $0.id == to }) else {
@@ -435,9 +461,9 @@ final class StubAccounts: @unchecked Sendable {
 	func loanDefaults(_ loan: String) -> LoanPaymentDefaults {
 		lock.withLock {
 			guard let last = txns.filter({ $0.account == loan && $0.transfer != nil && $0.amount > 0 }).max(by: { $0.date < $1.date }) else {
-				return LoanPaymentDefaults(total: loans[loan]?.payment)
+				return LoanPaymentDefaults(fromAccountId: nil, total: loans[loan]?.payment, interest: nil, escrow: nil, principalCategoryId: nil, interestCategoryId: nil, escrowCategoryId: nil)
 			}
-			return LoanPaymentDefaults(fromAccountId: last.transfer, total: last.amount, interest: 8_020, principalCategoryId: "principal", interestCategoryId: "interest")
+			return LoanPaymentDefaults(fromAccountId: last.transfer, total: last.amount, interest: 8_020, escrow: nil, principalCategoryId: "principal", interestCategoryId: "interest", escrowCategoryId: nil)
 		}
 	}
 
@@ -472,13 +498,13 @@ final class StubAccounts: @unchecked Sendable {
 			let loanName = accounts.first { $0.id == payment.loanAccountId }?.name
 			var lines = [RegisterLine(
 				id: principalLine, amount: -principal, payeeId: "to-\(payment.loanAccountId)", payeeName: loanName,
-				categoryId: payment.principalCategoryId, categoryName: payment.principalCategoryId.flatMap(categoryName),
+				categoryId: payment.principalCategoryId, categoryName: categoryName(payment.principalCategoryId),
 				notes: nil, transferAccountId: payment.loanAccountId, counterpartId: mirror
 			)]
 			if payment.interest != 0 {
 				lines.append(RegisterLine(
 					id: UUID().uuidString.lowercased(), amount: -payment.interest, payeeId: lender, payeeName: lender.flatMap { payees[$0]?.name },
-					categoryId: payment.interestCategoryId, categoryName: payment.interestCategoryId.flatMap(categoryName),
+					categoryId: payment.interestCategoryId, categoryName: categoryName(payment.interestCategoryId),
 					notes: nil, transferAccountId: nil, counterpartId: nil
 				))
 			}

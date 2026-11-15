@@ -8,6 +8,7 @@ import VeritasKit
 /// envelope and amount when those are still empty (D38).
 struct TransactionSheet: View {
 	@Bindable var model: TransactionEditorModel
+	@State private var isConfirmingGroup = false
 	@FocusState private var payeeFocused: Bool
 	@Environment(\.dismiss) private var dismiss
 
@@ -126,7 +127,11 @@ struct TransactionSheet: View {
 				Button("Cancel", role: .cancel) { dismiss() }
 					.keyboardShortcut(.cancelAction)
 				Button(model.isNew ? "Add" : "Save") {
-					Task { if await model.save() { dismiss() } }
+					if model.transferAsks, model.choseTransfer, model.transferPurpose.unhidePrompt != nil {
+						isConfirmingGroup = true
+					} else {
+						Task { if await model.save() { dismiss() } }
+					}
 				}
 				.buttonStyle(.borderedProminent)
 				.keyboardShortcut(.defaultAction)
@@ -140,6 +145,9 @@ struct TransactionSheet: View {
 			if model.isNew { payeeFocused = true }
 		}
 		.task(id: model.transferKey) { await model.refreshTransfer() }
+		.unhideGroupConfirmation(model.transferPurpose.unhidePrompt, isPresented: $isConfirmingGroup) {
+			Task { if await model.save() { dismiss() } }
+		}
 		.containerIdentifier("sheet.transaction")
 	}
 }

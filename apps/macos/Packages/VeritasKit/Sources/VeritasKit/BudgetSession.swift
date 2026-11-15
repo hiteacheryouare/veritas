@@ -152,9 +152,11 @@ public protocol BudgetSession: AnyObject, Sendable {
 	/// How many transactions a kind change reclassifies (CLS-3.3).
 	func kindChangePreview(_ categoryID: String, kind: CategoryKind) async throws -> UInt64
 	func setCategoryKind(_ categoryID: String, kind: CategoryKind) async throws
-	/// Returns the new envelope's id.
+	/// Where a new envelope of the kind would go, and whether its group is hidden (CLS-4.1).
+	func kindCategoryPlan(_ kind: CategoryKind) async throws -> KindCategoryPlan
+	/// Returns the new envelope's id. `unhideGroup` is the user's yes to showing a hidden group again.
 	@discardableResult
-	func createKindCategory(kind: CategoryKind, name: String) async throws -> String
+	func createKindCategory(kind: CategoryKind, name: String, unhideGroup: Bool) async throws -> String
 	/// `nil` when the account isn't a loan.
 	func loanTerms(_ accountID: String) async throws -> LoanTerms?
 	func setLoanTerms(_ accountID: String, _ terms: LoanTerms) async throws
@@ -166,6 +168,10 @@ public protocol BudgetSession: AnyObject, Sendable {
 	func recordLoanPayment(_ payment: LoanPaymentDraft) async throws
 	/// Basis points: "9.80%" is 980.
 	func evaluateRate(_ text: String, style: NumberStyle) async throws -> Int64
+	/// End-of-day balances for the register's chart, and the change over the range.
+	func balanceHistory(_ accountID: String, from: String, to: String) async throws -> BalanceHistory
+	/// Every tag, most used first.
+	func tags() async throws -> [TagSummary]
 
 	/// Whether the core can add, remove and configure widgets and dashboards,
 	/// and save report filters. Until it can, those actions stay hidden.

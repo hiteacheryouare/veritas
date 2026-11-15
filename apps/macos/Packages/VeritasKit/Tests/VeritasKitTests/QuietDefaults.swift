@@ -54,11 +54,14 @@ extension BudgetSession {
 	func kindTarget(_ kind: CategoryKind) async throws -> KindTarget { .none }
 	func kindChangePreview(_ categoryID: String, kind: CategoryKind) async throws -> UInt64 { 0 }
 	func setCategoryKind(_ categoryID: String, kind: CategoryKind) async throws {}
-	func createKindCategory(kind: CategoryKind, name: String) async throws -> String { "" }
+	func kindCategoryPlan(_ kind: CategoryKind) async throws -> KindCategoryPlan { KindCategoryPlan(groupName: "Debt", groupIsHidden: false) }
+	func createKindCategory(kind: CategoryKind, name: String, unhideGroup: Bool) async throws -> String { "" }
+	func balanceHistory(_ accountID: String, from: String, to: String) async throws -> BalanceHistory { BalanceHistory(points: [], change: nil) }
+	func tags() async throws -> [TagSummary] { [] }
 	func loanTerms(_ accountID: String) async throws -> LoanTerms? { nil }
 	func setLoanTerms(_ accountID: String, _ terms: LoanTerms) async throws {}
 	func createAccount(_ account: NewAccount, loan: LoanTerms?) async throws -> String { "" }
-	func loanPaymentDefaults(_ loanAccountID: String, today: String) async throws -> LoanPaymentDefaults { LoanPaymentDefaults() }
+	func loanPaymentDefaults(_ loanAccountID: String, today: String) async throws -> LoanPaymentDefaults { LoanPaymentDefaults.filled() }
 	func loanPaymentPreview(_ loanAccountID: String, date: String, total: Int64, interest: Int64, escrow: Int64, fees: Int64) async throws -> LoanPaymentPreview {
 		throw FfiError.Cancelled
 	}
@@ -68,4 +71,16 @@ extension BudgetSession {
 
 extension BudgetLibrary {
 	func listBudgets() async throws -> [BudgetListingItem] { [] }
+}
+
+extension LoanPaymentDefaults {
+	static func filled(
+		fromAccountId: String? = nil, total: Int64? = nil, interest: Int64? = nil, escrow: Int64? = nil,
+		principalCategoryId: String? = nil, interestCategoryId: String? = nil, escrowCategoryId: String? = nil
+	) -> LoanPaymentDefaults {
+		LoanPaymentDefaults(
+			fromAccountId: fromAccountId, total: total, interest: interest, escrow: escrow,
+			principalCategoryId: principalCategoryId, interestCategoryId: interestCategoryId, escrowCategoryId: escrowCategoryId
+		)
+	}
 }

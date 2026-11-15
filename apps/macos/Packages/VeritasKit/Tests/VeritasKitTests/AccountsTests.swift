@@ -42,7 +42,7 @@ final class AccountsFakeSession: BudgetSession, @unchecked Sendable {
 		RegisterRow(
 			id: id, accountId: "checking", accountName: "Checking", date: "2026-11-09", amount: amount, payeeId: nil, payeeName: payee,
 			categoryId: nil, categoryName: lines.isEmpty ? "Groceries" : nil, notes: nil, tags: [], cleared: false, reconciled: false,
-			transferAccountId: transfer, counterpartId: nil, lines: lines, splitDifference: nil, startingBalance: false,
+			transferAccountId: transfer, counterpartId: nil, counterpartParentId: nil, lines: lines, splitDifference: nil, startingBalance: false,
 			scheduleId: nil, needsActual: nil, runningBalance: balance
 		)
 	}

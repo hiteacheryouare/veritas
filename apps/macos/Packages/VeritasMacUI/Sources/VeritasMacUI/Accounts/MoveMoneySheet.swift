@@ -7,6 +7,7 @@ import VeritasKit
 /// transfer opens it too, since either side edits the pair (R-XFER-3).
 struct MoveMoneySheet: View {
 	@Bindable var model: MoveMoneyModel
+	@State private var isConfirmingGroup = false
 	@Environment(\.dismiss) private var dismiss
 
 	var body: some View {
@@ -64,7 +65,11 @@ struct MoveMoneySheet: View {
 				Button("Cancel", role: .cancel) { dismiss() }
 					.keyboardShortcut(.cancelAction)
 				Button(model.isNew ? "Move money" : "Save") {
-					Task { if await model.save() { dismiss() } }
+					if model.asksPurpose, model.purpose.unhidePrompt != nil {
+						isConfirmingGroup = true
+					} else {
+						Task { if await model.save() { dismiss() } }
+					}
 				}
 				.buttonStyle(.borderedProminent)
 				.keyboardShortcut(.defaultAction)
@@ -74,6 +79,9 @@ struct MoveMoneySheet: View {
 		}
 		.padding(Spacing.s5)
 		.frame(width: 600)
+		.unhideGroupConfirmation(model.purpose.unhidePrompt, isPresented: $isConfirmingGroup) {
+			Task { if await model.save() { dismiss() } }
+		}
 		.task { await model.load() }
 		.task(id: model.previewKey) { await model.refreshPreview() }
 		.containerIdentifier("sheet.moveMoney")
@@ -100,11 +108,13 @@ struct MoveMoneySheet: View {
 						Text("Now")
 						Text(model.format.currency(balance.now, on: .register)).font(.figures(.body))
 					}
-					GridRow {
-						Text("After")
-						Text(model.format.currency(balance.after, on: .register))
-							.font(.figures(.body, weight: .semibold))
-							.foregroundStyle(.textPrimary)
+					if model.showsAfter {
+						GridRow {
+							Text("After")
+							Text(model.format.currency(balance.after, on: .register))
+								.font(.figures(.body, weight: .semibold))
+								.foregroundStyle(.textPrimary)
+						}
 					}
 				}
 				.foregroundStyle(.textSecondary)
@@ -154,6 +164,21 @@ private struct LoanSplit: View {
 				}
 				.padding(.horizontal, Spacing.s4)
 				.frame(minHeight: Size.row)
+				if model.showsEscrowAndFees {
+					Divider()
+					part("Escrow", field: model.escrow, envelope: $model.escrowCategoryID, id: "moveMoney.escrow")
+					Divider()
+					part("Fees", field: model.fees, envelope: $model.feesCategoryID, id: "moveMoney.fees")
+				}
+			}
+			if !model.showsEscrowAndFees {
+				Button("Add Escrow or Fees") { model.showsEscrowAndFees = true }
+					.buttonStyle(.link)
+					.accessibilityIdentifier("moveMoney.showEscrow")
+			}
+			if model.canBudgetPrincipal, let principal = model.loan?.principal, principal > 0, let envelope = model.principalCategoryID, let name = model.envelopeName(envelope) {
+				Toggle("Budget \(model.format.amount(principal, on: .register)) for \(name) from To Budget", isOn: $model.budgetsPrincipal)
+					.accessibilityIdentifier("moveMoney.budgetPrincipal")
 			}
 			if let loan = model.loan {
 				switch loan.problem {
@@ -175,6 +200,20 @@ private struct LoanSplit: View {
 			}
 		}
 		.containerIdentifier("moveMoney.loan")
+	}
+
+	private func part(_ title: String, field: AmountFieldModel, envelope: Binding<String?>, id: String) -> some View {
+		HStack(spacing: Spacing.s3) {
+			Text(title)
+			Spacer()
+			AmountTextField(field: field, takesFocus: false) { _ in }
+				.frame(width: 120)
+				.accessibilityIdentifier(id)
+			EnvelopeMenu(groups: model.envelopes, selection: envelope)
+				.accessibilityIdentifier("\(id)Envelope")
+		}
+		.padding(.horizontal, Spacing.s4)
+		.frame(minHeight: Size.row)
 	}
 
 	/// Basis points as the mockup writes them: 980 is "9.80%".
@@ -235,7 +274,7 @@ struct TransferPurposeSection: View {
 				get: { purpose.createsEnvelope ? "new" : purpose.categoryID ?? "" },
 				set: { choice in
 					if choice == "new" {
-						purpose.chooseNewEnvelope()
+						Task { await purpose.chooseNewEnvelope() }
 					} else {
 						Task { await purpose.choose(choice.isEmpty ? nil : choice) }
 					}
@@ -261,6 +300,17 @@ struct TransferPurposeSection: View {
 	private var groups: [String] {
 		purpose.choices.reduce(into: []) { names, choice in
 			if names.last != choice.group { names.append(choice.group) }
+		}
+	}
+}
+
+extension View {
+	/// CLS-4.1: a new envelope whose group is hidden is added only once the
+	/// user agrees to show the group again. Cancel writes nothing.
+	func unhideGroupConfirmation(_ prompt: String?, isPresented: Binding<Bool>, confirm: @escaping () -> Void) -> some View {
+		confirmationDialog(prompt ?? "", isPresented: isPresented, titleVisibility: .visible) {
+			Button("Show Group and Add", action: confirm)
+			Button("Cancel", role: .cancel) {}
 		}
 	}
 }

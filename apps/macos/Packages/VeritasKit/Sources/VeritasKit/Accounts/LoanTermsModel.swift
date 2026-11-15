@@ -32,7 +32,7 @@ public final class LoanTermsModel: Identifiable {
 
 	/// What's typed as terms, or `nil` with `problem` set when a field can't be read.
 	public func terms() async -> LoanTerms? {
-		var terms = LoanTerms()
+		var terms = LoanTerms(rateBps: nil, payment: nil, paymentDay: nil, lender: nil)
 		let rate = rateText.trimmingCharacters(in: .whitespaces)
 		if !rate.isEmpty {
 			let style = workspace.numberStyle

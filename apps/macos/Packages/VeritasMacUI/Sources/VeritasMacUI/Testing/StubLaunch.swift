@@ -261,7 +261,14 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 		try writable()
 		try accountStore.setKind(categoryID, kind)
 	}
-	func createKindCategory(kind: CategoryKind, name: String) async throws -> String {
+	func kindCategoryPlan(_ kind: CategoryKind) async throws -> KindCategoryPlan {
+		KindCategoryPlan(groupName: "Savings and debt", groupIsHidden: false)
+	}
+	func balanceHistory(_ accountID: String, from: String, to: String) async throws -> BalanceHistory {
+		accountStore.balanceHistory(accountID, from: from, to: to)
+	}
+	func tags() async throws -> [TagSummary] { accountStore.tagSummaries() }
+	func createKindCategory(kind: CategoryKind, name: String, unhideGroup: Bool) async throws -> String {
 		try writable()
 		let id = try budget.createEnvelope(in: "savingsdebt", name: name)
 		accountStore.named(id, name, kind: kind)

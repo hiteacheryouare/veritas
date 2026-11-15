@@ -157,7 +157,8 @@ public final class TransactionEditorModel: Identifiable {
 			transferAsks = false
 			return
 		}
-		let preview = await workspace.report { try await $0.transferPreview(from: ends.from, to: ends.to, amount: 0) }
+		// Only the purpose is read here, which doesn't depend on the amount; the core refuses zero.
+		let preview = await workspace.report { try await $0.transferPreview(from: ends.from, to: ends.to, amount: 1) }
 		transferAsks = preview?.purpose == .ask
 		guard transferAsks else { return }
 		await transferPurpose.load(envelopes: envelopes)
