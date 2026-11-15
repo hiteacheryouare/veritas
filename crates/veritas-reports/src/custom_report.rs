@@ -151,7 +151,16 @@ impl CustomReport {
 	/// stored text; changed ones are written the way Actual's `fromJS` writes
 	/// them, with JSON in `JSON.stringify` form.
 	pub fn to_row(&self) -> CustomReportRow {
-		let original = CustomReport::from_row(&self.row).ok();
+		self.write(CustomReport::from_row(&self.row).ok())
+	}
+
+	/// The row `report/create` inserts: every column `fromJS` writes, on top
+	/// of `self.row` for the ones it doesn't.
+	pub fn to_new_row(&self) -> CustomReportRow {
+		self.write(None)
+	}
+
+	fn write(&self, original: Option<CustomReport>) -> CustomReportRow {
 		let changed = |pick: &dyn Fn(&CustomReport) -> String| {
 			original
 				.as_ref()

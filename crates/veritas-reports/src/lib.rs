@@ -7,6 +7,7 @@ mod balances;
 mod classify;
 mod custom_report;
 mod dashboard;
+mod filter;
 mod json;
 mod net_profit;
 mod period;
@@ -17,6 +18,8 @@ mod standard;
 mod statements;
 mod tax;
 mod time_frame;
+mod widget_meta;
+mod widgets;
 
 pub use balances::{AccountBalance, Side, account_balances, net_worth};
 pub use classify::{
@@ -27,6 +30,7 @@ pub use custom_report::{BalanceType, CustomReport, GroupBy, Interval, SortBy};
 pub use dashboard::{
 	Dashboard, DashboardWidget, GRID_COLUMNS, WidgetContent, WidgetType, dashboards, place_widget,
 };
+pub use filter::TransactionFilter;
 pub use json::Json;
 pub use net_profit::{CategoryLabels, CategoryLine, Line, NetProfit, Section, net_profit};
 pub use period::{Period, months};
@@ -46,3 +50,13 @@ pub use tax::{
 	summary_csv, tax_summary,
 };
 pub use time_frame::{DefaultFrame, spending_months, widget_months};
+pub use widget_meta::{
+	DEFAULT_MARKDOWN, TimeFrame, WidgetSettings, add_widget, check_conditions, condition,
+	create_page, delete_page, live_widget, parse_meta, read_settings, remove_widget, rename_page,
+	set_widget_settings, write_settings,
+};
+pub use widgets::{
+	AgeOfMoney, AgePoint, BudgetAnalysis, BudgetAnalysisMonth, CalendarDay, CalendarMonth,
+	Crossover, CrossoverPoint, Granularity, SummaryContent, SummaryData, TimeRange, Trend,
+	age_of_money, budget_analysis, calculate_time_range, calendar, crossover, summary,
+};

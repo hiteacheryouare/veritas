@@ -1,6 +1,7 @@
 // Test helpers outside #[test] fns, so clippy.toml's test allowances miss them.
 #![allow(dead_code, clippy::unwrap_used, clippy::panic)]
 
+pub mod actual;
 pub mod household;
 
 use veritas_domain::{

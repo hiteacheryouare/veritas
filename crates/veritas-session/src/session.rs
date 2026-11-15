@@ -444,6 +444,27 @@ impl<B: Backend> Session<B> {
 		read(bus.data(), self.classification.get(bus.data()))
 	}
 
+	/// `with_classification` plus the envelope sheet as of `today`, built
+	/// only when `sheet` asks for it.
+	pub fn with_reports<T>(
+		&mut self,
+		today: CivilDate,
+		sheet: bool,
+		read: impl FnOnce(&BudgetData, &Classification, Option<&EnvelopeSheet>) -> Result<T, CoreError>,
+	) -> Result<T, CoreError> {
+		let State::Open(bus) = &self.state else {
+			return Err(closed());
+		};
+		let data = bus.data();
+		let envelopes = if sheet {
+			self.today = today;
+			Some(self.sheet.get(data, today)?)
+		} else {
+			None
+		};
+		read(data, self.classification.get(data), envelopes)
+	}
+
 	fn after_change(&mut self, changed: &ChangeSet) {
 		self.dirty |= !changed.is_empty();
 		if !changed.is_empty() {

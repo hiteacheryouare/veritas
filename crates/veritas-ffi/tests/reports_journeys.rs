@@ -808,8 +808,11 @@ fn widget_name(session: &Session, id: &str) -> Option<String> {
 		.into_iter()
 		.flat_map(|p| p.widgets)
 		.find(|w| w.id == id)
+		.map(|w| match w.view {
+			veritas_ffi::WidgetView::CustomReport { report } => Some(report.settings.name),
+			_ => w.config.name,
+		})
 		.unwrap()
-		.name
 }
 
 const SPENDING_WIDGET: &str = "8de603a2-58a0-411b-8e1c-cca26d049f0c";
