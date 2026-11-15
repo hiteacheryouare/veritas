@@ -1477,12 +1477,11 @@ fn cls_4_1_picks_the_right_group_around_hidden_and_income_groups() {
 	let session = import(&scratch, "small");
 	let hidden_debt = group(&session, "debt", true);
 	let shared = group(&session, "SAVINGS and debt", false);
-	assert_eq!(
-		session
+	assert!(
+		!session
 			.kind_category_plan(CategoryKind::DebtPrincipal)
 			.unwrap()
-			.group_is_hidden,
-		false
+			.group_is_hidden
 	);
 	let principal = make(
 		&session,
