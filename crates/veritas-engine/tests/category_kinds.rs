@@ -64,6 +64,9 @@ fn cls_3_3_a_goal_envelope_stays_an_expense_category() {
 			closed_month: None,
 			released_to: None,
 			released: None,
+			activity_seen_through: None,
+			activity_seen_total: None,
+			close_month_dismissed_available: None,
 		},
 	);
 	assert!(matches!(

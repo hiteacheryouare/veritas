@@ -96,13 +96,7 @@ pub struct BillView {
 /// `schedules_json_paths`: where each schedule condition sits in the rule's
 /// conditions. The store upserts these four columns by `schedule_id`, never
 /// with `INSERT OR REPLACE` (decision 4).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct JsonPaths {
-	pub payee: Option<String>,
-	pub account: Option<String>,
-	pub amount: Option<String>,
-	pub date: Option<String>,
-}
+pub type JsonPaths = veritas_domain::ScheduleJsonPaths;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScheduleRule {
@@ -345,6 +339,11 @@ impl Bill {
 			)),
 			Err(error) => Err(invalid(format!("This bill never comes due: {error}"))),
 		}
+	}
+
+	/// The first date on or after `today`, as `createSchedule` stores it.
+	pub fn next_date(&self, today: CivilDate) -> Result<Option<CivilDate>, CoreError> {
+		next_date_from(&self.date_value()?, today).map_err(|error| invalid(error.to_string()))
 	}
 
 	fn date_value(&self) -> Result<DateValue, CoreError> {

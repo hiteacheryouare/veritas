@@ -266,6 +266,39 @@ export const opHandlers: Record<string, OpHandler> = {
 			actions: op.actions
 		});
 	},
+	updateRule: ({ api }, op) => {
+		required(op, 'id', 'conditions', 'actions');
+		return api.updateRule({
+			id: op.id,
+			stage: op.stage ?? null,
+			conditionsOp: op.conditionsOp ?? 'and',
+			conditions: op.conditions,
+			actions: op.actions
+		});
+	},
+	deleteRule: async ({ api }, op) => {
+		required(op, 'id');
+		if (!(await api.deleteRule(op.id))) {
+			throw new Error(`Actual refused to delete rule ${op.id}`);
+		}
+	},
+	// The rule editor's Apply (dc/components/rules/RuleEditor.tsx:1259-1280): rows
+	// from q('transactions').select('*'), and the rule's actions as `rule-get`
+	// serializes them.
+	applyActions: async ({ api, internal }, op) => {
+		required(op, 'rule', 'transactions');
+		const rule = await internal.send('rule-get', { id: op.rule });
+		if (!rule) {
+			throw new Error(`Rule ${op.rule} isn't loaded`);
+		}
+		const { data } = (await api.aqlQuery(
+			api.q('transactions').filter({ id: { $oneof: op.transactions } }).select('*')
+		)) as { data: unknown[] };
+		const result = await internal.send('rule-apply-actions', { transactions: data, actions: rule.actions });
+		if (!result) {
+			throw new Error(`Actual couldn't parse the actions of rule ${op.rule}`);
+		}
+	},
 	createSchedule: (session, op) => {
 		required(op, 'id', 'name', 'date');
 		return createWithId(session, 'schedules', op.id, () =>
@@ -298,6 +331,22 @@ export const opHandlers: Record<string, OpHandler> = {
 			conditions: op.conditions,
 			resetNextDate: op.resetNextDate
 		});
+	},
+	// A person's next click comes later: the fixed clock only moves 1 ms per
+	// 1,000 reads, and setNextDate tells a reset from a local write by timestamp.
+	tick: async () => {
+		for (let read = 0; read < 1000; read += 1) {
+			Date.now();
+		}
+	},
+	// What the 'sync' listener does when a budget opens (schedules/app.ts:858-881),
+	// awaited here instead of left running: once a day, gated by lastScheduleRun.
+	openBudgetSchedules: async ({ internal, today }) => {
+		const prefs = await internal.send('load-prefs');
+		if (prefs?.lastScheduleRun !== today) {
+			await internal.send('schedule/force-run-service');
+			await internal.send('save-prefs', { lastScheduleRun: today });
+		}
 	},
 
 	setNote: ({ api }, op) => {
