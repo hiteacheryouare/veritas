@@ -68,7 +68,7 @@ struct CurrencyEdgeTests {
 	}
 
 	@Test func aZeroPlaceCurrencyWithTheSymbolAfterReadsAndTypesWholeRials() async throws {
-		// IRR in Actual's table: 0 places, symbol after the amount.
+		// IRR in Actual's table: 0 places, symbol after the amount, spaced as Actual's picker sets it.
 		try await RealBudget.with { budget in
 			let workspace = budget.workspace
 			let rial = NewBudget(name: "Rial", currencyCode: "IRR", numberStyle: .commaDot, accounts: [], hasRetirementPlan: false, hasHealthSavingsAccount: false)
@@ -76,6 +76,7 @@ struct CurrencyEdgeTests {
 			try #require(workspace.overview?.name == "Rial")
 			let format = workspace.format
 			#expect(!format.symbolFirst)
+			#expect(format.symbolSpace)
 			#expect(format.decimalPlaces == 0)
 			#expect(workspace.mixedScaleNote != nil)
 
@@ -88,9 +89,9 @@ struct CurrencyEdgeTests {
 			await screen.commitEditing()
 			let budgeted = try #require(screen.sheet).row(envelope.id).budgeted
 			#expect(budgeted == 250_000)
-			#expect(format.currency(budgeted, on: .budget) == "250,000\u{FDFC}")
-			#expect(format.currency(-budgeted, on: .budget) == "\u{2212}250,000\u{FDFC}")
-			#expect(format.currency(148_050, on: .register) == "1,481\u{FDFC}", "a register amount is a hundredth, rounded")
+			#expect(format.currency(budgeted, on: .budget) == "250,000\u{202F}\u{FDFC}")
+			#expect(format.currency(-budgeted, on: .budget) == "\u{2212}250,000\u{202F}\u{FDFC}")
+			#expect(format.currency(148_050, on: .register) == "1,481\u{202F}\u{FDFC}", "a register amount is a hundredth, rounded")
 
 			let goals = GoalsScreenModel(workspace: workspace)
 			let target = AmountFieldModel(amount: 0, style: goals.numberStyle, reader: goals.reader)
@@ -99,7 +100,7 @@ struct CurrencyEdgeTests {
 			#expect(await goals.create(name: "Carpet", target: amount, date: nil, icon: nil, color: nil))
 			let carpet = try #require(goals.open.first { $0.name == "Carpet" })
 			#expect(carpet.target == 1_500_000)
-			#expect(format.wholeCurrency(carpet.target, on: .budget) == "1,500,000\u{FDFC}")
+			#expect(format.wholeCurrency(carpet.target, on: .budget) == "1,500,000\u{202F}\u{FDFC}")
 		}
 	}
 
