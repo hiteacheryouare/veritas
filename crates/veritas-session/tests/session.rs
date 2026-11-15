@@ -298,7 +298,13 @@ fn importing_a_zip_opens_a_writable_budget_and_snapshots_it_first() {
 	assert_eq!(session.read_only(), None);
 	assert!(!session.data().unwrap().accounts.is_empty());
 	assert!(session.load_report().skipped.is_empty());
-	assert_eq!(reasons(&session), [SnapshotReason::Open]);
+	let mut taken = reasons(&session);
+	taken.sort_by_key(|reason| format!("{reason:?}"));
+	assert_eq!(
+		taken,
+		[SnapshotReason::Import, SnapshotReason::Open],
+		"the import's own snapshot, and the open check's"
+	);
 	assert!(matches!(acquire(&dir).unwrap(), Access::ReadOnly(_)));
 
 	session.perform(&rename("Everyday")).unwrap();
@@ -935,6 +941,7 @@ fn a_new_budget_starts_with_its_accounts_in_the_right_groups() {
 		name: name.to_owned(),
 		kind,
 		starting_balance: Money::from_minor(typed),
+		loan: None,
 	};
 	let budget = veritas_domain::NewBudget {
 		accounts: vec![
@@ -1072,6 +1079,7 @@ fn setup_accounts_need_a_name_and_a_balance_that_fits() {
 			name: name.to_owned(),
 			kind: veritas_domain::NewAccountKind::CreditCard,
 			starting_balance: veritas_domain::Money::from_minor(typed),
+			loan: None,
 		}],
 		..new_budget("Household")
 	};

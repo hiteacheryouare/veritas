@@ -1,25 +1,26 @@
 import SwiftUI
 import VeritasDesign
 
-/// First launch, or after Close Budget (§9 #20).
+/// First launch, or after Close Budget: two equal ways in (D53).
 struct EmptyStateView: View {
 	let isWorking: Bool
+	let newBudget: () -> Void
 	let importActualZip: () -> Void
 
 	var body: some View {
 		ContentUnavailableView {
 			Text("No budget open")
 				.font(.text(.title, weight: .semibold))
-		} description: {
-			Text("In Actual, open Settings and choose Export data. Then import the .zip file here.")
-				.font(.text(.body))
 		} actions: {
-			Button("Import from Actual…", action: importActualZip)
-				.buttonStyle(.borderedProminent)
-				.controlSize(.large)
-				.keyboardShortcut(.defaultAction)
-				.disabled(isWorking)
-				.accessibilityIdentifier("importFromActual")
+			HStack(spacing: Spacing.s3) {
+				Button("New budget…", action: newBudget)
+					.accessibilityIdentifier("newBudget")
+				Button("Import from Actual…", action: importActualZip)
+					.accessibilityIdentifier("importFromActual")
+			}
+			.buttonStyle(.bordered)
+			.controlSize(.large)
+			.disabled(isWorking)
 			if isWorking {
 				ProgressView()
 					.controlSize(.small)

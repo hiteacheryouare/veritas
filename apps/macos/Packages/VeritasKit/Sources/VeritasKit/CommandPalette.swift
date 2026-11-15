@@ -39,7 +39,7 @@ public struct PaletteItem: Hashable, Identifiable, Sendable {
 public struct PaletteIndex: Sendable {
 	public let items: [PaletteItem]
 
-	public init(accounts: [AccountSummary], format: MoneyFormat) {
+	public init(accounts: [SidebarAccount], format: MoneyFormat) {
 		let commands = PaletteCommand.allCases.map {
 			PaletteItem(title: $0.title, detail: $0 == .addTransaction ? "⌘N" : nil, target: .perform($0))
 		}
@@ -47,7 +47,7 @@ public struct PaletteIndex: Sendable {
 			PaletteItem(title: $0.title, detail: nil, target: .go(.screen($0)))
 		}
 		let accountItems = accounts.map {
-			PaletteItem(title: $0.name, detail: format.amount($0.balance), target: .go(.account(id: $0.id)))
+			PaletteItem(title: $0.name, detail: format.amount($0.balance, on: .register), target: .go(.account(id: $0.id)))
 		}
 		items = commands + screens + accountItems
 	}

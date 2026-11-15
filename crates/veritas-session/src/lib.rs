@@ -11,6 +11,8 @@ pub mod categories;
 mod classification;
 mod fsio;
 pub mod goals;
+pub mod kinds;
+pub mod loans;
 mod lock;
 mod overview;
 pub mod payees;
@@ -23,6 +25,7 @@ mod sheet;
 mod snapshot;
 mod store;
 pub mod transactions;
+pub mod transfers;
 pub mod writes;
 
 pub use backup::write_backup;

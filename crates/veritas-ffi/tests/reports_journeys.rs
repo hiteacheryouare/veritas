@@ -319,6 +319,7 @@ fn every_report_is_fresh_after_each_kind_of_commit_undo_redo_restore_and_reopen(
 					name: "Credit union".to_owned(),
 					kind: NewAccountKind::Savings,
 					starting_balance: 310_000,
+					loan: None,
 				},
 			},
 			true,

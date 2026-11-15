@@ -96,8 +96,8 @@ Why the unusual rows:
 
 | User answer | Category used | Resulting kind |
 |---|---|---|
-| Loan/debt payment | the one visible `debt_principal` category (created in a "Debt" group if none exists; if several, ask) | `debt_principal` |
-| Saving/investing | a visible `savings` category (same rule) | `savings_contribution` |
+| Loan/debt payment | the one visible `debt_principal` category (if none exists, created in a live, non-income group named "Savings and Debt" if there is one, else in a group named "Debt", reusing or creating it (a hidden group of that name is reused and unhidden, see below); names match case-insensitively; if several, ask) | `debt_principal` |
+| Saving/investing | a visible `savings` category (if none exists, created in the same "Savings and Debt" group if there is one, else in a group named "Savings", same matching) | `savings_contribution` |
 | Other | a category the user picks | kind of that category (row 8 or 9) |
 
 "Visible" means the category is live, not hidden, not archived, and not in a hidden group. A hidden or archived category keeps its kind (CLS-3.2) and its history, but it is not offered for new money. If the only matching category is hidden, Veritas offers to show it again and use it, with a confirm step, and does not create a second one: 'Show "{category}" again and use it?' (If a hidden group holds it, the confirm shows the group too, as below.) Reusing the revived category keeps the lookup to exactly one result afterwards, so the user is never asked to choose between an old and a new category. If no matching category exists at all, Veritas creates one.

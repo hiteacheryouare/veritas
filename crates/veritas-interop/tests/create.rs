@@ -29,6 +29,7 @@ fn account(name: &str, kind: NewAccountKind, cents: i64) -> NewAccount {
 		name: name.to_owned(),
 		kind,
 		starting_balance: Money::from_minor(cents),
+		loan: None,
 	}
 }
 
