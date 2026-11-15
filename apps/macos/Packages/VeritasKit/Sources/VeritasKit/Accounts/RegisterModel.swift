@@ -165,6 +165,25 @@ public final class RegisterModel {
 		await setCleared([row.id], !row.cleared)
 	}
 
+	/// DEBT-6 A.5: deleting a loan's side of a payment deletes the whole
+	/// split it came from, so the confirmation names what goes with it.
+	public func paymentsDeleted(with rows: [RegisterRow]) async -> [RegisterRow] {
+		var payments: [RegisterRow] = []
+		for id in Set(rows.compactMap(\.counterpartParentId)).sorted() {
+			if let payment = await workspace.report({ try await $0.registerRow(id) }) { payments.append(payment) }
+		}
+		return payments
+	}
+
+	/// "Checking: To Car loan 331.80, Loan interest 80.20", for a payment's confirmation.
+	public func describe(_ payment: RegisterRow) -> String {
+		let lines = payment.lines.map { line in
+			let name = line.transferAccountId == nil ? (line.categoryName ?? "Uncategorized") : "To \(line.payeeName ?? "")"
+			return "\(name) \(format.amount(abs(line.amount), on: .register))"
+		}
+		return "\(payment.accountName): \(lines.joined(separator: ", "))"
+	}
+
 	public func delete(_ ids: [String]) async {
 		for id in ids {
 			guard await workspace.perform(.deleteTransaction(transactionId: id)) else { return }

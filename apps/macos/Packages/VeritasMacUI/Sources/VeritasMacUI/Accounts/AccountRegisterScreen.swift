@@ -14,6 +14,7 @@ struct AccountRegisterScreen: View {
 	@State private var editing: TransactionEditorModel?
 	@State private var moving: MoveMoneyModel?
 	@State private var deleting: [RegisterRow] = []
+	@State private var deletingPayments: [RegisterRow] = []
 	@State private var reconcile: ReconcileModel?
 	@State private var search = ""
 
@@ -78,7 +79,10 @@ struct AccountRegisterScreen: View {
 					editing = TransactionEditorModel(workspace: workspace, accountID: accountID, editing: row)
 				}
 			} delete: { rows in
-				deleting = rows
+				Task {
+					deletingPayments = await register.paymentsDeleted(with: rows)
+					deleting = rows
+				}
 			}
 		}
 		.background(.surfaceWindow)
@@ -93,7 +97,9 @@ struct AccountRegisterScreen: View {
 				Task { await register.delete(ids) }
 			}
 		} message: {
-			if deleting.contains(where: \.isTransfer) {
+			if !deletingPayments.isEmpty {
+				Text("The whole payment goes too. \(deletingPayments.map(register.describe).joined(separator: ". ")).")
+			} else if deleting.contains(where: \.isTransfer) {
 				Text("A transfer's other side goes too.")
 			}
 		}
