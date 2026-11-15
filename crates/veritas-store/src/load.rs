@@ -792,10 +792,14 @@ fn load_veritas_tables(
 		each_row(
 			conn,
 			"veritas_goal",
-			"SELECT id, category_id, target_cents, target_date, icon, color, status, \
-			 reached_month, closed_month, released_to_category_id, released_cents, \
-			 activity_seen_through, activity_seen_total, close_month_dismissed_available \
-			 FROM veritas_goal",
+			&format!(
+				"SELECT id, category_id, target_cents, target_date, icon, color, status, \
+				 reached_month, closed_month, released_to_category_id, released_cents, \
+				 {}, {}, {} FROM veritas_goal",
+				column_or_null(conn, "veritas_goal", "activity_seen_through")?,
+				column_or_null(conn, "veritas_goal", "activity_seen_total")?,
+				column_or_null(conn, "veritas_goal", "close_month_dismissed_available")?,
+			),
 			skipped,
 			|row| {
 				let id = GoalId::new(id(row, 0)?);
