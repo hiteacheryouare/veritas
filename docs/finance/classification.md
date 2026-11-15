@@ -96,11 +96,13 @@ Why the unusual rows:
 
 | User answer | Category used | Resulting kind |
 |---|---|---|
-| Loan/debt payment | the one visible `debt_principal` category (created in a "Debt" group if none exists; if several, ask) | `debt_principal` |
-| Saving/investing | a visible `savings` category (same rule) | `savings_contribution` |
+| Loan/debt payment | the one visible `debt_principal` category (if none exists, created in a live, visible, non-income group named "Savings and Debt" if there is one, else in a group named "Debt", reusing or creating it; names match case-insensitively; if several, ask) | `debt_principal` |
+| Saving/investing | a visible `savings` category (if none exists, created in the same "Savings and Debt" group if there is one, else in a group named "Savings", same matching) | `savings_contribution` |
 | Other | a category the user picks | kind of that category (row 8 or 9) |
 
 "Visible" means the category is live, not hidden, not archived, and not in a hidden group. A hidden or archived category keeps its kind (CLS-3.2) and its history, but it is not offered for new money. If the only matching category is hidden, the answer is the same as having none: Veritas offers to create one. Example: one hidden `savings` category and no other gives "none", so the prompt offers a new one, and the hidden one stays as it was.
+
+If the group Veritas would create the category in already exists but is hidden, Veritas reuses that group and unhides it, after a confirm step: 'Your group "{name}" is hidden. Show it again and add "{category}" to it?' The categories already in the group keep their own hidden flags. If the user cancels, nothing is written and the prompt stays open so they can pick another category. Veritas never creates a group under a second name. Example: a hidden group "Debt" and no visible `debt_principal` category. The user answers "Loan/debt payment", the confirm shows, and on yes "Debt" is unhidden with a new "Loan Principal" category inside it.
 
 Resolved in P0.4: Actual keeps the category on mixed pairs and clears it on same-side pairs (`transfer.ts:24-45`). No server check requires a category on on->off transfers. Only the Close Account modal does (`desktop-client/src/components/modals/CloseAccountModal.tsx:33-40`, `docs/actual-format.md` §4.2). Uncategorized on->off transfers exist in real files, which is why row 10 exists. PLAN R-XFER-4's "which Actual requires to carry a category" is wrong and needs correcting.
 
@@ -291,3 +293,4 @@ Actual's currency table gives each currency its `decimalPlaces` (`reference/actu
   - **Tax summary (R):** `total_cents` `50000` and, in the CSV, `total` `500.00`. The tax screen shows `¥500`.
   - Rounding to a whole yen of an R-scale `50049` gives `50000`, so the suggestion converts to `500`.
 - **CLS-12.13** Until the oracle has one JPY budget whose register rows, budget cells, envelope sheet and tax summary reproduce CLS-12.12, no 0-place screen or export ships.
+- **CLS-12.14** **Goals screen in a 0-place budget.** A goal's target, contribution and hold are budget scale. Spending to date is register scale (CLS-6 `expense_total`). Available and progress are mixed (CLS-12.10) and are labeled only "Available", never "over", "left" or "remaining". A view that shows both Spending to date and Available carries the CLS-12.10 line, and the two are not shown in one row. Example, yen, made-up amounts: a goal has a budget cell of 30000 (budget scale) and a 500 yen purchase stored as -50000 (register scale). The Goals screen shows Target ¥30,000 and, in the detail section, Spending to date ¥500 (50000 divided by 100). Its Available reads "Available -¥20,000" (30000 + (-50000) = -20000, on the currency's places, as Actual shows it) with the CLS-12.10 line. It never reads "¥20,000 over", because the real position is ¥29,500 left and the -¥20,000 is an effect of the two scales. For a 2-place currency the scales agree and none of this applies.

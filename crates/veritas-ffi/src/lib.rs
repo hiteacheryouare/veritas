@@ -1,14 +1,17 @@
 //! The only surface the apps see: commands, queries and the change-event stream, exported through UniFFI.
 
 mod accounts;
+mod bills;
 mod blocking;
 mod budget;
 mod commands;
 mod custom_reports;
 mod dashboards;
 mod goals;
+mod money;
 mod records;
 mod reports;
+mod rules;
 mod session;
 #[cfg(test)]
 mod test_support;
@@ -21,6 +24,10 @@ pub use accounts::{
 	AccountDetail, AccountGroupDetail, AccountList, ClearedStatus, PayeeDetail, PayeeMemory,
 	Reconciliation, RegisterFilter, RegisterLine, RegisterPage, RegisterRow, RegisterScope,
 	RegisterSort, RegisterSortKey, SplitLineDraft, TransactionDraft,
+};
+pub use bills::{
+	BillAmount, BillDate, BillDetail, BillDraft, BillFrequency, BillRepeat, BillRepeatEnd,
+	BillRepeatPattern, BillState, BillStatus, BillSummary, BillWeekday, BillWeekend, UpcomingBill,
 };
 pub use blocking::CancelToken;
 pub use budget::{BudgetMonth, EnvelopeGroup, EnvelopeRow, MoneyTone};
@@ -36,6 +43,11 @@ pub use dashboards::{
 	CrossoverCardPoint, DashboardPage, DashboardWidget, WidgetConfig, WidgetTimeFrame, WidgetView,
 };
 pub use goals::{GoalClosePreview, GoalPace, GoalState, GoalSummary, MonthAmount};
+pub use money::{
+	BalanceAfter, BalanceHistory, BalancePoint, CategoryKind, KindCategoryPlan, KindTarget,
+	LoanPaymentDefaults, LoanPaymentDraft, LoanPaymentPreview, LoanPaymentProblem, LoanTerms,
+	TagSummary, TransferPreview, TransferPurpose, evaluate_rate,
+};
 pub use records::{
 	AccountGroup, AccountGroupSummary, AccountSummary, AuditCheck, AuditFinding, BackupInfo,
 	BudgetListing, CategoryHistory, Change, Currency, EntityKind, EntityRef, NewAccount,
@@ -47,6 +59,11 @@ pub use reports::{
 	NetWorthMonth, OwnersEquity, ReportCategory, ReportDrill, ReportLabels, ReportLine,
 	ReportSection, ReportTransaction, SankeyFlow, SankeyNode, SankeyNodeKey, SankeyNodeKind,
 	SankeyReport, SheetAccount, SheetSection, TaxBucket, TaxBucketTotal, TaxDetailRow, TaxSummary,
+};
+pub use rules::{
+	RuleAccess, RuleAction, RuleActionOp, RuleChangedField, RuleCondition, RuleConditionOp,
+	RuleConditionsOp, RuleDraft, RuleField, RuleFieldChange, RuleMatch, RuleSentence, RuleSource,
+	RuleSplitLine, RuleStage, RuleValue,
 };
 pub use session::{ChangeListener, Session};
 

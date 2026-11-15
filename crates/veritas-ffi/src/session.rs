@@ -160,6 +160,7 @@ impl<B: Backend> Core<B> {
 				can_redo: session.can_redo(),
 				checking: session.open_check_pending(),
 				snapshot_problem: session.snapshot_problem().map(ToString::to_string),
+				schedule_problem: session.schedule_problem().map(ToOwned::to_owned),
 				skipped_rows: session.load_report().skipped.len() as u64,
 				audit_findings: session
 					.audit_report()
@@ -352,11 +353,16 @@ impl<B: Backend> Core<B> {
 		})
 	}
 
-	pub(crate) fn maintain(&self) -> Result<Change, FfiError> {
+	pub(crate) fn maintain(&self, today: &str) -> Result<Change, FfiError> {
 		self.call(|session| {
+			let today = crate::budget::civil_date(today)?;
 			let flipped = session.poll();
 			session.snapshot_if_due()?;
-			Ok(flipped.unwrap_or_default())
+			let posted = session.run_schedules(today).unwrap_or_default();
+			Ok(match flipped {
+				Some(flipped) => flipped,
+				None => posted,
+			})
 		})
 		.map(|changes| Change::from(&changes))
 	}
@@ -584,11 +590,16 @@ impl Session {
 		self.core.set_retention(retention)
 	}
 
-	/// The app calls this on a timer, every few minutes. It collects the
-	/// background integrity check and takes the hourly snapshot when one is
-	/// due. The change is empty unless the check turned the budget read-only.
-	pub fn maintain(&self) -> Result<Change, FfiError> {
-		self.core.maintain()
+	/// The app calls this right after opening a budget and then on a timer,
+	/// every few minutes, with the local date (`YYYY-MM-DD`). It collects the
+	/// background integrity check, takes the hourly snapshot when one is due,
+	/// and once a day runs Actual's schedule service: due and missed
+	/// auto-post bills are posted and paid ones move on, as one undo step,
+	/// gated by `metadata.json`'s `lastScheduleRun` as Actual gates it
+	/// (R-BILL-2). The change says what that posted, or that the check
+	/// turned the budget read-only.
+	pub fn maintain(&self, today: String) -> Result<Change, FfiError> {
+		self.core.maintain(&today)
 	}
 
 	/// Releases the budget's connection and lock now. Later calls fail.
@@ -598,7 +609,7 @@ impl Session {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
 	use std::path::{Path, PathBuf};
 	use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -608,7 +619,7 @@ mod tests {
 	use crate::ReadOnlyKind;
 	use crate::records::EntityKind;
 
-	struct Scratch(PathBuf);
+	pub(crate) struct Scratch(pub(crate) PathBuf);
 
 	impl Scratch {
 		fn new(label: &str) -> Self {
@@ -810,12 +821,21 @@ mod tests {
 		})
 		.unwrap();
 		let snapshots = core.snapshots().unwrap();
-		assert_eq!(snapshots.len(), 1);
-		assert_eq!(snapshots[0].reason, crate::SnapshotKind::Open);
-		assert!(snapshots[0].taken_at.ends_with('Z'));
+		let mut reasons: Vec<crate::SnapshotKind> = snapshots.iter().map(|s| s.reason).collect();
+		reasons.sort_by_key(|reason| format!("{reason:?}"));
+		assert_eq!(
+			reasons,
+			[crate::SnapshotKind::Import, crate::SnapshotKind::Open],
+			"the import's own snapshot, then the open check's"
+		);
+		let opened = snapshots
+			.iter()
+			.find(|s| s.reason == crate::SnapshotKind::Open)
+			.unwrap();
+		assert!(opened.taken_at.ends_with('Z'));
 		let listener = refetcher(&core);
 
-		let change = core.restore_snapshot(&snapshots[0].id).unwrap();
+		let change = core.restore_snapshot(&opened.id).unwrap();
 
 		assert!(change.everything);
 		assert_eq!(listener.heard.lock().unwrap().len(), 1);
@@ -913,7 +933,7 @@ mod tests {
 	/// Runs Actual's own API on a zip (tools/actual-oracle `dump`) with its
 	/// clock pinned to `today`: it imports the budget and reports what Actual
 	/// computes. `None` without the oracle, unless CI requires it.
-	fn actual_reads(zip: &Path, today: &str) -> Option<serde_json::Value> {
+	pub(crate) fn actual_reads(zip: &Path, today: &str) -> Option<serde_json::Value> {
 		let oracle = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/actual-oracle");
 		if !oracle.join("node_modules").exists() {
 			assert!(
@@ -949,6 +969,7 @@ mod tests {
 			name: name.to_owned(),
 			kind,
 			starting_balance,
+			loan: None,
 		};
 		let options = NewBudgetOptions {
 			retirement_401k: true,
@@ -1065,6 +1086,7 @@ mod tests {
 				name: "Checking".to_owned(),
 				kind: NewAccountKind::Checking,
 				starting_balance: 120_000,
+				loan: None,
 			}],
 		};
 		let create = |into: &str, cancel: &CancelToken| {
@@ -1186,7 +1208,7 @@ mod tests {
 	}
 
 	/// A fixed today keeps the month range stable.
-	fn this_month() -> (Month, String) {
+	pub(crate) fn this_month() -> (Month, String) {
 		(
 			Month {
 				year: 2026,
@@ -1393,7 +1415,7 @@ mod tests {
 		));
 	}
 
-	fn data(core: &Core<veritas_store::Store>) -> veritas_domain::BudgetData {
+	pub(crate) fn data(core: &Core<veritas_store::Store>) -> veritas_domain::BudgetData {
 		core.call(|session| Ok(session.data()?.clone())).unwrap()
 	}
 
@@ -1831,7 +1853,7 @@ mod tests {
 		);
 	}
 
-	struct Rows(Vec<veritas_domain::Row>);
+	pub(crate) struct Rows(pub(crate) Vec<veritas_domain::Row>);
 
 	impl veritas_session::Command for Rows {
 		fn plan(
@@ -1994,6 +2016,98 @@ mod tests {
 		assert_eq!(
 			budgeted(&core, DECEMBER, &destination),
 			dest_december + 30_000
+		);
+	}
+
+	#[test]
+	fn dismissing_new_activity_on_a_closed_goal_waits_for_something_new() {
+		// GOAL-6 R-16 (D72), in cents.
+		use crate::NewAccountKind::Checking;
+		let (_scratch, core) = imported("goal-dismiss");
+		let checking = new_account(&core, "Everyday", Checking, 0);
+		let id = new_goal(&core, "New laptop", 100_000, None);
+		let category = goal_of(&core, &id).category_id;
+		let march = Month {
+			year: 2027,
+			month: 3,
+		};
+		let on = |today: &str| {
+			core.goals(today)
+				.unwrap()
+				.into_iter()
+				.find(|goal| goal.id == id)
+				.unwrap()
+		};
+		on("2027-03-10");
+		core.perform(Command::CloseGoal {
+			goal_id: id.clone(),
+			release_to_category_id: None,
+			also_move_later: false,
+		})
+		.unwrap();
+		assert_eq!(on("2027-03-10").closed_month, Some(march));
+		let buy = |date: &str, amount: i64| {
+			let mut draft = typed(&checking, amount);
+			draft.date = date.to_owned();
+			draft.category_id = Some(category.clone());
+			add(&core, draft);
+		};
+		let dismiss = || {
+			let before = data(&core);
+			core.perform(Command::DismissGoalActivity {
+				goal_id: id.clone(),
+			})
+			.unwrap();
+			let after = data(&core);
+			assert_eq!(after.budget_cells, before.budget_cells, "no money moves");
+			assert_eq!(after.transactions, before.transactions, "no money moves");
+			let goal = after.goals[&veritas_domain::GoalId::new(id.as_str())].clone();
+			(
+				goal.activity_seen_through.map(|m| (m.year(), m.month())),
+				goal.activity_seen_total.map(|m| m.minor()),
+				goal.close_month_dismissed_available.map(|m| m.minor()),
+			)
+		};
+
+		buy("2027-04-05", -1000);
+		assert!(
+			on("2027-04-20").new_activity,
+			"(B) after the April purchase"
+		);
+		assert_eq!(dismiss(), (Some((2027, 4)), Some(-1000), None));
+		assert!(!on("2027-04-20").new_activity);
+		buy("2027-04-21", -200);
+		assert!(on("2027-04-21").new_activity, "April's total is now -1200");
+		assert_eq!(dismiss(), (Some((2027, 4)), Some(-1200), None));
+		assert!(!on("2027-04-21").new_activity);
+
+		buy("2027-05-03", -500);
+		assert!(on("2027-05-03").new_activity, "May is later than 2027-04");
+		assert_eq!(dismiss(), (Some((2027, 5)), Some(-1700), None));
+		assert!(!on("2027-05-03").new_activity);
+
+		budget(&core, march, &category, 300);
+		assert!(on("2027-05-03").new_activity, "(A): March ends at +300");
+		assert_eq!(dismiss(), (Some((2027, 5)), Some(-1700), Some(300)));
+		assert!(!on("2027-05-03").new_activity);
+		budget(&core, march, &category, 0);
+		assert!(!on("2027-05-03").new_activity, "March back at 0");
+		budget(&core, march, &category, -200);
+		assert!(on("2027-05-03").new_activity, "-200 is neither 0 nor 300");
+
+		core.perform(Command::ReopenGoal {
+			goal_id: id.clone(),
+		})
+		.unwrap();
+		let reopened = &data(&core).goals[&veritas_domain::GoalId::new(id.as_str())];
+		assert_eq!(
+			(
+				reopened.activity_seen_through,
+				reopened.activity_seen_total,
+				reopened.close_month_dismissed_available
+			),
+			(None, None, None),
+			"reopen clears all three"
 		);
 	}
 
@@ -2325,6 +2439,7 @@ mod tests {
 					name: name.to_owned(),
 					kind,
 					starting_balance,
+					loan: None,
 				},
 			})
 			.unwrap();
@@ -2340,7 +2455,7 @@ mod tests {
 			.unwrap()
 	}
 
-	fn transfer_payee_of(core: &Core<veritas_store::Store>, account: &str) -> String {
+	pub(crate) fn transfer_payee_of(core: &Core<veritas_store::Store>, account: &str) -> String {
 		core.payees()
 			.unwrap()
 			.into_iter()
@@ -2349,7 +2464,7 @@ mod tests {
 			.id
 	}
 
-	fn typed(account: &str, amount: i64) -> crate::TransactionDraft {
+	pub(crate) fn typed(account: &str, amount: i64) -> crate::TransactionDraft {
 		static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 		let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 		crate::TransactionDraft {
@@ -2366,14 +2481,14 @@ mod tests {
 		}
 	}
 
-	fn add(core: &Core<veritas_store::Store>, draft: crate::TransactionDraft) -> String {
+	pub(crate) fn add(core: &Core<veritas_store::Store>, draft: crate::TransactionDraft) -> String {
 		let id = draft.id.clone().unwrap();
 		core.perform(Command::AddTransaction { transaction: draft })
 			.unwrap();
 		id
 	}
 
-	fn row(core: &Core<veritas_store::Store>, id: &str) -> veritas_domain::Transaction {
+	pub(crate) fn row(core: &Core<veritas_store::Store>, id: &str) -> veritas_domain::Transaction {
 		data(core).transactions[&veritas_domain::TransactionId::new(id)].clone()
 	}
 
@@ -2395,6 +2510,7 @@ mod tests {
 					name: " Everyday ".to_owned(),
 					kind: Checking,
 					starting_balance: 0,
+					loan: None,
 				},
 			}),
 			Err(FfiError::Invalid { .. })
@@ -3186,7 +3302,17 @@ mod tests {
 
 	/// Runs Actual's own ops on `zip` (tools/actual-oracle `apply`) into `out`.
 	/// `false` without the oracle, unless CI requires it.
-	fn actual_apply(zip: &Path, ops: serde_json::Value, out: &Path, today: &str) -> bool {
+	pub(crate) fn actual_apply(
+		zip: &Path,
+		ops: serde_json::Value,
+		out: &Path,
+		today: &str,
+	) -> bool {
+		actual_apply_text(zip, &ops.to_string(), out, today)
+	}
+
+	/// `actual_apply` with the ops as JSON text, for ops whose key order matters.
+	pub(crate) fn actual_apply_text(zip: &Path, ops: &str, out: &Path, today: &str) -> bool {
 		let oracle = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/actual-oracle");
 		if !oracle.join("node_modules").exists() {
 			assert!(
@@ -3196,11 +3322,7 @@ mod tests {
 			return false;
 		}
 		let file = out.with_extension("ops.json");
-		std::fs::write(
-			&file,
-			serde_json::json!({"version": 1, "ops": ops}).to_string(),
-		)
-		.unwrap();
+		std::fs::write(&file, format!(r#"{{"version":1,"ops":{ops}}}"#)).unwrap();
 		let output = std::process::Command::new("node")
 			.current_dir(&oracle)
 			.arg("src/main.ts")
@@ -3220,13 +3342,15 @@ mod tests {
 		true
 	}
 
-	fn table<'a>(dump: &'a serde_json::Value, name: &str) -> &'a Vec<serde_json::Value> {
+	pub(crate) fn table<'a>(dump: &'a serde_json::Value, name: &str) -> &'a Vec<serde_json::Value> {
 		dump["tables"][name]["rows"].as_array().unwrap()
 	}
 
 	/// A Veritas budget with two open accounts, exported as the base both
 	/// sides start from.
-	fn two_account_base(label: &str) -> (Scratch, std::path::PathBuf, String, String, String) {
+	pub(crate) fn two_account_base(
+		label: &str,
+	) -> (Scratch, std::path::PathBuf, String, String, String) {
 		use crate::NewAccountKind::{Checking, Savings};
 		let (scratch, core) = imported(label);
 		let checking = new_account(&core, "Everyday", Checking, 0);
@@ -3239,7 +3363,11 @@ mod tests {
 		(scratch, base, checking, savings, category)
 	}
 
-	fn imported_from(scratch: &Scratch, zip: &Path, name: &str) -> Core<veritas_store::Store> {
+	pub(crate) fn imported_from(
+		scratch: &Scratch,
+		zip: &Path,
+		name: &str,
+	) -> Core<veritas_store::Store> {
 		Core::<veritas_store::Store>::import_actual_zip(
 			&zip.display().to_string(),
 			&scratch.0.join(name).display().to_string(),
@@ -3405,5 +3533,698 @@ mod tests {
 		assert!(actual_apply(&first, ops, &second, &today));
 		let (_, source, other) = theirs(&actual_reads(&second, &today).unwrap());
 		assert_eq!((source, other), edited, "after the edit");
+	}
+
+	#[test]
+	fn a_schedule_linked_on_the_savings_leg_is_written_back_as_actual_does() {
+		// transfer.ts:81-85: a rule on the savings side links the leg, and
+		// Actual puts the same schedule on the checking row.
+		let (_, today) = this_month();
+		let (scratch, base, checking, savings, _) = two_account_base("link-back-oracle");
+		let linked = scratch.0.join("linked.zip");
+		let ops = serde_json::json!([
+			{"op": "createSchedule", "id": "savings-plan", "name": "Savings plan", "amount": 999_999, "date": "2030-01-01"},
+			{"op": "createRule", "id": "link-savings", "conditions": [{"field": "account", "op": "is", "value": savings}],
+			 "actions": [{"op": "link-schedule", "value": "savings-plan"}]},
+		]);
+		if !actual_apply(&base, ops, &linked, &today) {
+			return;
+		}
+		let core = imported_from(&scratch, &linked, "veritas");
+		let mut draft = typed(&checking, -10_000);
+		draft.payee_id = Some(transfer_payee_of(&core, &savings));
+		let id = add(&core, draft);
+		let source = row(&core, &id);
+		let leg = row(&core, source.transfer.as_ref().unwrap().as_str());
+		let ours = (
+			source.schedule.as_ref().map(|s| s.as_str().to_owned()),
+			leg.schedule.as_ref().map(|s| s.as_str().to_owned()),
+		);
+		assert_eq!(
+			ours,
+			(
+				Some("savings-plan".to_owned()),
+				Some("savings-plan".to_owned())
+			)
+		);
+
+		let out = scratch.0.join("actual.zip");
+		let ops = serde_json::json!([{"op": "addTransactions", "account": checking, "transactions": [
+			{"date": "2026-11-12", "amount": -10_000, "payee": {"transferTo": savings}}
+		]}]);
+		assert!(actual_apply(&linked, ops, &out, &today));
+		let dump = actual_reads(&out, &today).unwrap();
+		let rows = table(&dump, "transactions");
+		let theirs = rows
+			.iter()
+			.find(|r| r["acct"] == checking.as_str() && r["transferred_id"].is_string())
+			.unwrap();
+		let other = rows
+			.iter()
+			.find(|r| r["id"] == theirs["transferred_id"])
+			.unwrap();
+		let schedule = |r: &serde_json::Value| r["schedule"].as_str().map(str::to_owned);
+		assert_eq!((schedule(theirs), schedule(other)), ours);
+	}
+
+	mod bills {
+		// Bills through the FFI (R-BILL-1 to R-BILL-5), checked against Actual's
+		// own schedule handlers on the same base where Actual has one.
+
+		use serde_json::{Value, json};
+
+		use super::*;
+		use crate::{
+			BillAmount, BillDate, BillDraft, BillFrequency, BillRepeat, BillRepeatEnd, BillState,
+			BillStatus,
+		};
+
+		const TODAY: &str = "2026-11-15";
+		const LANDLORD: &str = "11111111-1111-4111-8111-111111111111";
+
+		fn last_run(metadata: &Path) -> Option<String> {
+			let text = std::fs::read_to_string(metadata).unwrap();
+			let value: Value = serde_json::from_str(&text).unwrap();
+			value["lastScheduleRun"].as_str().map(str::to_owned)
+		}
+
+		fn set_last_run(metadata: &Path, day: Option<&str>) {
+			let mut value: Value =
+				serde_json::from_str(&std::fs::read_to_string(metadata).unwrap()).unwrap();
+			match day {
+				Some(day) => value["lastScheduleRun"] = json!(day),
+				None => {
+					value.as_object_mut().unwrap().remove("lastScheduleRun");
+				}
+			}
+			std::fs::write(metadata, value.to_string()).unwrap();
+		}
+
+		fn monthly(start: &str) -> BillDate {
+			BillDate::Repeat {
+				repeat: BillRepeat {
+					start: start.to_owned(),
+					interval: 1,
+					frequency: BillFrequency::Monthly,
+					patterns: Vec::new(),
+					weekend: None,
+					end: BillRepeatEnd::Never,
+				},
+			}
+		}
+
+		fn rent(account: &str, amount: BillAmount, date: BillDate, auto_post: bool) -> BillDraft {
+			BillDraft {
+				name: Some("Rent".to_owned()),
+				payee_id: Some(LANDLORD.to_owned()),
+				account_id: Some(account.to_owned()),
+				amount,
+				date,
+				category_id: None,
+				auto_post,
+			}
+		}
+
+		fn add_landlord(core: &Core<veritas_store::Store>) {
+			core.call(|session| {
+				let id = veritas_domain::PayeeId::new(LANDLORD);
+				session.perform(&Rows(vec![
+					veritas_domain::Row::Payee(veritas_domain::Payee {
+						id: id.clone(),
+						name: "Maple Court".to_owned(),
+						transfer_account: None,
+						favorite: false,
+						learn_categories: true,
+						tombstone: false,
+					}),
+					veritas_domain::Row::PayeeMapping(veritas_domain::PayeeMapping {
+						from: id.clone(),
+						to: id,
+					}),
+				]))?;
+				Ok(())
+			})
+			.unwrap();
+		}
+
+		/// A budget with one checking account and the landlord, exported as the base
+		/// both sides start from.
+		fn bill_base(
+			label: &str,
+			bill: Option<&dyn Fn(&str) -> BillDraft>,
+		) -> (Scratch, PathBuf, String) {
+			let (scratch, core) = imported(label);
+			let checking = new_account(&core, "Everyday", crate::NewAccountKind::Checking, 0);
+			add_landlord(&core);
+			if let Some(bill) = bill {
+				core.perform(Command::CreateBill {
+					bill_id: Some("bill-1".to_owned()),
+					bill: bill(&checking),
+				})
+				.unwrap();
+			}
+			let base = scratch.0.join("base.zip");
+			core.export_actual_zip(&base.display().to_string(), &CancelToken::default())
+				.unwrap();
+			core.close().unwrap();
+			(scratch, base, checking)
+		}
+
+		fn export(core: &Core<veritas_store::Store>, scratch: &Scratch, name: &str) -> PathBuf {
+			let zip = scratch.0.join(name);
+			core.export_actual_zip(&zip.display().to_string(), &CancelToken::default())
+				.unwrap();
+			zip
+		}
+
+		fn schedule_rule<'a>(dump: &'a Value, schedule: &str) -> &'a Value {
+			let rule = table(dump, "schedules")
+				.iter()
+				.find(|row| row["id"] == schedule)
+				.unwrap()["rule"]
+				.clone();
+			table(dump, "rules")
+				.iter()
+				.find(|row| row["id"] == rule)
+				.unwrap()
+		}
+
+		fn parsed(value: &Value) -> Value {
+			serde_json::from_str(value.as_str().unwrap()).unwrap()
+		}
+
+		fn without(row: &Value, keys: &[&str]) -> Value {
+			let mut row = row.clone();
+			for key in keys {
+				row.as_object_mut().unwrap().remove(*key);
+			}
+			row
+		}
+
+		fn posted_for(dump: &Value, schedule: &str) -> Vec<Value> {
+			table(dump, "transactions")
+				.iter()
+				.filter(|row| row["schedule"] == schedule && row["tombstone"] == 0)
+				.cloned()
+				.collect()
+		}
+
+		#[test]
+		fn a_bill_is_created_edited_paused_resumed_and_skipped_as_actual_does_it() {
+			// R-BILL-1, R-BILL-4, D65: against Actual's createSchedule, schedule/update
+			// and skip-next-date on the same base.
+			let (scratch, base, checking) = bill_base("bill-oracle", None);
+			let core = imported_from(&scratch, &base, "veritas");
+			core.goals(TODAY).unwrap();
+			let created = rent(
+				&checking,
+				BillAmount::Exact { amount: -150_000 },
+				monthly("2026-11-20"),
+				false,
+			);
+			core.perform(Command::CreateBill {
+				bill_id: Some("bill-1".to_owned()),
+				bill: created,
+			})
+			.unwrap();
+			let first = data(&core);
+			let first_rule =
+				&first.rules[&first.schedules[&veritas_domain::ScheduleId::new("bill-1")].rule];
+			let first_conditions: Value =
+				serde_json::from_str(&first_rule.conditions_json).unwrap();
+			let edited = rent(
+				&checking,
+				BillAmount::About { amount: -155_000 },
+				monthly("2026-11-25"),
+				false,
+			);
+			core.perform(Command::EditBill {
+				bill_id: "bill-1".to_owned(),
+				bill: edited,
+			})
+			.unwrap();
+			let second = data(&core);
+			let second_rule =
+				&second.rules[&second.schedules[&veritas_domain::ScheduleId::new("bill-1")].rule];
+			let second_conditions: Value =
+				serde_json::from_str(&second_rule.conditions_json).unwrap();
+			for command in [
+				Command::PauseBill {
+					bill_id: "bill-1".to_owned(),
+				},
+				Command::ResumeBill {
+					bill_id: "bill-1".to_owned(),
+				},
+				Command::SkipBill {
+					bill_id: "bill-1".to_owned(),
+				},
+			] {
+				core.perform(command).unwrap();
+			}
+			let ours_zip = export(&core, &scratch, "ours.zip");
+
+			let date = first_conditions
+				.as_array()
+				.unwrap()
+				.iter()
+				.find(|c| c["field"] == "date")
+				.unwrap()["value"]
+				.clone();
+			let ops = json!([
+								{"op": "createSchedule", "id": "bill-1", "name": "Rent", "postsTransaction": false,
+					"payee": LANDLORD, "account": checking, "amount": -150_000, "amountOp": "is", "date": date},
+				{"op": "tick"},
+					{"op": "updateSchedule", "id": "bill-1", "fields": {"name": "Rent", "posts_transaction": false},
+					"conditions": second_conditions},
+				{"op": "tick"},
+					{"op": "updateSchedule", "id": "bill-1", "fields": {"completed": true}},
+				{"op": "tick"},
+					{"op": "updateSchedule", "id": "bill-1", "fields": {"completed": false}, "resetNextDate": true},
+				{"op": "tick"},
+					{"op": "skipSchedule", "id": "bill-1"},
+			]);
+			let theirs_zip = scratch.0.join("theirs.zip");
+			if !actual_apply(&base, ops, &theirs_zip, TODAY) {
+				return;
+			}
+			let ours = actual_reads(&ours_zip, TODAY).unwrap();
+			let theirs = actual_reads(&theirs_zip, TODAY).unwrap();
+			assert_eq!(
+				ours["computed"]["schedules"]["bill-1"], theirs["computed"]["schedules"]["bill-1"],
+				"Actual reads the same next date and upcoming dates"
+			);
+			let row = |dump: &Value| {
+				without(
+					table(dump, "schedules")
+						.iter()
+						.find(|row| row["id"] == "bill-1")
+						.unwrap(),
+					&["rule"],
+				)
+			};
+			assert_eq!(row(&ours), row(&theirs));
+			let (our_rule, their_rule) = (
+				schedule_rule(&ours, "bill-1"),
+				schedule_rule(&theirs, "bill-1"),
+			);
+			assert_eq!(
+				parsed(&our_rule["conditions"]),
+				parsed(&their_rule["conditions"])
+			);
+			assert_eq!(parsed(&our_rule["actions"]), parsed(&their_rule["actions"]));
+			assert_eq!(
+				without(our_rule, &["id", "conditions", "actions"]),
+				without(their_rule, &["id", "conditions", "actions"])
+			);
+			let paths = |dump: &Value| {
+				table(dump, "schedules_json_paths")
+					.iter()
+					.find(|row| row["schedule_id"] == "bill-1")
+					.cloned()
+			};
+			assert!(paths(&ours).is_some());
+			assert_eq!(paths(&ours), paths(&theirs));
+		}
+
+		#[test]
+		fn veritas_and_actual_opening_the_same_budget_never_post_a_due_bill_twice() {
+			// R-BILL-2, docs/actual-format.md §6.3: the service runs once a day on
+			// open on either side, gated by lastScheduleRun.
+			let due = |account: &str| {
+				rent(
+					account,
+					BillAmount::Exact { amount: -150_000 },
+					monthly(TODAY),
+					true,
+				)
+			};
+			let (scratch, base, _) = bill_base("bill-twice", Some(&due));
+
+			// Veritas opens first, then Actual, which also forces a second run.
+			let core = imported_from(&scratch, &base, "veritas-first");
+			let posted = core.maintain(TODAY).unwrap();
+			assert!(!posted.entities.is_empty());
+			assert!(
+				core.maintain(TODAY).unwrap().entities.is_empty(),
+				"once a day"
+			);
+			assert_eq!(
+				last_run(&scratch.0.join("veritas-first/metadata.json")).as_deref(),
+				Some(TODAY)
+			);
+			let ours = export(&core, &scratch, "veritas-first.zip");
+			core.close().unwrap();
+			let then_actual = scratch.0.join("then-actual.zip");
+			let ops = json!([{"op": "openBudgetSchedules"}, {"op": "runSchedules"}]);
+			if !actual_apply(&ours, ops, &then_actual, TODAY) {
+				return;
+			}
+			let dump = actual_reads(&then_actual, TODAY).unwrap();
+			let rows = posted_for(&dump, "bill-1");
+			assert_eq!(rows.len(), 1, "{rows:?}");
+			assert_eq!(rows[0]["date"], 20_261_115);
+			assert_eq!(rows[0]["amount"], -150_000);
+
+			// Actual opens first, then Veritas.
+			let actual_first = scratch.0.join("actual-first.zip");
+			assert!(actual_apply(
+				&base,
+				json!([{"op": "openBudgetSchedules"}]),
+				&actual_first,
+				TODAY
+			));
+			assert_eq!(
+				posted_for(&actual_reads(&actual_first, TODAY).unwrap(), "bill-1").len(),
+				1
+			);
+			let core = imported_from(&scratch, &actual_first, "actual-first");
+			core.maintain(TODAY).unwrap();
+			let again = export(&core, &scratch, "actual-then-veritas.zip");
+			let dump = actual_reads(&again, TODAY).unwrap();
+			assert_eq!(posted_for(&dump, "bill-1").len(), 1);
+
+			// Even with the day cleared, Veritas sees the occurrence paid.
+			set_last_run(&scratch.0.join("actual-first/metadata.json"), None);
+			core.maintain(TODAY).unwrap();
+			let cleared = export(&core, &scratch, "cleared.zip");
+			assert_eq!(
+				posted_for(&actual_reads(&cleared, TODAY).unwrap(), "bill-1").len(),
+				1
+			);
+		}
+
+		#[test]
+		fn the_service_run_is_one_undo_step_and_saving_an_auto_post_bill_lets_it_run_again() {
+			let (scratch, core) = imported("bill-service");
+			let checking = new_account(&core, "Everyday", crate::NewAccountKind::Checking, 0);
+			add_landlord(&core);
+			core.goals(TODAY).unwrap();
+			let metadata = Path::new(&scratch.budget()).join("metadata.json");
+			set_last_run(&metadata, Some("2026-11-14"));
+			core.perform(Command::CreateBill {
+				bill_id: Some("bill-1".to_owned()),
+				bill: rent(
+					&checking,
+					BillAmount::Exact { amount: -150_000 },
+					monthly("2026-11-15"),
+					true,
+				),
+			})
+			.unwrap();
+			assert_eq!(
+				last_run(&metadata),
+				None,
+				"createSchedule clears it for an auto-post bill"
+			);
+			let bills = |core: &Core<veritas_store::Store>| {
+				core.call(|session| {
+					crate::bills::bills(session.data()?, crate::budget::civil_date(TODAY)?)
+				})
+				.unwrap()
+			};
+			assert_eq!(bills(&core)[0].status, BillStatus::Due);
+			let upcoming = core
+				.call(|session| {
+					crate::bills::upcoming(session.data()?, 40, crate::budget::civil_date(TODAY)?)
+				})
+				.unwrap();
+			assert_eq!(
+				upcoming
+					.iter()
+					.map(|u| (u.date.as_str(), u.status))
+					.collect::<Vec<_>>(),
+				[
+					("2026-11-15", BillStatus::Due),
+					("2026-12-15", BillStatus::Upcoming)
+				]
+			);
+
+			core.maintain(TODAY).unwrap();
+			let after = data(&core);
+			assert_eq!(
+				after
+					.transactions
+					.values()
+					.filter(|t| t.schedule.as_ref().map(|s| s.as_str()) == Some("bill-1"))
+					.count(),
+				1
+			);
+			// As in Actual, the occurrence is posted and the bill moves on at
+			// the next day's run, once it counts as paid.
+			assert_eq!(bills(&core)[0].next_date.as_deref(), Some(TODAY));
+			assert_eq!(bills(&core)[0].status, BillStatus::Paid);
+			assert_eq!(last_run(&metadata).as_deref(), Some(TODAY));
+			core.undo().unwrap();
+			let undone = data(&core);
+			assert!(
+				undone
+					.transactions
+					.values()
+					.filter(|t| t.schedule.as_ref().map(|s| s.as_str()) == Some("bill-1"))
+					.all(|t| t.tombstone)
+			);
+			assert_eq!(bills(&core)[0].next_date.as_deref(), Some(TODAY));
+			assert_eq!(
+				last_run(&metadata).as_deref(),
+				Some(TODAY),
+				"undo doesn't touch metadata.json"
+			);
+
+			core.perform(Command::PauseBill {
+				bill_id: "bill-1".to_owned(),
+			})
+			.unwrap();
+			assert_eq!(last_run(&metadata), None);
+			assert_eq!(bills(&core)[0].state, BillState::Paused);
+			core.perform(Command::EndBill {
+				bill_id: "bill-1".to_owned(),
+			})
+			.unwrap();
+			assert_eq!(bills(&core)[0].state, BillState::Ended);
+			assert_eq!(bills(&core)[0].status, BillStatus::Completed);
+			core.perform(Command::ResumeBill {
+				bill_id: "bill-1".to_owned(),
+			})
+			.unwrap();
+			assert_eq!(bills(&core)[0].state, BillState::Active);
+		}
+
+		#[test]
+		fn restoring_a_snapshot_from_before_the_run_lets_the_service_post_again_today() {
+			let (scratch, core) = imported("bill-restore");
+			core.call(|session| {
+				session.wait_for_open_check();
+				Ok(())
+			})
+			.unwrap();
+			let checking = new_account(&core, "Everyday", crate::NewAccountKind::Checking, 0);
+			add_landlord(&core);
+			core.perform(Command::CreateBill {
+				bill_id: Some("bill-1".to_owned()),
+				bill: rent(
+					&checking,
+					BillAmount::Exact { amount: -150_000 },
+					monthly(TODAY),
+					true,
+				),
+			})
+			.unwrap();
+			core.call(|session| session.snapshot(SnapshotReason::BulkEdit))
+				.unwrap();
+			let before_run = core
+				.snapshots()
+				.unwrap()
+				.into_iter()
+				.find(|snapshot| snapshot.reason == crate::SnapshotKind::BulkEdit)
+				.unwrap();
+			let posted_rent = |core: &Core<veritas_store::Store>| {
+				data(core)
+					.transactions
+					.values()
+					.filter(|t| {
+						!t.tombstone && t.schedule.as_ref().map(|s| s.as_str()) == Some("bill-1")
+					})
+					.count()
+			};
+			let metadata = Path::new(&scratch.budget()).join("metadata.json");
+
+			core.maintain(TODAY).unwrap();
+			assert_eq!(posted_rent(&core), 1);
+			assert_eq!(last_run(&metadata).as_deref(), Some(TODAY));
+
+			core.restore_snapshot(&before_run.id).unwrap();
+			assert_eq!(posted_rent(&core), 0, "the snapshot predates the post");
+			assert_eq!(last_run(&metadata), None);
+			core.maintain(TODAY).unwrap();
+			assert_eq!(posted_rent(&core), 1, "posted again today, not tomorrow");
+			assert_eq!(last_run(&metadata).as_deref(), Some(TODAY));
+		}
+
+		#[test]
+		fn post_now_writes_the_transaction_actual_posts() {
+			// R-BILL-3: "Post transaction" and "Post transaction today", against
+			// schedule/post-transaction on the same base.
+			let confirm = |account: &str| {
+				rent(
+					account,
+					BillAmount::About { amount: -150_000 },
+					monthly("2026-11-20"),
+					false,
+				)
+			};
+			let (scratch, base, _) = bill_base("bill-post", Some(&confirm));
+			let core = imported_from(&scratch, &base, "veritas");
+			core.goals(TODAY).unwrap();
+			for dated_today in [false, true] {
+				core.perform(Command::PostBillNow {
+					bill_id: "bill-1".to_owned(),
+					dated_today,
+				})
+				.unwrap();
+			}
+			let ours_zip = export(&core, &scratch, "ours.zip");
+			let theirs_zip = scratch.0.join("theirs.zip");
+			let ops = json!([
+				{"op": "postSchedule", "id": "bill-1", "today": false},
+				{"op": "postSchedule", "id": "bill-1", "today": true},
+			]);
+			if !actual_apply(&base, ops, &theirs_zip, TODAY) {
+				return;
+			}
+			let ours = actual_reads(&ours_zip, TODAY).unwrap();
+			let theirs = actual_reads(&theirs_zip, TODAY).unwrap();
+			let rows = |dump: &Value| {
+				let mut rows: Vec<Value> = posted_for(dump, "bill-1")
+					.iter()
+					.map(|row| without(row, &["id", "sort_order"]))
+					.collect();
+				rows.sort_by_key(|row| row["date"].as_i64());
+				rows
+			};
+			assert_eq!(rows(&ours).len(), 2);
+			assert_eq!(rows(&ours), rows(&theirs));
+			assert_eq!(
+				ours["computed"]["schedules"]["bill-1"],
+				theirs["computed"]["schedules"]["bill-1"]
+			);
+		}
+
+		#[test]
+		fn bills_actual_would_misread_are_refused_and_income_is_a_bill_too() {
+			// R-BILL-4, R-BILL-5.
+			let (_scratch, core) = imported("bill-checks");
+			let checking = new_account(&core, "Everyday", crate::NewAccountKind::Checking, 0);
+			add_landlord(&core);
+			core.goals(TODAY).unwrap();
+			let refused = |bill: BillDraft| match core.perform(Command::CreateBill {
+				bill_id: None,
+				bill,
+			}) {
+				Err(FfiError::Invalid { message }) => message,
+				other => panic!("{other:?}"),
+			};
+			let mut ended = rent(
+				&checking,
+				BillAmount::Exact { amount: -100 },
+				monthly("2026-11-20"),
+				false,
+			);
+			if let BillDate::Repeat { repeat } = &mut ended.date {
+				repeat.end = BillRepeatEnd::OnDate {
+					date: "2026-11-01".to_owned(),
+				};
+			}
+			assert!(refused(ended).contains("never comes due"));
+			let range = rent(
+				&checking,
+				BillAmount::Between {
+					low: -100,
+					high: -100,
+				},
+				monthly("2026-11-20"),
+				false,
+			);
+			assert_eq!(refused(range), "A range needs two different amounts");
+			let mut weekly = rent(
+				&checking,
+				BillAmount::Exact { amount: -100 },
+				monthly("2026-11-20"),
+				false,
+			);
+			if let BillDate::Repeat { repeat } = &mut weekly.date {
+				repeat.frequency = BillFrequency::Weekly;
+				repeat.patterns = vec![crate::BillRepeatPattern::Day { day: 3 }];
+			}
+			assert_eq!(
+				refused(weekly),
+				"Only monthly bills can repeat on chosen days"
+			);
+
+			let mut paycheck = rent(
+				&checking,
+				BillAmount::Exact { amount: 250_000 },
+				BillDate::Once {
+					date: "2026-11-30".to_owned(),
+				},
+				false,
+			);
+			paycheck.name = Some("Paycheck".to_owned());
+			core.perform(Command::CreateBill {
+				bill_id: Some("pay".to_owned()),
+				bill: paycheck.clone(),
+			})
+			.unwrap();
+			assert!(matches!(
+				core.perform(Command::CreateBill {
+					bill_id: None,
+					bill: paycheck,
+				}),
+				Err(FfiError::Invalid { .. })
+			));
+			let detail = core
+				.call(|session| {
+					crate::bills::bill_detail(
+						session.data()?,
+						"pay",
+						crate::budget::civil_date(TODAY)?,
+					)
+				})
+				.unwrap();
+			assert!(detail.bill.is_income);
+			assert_eq!(detail.next_dates, ["2026-11-30"]);
+			assert!(matches!(
+				core.perform(Command::SkipBill {
+					bill_id: "pay".to_owned(),
+				}),
+				Err(FfiError::Invalid { .. })
+			));
+			core.perform(Command::PayBill {
+				bill_id: "pay".to_owned(),
+				amount: 251_000,
+				date: "2026-11-29".to_owned(),
+			})
+			.unwrap();
+			let paid = data(&core);
+			let row = paid
+				.transactions
+				.values()
+				.find(|t| t.schedule.as_ref().map(|s| s.as_str()) == Some("pay"))
+				.unwrap();
+			assert_eq!(
+				(row.amount.minor(), row.date.to_string().as_str()),
+				(251_000, "2026-11-29")
+			);
+			// Inside the 2-day window of a confirm-first bill, so it reads paid,
+			// and the next service run completes it.
+			let pay = &paid.schedules[&veritas_domain::ScheduleId::new("pay")];
+			assert!(!pay.completed);
+			assert_eq!(
+				crate::bills::bill_detail(&paid, "pay", crate::budget::civil_date(TODAY).unwrap())
+					.unwrap()
+					.bill
+					.status,
+				BillStatus::Paid
+			);
+		}
 	}
 }

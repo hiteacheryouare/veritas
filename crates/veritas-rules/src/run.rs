@@ -360,7 +360,7 @@ impl RuleBook {
 /// is dropped at the end, even on a transaction that was already split, as
 /// in Actual. `None` is a rule Actual would crash on (a line number that
 /// skips ahead).
-fn split(parent: &mut RuleTransaction, actions: &[&Action]) -> Result<(), &'static str> {
+pub(crate) fn split(parent: &mut RuleTransaction, actions: &[&Action]) -> Result<(), &'static str> {
 	const PAST_THE_END: &str =
 		"split lines numbered past the end, which make Actual stop with an error";
 	const TOO_LARGE: &str = "split amounts too large to work out exactly";
@@ -369,6 +369,7 @@ fn split(parent: &mut RuleTransaction, actions: &[&Action]) -> Result<(), &'stat
 		payee,
 		category,
 		notes: None,
+		schedule: None,
 	};
 	let mut lines = if parent.splits.is_empty() {
 		let first = line(parent.payee.take(), parent.category.clone());
@@ -769,6 +770,27 @@ mod tests {
 				line(1, "fixed-amount", json!(9_007_199_254_740_991_i64)),
 				line(2, "fixed-percent", json!(1e20)),
 				line(3, "remainder", Value::Null),
+			]),
+		);
+		let outcome = run(&budget, &transaction("split me"));
+		assert_eq!(outcome.undetermined, [RuleId::new("huge")]);
+		assert_eq!(outcome.transaction, None);
+		assert!(outcome.reasons[&RuleId::new("huge")].contains("too large"));
+		assert!(outcome.partial.splits.is_empty());
+	}
+
+	#[test]
+	fn a_percentage_past_what_actual_can_count_is_undetermined() {
+		// 1e20 percent of the -4210 left: the fixed amounts are fine, so this
+		// is the percentage's own guard, with a remainder line still to fill.
+		let mut budget = budget();
+		split_rule(
+			&mut budget,
+			"huge",
+			RuleStage::Default,
+			json!([
+				line(1, "fixed-percent", json!(1e20)),
+				line(2, "remainder", Value::Null),
 			]),
 		);
 		let outcome = run(&budget, &transaction("split me"));

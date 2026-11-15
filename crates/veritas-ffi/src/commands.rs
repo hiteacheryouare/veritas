@@ -2,11 +2,14 @@ use veritas_domain::{
 	Account, AccountId, BudgetData, CategoryGroupId, CategoryId, CivilDate, CoreError, GoalId,
 	Note, Row,
 };
-use veritas_domain::{AccountGroupId, PayeeId, TransactionId};
+use veritas_domain::{AccountGroupId, PayeeId, ScheduleId, TransactionId};
 use veritas_rules::RuleBook;
-use veritas_session::{SnapshotReason, accounts, categories, goals, payees, transactions, writes};
+use veritas_session::{
+	SnapshotReason, accounts, bills, categories, goals, payees, transactions, writes,
+};
 
 use crate::accounts::TransactionDraft;
+use crate::bills::BillDraft;
 use crate::records::NewAccount;
 
 use veritas_engine::EnvelopeSheet;
@@ -15,11 +18,12 @@ use crate::Month;
 use crate::budget::{civil_date, edit, envelope, money};
 use crate::custom_reports::{self, CustomReportSettings};
 use crate::dashboards::{self, WidgetConfig};
+use crate::rules::{self, RuleDraft, RuleSource};
 use veritas_reports as reports;
 
 /// A user action. Each one is a single transaction and a single undo step.
 /// Workstreams add commands through `contract` PRs.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+#[derive(Debug, Clone, PartialEq, uniffi::Enum)]
 pub enum Command {
 	RenameAccount {
 		account_id: String,
@@ -145,6 +149,11 @@ pub enum Command {
 	ReopenGoal {
 		goal_id: String,
 	},
+	/// Hides a closed goal's "new activity" notice until something new
+	/// happens in its envelope (GOAL-6, D72). No money moves.
+	DismissGoalActivity {
+		goal_id: String,
+	},
 	/// A new target on the same goal: back to active, first reached month kept
 	/// (D71). A closed goal is `Invalid`: reopen it first (DEBT-8.2).
 	RetargetGoal {
@@ -243,6 +252,32 @@ pub enum Command {
 		account_id: String,
 		statement_balance: i64,
 	},
+	/// v9. CLS-3.3: reclassifies every row of the category, past and future,
+	/// so the shell confirms with `kindChangePreview` first.
+	SetCategoryKind {
+		category_id: String,
+		kind: crate::money::CategoryKind,
+	},
+	/// v9. CLS-4.1's "created if none exists": a debt principal or savings
+	/// category in "Savings and Debt", else "Debt" or "Savings", reused or
+	/// created. A hidden group is reused and unhidden only with
+	/// `unhide_group` (the user confirmed `kindCategoryPlan`), else `Invalid`.
+	/// The new id is the `category` entity.
+	CreateKindCategory {
+		kind: crate::money::CategoryKind,
+		name: String,
+		unhide_group: bool,
+	},
+	/// v9. R-DEBT-1: replaces the terms; a `nil` field clears it.
+	SetLoanTerms {
+		account_id: String,
+		terms: crate::money::LoanTerms,
+	},
+	/// v9. R-DEBT-2, DEBT-6: the payment as a split, its principal line a
+	/// transfer to the loan. The payment's id is the first `transaction` entity.
+	RecordLoanPayment {
+		payment: crate::money::LoanPaymentDraft,
+	},
 	/// Locks every cleared row when the cleared balance equals the statement,
 	/// and records the reconcile either way.
 	FinishReconcile {
@@ -279,6 +314,74 @@ pub enum Command {
 		y: i64,
 		width: i64,
 		height: i64,
+	},
+	/// A new bill: an Actual schedule with the rule it owns, stored as
+	/// Actual's schedule editor writes them (R-BILL-1, R-BILL-4). `bill_id`
+	/// picks the new id, as `TransactionDraft.id` does; it comes back as the
+	/// `schedule` entity in the `Change`. Inputs Actual would mis-evaluate
+	/// are refused with `Invalid`.
+	CreateBill {
+		bill_id: Option<String>,
+		bill: BillDraft,
+	},
+	/// Saves the editor over a bill. Only the schedule's own conditions and
+	/// its plain amount and category actions change; the next date resets
+	/// only when the date or account did (D65).
+	EditBill {
+		bill_id: String,
+		bill: BillDraft,
+	},
+	/// Pause and End are both Actual's Complete; only the label differs.
+	PauseBill {
+		bill_id: String,
+	},
+	EndBill {
+		bill_id: String,
+	},
+	/// Actual's Restart: the next date is reset from today.
+	ResumeBill {
+		bill_id: String,
+	},
+	/// R-BILL-3 Paid: posts the bill with this amount and date, through its
+	/// rules. A date before the window Actual counts as paying the next
+	/// occurrence also moves the bill on. A rule Veritas can't run refuses it
+	/// with `Invalid` and writes nothing (D60).
+	PayBill {
+		bill_id: String,
+		amount: i64,
+		date: String,
+	},
+	/// Skips the next occurrence. A one-time bill has nothing to skip to.
+	SkipBill {
+		bill_id: String,
+	},
+	/// Actual's "Post transaction", dated the next date, or "Post transaction
+	/// today". The next date moves once the daily service sees it paid.
+	PostBillNow {
+		bill_id: String,
+		dated_today: bool,
+	},
+	/// A rule from the sentence editor, stored as Actual's API stores it
+	/// (R-RULE-2). The id is the `rule` entity in the `Change`.
+	CreateRule {
+		draft: RuleDraft,
+	},
+	/// Parts the draft leaves unchanged keep their stored text. A bill's rule,
+	/// or one shown as "Edit in Actual", answers `Invalid`.
+	EditRule {
+		rule_id: String,
+		draft: RuleDraft,
+	},
+	/// `Invalid` while a bill (schedule) uses the rule, as in Actual.
+	DeleteRule {
+		rule_id: String,
+	},
+	/// "Apply to existing": runs only the rule's actions on the chosen rows,
+	/// overwriting what's there, with the transfer hooks. The session snapshots
+	/// first. A rule Veritas can't run here answers `Invalid` and writes nothing.
+	ApplyRule {
+		source: RuleSource,
+		transaction_ids: Vec<String>,
 	},
 	/// A new widget of Actual's `kind` on a dashboard, framed like
 	/// `PlaceWidget`. Its id comes back in the `Change`.
@@ -336,6 +439,7 @@ impl veritas_session::Command for Command {
 			Command::SetCleared {
 				transaction_ids, ..
 			} if transaction_ids.len() > 1 => Some(SnapshotReason::BulkEdit),
+			Command::ApplyRule { .. } => Some(SnapshotReason::RuleApply),
 			_ => None,
 		}
 	}
@@ -354,13 +458,36 @@ impl veritas_session::Command for Command {
 				| Command::CreateGoal { .. }
 				| Command::CloseGoal { .. }
 				| Command::ReopenGoal { .. }
+				| Command::DismissGoalActivity { .. }
 				| Command::RetargetGoal { .. }
 				| Command::CreateAccount { .. }
 				| Command::CloseAccount { .. }
 				| Command::AddTransaction { .. }
 				| Command::EditTransaction { .. }
 				| Command::AddReconcileAdjustment { .. }
+				| Command::CreateBill { .. }
+				| Command::EditBill { .. }
+				| Command::ResumeBill { .. }
+				| Command::PayBill { .. }
+				| Command::PostBillNow { .. }
 		)
+	}
+
+	fn clears_schedule_run(&self, data: &BudgetData) -> bool {
+		let ending = |id: &str| {
+			data.schedules
+				.get(&ScheduleId::new(id))
+				.is_some_and(|schedule| !schedule.completed)
+				&& bills::clears_schedule_run(data, &ScheduleId::new(id))
+		};
+		match self {
+			Command::CreateBill { bill, .. } | Command::EditBill { bill, .. } => bill.auto_post,
+			Command::PauseBill { bill_id } | Command::EndBill { bill_id } => ending(bill_id),
+			Command::ResumeBill { bill_id } => {
+				bills::clears_schedule_run(data, &ScheduleId::new(bill_id.as_str()))
+			}
+			_ => false,
+		}
 	}
 
 	fn plan_with_sheet(
@@ -482,6 +609,9 @@ impl veritas_session::Command for Command {
 			Command::ReopenGoal { goal_id } => {
 				goals::reopen_goal(data, sheet, &GoalId::new(goal_id.as_str()))
 			}
+			Command::DismissGoalActivity { goal_id } => {
+				goals::dismiss_goal_activity(data, sheet, &GoalId::new(goal_id.as_str()))
+			}
 			Command::RetargetGoal {
 				goal_id,
 				target,
@@ -552,6 +682,45 @@ impl veritas_session::Command for Command {
 				now_ms(),
 			)
 			.map(|planned| planned.rows),
+			Command::CreateBill { bill_id, bill } => {
+				let id = ScheduleId::new(
+					bill_id
+						.clone()
+						.unwrap_or_else(veritas_store::new_id)
+						.as_str(),
+				);
+				bills::create_bill(data, &id, &crate::bills::bill(bill)?, sheet.today())
+			}
+			Command::EditBill { bill_id, bill } => bills::edit_bill(
+				data,
+				&ScheduleId::new(bill_id.as_str()),
+				&crate::bills::bill(bill)?,
+				sheet.today(),
+			),
+			Command::ResumeBill { bill_id } => {
+				bills::resume_bill(data, &ScheduleId::new(bill_id.as_str()), sheet.today())
+			}
+			Command::PayBill {
+				bill_id,
+				amount,
+				date,
+			} => bills::pay_bill(
+				data,
+				&ScheduleId::new(bill_id.as_str()),
+				money(*amount),
+				civil_date(date)?,
+				sheet.today(),
+				now_ms(),
+			),
+			Command::PostBillNow {
+				bill_id,
+				dated_today,
+			} => bills::post_bill_now(
+				data,
+				&ScheduleId::new(bill_id.as_str()),
+				dated_today.then(|| sheet.today()),
+				now_ms(),
+			),
 			_ => self.plan_plain(data),
 		}
 	}
@@ -714,6 +883,26 @@ impl Command {
 					.collect();
 				transactions::set_cleared(data, &ids, *cleared)
 			}
+			Command::SetCategoryKind { category_id, kind } => {
+				veritas_session::kinds::set_kind(data, &category(category_id), (*kind).into())
+			}
+			Command::CreateKindCategory {
+				kind,
+				name,
+				unhide_group,
+			} => veritas_session::kinds::create_kind_category(
+				data,
+				(*kind).into(),
+				name,
+				*unhide_group,
+			)
+			.map(|(rows, _)| rows),
+			Command::SetLoanTerms { account_id, terms } => {
+				crate::money::set_loan_terms(data, account_id, terms)
+			}
+			Command::RecordLoanPayment { payment } => {
+				crate::money::record_loan_payment(data, payment, now_ms())
+			}
 			Command::UnlockReconciled { transaction_id } => {
 				transactions::unreconcile(data, &TransactionId::new(transaction_id.as_str()))
 			}
@@ -756,6 +945,22 @@ impl Command {
 				width,
 				height,
 			} => dashboards::place_widget(data, widget_id, (*x, *y, *width, *height)),
+			Command::PauseBill { bill_id } => {
+				bills::end_bill(data, &ScheduleId::new(bill_id.as_str()), true)
+			}
+			Command::EndBill { bill_id } => {
+				bills::end_bill(data, &ScheduleId::new(bill_id.as_str()), false)
+			}
+			Command::SkipBill { bill_id } => {
+				bills::skip_bill(data, &ScheduleId::new(bill_id.as_str()))
+			}
+			Command::CreateRule { draft } => rules::create(data, draft),
+			Command::EditRule { rule_id, draft } => rules::edit(data, rule_id, draft),
+			Command::DeleteRule { rule_id } => rules::delete(data, rule_id),
+			Command::ApplyRule {
+				source,
+				transaction_ids,
+			} => rules::apply(data, source, transaction_ids, now_ms()),
 			Command::AddWidget {
 				page_id,
 				kind,

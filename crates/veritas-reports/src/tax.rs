@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 
 use veritas_domain::{
 	BudgetData, CategoryId, CivilDate, CoreError, Money, TransactionId, TransactionKind,
+	is_js_whitespace,
 };
 
 use crate::net_profit::labels;
@@ -164,19 +165,6 @@ pub fn extract_tags(notes: &str) -> Vec<String> {
 		}
 	}
 	tags
-}
-
-/// JavaScript's `\s`, which Actual's tag regex uses. It differs from Unicode
-/// White_Space: it includes U+FEFF and excludes U+0085.
-fn is_js_whitespace(c: char) -> bool {
-	matches!(
-		c,
-		'\t' | '\n' | '\u{0B}' | '\u{0C}' | '\r' | ' ' | '\u{A0}' | '\u{1680}' | '\u{2000}'
-			..='\u{200A}'
-				| '\u{2028}' | '\u{2029}'
-				| '\u{202F}' | '\u{205F}'
-				| '\u{3000}' | '\u{FEFF}'
-	)
 }
 
 enum Assignment {

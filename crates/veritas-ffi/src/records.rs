@@ -140,6 +140,9 @@ pub struct SessionState {
 	/// The budget is usable meanwhile.
 	pub checking: bool,
 	pub snapshot_problem: Option<String>,
+	/// Why the last daily schedule service run failed, until one works. It
+	/// never fails `maintain`; the service tries again on the next call.
+	pub schedule_problem: Option<String>,
 	/// Rows the loader couldn't represent. They stay in the file untouched.
 	pub skipped_rows: u64,
 	/// What the invariant audit found, once the background check is done.
@@ -236,6 +239,9 @@ pub struct NewAccount {
 	/// Cents as typed. For a credit card, line of credit, loan or mortgage,
 	/// what is owed, as a positive amount; the core stores it negative.
 	pub starting_balance: i64,
+	/// v9. A loan's or a mortgage's terms, saved with it (R-DEBT-1).
+	#[uniffi(default = None)]
+	pub loan: Option<crate::money::LoanTerms>,
 }
 
 /// What setup offers. The core decides each one's budget flag and side
@@ -272,6 +278,7 @@ impl From<&NewAccount> for CoreNewAccount {
 				NewAccountKind::Mortgage => CoreNewAccountKind::Mortgage,
 			},
 			starting_balance: Money::from_minor(account.starting_balance),
+			loan: account.loan.as_ref().map(Into::into),
 		}
 	}
 }

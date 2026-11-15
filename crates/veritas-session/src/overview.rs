@@ -103,7 +103,7 @@ pub fn account_groups(
 
 /// ST-9.1: explicit kind, then loan fields, then a negative balance. Returns
 /// whether the account is a liability, and whether only the balance said so.
-fn placement(data: &BudgetData, id: &AccountId, balance: Money) -> (bool, bool) {
+pub(crate) fn placement(data: &BudgetData, id: &AccountId, balance: Money) -> (bool, bool) {
 	let meta = data.account_meta.get(id);
 	match meta.and_then(|meta| meta.kind) {
 		Some(AccountKind::Liability) => return (true, false),

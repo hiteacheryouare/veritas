@@ -15,7 +15,7 @@ use crate::bill::{schedule_slots, scheduled_amount};
 use crate::condition::{DateValue, Op, parse_date_value};
 use crate::run::{PayeeDirectory, RuleBook};
 use crate::schedule::{ScheduleStatus, next_date_after, next_date_from, paid_window_start, status};
-use crate::trigger::added_transaction;
+use crate::trigger::{added_transaction, transfers};
 
 /// How a new next date is stored in `schedules_next_date`
 /// (`setNextDate`, `app.ts:226-283`).
@@ -67,6 +67,11 @@ pub enum LeftBy {
 	Service,
 	/// Ryan marking the bill Paid.
 	Paid,
+	/// Ryan marking an auto-post bill Paid when it is due or missed. Nothing
+	/// was written, so Actual's service posts this occurrence at the
+	/// scheduled amount on its next open; entering it there too would pay it
+	/// twice.
+	PaidWhileDue,
 	/// "Post transaction" or "Post transaction today".
 	PostNow,
 }
@@ -111,6 +116,9 @@ impl LeftBill {
 			),
 			LeftBy::Paid => format!(
 				"Veritas didn't record this payment: {rules} couldn't run here{why}. Enter the payment in Actual instead."
+			),
+			LeftBy::PaidWhileDue => format!(
+				"Veritas didn't record this payment: {rules} couldn't run here{why}. Actual posts this bill at its scheduled amount the next time it opens this budget, so don't enter it there as well. Change the amount on that transaction if you paid a different amount."
 			),
 			LeftBy::PostNow => format!(
 				"Veritas didn't post this bill: {rules} couldn't run here{why}. Use Post transaction on it in Actual instead."
@@ -303,6 +311,22 @@ impl Planner<'_> {
 		if let Some(amount) = amount {
 			ruled.amount = amount;
 			ruled.date = date;
+		}
+		// D60: a post Veritas makes is left to Actual whole when its transfer
+		// leg's own run can't finish. The leg's payees are never kept.
+		for leg in transfers(&ruled, self.budget).legs {
+			let made = self.payees.made();
+			let outcome = self.book.run(&leg.mirror, self.budget, self.payees);
+			self.payees.forget_made_after(made);
+			if outcome.transaction.is_none() {
+				return Err(Box::new(LeftBill {
+					schedule: facts.schedule.id.clone(),
+					by: self.by,
+					partial: ruled,
+					undetermined: outcome.undetermined,
+					reasons: outcome.reasons,
+				}));
+			}
 		}
 		self.plan.posts.push(Posting {
 			schedule: facts.schedule.id.clone(),
@@ -554,6 +578,7 @@ pub fn pay(
 	id: &ScheduleId,
 	amount: Money,
 	date: CivilDate,
+	today: CivilDate,
 ) -> Result<SchedulePlan, CoreError> {
 	let facts = schedule_facts(budget, id)?;
 	if facts.account.is_none() {
@@ -566,7 +591,11 @@ pub fn pay(
 		budget,
 		payees,
 		plan: SchedulePlan::default(),
-		by: LeftBy::Paid,
+		by: if service_posts(facts.schedule, today) {
+			LeftBy::PaidWhileDue
+		} else {
+			LeftBy::Paid
+		},
 	};
 	if let Err(left) = planner.post(&facts, date, Some(amount)) {
 		planner.plan.left.push(*left);
@@ -591,6 +620,14 @@ pub fn pay(
 	Ok(planner.plan)
 }
 
+/// Whether Actual's daily service would post this bill's next occurrence on
+/// `today` (`app.ts:680-825`).
+fn service_posts(schedule: &Schedule, today: CivilDate) -> bool {
+	schedule.posts_transaction
+		&& !schedule.completed
+		&& schedule.next_date.is_some_and(|next| next <= today)
+}
+
 /// Whether a payment on `date` counts as paying the bill's next occurrence
 /// in Actual, so the bill screen can say what Paid will do.
 pub fn counts_as_paid(
@@ -602,6 +639,50 @@ pub fn counts_as_paid(
 	Ok(facts.schedule.next_date.is_some_and(|next| {
 		date >= paid_window_start(facts.date_op_is, facts.schedule.posts_transaction, next)
 	}))
+}
+
+/// A bill's status as the schedules page shows it (`getStatus` with
+/// `getHasTransactionsQuery`), counting `upcoming_days` ahead as upcoming.
+pub fn bill_status(
+	budget: &BudgetData,
+	id: &ScheduleId,
+	upcoming_days: i64,
+	today: CivilDate,
+) -> Result<ScheduleStatus, CoreError> {
+	let facts = schedule_facts(budget, id)?;
+	let next = facts.schedule.next_date;
+	Ok(status(
+		next,
+		facts.schedule.completed,
+		has_transaction(&facts, next, budget, &[]),
+		upcoming_days,
+		today,
+	))
+}
+
+/// The payee, account and scheduled amount the way `v_schedules` reads them,
+/// for any live schedule, even one the bill screen can't show.
+pub fn schedule_parts(
+	budget: &BudgetData,
+	id: &ScheduleId,
+) -> Option<(Option<PayeeId>, Option<AccountId>, Option<i64>)> {
+	let facts = schedule_facts(budget, id).ok()?;
+	Some((facts.payee, facts.account, facts.amount.ok()))
+}
+
+/// The bill's occurrences from `start` through `end`, weekend moves applied.
+pub fn bill_dates(
+	budget: &BudgetData,
+	id: &ScheduleId,
+	start: CivilDate,
+	end: CivilDate,
+) -> Result<Vec<CivilDate>, CoreError> {
+	let facts = schedule_facts(budget, id)?;
+	let Some(date) = facts.date.as_ref() else {
+		return Ok(Vec::new());
+	};
+	crate::schedule::schedule_dates(date, start, Some(end), None)
+		.map_err(|error| CoreError::Invalid(error.to_string()))
 }
 
 #[cfg(test)]
@@ -694,6 +775,7 @@ mod tests {
 			&mut payees,
 			&ScheduleId::new("rent"),
 			Money::from_minor(amount),
+			day(date),
 			day(date),
 		)
 		.unwrap()
@@ -858,6 +940,50 @@ mod tests {
 	}
 
 	#[test]
+	fn a_post_whose_transfer_leg_cannot_run_is_left_to_actual_whole() {
+		// D60: the bill pays into savings, and a rule on the savings side has a
+		// template, so the leg can't be built here; nothing of the turn is kept.
+		let mut paying = bill(monthly(), true);
+		paying.payee = Some(PayeeId::new("to-savings"));
+		let mut budget = budget_with(&paying, "2026-10-15");
+		budget.accounts.insert(
+			AccountId::new("savings"),
+			Account {
+				id: AccountId::new("savings"),
+				name: "Savings".into(),
+				..budget.accounts[&AccountId::new("checking")].clone()
+			},
+		);
+		budget.payees.insert(
+			PayeeId::new("to-savings"),
+			veritas_domain::Payee {
+				id: PayeeId::new("to-savings"),
+				name: String::new(),
+				transfer_account: Some(AccountId::new("savings")),
+				favorite: false,
+				learn_categories: false,
+				tombstone: false,
+			},
+		);
+		budget
+			.payee_mapping
+			.insert(PayeeId::new("to-savings"), PayeeId::new("to-savings"));
+		add_rule(
+			&mut budget,
+			"template",
+			serde_json::json!([{"op": "is", "field": "acct", "value": "savings"}]),
+			serde_json::json!([{"op": "set", "field": "notes", "value": "", "options": {"template": "{{date}}"}}]),
+		);
+		let book = RuleBook::new(&budget);
+		let mut payees = BudgetPayees::new(&budget, || PayeeId::new("made"));
+		let plan = advance_schedules(&book, &budget, &mut payees, day("2026-10-15"));
+		assert!(plan.posts.is_empty());
+		assert!(plan.writes.is_empty(), "no lastScheduleRun either");
+		assert_eq!(plan.left.len(), 1);
+		assert_eq!(plan.left[0].undetermined, [RuleId::new("template")]);
+	}
+
+	#[test]
 	fn the_note_for_a_left_bill_says_what_happens_next() {
 		// A Paid or Post now that meets a rule Veritas can't run isn't posted by
 		// Actual on its own, unlike the daily service's case.
@@ -878,6 +1004,7 @@ mod tests {
 			&id,
 			Money::from_minor(-150_000),
 			day("2026-12-14"),
+			day("2026-12-14"),
 		)
 		.unwrap();
 		assert!(paid.posts.is_empty() && paid.writes.is_empty());
@@ -892,6 +1019,42 @@ mod tests {
 			posted.left[0]
 				.note()
 				.ends_with("Use Post transaction on it in Actual instead.")
+		);
+	}
+
+	#[test]
+	fn paid_on_a_due_auto_post_bill_left_to_actual_warns_against_paying_twice() {
+		let mut budget = budget_with(&bill(monthly(), true), "2026-12-15");
+		add_rule(
+			&mut budget,
+			"template",
+			serde_json::json!([{"op": "lt", "field": "amount", "value": 0}]),
+			serde_json::json!([{"op": "set", "field": "notes", "value": "", "options": {"template": "{{date}}"}}]),
+		);
+		let book = RuleBook::new(&budget);
+		let id = ScheduleId::new("rent");
+		let mut payees = BudgetPayees::new(&budget, || PayeeId::new("made"));
+		let mut paid_on = |today: &str| {
+			pay(
+				&book,
+				&budget,
+				&mut payees,
+				&id,
+				Money::from_minor(-149_000),
+				day("2026-12-15"),
+				day(today),
+			)
+			.unwrap()
+			.left
+			.remove(0)
+		};
+		assert_eq!(paid_on("2026-12-14").by, LeftBy::Paid, "not due yet");
+		assert_eq!(paid_on("2026-12-20").by, LeftBy::PaidWhileDue, "missed");
+		let due = paid_on("2026-12-15");
+		assert_eq!(due.by, LeftBy::PaidWhileDue);
+		assert_eq!(
+			due.note(),
+			"Veritas didn't record this payment: 1 rule couldn't run here (a template action). Actual posts this bill at its scheduled amount the next time it opens this budget, so don't enter it there as well. Change the amount on that transaction if you paid a different amount."
 		);
 	}
 
