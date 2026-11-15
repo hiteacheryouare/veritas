@@ -83,6 +83,74 @@ final class GoalsAndEnvelopesJourneyTests: XCTestCase {
 		XCTAssertTrue(waitUntil { laptop.label.hasPrefix("New laptop, $1,120 of $2,000") }, laptop.label)
 	}
 
+	/// design/interaction.md: arrow keys move between goal cards and Return
+	/// opens the goal; every goal action is in the Goal menu, reached here
+	/// through Help's menu search so no mouse is used.
+	@MainActor
+	func testGoalsFromTheKeyboardAlone() {
+		let app = openGoals()
+		let laptop = app.descendants(matching: .any)["goal.laptop"]
+		XCTAssertTrue(laptop.waitForExistence(timeout: 5))
+		app.typeKey(.downArrow, modifierFlags: [])
+		XCTAssertTrue(waitUntil { laptop.isSelected }, "↓ selects the first goal")
+		app.typeKey(.return, modifierFlags: [])
+		let retarget = app.descendants(matching: .any)["sheet.retargetGoal"]
+		XCTAssertTrue(retarget.waitForExistence(timeout: 5), "Return opens the goal")
+		let target = retarget.textFields["amountField"]
+		target.typeKey("a", modifierFlags: .command)
+		target.typeText("1800")
+		target.typeKey(.return, modifierFlags: [])
+		XCTAssertTrue(retarget.waitForDisappearance())
+		XCTAssertTrue(waitUntil { laptop.label.hasPrefix("New laptop, $1,120 of $1,800") }, laptop.label)
+
+		app.typeKey(.rightArrow, modifierFlags: [])
+		app.typeKey(.rightArrow, modifierFlags: [])
+		let tires = app.descendants(matching: .any)["goal.tires"]
+		XCTAssertTrue(waitUntil { tires.isSelected })
+		menuSearch(app, "Close Goal…")
+		let close = app.descendants(matching: .any)["sheet.closeGoal"]
+		XCTAssertTrue(close.waitForExistence(timeout: 5))
+		app.typeKey(.return, modifierFlags: [])
+		XCTAssertTrue(close.waitForDisappearance(), "Return closes the goal")
+		XCTAssertTrue(waitUntil { tires.label.contains("Closed") }, tires.label)
+
+		let vet = app.descendants(matching: .any)["goal.vet"]
+		app.typeKey(.downArrow, modifierFlags: [])
+		XCTAssertTrue(waitUntil { vet.isSelected }, "↓ moves from Winter tires, now archived, to the next archived goal")
+		menuSearch(app, "Reopen Goal")
+		XCTAssertTrue(waitUntil { !vet.label.contains("Closed") }, vet.label)
+	}
+
+	/// GOAL-3: the over-limit warning shows as soon as the envelope is picked.
+	@MainActor
+	func testTheCloseWarningShowsBeforeTheButtonIsPressed() {
+		let app = openGoals()
+		let close = app.buttons["goal.tires.close"]
+		XCTAssertTrue(close.waitForExistence(timeout: 5))
+		close.click()
+		let sheet = app.descendants(matching: .any)["sheet.closeGoal"]
+		XCTAssertTrue(sheet.waitForExistence(timeout: 5))
+		XCTAssertFalse(sheet.descendants(matching: .any)["closeGoal.warning"].exists, "To Budget has room")
+		sheet.popUpButtons.firstMatch.click()
+		app.menuItems.matching(NSPredicate(format: "title BEGINSWITH %@", "Dining out")).firstMatch.click()
+		XCTAssertTrue(sheet.descendants(matching: .any)["closeGoal.warning"].waitForExistence(timeout: 5))
+		XCTAssertTrue(sheet.staticTexts["Dining out will be $14.75 over."].exists)
+		attachScreenshot(of: app, named: "close-goal-warning")
+		XCTAssertTrue(sheet.exists, "nothing was pressed")
+		sheet.typeKey(.escape, modifierFlags: [])
+		XCTAssertTrue(sheet.waitForDisappearance())
+	}
+
+	/// Shift-⌘-/ searches the menus; Return runs the highlighted item.
+	@MainActor
+	private func menuSearch(_ app: XCUIApplication, _ item: String) {
+		app.typeKey("/", modifierFlags: [.command, .shift])
+		app.typeText(item)
+		XCTAssertTrue(app.menuItems[item].waitForExistence(timeout: 5))
+		app.typeKey(.downArrow, modifierFlags: [])
+		app.typeKey(.return, modifierFlags: [])
+	}
+
 	@MainActor
 	func testAddingRenamingAndDeletingAnEnvelope() {
 		let app = openBudget()
