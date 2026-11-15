@@ -264,6 +264,17 @@ pub struct FormatPrefs {
 	pub currency_code: Option<String>,
 }
 
+impl FormatPrefs {
+	/// The places budget cells use: the currency's, or 2 for no currency or
+	/// a code Actual's table doesn't list (CLS-12.7).
+	pub fn decimal_places(&self) -> u8 {
+		self.currency_code
+			.as_deref()
+			.and_then(crate::currency)
+			.map_or(2, |currency| currency.decimal_places)
+	}
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Goal {
 	pub id: GoalId,
