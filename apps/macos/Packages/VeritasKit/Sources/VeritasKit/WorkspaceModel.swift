@@ -194,8 +194,10 @@ public final class WorkspaceModel {
 		format.decimalPlaces
 	}
 
-	/// CLS-12.10 and CLS-12.11: the line the budget and goal views show in a
-	/// 0-place budget, whose envelope numbers add both scales as Actual does.
+	/// CLS-12.11: the line the goal views show in a 0-place budget, whose
+	/// envelope numbers add both scales as Actual does. `goals()` carries no
+	/// note, so this one stays here; the Budget screen shows the core's
+	/// `BudgetMonth.mixedScaleNote`.
 	public var mixedScaleNote: String? {
 		phase == .open && budgetDecimalPlaces == 0
 			? "Spending is recorded at 2 places and budgets at 0, so these numbers mix both, as in Actual."

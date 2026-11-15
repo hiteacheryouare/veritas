@@ -80,6 +80,7 @@ struct CurrencyEdgeTests {
 
 			let screen = BudgetScreenModel(workspace: workspace)
 			await screen.load()
+			#expect(screen.sheet?.mixedScaleNote != nil, "the core sends CLS-12.10's line with a 0-place month")
 			let envelope = try #require(screen.spendingEnvelopes.first)
 			screen.beginEditing(envelope.id)
 			screen.editing?.type("250000")
