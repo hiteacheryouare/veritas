@@ -1384,3 +1384,167 @@ fn balance_history_tags_and_the_exact_tag_filter_follow_the_register() {
 			.is_err()
 	);
 }
+
+#[test]
+fn cls_4_1_picks_the_right_group_around_hidden_and_income_groups() {
+	// A hidden "Savings and Debt" group is never the home, so "Debt" is
+	// created without asking and the hidden group stays as it was. A
+	// visible "Savings and Debt" group wins over a hidden "Debt" group, so
+	// nothing is unhidden. An income group named "Savings" can't hold a
+	// savings category, and saying so writes nothing.
+	use veritas_ffi::{CategoryKind, EnvelopeGroup, KindCategoryPlan};
+	let groups = |session: &Session| -> Vec<EnvelopeGroup> {
+		session
+			.budget_month(
+				Month {
+					year: 2026,
+					month: 12,
+				},
+				TODAY.to_owned(),
+			)
+			.unwrap()
+			.groups
+	};
+	let make = |session: &Session, kind, name: &str, unhide_group| {
+		session
+			.perform(Command::CreateKindCategory {
+				kind,
+				name: name.to_owned(),
+				unhide_group,
+			})
+			.map(|change| created(&change, EntityKind::Category))
+	};
+	let group = |session: &Session, name: &str, hidden: bool| {
+		let id = created(
+			&perform(
+				session,
+				Command::CreateCategoryGroup {
+					name: name.to_owned(),
+				},
+			),
+			EntityKind::CategoryGroup,
+		);
+		if hidden {
+			perform(
+				session,
+				Command::SetCategoryGroupHidden {
+					group_id: id.clone(),
+					hidden: true,
+				},
+			);
+		}
+		id
+	};
+	let home_of = |session: &Session, category: &str| -> EnvelopeGroup {
+		groups(session)
+			.into_iter()
+			.find(|g| g.envelopes.iter().any(|e| e.id == category))
+			.unwrap()
+	};
+
+	let scratch = Scratch::new("cls41-hidden-shared");
+	let session = import(&scratch, "small");
+	let shared = group(&session, "Savings and Debt", true);
+	assert_eq!(
+		session
+			.kind_category_plan(CategoryKind::DebtPrincipal)
+			.unwrap(),
+		KindCategoryPlan {
+			group_name: "Debt".to_owned(),
+			group_is_hidden: false,
+		}
+	);
+	let principal = make(
+		&session,
+		CategoryKind::DebtPrincipal,
+		"Loan principal",
+		false,
+	)
+	.unwrap();
+	let home = home_of(&session, &principal);
+	assert_eq!((home.name.as_str(), home.hidden), ("Debt", false));
+	assert_ne!(home.id, shared);
+	assert!(
+		groups(&session)
+			.iter()
+			.find(|g| g.id == shared)
+			.unwrap()
+			.hidden,
+		"the hidden shared group is left alone"
+	);
+
+	let scratch = Scratch::new("cls41-visible-shared");
+	let session = import(&scratch, "small");
+	let hidden_debt = group(&session, "debt", true);
+	let shared = group(&session, "SAVINGS and debt", false);
+	assert_eq!(
+		session
+			.kind_category_plan(CategoryKind::DebtPrincipal)
+			.unwrap()
+			.group_is_hidden,
+		false
+	);
+	let principal = make(
+		&session,
+		CategoryKind::DebtPrincipal,
+		"Loan principal",
+		false,
+	)
+	.unwrap();
+	assert_eq!(home_of(&session, &principal).id, shared);
+	assert!(
+		groups(&session)
+			.iter()
+			.find(|g| g.id == hidden_debt)
+			.unwrap()
+			.hidden
+	);
+
+	let scratch = Scratch::new("cls41-income");
+	let session = import(&scratch, "small");
+	let income = session
+		.budget_month(
+			Month {
+				year: 2026,
+				month: 12,
+			},
+			TODAY.to_owned(),
+		)
+		.unwrap()
+		.groups
+		.into_iter()
+		.find(|g| g.is_income)
+		.unwrap()
+		.id;
+	perform(
+		&session,
+		Command::RenameCategoryGroup {
+			group_id: income,
+			name: "savings".to_owned(),
+		},
+	);
+	assert!(matches!(
+		session.kind_category_plan(CategoryKind::Savings),
+		Err(FfiError::Invalid { .. })
+	));
+	let before = groups(&session);
+	for unhide in [false, true] {
+		assert!(matches!(
+			make(&session, CategoryKind::Savings, "Rainy day fund", unhide),
+			Err(FfiError::Invalid { .. })
+		));
+	}
+	assert_eq!(groups(&session), before, "refusing writes nothing");
+	let principal = make(
+		&session,
+		CategoryKind::DebtPrincipal,
+		"Loan principal",
+		false,
+	)
+	.unwrap();
+	assert_eq!(
+		home_of(&session, &principal).name,
+		"Debt",
+		"debt is unaffected"
+	);
+}
