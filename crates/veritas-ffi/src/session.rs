@@ -229,7 +229,10 @@ impl<B: Backend> Core<B> {
 
 	pub(crate) fn goals(&self, today: &str) -> Result<Vec<GoalSummary>, FfiError> {
 		self.call(|session| {
-			session.with_sheet(crate::budget::civil_date(today)?, crate::goals::summaries)
+			session.with_sheet_and_classification(
+				crate::budget::civil_date(today)?,
+				crate::goals::summaries,
+			)
 		})
 	}
 
@@ -1850,6 +1853,157 @@ pub(crate) mod tests {
 			(undone.state, undone.reached_month),
 			(crate::GoalState::Active, None)
 		);
+	}
+
+	fn bought(account: &str, category: &str, date: &str, amount: i64) -> crate::TransactionDraft {
+		let mut draft = typed(account, amount);
+		draft.date = date.to_owned();
+		draft.category_id = Some(category.to_owned());
+		draft
+	}
+
+	fn report_expense(core: &Core<veritas_store::Store>, category: &str) -> i64 {
+		let november = veritas_domain::YearMonth::new(2026, 11).unwrap();
+		core.call(|session| {
+			session.with_classification(|data, kinds| {
+				crate::reports::net_profit_report(data, kinds, november, november)
+			})
+		})
+		.unwrap()
+		.total
+		.expenses
+		.categories
+		.iter()
+		.find(|line| line.category_id.as_deref() == Some(category))
+		.map_or(0, |line| line.total)
+	}
+
+	#[test]
+	fn spending_to_date_is_the_reports_expense_total_and_a_refund_can_take_it_below_zero() {
+		// DEBT-8 Status (Fred's ruling on #64): CLS-6 `expense_total` for the
+		// goal's category, never the sheet's spent cells, and never clamped at 0
+		// (ST-1.2). Today is 2026-11-15, so a row dated later isn't to date yet.
+		let (_scratch, core) = imported("goal-refund");
+		let id = new_goal(&core, "New laptop", 150_000, Some("2027-06-30"));
+		let category = goal_of(&core, &id).category_id;
+		let checking = new_account(&core, "Goal checking", crate::NewAccountKind::Checking, 0);
+
+		add(&core, bought(&checking, &category, "2026-11-10", -40_000));
+		assert_eq!(goal_of(&core, &id).spent, 40_000);
+
+		add(&core, bought(&checking, &category, "2026-11-13", 55_000));
+		let refunded = goal_of(&core, &id);
+		assert_eq!(
+			refunded.spent, -15_000,
+			"a refund bigger than the purchase shows as a true minus"
+		);
+		assert_eq!(refunded.spent, report_expense(&core, &category));
+		assert_eq!(
+			refunded.available, 15_000,
+			"the envelope is Actual's, as before"
+		);
+
+		add(&core, bought(&checking, &category, "2026-11-20", -5_000));
+		assert_eq!(goal_of(&core, &id).spent, -15_000);
+	}
+
+	#[test]
+	fn a_zero_place_goal_keeps_spending_on_the_register_scale_and_never_reads_over() {
+		// CLS-12.14's example: a yen goal budgeted 30000 (budget scale), then a
+		// 500 yen purchase stored as -50000 (register scale). Spending to date
+		// is 50000 (shown as 500 yen), Available is the mixed -20000, and the
+		// Budget screen carries CLS-12.10's line.
+		let scratch = Scratch::new("goal-yen");
+		let format = crate::NumberFormat {
+			currency: Some("JPY".to_owned()),
+			style: crate::NumberStyle::CommaDot,
+			hide_decimals: true,
+		};
+		let core = Core::<veritas_store::Store>::create_budget(
+			"Yen",
+			&scratch.budget(),
+			&format,
+			&crate::NewBudgetOptions {
+				retirement_401k: false,
+				hsa: false,
+				accounts: Vec::new(),
+			},
+			&CancelToken::default(),
+		)
+		.unwrap();
+		let id = new_goal(&core, "Camera", 30_000, None);
+		let category = goal_of(&core, &id).category_id;
+		let checking = new_account(&core, "Goal checking", crate::NewAccountKind::Checking, 0);
+		budget(&core, NOVEMBER, &category, 30_000);
+		add(&core, bought(&checking, &category, "2026-11-12", -50_000));
+
+		let goal = goal_of(&core, &id);
+		assert_eq!(
+			(goal.target, goal.spent, goal.available),
+			(30_000, 50_000, -20_000)
+		);
+		assert_eq!(goal.spent, report_expense(&core, &category));
+		assert_eq!(goal.state, crate::GoalState::ReachedSpent);
+		assert_eq!(
+			goal.tone,
+			crate::MoneyTone::Neutral,
+			"the mixed -20000 is not an overspend: the real position is 29500 yen left"
+		);
+		let (_, today) = this_month();
+		let month = core.budget_month(NOVEMBER, &today).unwrap();
+		assert_eq!(
+			month.mixed_scale_note.as_deref(),
+			Some(
+				"Spending is recorded at 2 places and budgets at 0, so these numbers mix both, as in Actual."
+			)
+		);
+	}
+
+	#[test]
+	fn the_goal_card_reads_its_tone_and_progress_from_the_core() {
+		// design/mockups/goals.html: 75% is $1,120 of $1,500, rounded down;
+		// Reached → Spent reads 100% and its target. A 2-place budget has no
+		// mixed-scale line, and a spent goal below zero is overspent there.
+		let (_scratch, core) = imported("goal-progress");
+		let id = new_goal(&core, "New laptop", 150_000, None);
+		let category = goal_of(&core, &id).category_id;
+		budget(&core, NOVEMBER, &category, 112_000);
+		let saving = goal_of(&core, &id);
+		assert_eq!(
+			(saving.progress_percent, saving.progress_amount, saving.tone),
+			(74, 112_000, crate::MoneyTone::Available)
+		);
+
+		budget(&core, NOVEMBER, &category, 150_000);
+		let reached = goal_of(&core, &id);
+		assert_eq!(
+			(
+				reached.state,
+				reached.progress_percent,
+				reached.progress_amount
+			),
+			(crate::GoalState::Reached, 100, 150_000)
+		);
+
+		let checking = new_account(&core, "Goal checking", crate::NewAccountKind::Checking, 0);
+		add(&core, bought(&checking, &category, "2026-11-14", -152_000));
+		let spent = goal_of(&core, &id);
+		assert_eq!(
+			(spent.state, spent.progress_percent, spent.progress_amount),
+			(crate::GoalState::ReachedSpent, 100, 150_000)
+		);
+		assert_eq!(spent.available, -2_000);
+		assert_eq!(spent.tone, crate::MoneyTone::Overspent);
+
+		let (_, today) = this_month();
+		let month = core.budget_month(NOVEMBER, &today).unwrap();
+		assert_eq!(month.mixed_scale_note, None);
+		let expected = match month.to_budget {
+			..0 => crate::MoneyTone::Overspent,
+			0 => crate::MoneyTone::Neutral,
+			_ => crate::MoneyTone::Income,
+		};
+		assert_eq!(month.to_budget_tone, expected);
 	}
 
 	pub(crate) struct Rows(pub(crate) Vec<veritas_domain::Row>);

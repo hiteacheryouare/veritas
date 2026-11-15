@@ -493,6 +493,22 @@ impl<B: Backend> Session<B> {
 		read(bus.data(), self.classification.get(bus.data()))
 	}
 
+	/// `with_sheet` and `with_classification` together, for a screen that
+	/// shows envelope figures beside report figures (the Goals screen).
+	pub fn with_sheet_and_classification<T>(
+		&mut self,
+		today: CivilDate,
+		read: impl FnOnce(&BudgetData, &EnvelopeSheet, &Classification) -> Result<T, CoreError>,
+	) -> Result<T, CoreError> {
+		self.today = today;
+		let State::Open(bus) = &self.state else {
+			return Err(closed());
+		};
+		let data = bus.data();
+		let sheet = self.sheet.get(data, today)?;
+		read(data, sheet, self.classification.get(data))
+	}
+
 	/// `with_classification` plus the envelope sheet as of `today`, built
 	/// only when `sheet` asks for it.
 	pub fn with_reports<T>(
