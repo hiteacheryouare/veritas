@@ -54,11 +54,14 @@ pub use widget_meta::{
 	set_widget_settings, write_settings,
 };
 pub use widgets::{
-	AgeOfMoney, AgePoint, BudgetAnalysis, BudgetAnalysisMonth, CalendarDay, CalendarMonth,
-	CashFlowCard, Crossover, CrossoverPoint, DefaultFrame, Granularity, NetWorthCard,
+	AgeOfMoney, AgePoint, BalanceForecastCard, BudgetAnalysis, BudgetAnalysisMonth, CalendarDay,
+	CalendarMonth, CashFlowCard, Crossover, CrossoverPoint, DefaultFrame,
+	FORECAST_UNASSIGNED_ACCOUNT, Forecast, ForecastBill, ForecastChartPoint, ForecastGranularity,
+	ForecastLowest, ForecastPoint, ForecastRequest, ForecastSource, Granularity, NetWorthCard,
 	NetWorthInterval, NetWorthPeriod, SankeyCard, SankeyColor, SankeyLabel, SankeyLayer,
 	SankeyLink, SankeyMode, SankeyNode, SankeySort, Spending, SpendingDay, SpendingMode,
-	SummaryContent, SummaryData, TimeRange, Trend, age_of_money, budget_analysis,
-	calculate_time_range, calendar, cash_flow_card, crossover, net_worth_card, sankey_card,
-	sankey_height_limit, spending, spending_months, summary, widget_months,
+	SummaryContent, SummaryData, TimeRange, Trend, age_of_money, balance_forecast_card,
+	budget_analysis, calculate_time_range, calendar, card_forecast, cash_flow_card, crossover,
+	generate_forecast, net_worth_card, sankey_card, sankey_height_limit, spending, spending_months,
+	summary, widget_months,
 };

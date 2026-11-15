@@ -567,7 +567,7 @@ fn without_type(condition: &Value) -> Value {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct Slots {
+pub struct ScheduleSlots {
 	pub payee: Option<usize>,
 	pub account: Option<usize>,
 	pub amount: Option<usize>,
@@ -575,14 +575,14 @@ pub(crate) struct Slots {
 }
 
 /// `extractScheduleConds` (`lc/shared/schedules.ts:255-281`) as indexes.
-pub(crate) fn schedule_slots(conditions: &[Value]) -> Slots {
+pub fn schedule_slots(conditions: &[Value]) -> ScheduleSlots {
 	let find = |field: Field, ops: &[&str]| {
 		conditions.iter().position(|condition| {
 			field_of(condition) == Some(field)
 				&& condition["op"].as_str().is_some_and(|op| ops.contains(&op))
 		})
 	};
-	Slots {
+	ScheduleSlots {
 		payee: find(Field::Payee, &["is"]),
 		account: find(Field::Account, &["is"]),
 		amount: find(Field::Amount, &["is", "isapprox", "isbetween"]),

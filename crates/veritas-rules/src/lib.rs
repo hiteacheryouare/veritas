@@ -16,12 +16,14 @@ mod trigger;
 pub use action::{Action, RuleTransaction, SetField, SplitLine, SplitMethod};
 pub use bill::{
 	Bill, BillAmount, BillDate, BillView, EditedRule, JsonPaths, Repeat, RepeatEnd, RepeatPattern,
-	ScheduleRule, WeekendMove, bill_from_schedule, json_paths, schedule_name, scheduled_amount,
+	ScheduleRule, ScheduleSlots, WeekendMove, bill_from_schedule, json_paths, schedule_name,
+	schedule_slots, scheduled_amount,
 };
 pub use condition::{
 	AmountSign, Condition, ConditionValue, DateValue, EvalError, Field, FieldKind, FieldValue, Gap,
 	Op, parse_date_value,
 };
+pub use jsregex::{JsPattern, Unreadable};
 pub use posting::{
 	LeftBill, LeftBy, NextDateWrite, Posting, SchedulePlan, ScheduleWrite, advance_schedules,
 	complete, counts_as_paid, pay, post_now, restart, skip,

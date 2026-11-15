@@ -252,6 +252,50 @@ export const widgetData = async ({ internal }: ActualSession, requests: WidgetRe
 			});
 			return { start: startDate, end: endDate, data: await run(spreadsheet) };
 		},
+		// BalanceForecastCard.tsx's source, range and request, the server's
+		// forecast/generate, and the card's chart data. A request's budgetType
+		// stands in for the synced pref the card reads.
+		'forecast-card': async ({ meta, budgetType }) => {
+			const chart = await loadSource(`${REPORTS}/reports/balanceForecastChartData.ts`);
+			const stored = await internal.db.first("SELECT value FROM preferences WHERE id = 'budgetType'");
+			const type = (budgetType ?? stored?.value) === 'tracking' ? 'tracking' : 'envelope';
+			const source = meta?.source === 'tracking-budget' && type === 'tracking' ? 'tracking-budget' : 'schedules';
+			const tracking = source === 'tracking-budget';
+			const granularity = meta?.granularity || 'Monthly';
+			const defaultTimeFrame = {
+				start: months.currentMonth(),
+				end: months.addMonths(months.currentMonth(), 11),
+				mode: 'static'
+			};
+			const [start, end] = ranges.calculateTimeRange(meta?.timeFrame, defaultTimeFrame);
+			const accounts = await internal.send('accounts-get');
+			const request = Object.fromEntries(
+				Object.entries({
+					accountIds: tracking ? undefined : (meta?.accounts ?? accounts.map((a: any) => a.id)),
+					conditions: tracking ? undefined : meta?.conditions,
+					conditionsOp: tracking ? undefined : meta?.conditionsOp,
+					startDate: months.firstDayOfMonth(start),
+					endDate: months.lastDayOfMonth(end),
+					includeAccountlessSchedules: tracking ? undefined : meta?.accounts === undefined,
+					source
+				}).filter(([, value]) => value !== undefined)
+			);
+			const forecast = await internal.send('forecast/generate', request);
+			if (forecast?.error) {
+				throw new Error(forecast.error.message ?? String(forecast.error));
+			}
+			const args = { forecastData: forecast, start, end, granularity };
+			const points = chart.buildBalanceForecastChartData(args);
+			return {
+				start,
+				end,
+				source,
+				forecast,
+				points,
+				scheduled: chart.countForecastScheduledOccurrences(args),
+				lowest: chart.getLowestChartDataPoint(points) ?? null
+			};
+		},
 		// CrossoverCard.tsx's range effect and props; defaultTimeFrame is
 		// Crossover.tsx's, which Node can't load as TSX.
 		'crossover-card': async ({ meta }) => {
@@ -311,6 +355,11 @@ export const widgetData = async ({ internal }: ActualSession, requests: WidgetRe
 		if (request.type === 'budget-amount') {
 			await internal.send('budget/budget-amount', request.meta);
 			await new Promise(resolve => setTimeout(resolve, 0));
+			continue;
+		}
+		// A bill made the way the schedule editor saves one.
+		if (request.type === 'schedule-create') {
+			await internal.send('schedule/create', request.meta);
 			continue;
 		}
 		// Switches the budget type the way a synced preference change does. Sync

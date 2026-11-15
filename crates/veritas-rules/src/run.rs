@@ -215,16 +215,29 @@ impl RuleBook {
 		budget: &BudgetData,
 		payees: &mut dyn PayeeDirectory,
 	) -> RunOutcome {
+		let account_off_budget = budget
+			.accounts
+			.get(&transaction.account)
+			.map(|account| account.off_budget);
+		self.run_on_account(transaction, budget, payees, account_off_budget)
+	}
+
+	/// `run` for a transaction whose account isn't in the budget, such as
+	/// the stand-in account the balance forecast gives accountless bills.
+	/// `account_off_budget` is what `onBudget` and `offBudget` read.
+	pub fn run_on_account(
+		&self,
+		transaction: &RuleTransaction,
+		budget: &BudgetData,
+		payees: &mut dyn PayeeDirectory,
+		account_off_budget: Option<bool>,
+	) -> RunOutcome {
 		let made_before = payees.made();
 		let mut payee_name = transaction
 			.payee
 			.as_ref()
 			.and_then(|payee| budget.payees.get(payee))
 			.map(|payee| payee.name.clone());
-		let account_off_budget = budget
-			.accounts
-			.get(&transaction.account)
-			.map(|account| account.off_budget);
 		let schedule_rule = transaction
 			.schedule
 			.as_ref()

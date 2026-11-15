@@ -10,9 +10,9 @@ use std::path::Path;
 use criterion::{Criterion, criterion_group, criterion_main};
 use veritas_domain::{BudgetData, CivilDate, YearMonth};
 use veritas_reports::{
-	Json, Period, age_of_money, balance_sheet, budget_analysis, calendar, cash_flow, classify,
-	crossover, net_profit, net_worth_by_month, owners_equity, sankey, sankey_card, summary,
-	tax_summary,
+	Json, Period, age_of_money, balance_forecast_card, balance_sheet, budget_analysis, calendar,
+	cash_flow, classify, crossover, net_profit, net_worth_by_month, owners_equity, sankey,
+	sankey_card, summary, tax_summary,
 };
 
 fn load_perf_100k() -> BudgetData {
@@ -136,6 +136,10 @@ fn widgets(c: &mut Criterion) {
 	let crossover_meta = Json::parse(&format!(r#"{{"timeFrame":{year}}}"#)).unwrap();
 	let sankey_spent = filtered(r#","showTransfers":true,"categorySort":"global""#);
 	let sankey_budgeted = filtered(r#","mode":"budgeted""#);
+	let forecast_daily = Json::parse(&format!(
+		r#"{{"granularity":"Daily","conditions":[{{"field":"category","op":"isNot","value":"{category}","type":"id"}},{{"field":"notes","op":"doesNotContain","value":"zzz","type":"string"}}]}}"#
+	))
+	.unwrap();
 
 	let mut group = c.benchmark_group("perf-100k widgets");
 	group.sample_size(20);
@@ -159,6 +163,12 @@ fn widgets(c: &mut Criterion) {
 	});
 	group.bench_function("sankey card, budgeted, one year", |b| {
 		b.iter(|| sankey_card(&budget, &sheet, Some(&sankey_budgeted), today, None).unwrap())
+	});
+	group.bench_function("balance forecast, next twelve months", |b| {
+		b.iter(|| balance_forecast_card(&budget, &sheet, None, today).unwrap())
+	});
+	group.bench_function("balance forecast, daily, filtered", |b| {
+		b.iter(|| balance_forecast_card(&budget, &sheet, Some(&forecast_daily), today).unwrap())
 	});
 	group.finish();
 }

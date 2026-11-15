@@ -3,10 +3,12 @@
 //! Every function reads the widget's `meta` as Actual stores it.
 
 mod age_of_money;
+mod balance_forecast;
 mod budget_analysis;
 mod calendar;
 mod cash_flow;
 mod crossover;
+mod forecast;
 mod net_worth;
 mod sankey;
 mod spending;
@@ -14,10 +16,18 @@ mod summary;
 mod time_frame;
 
 pub use age_of_money::{AgeOfMoney, AgePoint, Granularity, Trend, age_of_money};
+pub use balance_forecast::{
+	BalanceForecastCard, ForecastChartPoint, ForecastGranularity, balance_forecast_card,
+	card_forecast,
+};
 pub use budget_analysis::{BudgetAnalysis, BudgetAnalysisMonth, budget_analysis};
 pub use calendar::{CalendarDay, CalendarMonth, calendar};
 pub use cash_flow::{CashFlowCard, cash_flow_card};
 pub use crossover::{Crossover, CrossoverPoint, crossover};
+pub use forecast::{
+	FORECAST_UNASSIGNED_ACCOUNT, Forecast, ForecastBill, ForecastLowest, ForecastPoint,
+	ForecastRequest, ForecastSource, generate_forecast,
+};
 pub use net_worth::{NetWorthCard, NetWorthInterval, NetWorthPeriod, net_worth_card};
 pub use sankey::{
 	SankeyCard, SankeyColor, SankeyLabel, SankeyLayer, SankeyLink, SankeyMode, SankeyNode,
