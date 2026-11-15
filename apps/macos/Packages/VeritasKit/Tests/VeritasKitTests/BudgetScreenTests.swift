@@ -250,10 +250,16 @@ struct BudgetScreenTests {
 		#expect(await field.commit() == 5_000)
 	}
 
+	/// The tone and progress are what the core answers for a goal with no pace
+	/// and a balance that isn't below zero.
 	static func goal(_ id: String, state: GoalState, available: Int64, target: Int64) -> GoalSummary {
-		GoalSummary(
+		let reached = state == .reached || state == .reachedSpent
+		return GoalSummary(
 			id: id, categoryId: id, name: id.capitalized, target: target, targetDate: "2027-03-01", icon: nil, color: nil,
-			state: state, available: available, spent: 0, suggestedMonthly: state == .active ? 7_600 : nil, monthsLeft: 5,
+			state: state, available: available, spent: 0, tone: state == .closed ? .neutral : .available,
+			progressPercent: reached ? 100 : UInt8(min(available * 100 / target, 99)),
+			progressAmount: state == .reachedSpent ? target : available,
+			suggestedMonthly: state == .active ? 7_600 : nil, monthsLeft: 5,
 			pace: nil, reachedMonth: nil, closedMonth: state == .closed ? Month(year: 2026, month: 8) : nil, laterBudget: [], newActivity: false
 		)
 	}
@@ -317,7 +323,7 @@ final class BudgetFakeSession: BudgetSession, @unchecked Sendable {
 		}
 		return BudgetMonth(
 			month: echoesMonth ? month : Self.month, firstMonth: Month(year: 2026, month: 1), lastMonth: Self.month,
-			toBudget: 31_240, income: 400_000, fromLastMonth: 0, overspentLastMonth: 0, budgeted: 0, forNextMonth: 0, spent: 0, available: 0,
+			toBudget: 31_240, toBudgetTone: .income, income: 400_000, fromLastMonth: 0, overspentLastMonth: 0, budgeted: 0, forNextMonth: 0, spent: 0, available: 0,
 			groups: [
 				EnvelopeGroup(id: "everyday", name: "Everyday", isIncome: false, hidden: false, budgeted: 0, spent: 0, available: 0, envelopes: [
 					row("groceries", 41_200, -31_862, 9_338, .available),
@@ -329,7 +335,8 @@ final class BudgetFakeSession: BudgetSession, @unchecked Sendable {
 				EnvelopeGroup(id: "income", name: "Income", isIncome: true, hidden: false, budgeted: 0, spent: 0, available: 0, envelopes: [
 					row("salary", 0, 400_000, 0, .income)
 				])
-			]
+			],
+			mixedScaleNote: nil
 		)
 	}
 }
