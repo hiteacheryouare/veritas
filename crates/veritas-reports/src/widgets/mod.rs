@@ -9,6 +9,7 @@ mod calendar;
 mod cash_flow;
 mod crossover;
 mod forecast;
+pub mod monte_carlo;
 mod net_worth;
 mod sankey;
 mod spending;
@@ -28,6 +29,7 @@ pub use forecast::{
 	FORECAST_UNASSIGNED_ACCOUNT, Forecast, ForecastBill, ForecastLowest, ForecastPoint,
 	ForecastRequest, ForecastSource, generate_forecast,
 };
+pub use monte_carlo::{MonteCarloCard, MonteCarloChartPoint, monte_carlo_card};
 pub use net_worth::{NetWorthCard, NetWorthInterval, NetWorthPeriod, net_worth_card};
 pub use sankey::{
 	SankeyCard, SankeyColor, SankeyLabel, SankeyLayer, SankeyLink, SankeyMode, SankeyNode,
