@@ -117,13 +117,13 @@ struct NewGoalSheet: View {
 struct CloseGoalSheet: View {
 	let goals: GoalsScreenModel
 	let goal: GoalSummary
-	@State private var destinations: [EnvelopeRow]
+	@State private var destinations: GoalsScreenModel.CloseDestinations?
 	@State private var destination: String?
 	@State private var preview: GoalClosePreview?
 	@State private var alsoMoveLater = false
 	@Environment(\.dismiss) private var dismiss
 
-	init(goals: GoalsScreenModel, goal: GoalSummary, destinations: [EnvelopeRow] = [], preview: GoalClosePreview? = nil) {
+	init(goals: GoalsScreenModel, goal: GoalSummary, destinations: GoalsScreenModel.CloseDestinations? = nil, preview: GoalClosePreview? = nil) {
 		self.goals = goals
 		self.goal = goal
 		_destinations = State(initialValue: destinations)
@@ -131,7 +131,7 @@ struct CloseGoalSheet: View {
 	}
 
 	private var destinationName: String {
-		destinations.first { $0.id == destination }?.name ?? "To Budget"
+		destinations?.envelopes.first { $0.id == destination }?.name ?? "To Budget"
 	}
 
 	var body: some View {
@@ -153,9 +153,9 @@ struct CloseGoalSheet: View {
 				HStack {
 					Text(preview.map { $0.leftover >= 0 ? "Move it to" : "Cover it from" } ?? "Move it to")
 						.foregroundStyle(.textSecondary)
-					EnvelopePicker(title: "Destination", selection: $destination, envelopes: destinations, format: goals.format)
+					EnvelopePicker(title: "Destination", selection: $destination, envelopes: destinations?.envelopes ?? [], format: goals.format)
 				}
-				if let preview, let before = beforeAvailable {
+				if let preview, let before = destinations?.available(destination) {
 					HStack(spacing: Spacing.s2) {
 						Text("\(destinationName) available")
 						Spacer()
@@ -209,11 +209,6 @@ struct CloseGoalSheet: View {
 			Task { preview = await goals.preview(close: goal, releaseTo: destination) }
 		}
 		.containerIdentifier("sheet.closeGoal")
-	}
-
-	private var beforeAvailable: Int64? {
-		guard let preview else { return nil }
-		return preview.destinationAvailableAfter - preview.leftover
 	}
 }
 

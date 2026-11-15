@@ -121,7 +121,7 @@ private struct LargeGoalCard: View {
 		.background(.surfaceGrouped, in: .rect(cornerRadius: Radius.section))
 		.overlay(RoundedRectangle(cornerRadius: Radius.section).strokeBorder(Color.edgeGrouped))
 		.accessibilityElement(children: .contain)
-		.accessibilityLabel("\(goal.name), \(format.wholeCurrency(goal.shownProgress, on: .budget)) of \(format.wholeCurrency(goal.target, on: .budget)), \(words.note)")
+		.accessibilityLabel("\(goal.name), \(format.wholeCurrency(goal.progressAmount, on: .budget)) of \(format.wholeCurrency(goal.target, on: .budget)), \(words.note)")
 		.accessibilityIdentifier("goal.\(goal.id)")
 	}
 }

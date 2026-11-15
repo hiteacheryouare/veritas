@@ -122,7 +122,7 @@ struct BudgetScreenTests {
 		]
 		let screen = await openScreen()
 		#expect(screen.goals.map(\.id) == ["laptop"], "closed goals stay off the overview")
-		#expect(abs(screen.goals[0].progress - 0.7467) < 0.001)
+		#expect(screen.goals[0].progressPercent == 74)
 		#expect(screen.goals[0].targetMonth == Month(year: 2027, month: 3))
 	}
 

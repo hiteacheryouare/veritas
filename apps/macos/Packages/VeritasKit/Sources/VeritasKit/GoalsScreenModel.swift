@@ -57,14 +57,32 @@ public final class GoalsScreenModel {
 		return done
 	}
 
+	/// Where a goal's leftover can go this month, with what each holds now.
+	public struct CloseDestinations: Sendable {
+		public var envelopes: [EnvelopeRow]
+		public var toBudget: Int64
+
+		public init(envelopes: [EnvelopeRow], toBudget: Int64) {
+			self.envelopes = envelopes
+			self.toBudget = toBudget
+		}
+
+		/// The destination's available this month, as the core reports it. `nil` is To Budget.
+		public func available(_ id: String?) -> Int64? {
+			guard let id else { return toBudget }
+			return envelopes.first { $0.id == id }?.available
+		}
+	}
+
 	/// Envelopes a goal's leftover can go to, from this month's budget.
-	public func destinations() async -> [EnvelopeRow] {
-		let month = BudgetScreenModel.currentMonth()
+	public func destinations() async -> CloseDestinations? {
 		let goalCategories = Set(goals.map(\.categoryId))
-		return await workspace.budgetMonth(month)?.groups
+		guard let sheet = await workspace.budgetMonth(BudgetScreenModel.currentMonth()) else { return nil }
+		let envelopes = sheet.groups
 			.filter { !$0.isIncome }
 			.flatMap(\.envelopes)
-			.filter { !$0.hidden && !goalCategories.contains($0.id) } ?? []
+			.filter { !$0.hidden && !goalCategories.contains($0.id) }
+		return CloseDestinations(envelopes: envelopes, toBudget: sheet.toBudget)
 	}
 
 	static func civilDate(_ date: Date) -> String {

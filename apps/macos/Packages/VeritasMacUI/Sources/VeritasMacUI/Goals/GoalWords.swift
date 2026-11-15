@@ -10,25 +10,22 @@ struct GoalWords {
 	let detail: String?
 
 	init(_ goal: GoalSummary, format: MoneyFormat, thisMonth: Month = GoalWords.currentMonth()) {
+		tone = goal.tone.design
 		switch goal.state {
 		case .active:
 			let suggestion = goal.suggestedMonthly.map { "Budget \(format.wholeCurrency($0, on: .budget)) a month" }
 			switch goal.pace {
 			case .onTrack(let eta):
 				note = "On track for \(GoalWords.etaName(eta, from: thisMonth))"
-				tone = .available
 				detail = suggestion
 			case .behind(let needed):
 				note = "Behind, needs \(format.wholeCurrency(needed, on: .budget)) a month"
-				tone = .low
 				detail = nil
 			case .noHistory(let needed):
 				note = "Budget \(format.wholeCurrency(needed, on: .budget)) a month"
-				tone = .neutral
 				detail = "No ETA yet"
 			case .notAdding(let needed):
 				note = "Nothing is being added"
-				tone = .low
 				detail = "Budget \(format.wholeCurrency(needed, on: .budget)) a month"
 			case nil:
 				if let suggestion, let month = goal.targetMonth {
@@ -38,21 +35,17 @@ struct GoalWords {
 					note = "No target date"
 					detail = nil
 				}
-				tone = .available
 			}
 		case .reached:
 			note = "Reached"
-			tone = .available
 			detail = nil
 		case .reachedSpent:
-			let over = goal.available < 0
+			let over = goal.tone == .overspent
 			note = over ? "Reached → Spent, overspent" : "Reached → Spent"
-			tone = over ? .overspent : .available
 			let left = over ? "\(format.currency(goal.available, on: .budget)) over" : "\(format.currency(goal.available, on: .budget)) left"
 			detail = "\(format.currency(goal.spent, on: .register)) spent, \(left)"
 		case .closed:
 			note = goal.closedMonth.map { "Closed \(GoalWords.monthYear($0))" } ?? "Closed"
-			tone = .neutral
 			detail = "\(format.amount(goal.spent, on: .register)) spent"
 		}
 	}

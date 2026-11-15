@@ -43,7 +43,7 @@ struct RealCoreGoalJourneyTests {
 			#expect(laptop.color == "#34c759")
 			#expect(laptop.monthsLeft == 6)
 			#expect(laptop.suggestedMonthly == 25_000)
-			#expect(laptop.progress == 0)
+			#expect(laptop.progressPercent == 0)
 
 			let screen = await budget.screen(current)
 			#expect(screen.group(of: laptop.categoryId)?.name == "Goals", "a goal is an envelope in the Goals group")
@@ -56,7 +56,7 @@ struct RealCoreGoalJourneyTests {
 			laptop = try #require(goals.goals.first { $0.id == laptop.id })
 			#expect(laptop.state == .reached)
 			#expect(laptop.reachedMonth == current)
-			#expect(laptop.ringProgress == 1)
+			#expect(laptop.progressPercent == 100)
 			#expect(laptop.suggestedMonthly == nil, "a reached goal gets no suggestion")
 
 			#expect(await budget.workspace.perform(purchase(148_000, in: laptop.categoryId, payee: "Apple Store")))
@@ -65,7 +65,7 @@ struct RealCoreGoalJourneyTests {
 			#expect(laptop.state == .reachedSpent)
 			#expect(laptop.available == 2_000)
 			#expect(laptop.spent == 148_000)
-			#expect(laptop.wasReached && laptop.ringProgress == 1 && laptop.shownProgress == 150_000)
+			#expect(laptop.progressPercent == 100 && laptop.progressAmount == 150_000)
 			#expect(!laptop.canRetarget, "a spent goal is closed or reopened, not re-targeted")
 
 			#expect(await goals.create(name: "Bigger laptop", target: 1, date: nil, icon: nil, color: nil))

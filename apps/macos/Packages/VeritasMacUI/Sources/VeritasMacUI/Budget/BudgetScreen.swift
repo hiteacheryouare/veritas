@@ -217,7 +217,7 @@ private struct ToBudgetHeader: View {
 	}
 
 	private var tone: VeritasDesign.MoneyTone {
-		sheet.toBudget < 0 ? .overspent : sheet.toBudget == 0 ? .neutral : .income
+		sheet.toBudgetTone.design
 	}
 }
 
