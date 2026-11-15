@@ -94,7 +94,7 @@ struct BudgetFieldOnRealBudgetTests {
 		await workspace.importActualZip(fixture)
 		do {
 			try #require(workspace.phase == .open)
-			let screen = BudgetScreenModel(workspace: workspace, reader: CoreAmountReader(budgetDecimalPlaces: workspace.budgetDecimalPlaces), month: Self.october)
+			let screen = BudgetScreenModel(workspace: workspace, month: Self.october)
 			await screen.load()
 			try await body(screen, workspace)
 		} catch {

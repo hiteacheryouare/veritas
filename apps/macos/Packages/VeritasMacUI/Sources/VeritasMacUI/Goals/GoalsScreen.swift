@@ -13,10 +13,7 @@ struct GoalsScreen: View {
 
 	init(workspace: WorkspaceModel, goals: GoalsScreenModel? = nil) {
 		self.workspace = workspace
-		_goals = State(initialValue: goals ?? GoalsScreenModel(
-			workspace: workspace,
-			reader: CoreAmountReader(budgetDecimalPlaces: workspace.budgetDecimalPlaces)
-		))
+		_goals = State(initialValue: goals ?? GoalsScreenModel(workspace: workspace))
 	}
 
 	var body: some View {
@@ -41,6 +38,9 @@ struct GoalsScreen: View {
 							}
 						}
 					}
+				}
+				if let note = workspace.mixedScaleNote {
+					MixedScaleNote(text: note)
 				}
 			}
 			.padding(Spacing.s5)
@@ -121,7 +121,7 @@ private struct LargeGoalCard: View {
 		.background(.surfaceGrouped, in: .rect(cornerRadius: Radius.section))
 		.overlay(RoundedRectangle(cornerRadius: Radius.section).strokeBorder(Color.edgeGrouped))
 		.accessibilityElement(children: .contain)
-		.accessibilityLabel("\(goal.name), \(format.wholeCurrency(goal.shownProgress)) of \(format.wholeCurrency(goal.target)), \(words.note)")
+		.accessibilityLabel("\(goal.name), \(format.wholeCurrency(goal.shownProgress, on: .budget)) of \(format.wholeCurrency(goal.target, on: .budget)), \(words.note)")
 		.accessibilityIdentifier("goal.\(goal.id)")
 	}
 }

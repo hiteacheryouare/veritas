@@ -46,17 +46,14 @@ final class RealBudget {
 	}
 
 	func screen(_ month: Month) async -> BudgetScreenModel {
-		let screen = BudgetScreenModel(
-			workspace: workspace,
-			reader: CoreAmountReader(budgetDecimalPlaces: workspace.budgetDecimalPlaces),
-			month: month
+		let screen = BudgetScreenModel(workspace: workspace, month: month
 		)
 		await screen.load()
 		return screen
 	}
 
 	func goalsScreen() async -> GoalsScreenModel {
-		let goals = GoalsScreenModel(workspace: workspace, reader: CoreAmountReader(budgetDecimalPlaces: workspace.budgetDecimalPlaces))
+		let goals = GoalsScreenModel(workspace: workspace)
 		await goals.load()
 		return goals
 	}

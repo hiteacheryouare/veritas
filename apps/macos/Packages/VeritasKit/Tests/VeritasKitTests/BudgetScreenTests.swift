@@ -128,9 +128,9 @@ struct BudgetScreenTests {
 
 	@Test func goalCardsRoundToWholeUnits() {
 		let format = MoneyFormat()
-		#expect(format.wholeCurrency(112_000) == "$1,120")
-		#expect(format.wholeCurrency(41_050) == "$411")
-		#expect(format.wholeCurrency(-41_049) == "\u{2212}$410")
+		#expect(format.wholeCurrency(112_000, on: .budget) == "$1,120")
+		#expect(format.wholeCurrency(41_050, on: .budget) == "$411")
+		#expect(format.wholeCurrency(-41_049, on: .budget) == "\u{2212}$410")
 	}
 
 	@Test func deletingAnEnvelopeWithHistoryArchivesItInstead() async {
@@ -195,7 +195,7 @@ struct BudgetScreenTests {
 		]
 		let workspace = WorkspaceModel(library: BudgetFakeLibrary(session: session), format: MoneyFormat())
 		await workspace.reopen(directory: URL(filePath: "/tmp/budget"))
-		let goals = GoalsScreenModel(workspace: workspace, reader: CoreAmountReader(budgetDecimalPlaces: 2))
+		let goals = GoalsScreenModel(workspace: workspace)
 		await goals.load()
 		#expect(goals.open.map(\.id) == ["laptop", "tires"])
 		#expect(goals.archive.map(\.id) == ["vet"])
@@ -230,7 +230,7 @@ struct BudgetScreenTests {
 	private func openScreen() async -> BudgetScreenModel {
 		let workspace = WorkspaceModel(library: BudgetFakeLibrary(session: session), format: MoneyFormat())
 		await workspace.reopen(directory: URL(filePath: "/tmp/budget"))
-		let screen = BudgetScreenModel(workspace: workspace, reader: CoreAmountReader(), month: BudgetFakeSession.month)
+		let screen = BudgetScreenModel(workspace: workspace, month: BudgetFakeSession.month)
 		await screen.load()
 		return screen
 	}

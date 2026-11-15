@@ -142,8 +142,8 @@ struct CloseGoalSheet: View {
 				if let preview {
 					Label {
 						Text(preview.leftover >= 0
-							? "\(goals.format.currency(preview.leftover)) is left in this goal."
-							: "This goal is \(goals.format.currency(-preview.leftover)) over.")
+							? "\(goals.format.currency(preview.leftover, on: .budget)) is left in this goal."
+							: "This goal is \(goals.format.currency(-preview.leftover, on: .budget)) over.")
 					} icon: {
 						Image(systemName: preview.leftover >= 0 ? "checkmark.circle" : "exclamationmark.triangle")
 					}
@@ -159,14 +159,14 @@ struct CloseGoalSheet: View {
 					HStack(spacing: Spacing.s2) {
 						Text("\(destinationName) available")
 						Spacer()
-						Text(goals.format.amount(before)).font(.figures(.body, weight: .semibold))
+						Text(goals.format.amount(before, on: .budget)).font(.figures(.body, weight: .semibold))
 						Image(systemName: "arrow.right").imageScale(.small)
-						Text(goals.format.amount(preview.destinationAvailableAfter)).font(.figures(.body, weight: .semibold))
+						Text(goals.format.amount(preview.destinationAvailableAfter, on: .budget)).font(.figures(.body, weight: .semibold))
 					}
 					.foregroundStyle(.textSecondary)
 				}
 				if let preview, preview.destinationAvailableAfter < 0 {
-					ProblemNote(text: "\(destinationName) will be \(goals.format.currency(-preview.destinationAvailableAfter)) over.")
+					ProblemNote(text: "\(destinationName) will be \(goals.format.currency(-preview.destinationAvailableAfter, on: .budget)) over.")
 						.accessibilityIdentifier("closeGoal.warning")
 				}
 			}
@@ -177,7 +177,7 @@ struct CloseGoalSheet: View {
 				Toggle(isOn: $alsoMoveLater) {
 					VStack(alignment: .leading, spacing: 2) {
 						Text("Also move those to \(destinationName)")
-						Text(later.map { "\(GoalWords.monthYear($0.month)) \(goals.format.amount($0.amount))" }.joined(separator: ", "))
+						Text(later.map { "\(GoalWords.monthYear($0.month)) \(goals.format.amount($0.amount, on: .budget))" }.joined(separator: ", "))
 							.font(.text(.caption))
 							.foregroundStyle(.textSecondary)
 					}

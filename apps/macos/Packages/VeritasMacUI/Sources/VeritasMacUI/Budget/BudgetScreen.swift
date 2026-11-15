@@ -14,10 +14,7 @@ struct BudgetScreen: View {
 
 	init(workspace: WorkspaceModel, screen: BudgetScreenModel? = nil) {
 		self.workspace = workspace
-		_screen = State(initialValue: screen ?? BudgetScreenModel(
-			workspace: workspace,
-			reader: CoreAmountReader(budgetDecimalPlaces: workspace.budgetDecimalPlaces)
-		))
+		_screen = State(initialValue: screen ?? BudgetScreenModel(workspace: workspace))
 	}
 
 	var body: some View {
@@ -61,6 +58,10 @@ struct BudgetScreen: View {
 						}
 					}
 					.accessibilityIdentifier("budget.newGroup")
+					if let note = workspace.mixedScaleNote {
+						MixedScaleNote(text: note)
+							.padding(.top, Spacing.s4)
+					}
 				}
 			}
 			.padding(.top, Spacing.s2)
@@ -186,7 +187,7 @@ private struct ToBudgetHeader: View {
 			HStack(spacing: Spacing.s2) {
 				Image(systemName: tone.symbol ?? "tray.and.arrow.down")
 					.font(.system(size: dense ? 15 : 26, weight: .semibold))
-				Text(screen.format.currency(sheet.toBudget))
+				Text(screen.format.currency(sheet.toBudget, on: .budget))
 					.font(.figures(dense ? .title : .display, weight: .bold))
 					.lineLimit(1)
 					.fixedSize()
@@ -196,7 +197,7 @@ private struct ToBudgetHeader: View {
 				.font(.text(dense ? .body : .heading, weight: .semibold))
 				.fixedSize()
 			if sheet.forNextMonth > 0 {
-				Text("\(screen.format.amount(sheet.forNextMonth)) held for next month")
+				Text("\(screen.format.amount(sheet.forNextMonth, on: .budget)) held for next month")
 					.font(.text(.body))
 					.foregroundStyle(.textSecondary)
 			}
@@ -261,5 +262,18 @@ struct EnvelopeGrid<Name: View, Bar: View, Budgeted: View, Spent: View, Availabl
 			available.frame(width: 150, alignment: .trailing)
 		}
 		.padding(.horizontal, Spacing.s4)
+	}
+}
+
+/// CLS-12.10's fixed line under a 0-place budget's envelope numbers.
+struct MixedScaleNote: View {
+	let text: String
+
+	var body: some View {
+		Text(text)
+			.font(.text(.caption))
+			.foregroundStyle(.textSecondary)
+			.fixedSize(horizontal: false, vertical: true)
+			.accessibilityIdentifier("mixedScaleNote")
 	}
 }

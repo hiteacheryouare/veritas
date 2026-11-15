@@ -15,11 +15,9 @@ public final class BudgetScreenModel {
 	public private(set) var editingID: String?
 
 	@ObservationIgnored let workspace: WorkspaceModel
-	@ObservationIgnored private let amountReader: any AmountReader
 
-	public init(workspace: WorkspaceModel, reader: any AmountReader, month: Month = BudgetScreenModel.currentMonth()) {
+	public init(workspace: WorkspaceModel, month: Month = BudgetScreenModel.currentMonth()) {
 		self.workspace = workspace
-		amountReader = reader
 		self.month = month
 	}
 
@@ -37,7 +35,8 @@ public final class BudgetScreenModel {
 
 	public var numberStyle: NumberStyle { workspace.numberStyle }
 
-	public var reader: any AmountReader { amountReader }
+	/// Read when each field opens, so a field always uses the open budget's places.
+	public var reader: any AmountReader { workspace.budgetAmountReader }
 
 	/// The groups and envelopes on screen: hidden ones only while Show Hidden is on.
 	public var groups: [EnvelopeGroup] {
@@ -87,7 +86,7 @@ public final class BudgetScreenModel {
 		guard let id = editingID, let editing else { return }
 		guard let envelope = envelope(id) else { return cancelEditing() }
 		if editing.isUntouched, envelope.budgeted != editing.original {
-			self.editing = AmountFieldModel(amount: envelope.budgeted, style: workspace.numberStyle, reader: amountReader)
+			self.editing = AmountFieldModel(amount: envelope.budgeted, style: workspace.numberStyle, reader: reader)
 		}
 	}
 
@@ -116,7 +115,7 @@ public final class BudgetScreenModel {
 		guard !isReadOnly, let envelope = envelope(id), group(of: id)?.isIncome == false else { return }
 		selection = id
 		editingID = id
-		editing = AmountFieldModel(amount: envelope.budgeted, style: workspace.numberStyle, reader: amountReader)
+		editing = AmountFieldModel(amount: envelope.budgeted, style: workspace.numberStyle, reader: reader)
 	}
 
 	public func cancelEditing() {

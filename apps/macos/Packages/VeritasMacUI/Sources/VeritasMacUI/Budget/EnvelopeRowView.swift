@@ -44,7 +44,7 @@ struct EnvelopeRowView: View {
 			budgeted
 		} spent: {
 			if !isIncome {
-				Text(screen.format.amount(-envelope.spent))
+				Text(screen.format.amount(-envelope.spent, on: .budget))
 					.font(.figures(.body))
 					.foregroundStyle(envelope.spent == 0 ? Color(ColorToken.moneyNeutral) : Color.textPrimary)
 			}
@@ -117,14 +117,14 @@ struct EnvelopeRowView: View {
 			Button {
 				screen.beginEditing(envelope.id)
 			} label: {
-				Text(screen.format.amount(envelope.budgeted))
+				Text(screen.format.amount(envelope.budgeted, on: .budget))
 					.font(.figures(.body))
 					.frame(maxWidth: .infinity, alignment: .trailing)
 					.contentShape(.rect)
 			}
 			.buttonStyle(.plain)
 			.disabled(screen.isReadOnly)
-			.accessibilityLabel("Budgeted \(screen.format.amount(envelope.budgeted))")
+			.accessibilityLabel("Budgeted \(screen.format.amount(envelope.budgeted, on: .budget))")
 			.accessibilityIdentifier("envelope.\(envelope.id).budgeted")
 		}
 	}
@@ -203,15 +203,15 @@ struct EnvelopeRowView: View {
 	/// design/interaction.md: rows read as a sentence.
 	static func spoken(_ envelope: EnvelopeRow, isIncome: Bool, format: MoneyFormat) -> String {
 		if isIncome {
-			return "\(envelope.name), received \(format.amount(envelope.spent))"
+			return "\(envelope.name), received \(format.amount(envelope.spent, on: .budget))"
 		}
 		let state = switch envelope.tone {
-		case .overspent: "overspent by \(format.amount(-envelope.available))"
-		case .low: "low, \(format.amount(envelope.available)) left"
+		case .overspent: "overspent by \(format.amount(-envelope.available, on: .budget))"
+		case .low: "low, \(format.amount(envelope.available, on: .budget)) left"
 		case .neutral: "nothing left"
-		default: "\(format.amount(envelope.available)) left"
+		default: "\(format.amount(envelope.available, on: .budget)) left"
 		}
-		return "\(envelope.name), budgeted \(format.amount(envelope.budgeted)), spent \(format.amount(-envelope.spent)), \(state)"
+		return "\(envelope.name), budgeted \(format.amount(envelope.budgeted, on: .budget)), spent \(format.amount(-envelope.spent, on: .budget)), \(state)"
 	}
 }
 
@@ -230,7 +230,7 @@ private struct EditPreview: View {
 					Text("Return sets")
 						.font(.text(.caption))
 						.foregroundStyle(.textSecondary)
-					Text(format.amount(preview))
+					Text(format.amount(preview, on: .budget))
 						.font(.figures(.body, weight: .semibold))
 				}
 				.accessibilityElement(children: .combine)

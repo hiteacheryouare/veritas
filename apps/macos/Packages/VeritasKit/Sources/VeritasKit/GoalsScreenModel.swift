@@ -10,12 +10,13 @@ public final class GoalsScreenModel {
 	public private(set) var goals: [GoalSummary] = []
 
 	@ObservationIgnored let workspace: WorkspaceModel
-	@ObservationIgnored public let reader: any AmountReader
 
-	public init(workspace: WorkspaceModel, reader: any AmountReader) {
+	public init(workspace: WorkspaceModel) {
 		self.workspace = workspace
-		self.reader = reader
 	}
+
+	/// Read when each field opens, so a field always uses the open budget's places.
+	public var reader: any AmountReader { workspace.budgetAmountReader }
 
 	public var open: [GoalSummary] { goals.filter(\.isOpen) }
 	public var archive: [GoalSummary] { goals.filter { !$0.isOpen } }

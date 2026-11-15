@@ -37,7 +37,7 @@ struct GoalCard: View {
 		.background(.surfaceGrouped, in: .rect(cornerRadius: Radius.section))
 		.overlay(RoundedRectangle(cornerRadius: Radius.section).strokeBorder(Color.edgeGrouped))
 		.accessibilityElement(children: .ignore)
-		.accessibilityLabel("\(goal.name), \(format.wholeCurrency(goal.shownProgress)) of \(format.wholeCurrency(goal.target)), \(words.note)")
+		.accessibilityLabel("\(goal.name), \(format.wholeCurrency(goal.shownProgress, on: .budget)) of \(format.wholeCurrency(goal.target, on: .budget)), \(words.note)")
 		.accessibilityIdentifier("goal.\(goal.id)")
 	}
 }
@@ -48,9 +48,9 @@ struct GoalProgress: View {
 
 	var body: some View {
 		HStack(spacing: 4) {
-			Text(format.wholeCurrency(goal.shownProgress)).font(.figures(.body, weight: .semibold))
+			Text(format.wholeCurrency(goal.shownProgress, on: .budget)).font(.figures(.body, weight: .semibold))
 			Text("of")
-			Text(format.wholeCurrency(goal.target)).font(.figures(.body, weight: .semibold))
+			Text(format.wholeCurrency(goal.target, on: .budget)).font(.figures(.body, weight: .semibold))
 		}
 		.font(.text(.body))
 	}
