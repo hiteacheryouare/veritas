@@ -190,6 +190,7 @@ final class StubAccounts: @unchecked Sendable {
 				if let to = filter.to, txn.date > to { return false }
 				if let category = filter.categoryId, txn.category != category { return false }
 				if filter.uncategorized, txn.category != nil || txn.transfer != nil { return false }
+				if let tag = filter.tag, !(txn.notes ?? "").split(separator: " ").contains(Substring("#\(tag)")) { return false }
 				return true
 			}
 			switch sort.key {
@@ -200,7 +201,7 @@ final class StubAccounts: @unchecked Sendable {
 			case .notes: rows.sort { ($0.notes ?? "") < ($1.notes ?? "") }
 			case .account: rows.sort { $0.account < $1.account }
 			}
-			let showBalance = sort.key == .date && !sort.ascending && search.isEmpty && filter.status == nil && filter.from == nil && filter.categoryId == nil
+			let showBalance = sort.key == .date && !sort.ascending && search.isEmpty && filter.status == nil && filter.categoryId == nil && filter.tag == nil
 			let page = rows.dropFirst(Int(offset)).prefix(Int(limit)).map { row($0, balance: showBalance ? balances[$0.id] : nil) }
 			return RegisterPage(total: UInt64(rows.count), rows: page)
 		}

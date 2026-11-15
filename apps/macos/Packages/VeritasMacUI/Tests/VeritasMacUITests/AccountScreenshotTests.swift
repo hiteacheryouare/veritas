@@ -30,9 +30,9 @@ struct AccountScreenshotTests {
 	@Test func register() async throws {
 		let workspace = await workspace()
 		let register = RegisterModel(workspace: workspace, scope: .account(accountId: "checking"))
-		await register.load()
+		await register.setFilter { $0.from = "2026-10-10"; $0.to = "2026-11-09" }
 		try render(AccountRegisterScreen(workspace: workspace, accountID: "checking", register: register), named: "register", size: CGSize(width: 1200, height: 760), settle: 0.8)
-		await register.setFilter { $0.search = "#medical" }
+		await register.setFilter { $0.from = nil; $0.to = nil; $0.tag = "medical" }
 		try render(AccountRegisterScreen(workspace: workspace, accountID: "checking", register: register), named: "register-filtered", size: CGSize(width: 1200, height: 520), settle: 0.8)
 	}
 
@@ -59,6 +59,10 @@ struct AccountScreenshotTests {
 		await loan.refreshPreview()
 		await loan.refreshPreview()
 		try render(MoveMoneySheet(model: loan), named: "move-money-loan", settle: 0.6)
+		loan.showsEscrowAndFees = true
+		loan.escrow.type("40.00")
+		await loan.refreshPreview()
+		try render(MoveMoneySheet(model: loan), named: "move-money-loan-escrow", settle: 0.6)
 
 		let saving = MoveMoneyModel(workspace: workspace, fromID: "checking")
 		await saving.load()

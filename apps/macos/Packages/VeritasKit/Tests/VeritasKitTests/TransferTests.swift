@@ -70,6 +70,12 @@ final class TransferFakeSession: BudgetSession, @unchecked Sendable {
 	func kindTarget(_ kind: CategoryKind) async throws -> KindTarget { kind == .savings ? savings : debt }
 	func kindChangePreview(_ categoryID: String, kind: CategoryKind) async throws -> UInt64 { reclassified }
 	func setCategoryKind(_ categoryID: String, kind: CategoryKind) async throws { calls.append("kind \(categoryID) \(kind)") }
+	var historyAsked: [String] = []
+	func balanceHistory(_ accountID: String, from: String, to: String) async throws -> BalanceHistory {
+		historyAsked.append("\(accountID) \(from)...\(to)")
+		return BalanceHistory(points: [BalancePoint(date: from, balance: 100_000), BalancePoint(date: to, balance: 201_400)], change: 1.014)
+	}
+	func tags() async throws -> [TagSummary] { [TagSummary(name: "medical", color: "#0f8a9a", hidden: false, count: 14)] }
 	var groupHidden = false
 	func kindCategoryPlan(_ kind: CategoryKind) async throws -> KindCategoryPlan { KindCategoryPlan(groupName: "Savings and Debt", groupIsHidden: groupHidden) }
 	func createKindCategory(kind: CategoryKind, name: String, unhideGroup: Bool) async throws -> String {
@@ -330,6 +336,18 @@ struct TransferTests {
 		#expect(draft.accountId == "checking")
 		#expect(draft.amount == 15_000)
 		#expect(draft.payeeId == "to-savings")
+	}
+
+	@Test func theRegisterChartFollowsTheDateFilterAndKeepsTheRunningBalance() async {
+		// Contract v9: balanceHistory, tags and a running balance under a date range.
+		let register = RegisterModel(workspace: await workspace(), scope: .account(accountId: "checking"))
+		await register.setFilter { $0.from = "2026-10-10"; $0.to = "2026-11-09" }
+		#expect(session.historyAsked.last == "checking 2026-10-10...2026-11-09")
+		#expect(register.history?.change == 1.014)
+		#expect(register.tags.map(\.name) == ["medical"])
+		#expect(register.showsBalance, "a date range keeps the running balance")
+		await register.setFilter { $0.tag = "medical" }
+		#expect(!register.showsBalance)
 	}
 
 	@Test func deletingTheLoansSideNamesTheWholePayment() async {

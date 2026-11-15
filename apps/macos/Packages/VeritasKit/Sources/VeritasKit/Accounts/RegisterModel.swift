@@ -56,6 +56,9 @@ public final class RegisterModel {
 	public let scope: RegisterScope
 	public var filter = RegisterFilter(search: nil, status: nil, from: nil, to: nil, categoryId: nil, payeeId: nil, uncategorized: false)
 	public var sort = RegisterSort(key: .date, ascending: false)
+	/// The chart above one account's register, over the date filter or the last 30 days.
+	public private(set) var history: BalanceHistory?
+	public private(set) var tags: [TagSummary] = []
 	public private(set) var total = 0
 	/// Goes up whenever the rows change, so the table reloads.
 	public private(set) var revision = 0
@@ -83,13 +86,19 @@ public final class RegisterModel {
 	}
 
 	/// The running balance is the account's, so it shows only in date order with no filter.
+	/// Contract v9 keeps the running balance under a date range, so only
+	/// the other filters hide it.
 	public var showsBalance: Bool {
-		accountID != nil && sort.key == .date && !sort.ascending && isUnfiltered
+		accountID != nil && sort.key == .date && !sort.ascending && isUnfilteredButDates
+	}
+
+	private var isUnfilteredButDates: Bool {
+		(filter.search ?? "").isEmpty && filter.status == nil && filter.categoryId == nil && filter.payeeId == nil
+			&& !filter.uncategorized && filter.tag == nil
 	}
 
 	public var isUnfiltered: Bool {
-		(filter.search ?? "").isEmpty && filter.status == nil && filter.from == nil && filter.to == nil
-			&& filter.categoryId == nil && filter.payeeId == nil && !filter.uncategorized
+		isUnfilteredButDates && filter.from == nil && filter.to == nil
 	}
 
 	/// Starts over from the first page, as after any change.
@@ -99,6 +108,17 @@ public final class RegisterModel {
 		loading = []
 		await fetch(page: 0)
 		revision += 1
+		await loadChart()
+	}
+
+	private func loadChart() async {
+		guard let accountID, workspace.canPlanTransfers else { return }
+		let today = WorkspaceModel.today()
+		let monthAgo = Calendar.current.date(byAdding: .day, value: -30, to: .now).map(TransactionEditorModel.civilDate) ?? today
+		let from = filter.from ?? monthAgo
+		let to = filter.to ?? today
+		history = await workspace.report { try await $0.balanceHistory(accountID, from: from, to: to) }
+		tags = await workspace.report { try await $0.tags() } ?? []
 	}
 
 	public func row(at index: Int) -> RegisterRow? {

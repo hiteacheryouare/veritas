@@ -65,7 +65,7 @@ struct AccountRegisterScreen: View {
 				}
 			}
 			VStack(alignment: .leading, spacing: Spacing.s3) {
-				BalanceGraph(rows: register.loadedRows, format: register.format, shows: register.showsBalance)
+				BalanceGraph(history: register.history, format: register.format)
 					.frame(height: 140)
 				RegisterFilters(register: register, search: $search)
 			}
@@ -164,6 +164,20 @@ private struct RegisterFilters: View {
 			.labelsHidden()
 			.fixedSize()
 			.accessibilityIdentifier("register.range")
+			if !register.tags.isEmpty {
+				Picker("Tag", selection: Binding(get: { register.filter.tag }, set: { tag in
+					Task { await register.setFilter { $0.tag = tag } }
+				})) {
+					Text("All tags").tag(String?.none)
+					Divider()
+					ForEach(register.tags, id: \.name) { tag in
+						Text("#\(tag.name)  \(tag.count)").tag(String?.some(tag.name))
+					}
+				}
+				.labelsHidden()
+				.fixedSize()
+				.accessibilityIdentifier("register.tag")
+			}
 			Picker("Status", selection: Binding(get: { register.filter.status }, set: { status in
 				Task { await register.setFilter { $0.status = status } }
 			})) {
@@ -193,40 +207,47 @@ private struct RegisterFilters: View {
 	}
 }
 
-/// The running balance of the newest rows, as in the register mockup.
+/// The account's end-of-day balance over the date filter, and how much it
+/// changed, as in the register mockup.
 private struct BalanceGraph: View {
-	let rows: [RegisterRow]
+	let history: BalanceHistory?
 	let format: MoneyFormat
-	let shows: Bool
-
-	private var points: [(date: String, balance: Int64)] {
-		guard shows else { return [] }
-		let recent = rows.prefix(60).compactMap { row in row.runningBalance.map { (row.date, $0) } }
-		return recent.reversed()
-	}
 
 	var body: some View {
-		let points = points
-		if points.count > 1, let first = points.first, let last = points.last {
-			ZStack(alignment: .bottomTrailing) {
-				Chart(Array(points.enumerated()), id: \.offset) { index, point in
-					AreaMark(x: .value("Day", index), y: .value("Balance", Double(point.balance) / 100))
+		if let history, history.points.count > 1, let first = history.points.first, let last = history.points.last {
+			ZStack {
+				Chart(history.points, id: \.date) { point in
+					AreaMark(x: .value("Day", point.date), y: .value("Balance", Double(point.balance) / 100))
 						.foregroundStyle(Color.textPrimary.opacity(0.06))
-					LineMark(x: .value("Day", index), y: .value("Balance", Double(point.balance) / 100))
+					LineMark(x: .value("Day", point.date), y: .value("Balance", Double(point.balance) / 100))
 						.foregroundStyle(Color.textPrimary)
 				}
 				.chartXAxis(.hidden)
 				.chartYAxis(.hidden)
 				.chartYScale(domain: .automatic(includesZero: false))
-				Text("\(RegisterRow.short(first.date)) – \(RegisterRow.short(last.date))")
-					.font(.text(.caption))
-					.foregroundStyle(.textSecondary)
+				VStack(alignment: .trailing) {
+					if let change = history.change {
+						Text(Self.change(change))
+							.font(.text(.heading, weight: .semibold))
+							.accessibilityIdentifier("register.change")
+					}
+					Spacer()
+					Text("\(RegisterRow.short(first.date)) – \(RegisterRow.short(last.date))")
+						.font(.text(.caption))
+						.foregroundStyle(.textSecondary)
+				}
+				.frame(maxWidth: .infinity, alignment: .trailing)
 			}
 			.accessibilityElement(children: .ignore)
-			.accessibilityLabel("Balance from \(RegisterRow.short(first.date)), \(format.amount(first.balance, on: .register)), to \(RegisterRow.short(last.date)), \(format.amount(last.balance, on: .register))")
+			.accessibilityLabel("Balance from \(RegisterRow.short(first.date)), \(format.amount(first.balance, on: .register)), to \(RegisterRow.short(last.date)), \(format.amount(last.balance, on: .register))\(history.change.map { ", " + Self.change($0) } ?? "")")
 		} else {
 			Color.clear
 		}
+	}
+
+	/// "+101.4%": the core's fraction, with its sign.
+	static func change(_ fraction: Double) -> String {
+		(fraction > 0 ? "+" : "") + fraction.formatted(.percent.precision(.fractionLength(1)))
 	}
 }
 
