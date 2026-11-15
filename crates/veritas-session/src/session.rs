@@ -867,6 +867,18 @@ fn rank(reason: Option<ReadOnlyReason>) -> u8 {
 	}
 }
 
+impl<B: Backend> Drop for Session<B> {
+	/// The open check and its snapshot run on connections of their own.
+	/// Waiting for them means a closed budget has nothing left reading or
+	/// writing its files, so the next writer isn't locked out and a deleted
+	/// budget folder stays deleted.
+	fn drop(&mut self) {
+		if let Some(pending) = self.open_check.take() {
+			pending.wait();
+		}
+	}
+}
+
 fn closed() -> CoreError {
 	CoreError::Storage("the budget couldn't be reopened. Close it and open it again".to_owned())
 }
