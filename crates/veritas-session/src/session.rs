@@ -214,6 +214,7 @@ impl<B: Backend> Session<B> {
 				return Err(CoreError::Overflow);
 			}
 			account.opening_balance()?;
+			account.loan = crate::accounts::loan_terms_for(account)?;
 		}
 		let today = CivilDate::from((options.clock)().date_naive());
 		build_aside(budget_dir, "creating", cancel, |inner| {
@@ -252,11 +253,24 @@ impl<B: Backend> Session<B> {
 				}),
 			},
 		)?;
-		Session::open(budget_dir, options)
+		let mut session = Session::open(budget_dir, options)?;
+		// R-REL-3: the budget as it arrived from Actual, before any edit can
+		// reach the background open snapshot.
+		if session.read_only().is_none()
+			&& let Err(problem) = session.snapshot(SnapshotReason::Import)
+		{
+			session.snapshot_problem = Some(problem);
+		}
+		Ok(session)
 	}
 
 	pub fn dir(&self) -> &Path {
 		&self.dir
+	}
+
+	/// The local date the shell last read the budget as of.
+	pub fn today(&self) -> CivilDate {
+		self.today
 	}
 
 	pub fn read_only(&self) -> Option<ReadOnlyReason> {

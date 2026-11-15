@@ -132,6 +132,7 @@ fn account(name: &str, kind: NewAccountKind, starting_balance: i64) -> NewAccoun
 		name: name.to_owned(),
 		kind,
 		starting_balance,
+		loan: None,
 	}
 }
 
