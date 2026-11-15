@@ -25,7 +25,9 @@ pub use sankey::{
 };
 pub use spending::{Spending, SpendingDay, SpendingMode, spending};
 pub use summary::{SummaryContent, SummaryData, summary};
-pub use time_frame::{TimeRange, calculate_time_range};
+pub use time_frame::{
+	DefaultFrame, TimeRange, calculate_time_range, spending_months, widget_months,
+};
 
 use veritas_domain::{BudgetData, CoreError, Transaction};
 

@@ -17,7 +17,6 @@ mod sankey;
 mod standard;
 mod statements;
 mod tax;
-mod time_frame;
 mod widget_meta;
 mod widgets;
 
@@ -49,7 +48,6 @@ pub use tax::{
 	Bucket, BucketTotal, Direction, Source, TaxRow, TaxSummary, detail_csv, extract_tags,
 	summary_csv, tax_summary,
 };
-pub use time_frame::{DefaultFrame, spending_months, widget_months};
 pub use widget_meta::{
 	DEFAULT_MARKDOWN, TimeFrame, WidgetSettings, add_widget, check_conditions, condition,
 	create_page, delete_page, live_widget, parse_meta, read_settings, remove_widget, rename_page,
@@ -57,9 +55,10 @@ pub use widget_meta::{
 };
 pub use widgets::{
 	AgeOfMoney, AgePoint, BudgetAnalysis, BudgetAnalysisMonth, CalendarDay, CalendarMonth,
-	CashFlowCard, Crossover, CrossoverPoint, Granularity, NetWorthCard, NetWorthInterval,
-	NetWorthPeriod, SankeyCard, SankeyColor, SankeyLabel, SankeyLayer, SankeyLink, SankeyMode,
-	SankeyNode, SankeySort, Spending, SpendingDay, SpendingMode, SummaryContent, SummaryData,
-	TimeRange, Trend, age_of_money, budget_analysis, calculate_time_range, calendar,
-	cash_flow_card, crossover, net_worth_card, sankey_card, sankey_height_limit, spending, summary,
+	CashFlowCard, Crossover, CrossoverPoint, DefaultFrame, Granularity, NetWorthCard,
+	NetWorthInterval, NetWorthPeriod, SankeyCard, SankeyColor, SankeyLabel, SankeyLayer,
+	SankeyLink, SankeyMode, SankeyNode, SankeySort, Spending, SpendingDay, SpendingMode,
+	SummaryContent, SummaryData, TimeRange, Trend, age_of_money, budget_analysis,
+	calculate_time_range, calendar, cash_flow_card, crossover, net_worth_card, sankey_card,
+	sankey_height_limit, spending, spending_months, summary, widget_months,
 };

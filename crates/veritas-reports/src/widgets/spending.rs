@@ -75,7 +75,7 @@ fn last_day(month: YearMonth) -> Result<NaiveDate, CoreError> {
 /// `calculateSpendingReportTimeRange`, reading `isLive` as JS does: missing
 /// is live, `null` is live for the slide but not for the budget and average
 /// shortcut.
-fn compared_months(
+pub(super) fn compared_months(
 	meta: Option<&Json>,
 	mode: SpendingMode,
 	today: NaiveDate,
