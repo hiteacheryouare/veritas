@@ -230,7 +230,10 @@ impl<B: Backend> Core<B> {
 
 	pub(crate) fn goals(&self, today: &str) -> Result<Vec<GoalSummary>, FfiError> {
 		self.call(|session| {
-			session.with_sheet(crate::budget::civil_date(today)?, crate::goals::summaries)
+			session.with_sheet_and_classification(
+				crate::budget::civil_date(today)?,
+				crate::goals::summaries,
+			)
 		})
 	}
 
@@ -887,6 +890,90 @@ pub(crate) mod tests {
 	}
 
 	#[test]
+	fn the_number_format_places_the_symbol_where_actual_does() {
+		// Actual keeps the symbol's side and spacing as budget preferences
+		// (currencySymbolPosition, currencySpaceBetweenAmountAndSymbol), set
+		// from the currency table when a currency is picked. EUR reads
+		// `1.234,56 €` there. Unset, useFormat puts the symbol before with no
+		// space, so an imported budget reads the same in both apps.
+		let scratch = Scratch::new("symbol-placement");
+		let format = crate::NumberFormat {
+			currency: Some("EUR".to_owned()),
+			style: crate::NumberStyle::DotComma,
+			hide_decimals: false,
+			symbol_first: None,
+			symbol_space: None,
+		};
+		let options = crate::NewBudgetOptions {
+			retirement_401k: false,
+			hsa: false,
+			accounts: Vec::new(),
+		};
+		let core = Core::<veritas_store::Store>::create_budget(
+			"Euro",
+			&scratch.budget(),
+			&format,
+			&options,
+			&CancelToken::default(),
+		)
+		.unwrap();
+		let placement = |core: &Core<veritas_store::Store>| {
+			let format = core.overview().unwrap().number_format.unwrap();
+			(format.symbol_first, format.symbol_space)
+		};
+		assert_eq!(placement(&core), (Some(false), Some(true)));
+		core.close().unwrap();
+
+		let db = scratch.0.join("budget").join("db.sqlite");
+		let prefs = |sql: &str| {
+			let connection = rusqlite::Connection::open(&db).unwrap();
+			connection.execute_batch(sql).unwrap();
+		};
+		let stored: Vec<(String, String)> = rusqlite::Connection::open(&db)
+			.unwrap()
+			.prepare("SELECT id, value FROM preferences WHERE id LIKE 'currency%' ORDER BY id")
+			.unwrap()
+			.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+			.unwrap()
+			.collect::<Result<_, _>>()
+			.unwrap();
+		assert_eq!(
+			stored,
+			[
+				(
+					"currencySpaceBetweenAmountAndSymbol".to_owned(),
+					"true".to_owned()
+				),
+				("currencySymbolPosition".to_owned(), "after".to_owned()),
+			]
+		);
+		let reopened = || {
+			Core::<veritas_store::Store>::open(&scratch.budget(), &CancelToken::default()).unwrap()
+		};
+
+		prefs(
+			"UPDATE preferences SET value = 'before' WHERE id = 'currencySymbolPosition'; \
+			 UPDATE preferences SET value = 'false' WHERE id = 'currencySpaceBetweenAmountAndSymbol';",
+		);
+		let core = reopened();
+		assert_eq!(
+			placement(&core),
+			(Some(true), Some(false)),
+			"the user's choice wins"
+		);
+		core.close().unwrap();
+
+		prefs("DELETE FROM preferences WHERE id LIKE 'currencyS%';");
+		let core = reopened();
+		assert_eq!(
+			placement(&core),
+			(Some(true), Some(false)),
+			"unset: Actual's default, not the table"
+		);
+		core.close().unwrap();
+	}
+
+	#[test]
 	fn the_shell_gets_an_overview_an_export_a_backup_and_the_budget_list() {
 		// R-IO-2, R-REL-4, docs/finance/statements.md ST-9
 		let (scratch, core) = imported("shell");
@@ -987,6 +1074,8 @@ pub(crate) mod tests {
 			currency: Some("USD".to_owned()),
 			style: NumberStyle::CommaDot,
 			hide_decimals: false,
+			symbol_first: None,
+			symbol_space: None,
 		};
 		let core = Core::<veritas_store::Store>::create_budget(
 			"Household",
@@ -1078,6 +1167,8 @@ pub(crate) mod tests {
 			currency: Some("USD".to_owned()),
 			style: NumberStyle::CommaDot,
 			hide_decimals: false,
+			symbol_first: None,
+			symbol_space: None,
 		};
 		let options = NewBudgetOptions {
 			retirement_401k: true,
@@ -1851,6 +1942,174 @@ pub(crate) mod tests {
 			(undone.state, undone.reached_month),
 			(crate::GoalState::Active, None)
 		);
+	}
+
+	fn bought(account: &str, category: &str, date: &str, amount: i64) -> crate::TransactionDraft {
+		let mut draft = typed(account, amount);
+		draft.date = date.to_owned();
+		draft.category_id = Some(category.to_owned());
+		draft
+	}
+
+	fn report_expense(core: &Core<veritas_store::Store>, category: &str) -> i64 {
+		let november = veritas_domain::YearMonth::new(2026, 11).unwrap();
+		core.call(|session| {
+			session.with_classification(|data, kinds| {
+				crate::reports::net_profit_report(data, kinds, november, november)
+			})
+		})
+		.unwrap()
+		.total
+		.expenses
+		.categories
+		.iter()
+		.find(|line| line.category_id.as_deref() == Some(category))
+		.map_or(0, |line| line.total)
+	}
+
+	#[test]
+	fn spending_to_date_is_the_reports_expense_total_and_a_refund_can_take_it_below_zero() {
+		// DEBT-8 Status (Fred's ruling on #64): CLS-6 `expense_total` for the
+		// goal's category, never the sheet's spent cells, and never clamped at 0
+		// (ST-1.2). Today is 2026-11-15, so a row dated later isn't to date yet.
+		let (_scratch, core) = imported("goal-refund");
+		let id = new_goal(&core, "New laptop", 150_000, Some("2027-06-30"));
+		let category = goal_of(&core, &id).category_id;
+		let checking = new_account(&core, "Goal checking", crate::NewAccountKind::Checking, 0);
+
+		add(&core, bought(&checking, &category, "2026-11-10", -40_000));
+		assert_eq!(goal_of(&core, &id).spent, 40_000);
+
+		add(&core, bought(&checking, &category, "2026-11-13", 55_000));
+		let refunded = goal_of(&core, &id);
+		assert_eq!(
+			refunded.spent, -15_000,
+			"a refund bigger than the purchase shows as a true minus"
+		);
+		assert_eq!(refunded.spent, report_expense(&core, &category));
+		assert_eq!(
+			refunded.available, 15_000,
+			"the envelope is Actual's, as before"
+		);
+
+		add(&core, bought(&checking, &category, "2026-11-20", -5_000));
+		assert_eq!(goal_of(&core, &id).spent, -15_000);
+	}
+
+	#[test]
+	fn a_zero_place_goal_keeps_spending_on_the_register_scale_and_never_reads_over() {
+		// CLS-12.14's example: a yen goal budgeted 30000 (budget scale), then a
+		// 500 yen purchase stored as -50000 (register scale). Spending to date
+		// is 50000 (shown as 500 yen), Available is the mixed -20000, and the
+		// Budget screen carries CLS-12.10's line.
+		let scratch = Scratch::new("goal-yen");
+		let format = crate::NumberFormat {
+			currency: Some("JPY".to_owned()),
+			style: crate::NumberStyle::CommaDot,
+			hide_decimals: true,
+			symbol_first: None,
+			symbol_space: None,
+		};
+		let core = Core::<veritas_store::Store>::create_budget(
+			"Yen",
+			&scratch.budget(),
+			&format,
+			&crate::NewBudgetOptions {
+				retirement_401k: false,
+				hsa: false,
+				accounts: Vec::new(),
+			},
+			&CancelToken::default(),
+		)
+		.unwrap();
+		let id = new_goal(&core, "Camera", 30_000, None);
+		let category = goal_of(&core, &id).category_id;
+		let checking = new_account(&core, "Goal checking", crate::NewAccountKind::Checking, 0);
+		budget(&core, NOVEMBER, &category, 30_000);
+		add(&core, bought(&checking, &category, "2026-11-12", -50_000));
+
+		let goal = goal_of(&core, &id);
+		assert_eq!(
+			(goal.target, goal.spent, goal.available),
+			(30_000, 50_000, -20_000)
+		);
+		assert_eq!(goal.spent, report_expense(&core, &category));
+		assert_eq!(goal.state, crate::GoalState::ReachedSpent);
+		assert_eq!(
+			goal.tone,
+			crate::MoneyTone::Neutral,
+			"the mixed -20000 is not an overspend: the real position is 29500 yen left"
+		);
+		let (_, today) = this_month();
+		let month = core.budget_month(NOVEMBER, &today).unwrap();
+		assert_eq!(
+			month.mixed_scale_note.as_deref(),
+			Some(
+				"Spending is recorded at 2 places and budgets at 0, so these numbers mix both, as in Actual."
+			)
+		);
+	}
+
+	#[test]
+	fn the_goal_card_reads_its_tone_and_progress_from_the_core() {
+		// design/mockups/goals.html: 75% is $1,120 of $1,500, rounded down;
+		// Reached → Spent reads 100% and its target. A 2-place budget has no
+		// mixed-scale line, and a spent goal below zero is overspent there.
+		let (_scratch, core) = imported("goal-progress");
+		let id = new_goal(&core, "New laptop", 150_000, None);
+		let category = goal_of(&core, &id).category_id;
+		budget(&core, NOVEMBER, &category, 112_000);
+		let saving = goal_of(&core, &id);
+		assert_eq!(
+			(saving.progress_percent, saving.progress_amount, saving.tone),
+			(74, 112_000, crate::MoneyTone::Available)
+		);
+
+		budget(&core, NOVEMBER, &category, 150_000);
+		let reached = goal_of(&core, &id);
+		assert_eq!(
+			(
+				reached.state,
+				reached.progress_percent,
+				reached.progress_amount
+			),
+			(crate::GoalState::Reached, 100, 150_000)
+		);
+
+		let checking = new_account(&core, "Goal checking", crate::NewAccountKind::Checking, 0);
+		add(&core, bought(&checking, &category, "2026-11-14", -152_000));
+		let spent = goal_of(&core, &id);
+		assert_eq!(
+			(spent.state, spent.progress_percent, spent.progress_amount),
+			(crate::GoalState::ReachedSpent, 100, 150_000)
+		);
+		assert_eq!(spent.available, -2_000);
+		assert_eq!(spent.tone, crate::MoneyTone::Overspent);
+
+		let (_, today) = this_month();
+		let month = core.budget_month(NOVEMBER, &today).unwrap();
+		assert_eq!(month.mixed_scale_note, None);
+		let expected = match month.to_budget {
+			..0 => crate::MoneyTone::Overspent,
+			0 => crate::MoneyTone::Neutral,
+			_ => crate::MoneyTone::Income,
+		};
+		assert_eq!(month.to_budget_tone, expected);
+	}
+
+	#[test]
+	fn an_active_goal_overspent_this_month_reads_overspent_in_a_two_place_budget() {
+		let (_scratch, core) = imported("goal-progress");
+		let id = new_goal(&core, "New laptop", 150_000, None);
+		let category = goal_of(&core, &id).category_id;
+		budget(&core, NOVEMBER, &category, 50_000);
+		let checking = new_account(&core, "Goal checking", crate::NewAccountKind::Checking, 0);
+		add(&core, bought(&checking, &category, "2026-11-14", -80_000));
+		let goal = goal_of(&core, &id);
+		assert_eq!(goal.state, crate::GoalState::Active);
+		assert_eq!(goal.available, -30_000);
+		assert_eq!(goal.tone, crate::MoneyTone::Overspent);
+		assert_eq!(goal.progress_percent, 0);
 	}
 
 	pub(crate) struct Rows(pub(crate) Vec<veritas_domain::Row>);

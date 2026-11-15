@@ -1,13 +1,31 @@
 use crate::{AccountKind, CoreError, Money};
 
-/// Actual's number format preferences: `numberFormat`, `hideFraction` and
-/// `defaultCurrencyCode` (loot-core/src/types/prefs.ts:26-31).
+/// Actual's number format preferences: `numberFormat`, `hideFraction`,
+/// `defaultCurrencyCode`, `currencySymbolPosition` and
+/// `currencySpaceBetweenAmountAndSymbol` (loot-core/src/types/prefs.ts:26-31).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NumberFormat {
 	/// An ISO 4217 code, or `None` for no currency symbol, Actual's default.
 	pub currency: Option<String>,
 	pub style: NumberStyle,
 	pub hide_decimals: bool,
+	/// The symbol goes before the amount (`€1.234,56`), not after.
+	pub symbol_first: bool,
+	/// A narrow space separates amount and symbol (`1.234,56 €`).
+	pub symbol_space: bool,
+}
+
+impl NumberFormat {
+	/// Where Actual's currency picker places this currency's symbol, or
+	/// Actual's own default (before, no space) without one.
+	pub fn currency_symbol_placement(currency: Option<&str>) -> (bool, bool) {
+		currency
+			.and_then(crate::currency)
+			.filter(|currency| !currency.code.is_empty())
+			.map_or((true, false), |currency| {
+				(currency.symbol_first, currency.symbol_space())
+			})
+	}
 }
 
 /// Actual's `numberFormat` values (loot-core/src/shared/util.ts:265-271).
