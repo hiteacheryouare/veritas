@@ -627,7 +627,7 @@ fn load_reports(
 	each_row(
 		conn,
 		"dashboard_pages",
-		"SELECT id, name, tombstone FROM dashboard_pages",
+		"SELECT id, name, tombstone, rowid FROM dashboard_pages",
 		skipped,
 		|row| {
 			let id = DashboardPageId::new(id(row, 0)?);
@@ -635,6 +635,7 @@ fn load_reports(
 				id: id.clone(),
 				name: text(at(row, 1)?)?,
 				tombstone: tombstone(at(row, 2)?),
+				position: integer(at(row, 3)?)?.unwrap_or_default(),
 			};
 			data.dashboard_pages.insert(id, page);
 			Ok(())
