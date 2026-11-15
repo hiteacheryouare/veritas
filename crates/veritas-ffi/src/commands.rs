@@ -252,6 +252,32 @@ pub enum Command {
 		account_id: String,
 		statement_balance: i64,
 	},
+	/// v9. CLS-3.3: reclassifies every row of the category, past and future,
+	/// so the shell confirms with `kindChangePreview` first.
+	SetCategoryKind {
+		category_id: String,
+		kind: crate::money::CategoryKind,
+	},
+	/// v9. CLS-4.1's "created if none exists": a debt principal or savings
+	/// category in "Savings and Debt", else "Debt" or "Savings", reused or
+	/// created. A hidden group is reused and unhidden only with
+	/// `unhide_group` (the user confirmed `kindCategoryPlan`), else `Invalid`.
+	/// The new id is the `category` entity.
+	CreateKindCategory {
+		kind: crate::money::CategoryKind,
+		name: String,
+		unhide_group: bool,
+	},
+	/// v9. R-DEBT-1: replaces the terms; a `nil` field clears it.
+	SetLoanTerms {
+		account_id: String,
+		terms: crate::money::LoanTerms,
+	},
+	/// v9. R-DEBT-2, DEBT-6: the payment as a split, its principal line a
+	/// transfer to the loan. The payment's id is the first `transaction` entity.
+	RecordLoanPayment {
+		payment: crate::money::LoanPaymentDraft,
+	},
 	/// Locks every cleared row when the cleared balance equals the statement,
 	/// and records the reconcile either way.
 	FinishReconcile {
@@ -856,6 +882,26 @@ impl Command {
 					.map(|id| TransactionId::new(id.as_str()))
 					.collect();
 				transactions::set_cleared(data, &ids, *cleared)
+			}
+			Command::SetCategoryKind { category_id, kind } => {
+				veritas_session::kinds::set_kind(data, &category(category_id), (*kind).into())
+			}
+			Command::CreateKindCategory {
+				kind,
+				name,
+				unhide_group,
+			} => veritas_session::kinds::create_kind_category(
+				data,
+				(*kind).into(),
+				name,
+				*unhide_group,
+			)
+			.map(|(rows, _)| rows),
+			Command::SetLoanTerms { account_id, terms } => {
+				crate::money::set_loan_terms(data, account_id, terms)
+			}
+			Command::RecordLoanPayment { payment } => {
+				crate::money::record_loan_payment(data, payment, now_ms())
 			}
 			Command::UnlockReconciled { transaction_id } => {
 				transactions::unreconcile(data, &TransactionId::new(transaction_id.as_str()))

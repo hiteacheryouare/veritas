@@ -65,7 +65,9 @@ private final class Recorder: ChangeListener, @unchecked Sendable {
 	#expect(state.snapshotProblem == nil)
 	#expect(state.auditFindings == 0)
 	#expect(try session.auditReport() == [])
-	#expect(try session.snapshots().map(\.reason) == [.open])
+	let reasons = try session.snapshots().map(\.reason)
+	#expect(reasons.count == 2)
+	#expect(Set(reasons) == [.import, .open])
 }
 
 @Test func aSecondWindowShowsTheOpenElsewhereBanner() async throws {
