@@ -89,7 +89,7 @@ private struct AccountRow: View {
 			Text(account.name)
 				.foregroundStyle(account.isInactive ? .textTertiary : .textSecondary)
 			Spacer(minLength: Spacing.s2)
-			Text(format.amount(account.balance))
+			Text(format.amount(account.balance, on: .register))
 				.font(.figures(.body))
 				.foregroundStyle(account.isInactive ? .textTertiary : .textPrimary)
 		}

@@ -4,7 +4,7 @@ import VeritasDesign
 import VeritasKit
 
 /// The amount field every screen uses (R-BUD-3). It opens with the value
-/// selected, shapes each keystroke through the core, and reports Return, Tab
+/// selected, or with the caret after what was typed to open it, shapes each keystroke through the core, and reports Return, Tab
 /// and Esc. It's an NSTextField because it must take focus the moment it
 /// appears, which a SwiftUI field inserted mid-update can't.
 struct AmountTextField: NSViewRepresentable {
@@ -25,6 +25,7 @@ struct AmountTextField: NSViewRepresentable {
 		let view = FocusingTextField()
 		view.takesFocus = takesFocus
 		view.stringValue = field.text
+		view.opensWithSelection = field.isUntouched
 		view.alignment = alignment
 		view.font = NSFont.monospacedDigitSystemFont(ofSize: TextSize.body.rawValue, weight: .medium)
 			.withDesign(.rounded)
@@ -35,11 +36,21 @@ struct AmountTextField: NSViewRepresentable {
 		return view
 	}
 
+	/// Gives up first responder as it goes, so its field editor isn't left
+	/// holding the window's keys.
+	static func dismantleNSView(_ view: FocusingTextField, coordinator: Coordinator) {
+		if view.currentEditor() != nil { view.window?.makeFirstResponder(nil) }
+	}
+
 	func updateNSView(_ view: FocusingTextField, context: Context) {
 		context.coordinator.parent = self
 		if view.stringValue != field.text {
 			view.stringValue = field.text
-			view.currentEditor()?.selectedRange = NSRange(location: field.text.utf16.count, length: 0)
+			if field.isUntouched {
+				view.currentEditor()?.selectAll(nil)
+			} else {
+				view.currentEditor()?.selectedRange = NSRange(location: field.text.utf16.count, length: 0)
+			}
 		}
 		view.hasProblem = field.problem != nil
 	}
@@ -82,6 +93,8 @@ struct AmountTextField: NSViewRepresentable {
 
 final class FocusingTextField: NSTextField {
 	var takesFocus = true
+	/// Off when a typed key opened the field, so the next key appends to it.
+	var opensWithSelection = true
 
 	var hasProblem = false {
 		didSet { layer?.borderWidth = hasProblem ? 1.5 : 0 }
@@ -95,7 +108,11 @@ final class FocusingTextField: NSTextField {
 		layer?.borderColor = NSColor(Color(ColorToken.moneyOverspent)).cgColor
 		guard takesFocus else { return }
 		window.makeFirstResponder(self)
-		currentEditor()?.selectAll(nil)
+		if opensWithSelection {
+			currentEditor()?.selectAll(nil)
+		} else {
+			currentEditor()?.selectedRange = NSRange(location: stringValue.utf16.count, length: 0)
+		}
 	}
 }
 

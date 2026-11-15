@@ -37,7 +37,7 @@ struct GoalCard: View {
 		.background(.surfaceGrouped, in: .rect(cornerRadius: Radius.section))
 		.overlay(RoundedRectangle(cornerRadius: Radius.section).strokeBorder(Color.edgeGrouped))
 		.accessibilityElement(children: .ignore)
-		.accessibilityLabel("\(goal.name), \(format.wholeCurrency(goal.shownProgress)) of \(format.wholeCurrency(goal.target)), \(words.note)")
+		.accessibilityLabel("\(goal.name), \(format.wholeCurrency(goal.progressAmount, on: .budget)) of \(format.wholeCurrency(goal.target, on: .budget)), \(words.note)")
 		.accessibilityIdentifier("goal.\(goal.id)")
 	}
 }
@@ -48,9 +48,9 @@ struct GoalProgress: View {
 
 	var body: some View {
 		HStack(spacing: 4) {
-			Text(format.wholeCurrency(goal.shownProgress)).font(.figures(.body, weight: .semibold))
+			Text(format.wholeCurrency(goal.progressAmount, on: .budget)).font(.figures(.body, weight: .semibold))
 			Text("of")
-			Text(format.wholeCurrency(goal.target)).font(.figures(.body, weight: .semibold))
+			Text(format.wholeCurrency(goal.target, on: .budget)).font(.figures(.body, weight: .semibold))
 		}
 		.font(.text(.body))
 	}
@@ -63,21 +63,25 @@ struct GoalRing: View {
 	let lineWidth: CGFloat
 	var showsPercent = false
 
+	private var fraction: Double {
+		Double(goal.progressPercent) / 100
+	}
+
 	var body: some View {
 		ZStack {
 			Circle().stroke(Color.track, lineWidth: lineWidth)
 			Circle()
-				.trim(from: 0, to: goal.ringProgress)
+				.trim(from: 0, to: fraction)
 				.stroke(Color(tone == .neutral ? ColorToken.moneyNeutral : tone.fill), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
 				.rotationEffect(.degrees(-90))
 			if showsPercent {
-				Text(goal.ringProgress, format: .percent.precision(.fractionLength(0)))
+				Text("\(goal.progressPercent)%")
 					.font(.figures(.title, weight: .bold))
 			}
 		}
 		.frame(width: size, height: size)
 		.padding(lineWidth / 2)
-		.motion(.fast, value: goal.ringProgress)
+		.motion(.fast, value: fraction)
 		.accessibilityHidden(true)
 	}
 }

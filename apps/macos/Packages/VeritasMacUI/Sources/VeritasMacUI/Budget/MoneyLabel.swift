@@ -32,7 +32,7 @@ struct AvailableLabel: View {
 					.opacity(0.8)
 					.accessibilityHidden(true)
 			}
-			Text(format.amount(amount))
+			Text(format.amount(amount, on: .budget))
 				.font(.figures(.body, weight: .semibold))
 			Text(word ?? tone.word ?? "")
 				.font(.text(.caption))

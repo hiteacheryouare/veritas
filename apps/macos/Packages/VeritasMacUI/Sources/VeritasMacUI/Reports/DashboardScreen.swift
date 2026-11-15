@@ -353,17 +353,17 @@ private struct WidgetHeader: View {
 			}
 		case .cashFlow(_, _, let net, let classified):
 			Signed(amount: net, format: format, weight: .semibold)
-				.accessibilityLabel("\(classified ? "Net Profit" : "Money in less money out") \(format.amount(net))")
+				.accessibilityLabel("\(classified ? "Net Profit" : "Money in less money out") \(format.amount(net, on: .register))")
 		case .spending(_, let spent, _, let compare, _):
 			Signed(amount: compare - spent, format: format, weight: .semibold)
 		case .calendar(_, _, let income, let expenses):
 			HStack(spacing: Spacing.s2) {
-				Label(format.amount(income), systemImage: "arrow.up")
+				Label(format.amount(income, on: .register), systemImage: "arrow.up")
 					.foregroundStyle(Color.moneyAvailable)
-					.accessibilityLabel("Money in \(format.amount(income))")
-				Label(format.amount(expenses), systemImage: "arrow.down")
+					.accessibilityLabel("Money in \(format.amount(income, on: .register))")
+				Label(format.amount(expenses, on: .register), systemImage: "arrow.down")
 					.foregroundStyle(Color.moneyOverspent)
-					.accessibilityLabel("Money out \(format.amount(expenses))")
+					.accessibilityLabel("Money out \(format.amount(expenses, on: .register))")
 			}
 			.font(.figures(.caption, weight: .semibold))
 			.labelStyle(.titleAndIcon)
@@ -397,7 +397,7 @@ private struct Signed: View {
 	var weight: Font.Weight = .medium
 
 	var body: some View {
-		Text((amount > 0 ? "+" : "") + format.amount(amount))
+		Text((amount > 0 ? "+" : "") + format.amount(amount, on: .register))
 			.font(.figures(.body, weight: weight))
 			.foregroundStyle(amount < 0 ? Color.moneyOverspent : Color.moneyAvailable)
 	}
@@ -500,7 +500,7 @@ private struct BigFigure: View {
 
 	private var text: String {
 		switch figure {
-		case .money(let amount): format.amount(amount)
+		case .money(let amount): format.amount(amount, on: .register)
 		case .percent(let value): (value / 100).formatted(.percent.precision(.fractionLength(0...1)))
 		case .number(let value): value.formatted(.number.precision(.fractionLength(0...2)))
 		case .days(let value): value == 1 ? "1 day" : "\(value) days"
@@ -544,7 +544,7 @@ private struct PairBars: View {
 		VStack(spacing: 4) {
 			VStack(spacing: 0) {
 				Text(item.0).font(.text(.caption)).foregroundStyle(.textSecondary)
-				Text(format.amount(item.1)).font(.figures(.caption, weight: .semibold))
+				Text(format.amount(item.1, on: .register)).font(.figures(.caption, weight: .semibold))
 			}
 			RoundedRectangle(cornerRadius: 3).fill(item.2).frame(width: 18, height: max(height, 2))
 		}
@@ -611,7 +611,7 @@ private struct CalendarGrid: View {
 		}
 		.frame(height: 30)
 		.accessibilityElement(children: .ignore)
-		.accessibilityLabel("\(day.day): in \(format.amount(day.income)), out \(format.amount(day.expenses))")
+		.accessibilityLabel("\(day.day): in \(format.amount(day.income, on: .register)), out \(format.amount(day.expenses, on: .register))")
 	}
 }
 

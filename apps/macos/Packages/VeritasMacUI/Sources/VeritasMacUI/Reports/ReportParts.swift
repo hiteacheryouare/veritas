@@ -19,7 +19,7 @@ struct ReportAmount: View {
 					.font(.system(size: size == .body ? 10 : size.rawValue * 0.6, weight: .semibold))
 					.accessibilityHidden(true)
 			}
-			Text(format.amount(amount))
+			Text(format.amount(amount, on: .register))
 				.font(.figures(size, weight: weight))
 				.monospacedDigit()
 				.lineLimit(1)
@@ -133,7 +133,7 @@ struct DrilldownSheet: View {
 							TableColumn("Account") { Text($0.accountName) }
 								.width(min: 80, ideal: 100)
 							TableColumn("Amount") { row in
-								Text(model.format.amount(row.amount))
+								Text(model.format.amount(row.amount, on: .register))
 									.font(.figures(.body))
 									.frame(maxWidth: .infinity, alignment: .trailing)
 							}

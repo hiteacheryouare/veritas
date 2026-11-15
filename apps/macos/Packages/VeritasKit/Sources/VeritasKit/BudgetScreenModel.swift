@@ -15,11 +15,9 @@ public final class BudgetScreenModel {
 	public private(set) var editingID: String?
 
 	@ObservationIgnored let workspace: WorkspaceModel
-	@ObservationIgnored private let amountReader: any AmountReader
 
-	public init(workspace: WorkspaceModel, reader: any AmountReader, month: Month = BudgetScreenModel.currentMonth()) {
+	public init(workspace: WorkspaceModel, month: Month = BudgetScreenModel.currentMonth()) {
 		self.workspace = workspace
-		amountReader = reader
 		self.month = month
 	}
 
@@ -32,9 +30,13 @@ public final class BudgetScreenModel {
 
 	public var isReadOnly: Bool { workspace.readOnly != nil }
 
+	/// A tracking budget has no To Budget, holds, covers or carryover (R-BUD-2).
+	public var isTracking: Bool { workspace.readOnly == .trackingBudget }
+
 	public var numberStyle: NumberStyle { workspace.numberStyle }
 
-	public var reader: any AmountReader { amountReader }
+	/// Read when each field opens, so a field always uses the open budget's places.
+	public var reader: any AmountReader { workspace.budgetAmountReader }
 
 	/// The groups and envelopes on screen: hidden ones only while Show Hidden is on.
 	public var groups: [EnvelopeGroup] {
@@ -67,13 +69,33 @@ public final class BudgetScreenModel {
 		return sheet.month != sheet.lastMonth
 	}
 
+	/// An edit reloads the sheet more than once, and ⌘→ can start the next
+	/// month's load meanwhile. Only the latest load lands, so a slow one never
+	/// takes the screen back a month or shows a sheet from before the edit.
+	@ObservationIgnored private var loadGeneration = 0
+
 	public func load() async {
+		loadGeneration += 1
+		let generation = loadGeneration
 		guard let loaded = await workspace.budgetMonth(month) else { return }
+		let openGoals = await workspace.goals().filter(\.isOpen)
+		guard generation == loadGeneration else { return }
 		sheet = loaded
 		month = loaded.month
-		goals = await workspace.goals().filter(\.isOpen)
+		goals = openGoals
 		if let selection, !envelopeIDs.contains(selection) {
 			self.selection = nil
+		}
+		refreshEditing()
+	}
+
+	/// An undo or redo can change the cell under an open field. An untouched
+	/// field shows the new value, and the field closes if its envelope is gone.
+	private func refreshEditing() {
+		guard let id = editingID, let editing else { return }
+		guard let envelope = envelope(id) else { return cancelEditing() }
+		if editing.isUntouched, envelope.budgeted != editing.original {
+			self.editing = AmountFieldModel(amount: envelope.budgeted, style: workspace.numberStyle, reader: reader)
 		}
 	}
 
@@ -99,10 +121,10 @@ public final class BudgetScreenModel {
 
 
 	public func beginEditing(_ id: String) {
-		guard let envelope = envelope(id), group(of: id)?.isIncome == false else { return }
+		guard !isReadOnly, let envelope = envelope(id), group(of: id)?.isIncome == false else { return }
 		selection = id
 		editingID = id
-		editing = AmountFieldModel(amount: envelope.budgeted, style: workspace.numberStyle, reader: amountReader)
+		editing = AmountFieldModel(amount: envelope.budgeted, style: workspace.numberStyle, reader: reader)
 	}
 
 	public func cancelEditing() {
@@ -115,7 +137,7 @@ public final class BudgetScreenModel {
 	public func commitEditing(thenMove step: Int = 0) async {
 		guard let editing, let id = editingID else { return }
 		guard let amount = await editing.commit() else { return }
-		if amount != editing.original {
+		if amount != envelope(id)?.budgeted {
 			guard await workspace.perform(.setBudget(month: month, categoryId: id, amount: amount)) else { return }
 			await load()
 		}

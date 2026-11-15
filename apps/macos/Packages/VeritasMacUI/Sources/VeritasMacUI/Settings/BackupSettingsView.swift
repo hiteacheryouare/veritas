@@ -44,8 +44,6 @@ struct BackupSettingsView: View {
 			Button("Restore") { Task { await settings.restoreSnapshot(id: snapshot.id) } }
 				.keyboardShortcut(.defaultAction)
 			Button("Cancel", role: .cancel) {}
-		} message: { _ in
-			Text("Veritas saves a snapshot of the budget as it is now first.")
 		}
 	}
 

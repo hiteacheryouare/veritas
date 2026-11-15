@@ -172,7 +172,7 @@ private struct SpendingList: View {
 				}
 				.buttonStyle(.plain)
 				.help(ReportWords.showTransactions(line.count) ?? "")
-				.accessibilityLabel("\(line.title), \(model.format.amount(line.amount))")
+				.accessibilityLabel("\(line.title), \(model.format.amount(line.amount, on: .register))")
 				.accessibilityIdentifier("spending.\(line.id)")
 				Divider().padding(.leading, Spacing.s4)
 			}

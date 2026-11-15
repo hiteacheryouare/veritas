@@ -38,11 +38,12 @@ public struct BudgetOverview: Hashable, Sendable {
 	/// The full integrity check still runs in the background. The budget is usable meanwhile.
 	public let isChecking: Bool
 	public let accountGroups: [SidebarGroup]
+	/// The budget's number format and its currency's symbol and places, read
+	/// with the overview so they are set before any screen shows the budget.
 	/// `nil` until the core reads the budget's own format.
 	public let format: MoneyFormat?
 	/// How amount fields read what's typed: the budget's separators.
 	public let numberStyle: NumberStyle
-	public let currencyCode: String?
 
 	public init(
 		name: String?,
@@ -53,8 +54,7 @@ public struct BudgetOverview: Hashable, Sendable {
 		isChecking: Bool = false,
 		accountGroups: [SidebarGroup],
 		format: MoneyFormat? = nil,
-		numberStyle: NumberStyle = .commaDot,
-		currencyCode: String? = nil
+		numberStyle: NumberStyle = .commaDot
 	) {
 		self.name = name
 		self.directory = directory
@@ -65,7 +65,6 @@ public struct BudgetOverview: Hashable, Sendable {
 		self.accountGroups = accountGroups
 		self.format = format
 		self.numberStyle = numberStyle
-		self.currencyCode = currencyCode
 	}
 
 	public var accounts: [SidebarAccount] {

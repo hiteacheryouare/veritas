@@ -29,6 +29,13 @@ struct BudgetScreenTests {
 		#expect(field.original == 41_200)
 	}
 
+	@Test func anEmptyAmountAsksForOne() async {
+		let field = AmountFieldModel(amount: 41_200, style: .commaDot, reader: CoreAmountReader(budgetDecimalPlaces: 2))
+		field.type("")
+		#expect(await field.commit() == nil)
+		#expect(field.problem == "Enter an amount or press Esc.")
+	}
+
 	@Test func anExpressionPreviewsWhatReturnWouldSet() async throws {
 		let field = AmountFieldModel(amount: 41_200, style: .commaDot, reader: CoreAmountReader())
 		field.type("+")
@@ -115,15 +122,15 @@ struct BudgetScreenTests {
 		]
 		let screen = await openScreen()
 		#expect(screen.goals.map(\.id) == ["laptop"], "closed goals stay off the overview")
-		#expect(abs(screen.goals[0].progress - 0.7467) < 0.001)
+		#expect(screen.goals[0].progressPercent == 74)
 		#expect(screen.goals[0].targetMonth == Month(year: 2027, month: 3))
 	}
 
 	@Test func goalCardsRoundToWholeUnits() {
 		let format = MoneyFormat()
-		#expect(format.wholeCurrency(112_000) == "$1,120")
-		#expect(format.wholeCurrency(41_050) == "$411")
-		#expect(format.wholeCurrency(-41_049) == "\u{2212}$410")
+		#expect(format.wholeCurrency(112_000, on: .budget) == "$1,120")
+		#expect(format.wholeCurrency(41_050, on: .budget) == "$411")
+		#expect(format.wholeCurrency(-41_049, on: .budget) == "\u{2212}$410")
 	}
 
 	@Test func deletingAnEnvelopeWithHistoryArchivesItInstead() async {
@@ -188,7 +195,7 @@ struct BudgetScreenTests {
 		]
 		let workspace = WorkspaceModel(library: BudgetFakeLibrary(session: session), format: MoneyFormat())
 		await workspace.reopen(directory: URL(filePath: "/tmp/budget"))
-		let goals = GoalsScreenModel(workspace: workspace, reader: CoreAmountReader(budgetDecimalPlaces: 2))
+		let goals = GoalsScreenModel(workspace: workspace)
 		await goals.load()
 		#expect(goals.open.map(\.id) == ["laptop", "tires"])
 		#expect(goals.archive.map(\.id) == ["vet"])
@@ -196,6 +203,44 @@ struct BudgetScreenTests {
 		#expect(!session.goals[1].canRetarget, "a spent goal is reopened or closed, not re-targeted")
 		#expect(await goals.close(goals.open[1], releaseTo: "groceries", alsoMoveLater: false))
 		#expect(session.commands == [.closeGoal(goalId: "tires", releaseToCategoryId: "groceries", alsoMoveLater: false)])
+	}
+
+	@Test func aSlowReloadNeverTakesTheScreenBackAMonth() async {
+		session.echoesMonth = true
+		let workspace = WorkspaceModel(library: BudgetFakeLibrary(session: session), format: MoneyFormat())
+		await workspace.reopen(directory: URL(filePath: "/tmp/budget"))
+		let october = Month(year: 2026, month: 10)
+		let screen = BudgetScreenModel(workspace: workspace, month: october)
+		await screen.load()
+		session.slowMonth = october
+		let reload = Task { await screen.load() }
+		await Task.yield()
+		await screen.nextMonth()
+		await reload.value
+		#expect(screen.month == BudgetFakeSession.month)
+		#expect(screen.sheet?.month == BudgetFakeSession.month, "the October reload that finished last is dropped")
+	}
+
+	@Test func arrowKeysWalkTheGoalGridThenTheArchive() async {
+		session.goals = (1...6).map { Self.goal("open\($0)", state: .active, available: 0, target: 100) }
+			+ (1...2).map { Self.goal("closed\($0)", state: .closed, available: 0, target: 100) }
+		let workspace = WorkspaceModel(library: BudgetFakeLibrary(session: session), format: MoneyFormat())
+		await workspace.reopen(directory: URL(filePath: "/tmp/budget"))
+		let goals = GoalsScreenModel(workspace: workspace)
+		await goals.load()
+		var visited: [String?] = []
+		for move: GoalsScreenModel.Move in [.down, .right, .down, .down, .up, .left, .up, .right, .down, .down, .down, .down] {
+			goals.moveSelection(move, columns: 4)
+			visited.append(goals.selection)
+		}
+		#expect(visited == [
+			"open1", "open2", "open6", "closed1", "open6", "open5", "open1", "open2",
+			"open6", "closed1", "closed2", "closed2"
+		])
+		goals.selection = "open3"
+		goals.moveSelection(.down, columns: 4)
+		#expect(goals.selection == "open6", "down from a row above a short last row lands on its last card")
+		#expect(goals.selectedGoal?.id == "open6")
 	}
 
 	@Test func budgetCellsUseTheCurrencysPlaces() async throws {
@@ -223,7 +268,7 @@ struct BudgetScreenTests {
 	private func openScreen() async -> BudgetScreenModel {
 		let workspace = WorkspaceModel(library: BudgetFakeLibrary(session: session), format: MoneyFormat())
 		await workspace.reopen(directory: URL(filePath: "/tmp/budget"))
-		let screen = BudgetScreenModel(workspace: workspace, reader: CoreAmountReader(), month: BudgetFakeSession.month)
+		let screen = BudgetScreenModel(workspace: workspace, month: BudgetFakeSession.month)
 		await screen.load()
 		return screen
 	}
@@ -236,6 +281,9 @@ final class BudgetFakeSession: BudgetSession, @unchecked Sendable {
 	var hideRent = false
 	var goals: [GoalSummary] = []
 	var history = CategoryHistory(transactions: 0, budgetedMonths: 0, taxBucket: nil)
+	/// Answers with the month asked for instead of always November.
+	var echoesMonth = false
+	var slowMonth: Month?
 
 	func goals(today: String) async throws -> [GoalSummary] {
 		goals
@@ -261,11 +309,14 @@ final class BudgetFakeSession: BudgetSession, @unchecked Sendable {
 	}
 
 	func budgetMonth(_ month: Month, today: String) async throws -> BudgetMonth {
+		if month == slowMonth {
+			try await Task.sleep(for: .milliseconds(300))
+		}
 		let row = { (id: String, budgeted: Int64, spent: Int64, available: Int64, tone: VeritasCore.MoneyTone) in
 			EnvelopeRow(id: id, name: id.capitalized, hidden: false, budgeted: budgeted, spent: spent, available: available, carryover: false, tone: tone, fill: 0.5, note: nil)
 		}
 		return BudgetMonth(
-			month: Self.month, firstMonth: Month(year: 2026, month: 1), lastMonth: Self.month,
+			month: echoesMonth ? month : Self.month, firstMonth: Month(year: 2026, month: 1), lastMonth: Self.month,
 			toBudget: 31_240, income: 400_000, fromLastMonth: 0, overspentLastMonth: 0, budgeted: 0, forNextMonth: 0, spent: 0, available: 0,
 			groups: [
 				EnvelopeGroup(id: "everyday", name: "Everyday", isIncome: false, hidden: false, budgeted: 0, spent: 0, available: 0, envelopes: [

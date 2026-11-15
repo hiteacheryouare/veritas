@@ -5,6 +5,7 @@ import VeritasKit
 struct VeritasCommands: Commands {
 	@FocusedValue(\.workspace) private var model
 	@FocusedValue(\.budgetMonths) private var budgetMonths
+	@FocusedValue(\.goalActions) private var goalActions
 	@Environment(\.openWindow) private var openWindow
 
 	private var isOpen: Bool { model?.phase == .open }
@@ -14,7 +15,9 @@ struct VeritasCommands: Commands {
 	/// in a sheet, which is about something else.
 	private func step(back: Bool) {
 		let window = NSApp.keyWindow
-		if let editor = window?.firstResponder as? NSTextView {
+		// A field that just closed can leave its detached editor as first
+		// responder; only a field still on screen keeps the keys.
+		if let editor = window?.firstResponder as? NSTextView, editor.superview != nil, editor.isEditable {
 			if back { editor.moveToLeftEndOfLine(nil) } else { editor.moveToRightEndOfLine(nil) }
 			return
 		}
@@ -92,6 +95,14 @@ struct VeritasCommands: Commands {
 			Button("Go to Anything…") { model?.isPaletteShown = true }
 				.keyboardShortcut("k")
 				.disabled(!isOpen)
+		}
+		CommandMenu("Goal") {
+			Button("Close Goal…") { goalActions?.close?() }
+				.disabled(goalActions?.close == nil)
+			Button("Change Target…") { goalActions?.changeTarget?() }
+				.disabled(goalActions?.changeTarget == nil)
+			Button("Reopen Goal") { goalActions?.reopen?() }
+				.disabled(goalActions?.reopen == nil)
 		}
 	}
 
