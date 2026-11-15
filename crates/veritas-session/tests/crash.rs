@@ -289,6 +289,7 @@ fn create_until_killed() {
 			name: "Checking".to_owned(),
 			kind: NewAccountKind::Checking,
 			starting_balance: Money::from_minor(120_000),
+			loan: None,
 		}],
 	};
 	say("ready 0");

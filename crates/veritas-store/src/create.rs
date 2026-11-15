@@ -135,6 +135,7 @@ pub fn paycheck_accounts(retirement_401k: bool, hsa: bool) -> Vec<NewAccount> {
 			name: "401(k)".to_owned(),
 			kind: NewAccountKind::Retirement,
 			starting_balance: Money::ZERO,
+			loan: None,
 		});
 	}
 	if hsa {
@@ -142,6 +143,7 @@ pub fn paycheck_accounts(retirement_401k: bool, hsa: bool) -> Vec<NewAccount> {
 			name: "HSA".to_owned(),
 			kind: NewAccountKind::Investment,
 			starting_balance: Money::ZERO,
+			loan: None,
 		});
 	}
 	accounts
@@ -207,9 +209,15 @@ pub fn plan_new_account(
 		}),
 		Row::AccountMeta(AccountMetaRow {
 			account: id.clone(),
-			meta: AccountMeta {
-				kind: Some(account.kind.account_kind()),
-				..AccountMeta::default()
+			meta: {
+				let terms = account.loan.clone().unwrap_or_default();
+				AccountMeta {
+					kind: Some(account.kind.account_kind()),
+					loan_rate_bps: terms.rate_bps,
+					loan_payment: terms.payment,
+					loan_payment_day: terms.payment_day,
+					lender: terms.lender,
+				}
 			},
 		}),
 	];

@@ -62,6 +62,9 @@ pub struct RegisterFilter {
 	pub category_id: Option<String>,
 	pub payee_id: Option<String>,
 	pub uncategorized: bool,
+	/// v9. Rows whose notes, or a line's notes, carry exactly this tag.
+	#[uniffi(default = None)]
+	pub tag: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -110,6 +113,9 @@ pub struct RegisterRow {
 	pub reconciled: bool,
 	pub transfer_account_id: Option<String>,
 	pub counterpart_id: Option<String>,
+	/// v9. When the other side is a split line, its split's id: deleting this
+	/// row deletes that whole split (DEBT-6 A.5), so confirm first.
+	pub counterpart_parent_id: Option<String>,
 	pub lines: Vec<RegisterLine>,
 	pub split_difference: Option<i64>,
 	pub starting_balance: bool,
@@ -262,6 +268,7 @@ pub(crate) fn register_page<S: veritas_session::Backend>(
 		category: filter.category_id.as_deref().map(CategoryId::new),
 		payee: filter.payee_id.as_deref().map(PayeeId::new),
 		uncategorized: filter.uncategorized,
+		tag: filter.tag.clone(),
 	};
 	let sort = Sort {
 		key: match sort.key {
@@ -325,6 +332,7 @@ impl From<register::RegisterRow> for RegisterRow {
 			reconciled: row.reconciled,
 			transfer_account_id: text(&row.transfer_account),
 			counterpart_id: text(&row.counterpart),
+			counterpart_parent_id: text(&row.counterpart_parent),
 			lines: row.lines.into_iter().map(RegisterLine::from).collect(),
 			split_difference: row.split_difference.map(Money::minor),
 			starting_balance: row.starting_balance,
