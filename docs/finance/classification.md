@@ -102,6 +102,8 @@ Why the unusual rows:
 
 "Visible" means the category is live, not hidden, not archived, and not in a hidden group. A hidden or archived category keeps its kind (CLS-3.2) and its history, but it is not offered for new money. If the only matching category is hidden, the answer is the same as having none: Veritas offers to create one. Example: one hidden `savings` category and no other gives "none", so the prompt offers a new one, and the hidden one stays as it was.
 
+If the group Veritas would create the category in already exists but is hidden, Veritas reuses that group and unhides it, after a confirm step: 'Your group "{name}" is hidden. Show it again and add "{category}" to it?' The categories already in the group keep their own hidden flags. If the user cancels, nothing is written and the prompt stays open so they can pick another category. Veritas never creates a group under a second name. Example: a hidden group "Debt" and no visible `debt_principal` category. The user answers "Loan/debt payment", the confirm shows, and on yes "Debt" is unhidden with a new "Loan Principal" category inside it.
+
 Resolved in P0.4: Actual keeps the category on mixed pairs and clears it on same-side pairs (`transfer.ts:24-45`). No server check requires a category on on->off transfers. Only the Close Account modal does (`desktop-client/src/components/modals/CloseAccountModal.tsx:33-40`, `docs/actual-format.md` §4.2). Uncategorized on->off transfers exist in real files, which is why row 10 exists. PLAN R-XFER-4's "which Actual requires to carry a category" is wrong and needs correcting.
 
 ### CLS-4.2 Existing Actual data with no metadata

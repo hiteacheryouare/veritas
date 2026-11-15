@@ -4,6 +4,7 @@
 
 use chrono::{Days, NaiveDate};
 use serde_json::Value;
+pub(crate) use veritas_domain::is_js_whitespace;
 
 pub(crate) fn truthy(value: Option<&Value>) -> bool {
 	match value {
@@ -93,18 +94,6 @@ pub(crate) fn strict_date(text: &str) -> Option<NaiveDate> {
 		return None;
 	}
 	NaiveDate::parse_from_str(text, "%Y-%m-%d").ok()
-}
-
-/// The characters JavaScript's `\s` matches.
-pub(crate) fn is_js_whitespace(c: char) -> bool {
-	matches!(
-		c,
-		'\t' | '\n' | '\u{0b}' | '\u{0c}' | '\r' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'
-			..='\u{200a}'
-				| '\u{2028}' | '\u{2029}'
-				| '\u{202f}' | '\u{205f}'
-				| '\u{3000}' | '\u{feff}'
-	)
 }
 
 #[cfg(test)]

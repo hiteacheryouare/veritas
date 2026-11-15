@@ -555,6 +555,7 @@ fn a_kind_change_is_counted_before_it_reclassifies_history() {
 		Command::CreateKindCategory {
 			kind: CategoryKind::DebtPrincipal,
 			name: "Loan Principal".to_owned(),
+			unhide_group: false,
 		},
 	);
 	let principal = created(&change, EntityKind::Category);
@@ -575,6 +576,7 @@ fn a_kind_change_is_counted_before_it_reclassifies_history() {
 	assert!(refused(session.perform(Command::CreateKindCategory {
 		kind: CategoryKind::DebtPrincipal,
 		name: "Another".to_owned(),
+		unhide_group: false,
 	})));
 	session.undo().unwrap();
 	assert_eq!(
@@ -750,6 +752,7 @@ fn loan_setup(label: &str, owed: i64) -> LoanSetup {
 			Command::CreateKindCategory {
 				kind: CategoryKind::DebtPrincipal,
 				name: "Loan Principal".to_owned(),
+				unhide_group: false,
 			},
 		),
 		EntityKind::Category,

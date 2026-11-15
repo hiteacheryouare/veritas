@@ -259,11 +259,14 @@ pub enum Command {
 		kind: crate::money::CategoryKind,
 	},
 	/// v9. CLS-4.1's "created if none exists": a debt principal or savings
-	/// category in "Savings and Debt", else "Debt" or "Savings", created if
-	/// missing. The new id is the `category` entity.
+	/// category in "Savings and Debt", else "Debt" or "Savings", reused or
+	/// created. A hidden group is reused and unhidden only with
+	/// `unhide_group` (the user confirmed `kindCategoryPlan`), else `Invalid`.
+	/// The new id is the `category` entity.
 	CreateKindCategory {
 		kind: crate::money::CategoryKind,
 		name: String,
+		unhide_group: bool,
 	},
 	/// v9. R-DEBT-1: replaces the terms; a `nil` field clears it.
 	SetLoanTerms {
@@ -883,10 +886,17 @@ impl Command {
 			Command::SetCategoryKind { category_id, kind } => {
 				veritas_session::kinds::set_kind(data, &category(category_id), (*kind).into())
 			}
-			Command::CreateKindCategory { kind, name } => {
-				veritas_session::kinds::create_kind_category(data, (*kind).into(), name)
-					.map(|(rows, _)| rows)
-			}
+			Command::CreateKindCategory {
+				kind,
+				name,
+				unhide_group,
+			} => veritas_session::kinds::create_kind_category(
+				data,
+				(*kind).into(),
+				name,
+				*unhide_group,
+			)
+			.map(|(rows, _)| rows),
 			Command::SetLoanTerms { account_id, terms } => {
 				crate::money::set_loan_terms(data, account_id, terms)
 			}
