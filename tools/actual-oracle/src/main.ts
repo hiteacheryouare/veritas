@@ -6,7 +6,7 @@ import { writeCanonical } from './canonicalJson.ts';
 import type { CanonicalValue } from './canonicalJson.ts';
 import { budgetMonthsDump, computedDump, rawDump } from './dump.ts';
 import { DEFAULT_SEED, DEFAULT_TODAY, withActual } from './environment.ts';
-import type { Determinism } from './environment.ts';
+import type { ActualSession, Determinism } from './environment.ts';
 import { applyOps, parseOpFile } from './ops.ts';
 import { arithmeticVectors } from './arithmeticVectors.ts';
 import { loadArithmetic } from './reference.ts';
@@ -24,6 +24,7 @@ const USAGE = `Usage:
   node src/main.ts arithmetic-vectors [--out <file>]
   node src/main.ts report-rows <zip> <requests.json> [--out <file>]
   node src/main.ts widgets <zip> <requests.json> [--out <file>]
+  node src/main.ts rule-matches <zip> <rule-ids.json> [--out <file>]
   node src/main.ts dashboards <zip> [--out <file>]
 
 eval, arithmetic-vectors and widgets run Actual's own code from the pinned source in
@@ -78,6 +79,27 @@ const dump = async (determinism: Determinism, zipPath: string, out: string | und
 				return computedDump(session);
 			});
 	writeCanonicalTo(computed ? { ...raw, computed } : raw, out);
+};
+
+// The rows the rule editor lists for "Apply to existing"
+// (dc/components/rules/RuleEditor.tsx:1085-1103), in its order.
+const ruleMatches = async ({ api, internal }: ActualSession, ruleIds: string[]) => {
+	const matches: Record<string, string[]> = {};
+	for (const id of ruleIds) {
+		const rule = await internal.send('rule-get', { id });
+		if (!rule) {
+			throw new Error(`Rule ${id} isn't loaded`);
+		}
+		const { filters } = await internal.send('make-filters-from-conditions', { conditions: rule.conditions });
+		const splits = new Set(rule.actions.map((action: any) => action.options?.splitIndex ?? 0));
+		const parentOnly = splits.size > 1 ? { is_child: false } : {};
+		const opKey = rule.conditionsOp === 'or' ? '$or' : '$and';
+		const { data } = (await api.aqlQuery(
+			api.q('transactions').filter({ [opKey]: filters, ...parentOnly }).select('id')
+		)) as { data: { id: string }[] };
+		matches[id] = filters.length > 0 ? data.map(row => row.id) : [];
+	}
+	return matches;
 };
 
 const apply = (determinism: Determinism, zipPath: string, opsPath: string, out: string) =>
@@ -217,6 +239,13 @@ const main = async () => {
 			return widgetData(session, requests);
 		});
 		writeCanonicalTo(data, values.out);
+	} else if (command === 'rule-matches' && args.length === 2) {
+		const ruleIds: string[] = JSON.parse(readFileSync(args[1], 'utf8'));
+		const matches = await withActual(determinism, async session => {
+			await session.api.importBudget(readFileSync(args[0]));
+			return ruleMatches(session, ruleIds);
+		});
+		writeCanonicalTo(matches, values.out);
 	} else if (command === 'dashboards' && args.length === 1) {
 		const data = await withActual(determinism, async session => {
 			await session.api.importBudget(readFileSync(args[0]));
