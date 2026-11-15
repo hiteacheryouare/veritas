@@ -1089,11 +1089,10 @@ fn reserve_folder(parent: &Path, prefix: &str) -> Result<PathBuf, CoreError> {
 	}
 }
 
-/// What the budget stores in its preferences, with Actual's defaults for what
-/// it doesn't: comma-dot, no currency, fractions shown. An unset symbol
-/// position or spacing comes from the currency table, as Actual's currency
-/// picker would set it. Any position but `after` is before, and only `true`
-/// spaces, as Actual's useFormat reads them.
+/// What the budget stores in its preferences, read as Actual's useFormat
+/// reads them: comma-dot, no currency and fractions shown when unset; the
+/// symbol goes before the amount unless the position is `after`, and only
+/// `true` puts a space between them, so an unset pair is before, no space.
 fn number_format(prefs: &veritas_domain::FormatPrefs) -> veritas_domain::NumberFormat {
 	use veritas_domain::NumberStyle;
 	let style = [
@@ -1106,20 +1105,11 @@ fn number_format(prefs: &veritas_domain::FormatPrefs) -> veritas_domain::NumberF
 	.into_iter()
 	.find(|style| prefs.number_format.as_deref() == Some(style.actual_value()))
 	.unwrap_or(NumberStyle::CommaDot);
-	let currency = prefs.currency_code.clone().filter(|code| !code.is_empty());
-	let (table_first, table_space) =
-		veritas_domain::NumberFormat::currency_symbol_placement(currency.as_deref());
 	veritas_domain::NumberFormat {
-		currency,
+		currency: prefs.currency_code.clone().filter(|code| !code.is_empty()),
 		style,
 		hide_decimals: prefs.hide_fraction,
-		symbol_first: prefs
-			.symbol_position
-			.as_deref()
-			.map_or(table_first, |position| position != "after"),
-		symbol_space: prefs
-			.symbol_space
-			.as_deref()
-			.map_or(table_space, |space| space == "true"),
+		symbol_first: prefs.symbol_position.as_deref() != Some("after"),
+		symbol_space: prefs.symbol_space.as_deref() == Some("true"),
 	}
 }

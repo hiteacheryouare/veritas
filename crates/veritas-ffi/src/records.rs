@@ -316,8 +316,9 @@ pub struct NumberFormat {
 	pub currency: Option<String>,
 	pub style: NumberStyle,
 	pub hide_decimals: bool,
-	/// The symbol goes before the amount. Always set by `overview()`; `None`
-	/// in `createBudget` takes the currency table's placement.
+	/// The symbol goes before the amount. Always set by `overview()`, from
+	/// the budget's preferences (before when unset, as Actual). `None` in
+	/// `createBudget` seeds the preference from the currency table.
 	#[uniffi(default = None)]
 	pub symbol_first: Option<bool>,
 	/// A narrow no-break space (U+202F) between amount and symbol. Set and

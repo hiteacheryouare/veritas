@@ -894,7 +894,8 @@ pub(crate) mod tests {
 		// Actual keeps the symbol's side and spacing as budget preferences
 		// (currencySymbolPosition, currencySpaceBetweenAmountAndSymbol), set
 		// from the currency table when a currency is picked. EUR reads
-		// `1.234,56 €` there. Unset preferences fall back to the table.
+		// `1.234,56 €` there. Unset, useFormat puts the symbol before with no
+		// space, so an imported budget reads the same in both apps.
 		let scratch = Scratch::new("symbol-placement");
 		let format = crate::NumberFormat {
 			currency: Some("EUR".to_owned()),
@@ -966,8 +967,8 @@ pub(crate) mod tests {
 		let core = reopened();
 		assert_eq!(
 			placement(&core),
-			(Some(false), Some(true)),
-			"unset: the table"
+			(Some(true), Some(false)),
+			"unset: Actual's default, not the table"
 		);
 		core.close().unwrap();
 	}
