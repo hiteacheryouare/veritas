@@ -11,7 +11,7 @@ use veritas_domain::{
 };
 
 use crate::custom_report::{CustomReport, Interval};
-use crate::json::Json;
+use crate::filter::TransactionFilter;
 
 /// One grouped row: a sum of same-signed amounts for an interval, account,
 /// payee, category and transfer account, as Actual's query returns it.
@@ -168,7 +168,6 @@ pub fn report_range(
 
 /// What the report's queries can see of one live, non-parent row.
 struct Fields<'a> {
-	transaction: &'a Transaction,
 	category: Option<&'a CategoryId>,
 	category_group: Option<&'a CategoryGroupId>,
 	payee: Option<&'a PayeeId>,
@@ -176,7 +175,7 @@ struct Fields<'a> {
 	account: Option<&'a AccountId>,
 }
 
-fn is_row(budget: &BudgetData, transaction: &Transaction) -> bool {
+pub(crate) fn is_row(budget: &BudgetData, transaction: &Transaction) -> bool {
 	!transaction.tombstone
 		&& match &transaction.split {
 			SplitRole::None => true,
@@ -218,7 +217,6 @@ fn fields<'a>(budget: &'a BudgetData, transaction: &'a Transaction) -> Fields<'a
 				.is_none_or(|account| live_account(account).is_some())
 		});
 	Fields {
-		transaction,
 		category: category.map(|category| &category.id),
 		category_group: category_group.map(|group| &group.id),
 		payee: payee.map(|payee| &payee.id),
@@ -283,15 +281,7 @@ pub fn report_rows(
 	start: &str,
 	end: &str,
 ) -> Result<(Vec<QueryRow>, Vec<QueryRow>), CoreError> {
-	let conditions = report
-		.conditions
-		.iter()
-		.filter(|condition| condition.get("customName").is_none())
-		.map(Condition::parse)
-		.collect::<Result<Vec<_>, _>>()?
-		.into_iter()
-		.flatten()
-		.collect::<Vec<_>>();
+	let filter = TransactionFilter::new(&report.conditions, report.conditions_or)?;
 	let (low, high) = (bound(start, report.interval)?, bound(end, report.interval)?);
 	let mut assets: BTreeMap<GroupKey, (Fields, Money)> = BTreeMap::new();
 	let mut debts: BTreeMap<GroupKey, (Fields, Money)> = BTreeMap::new();
@@ -304,18 +294,10 @@ pub fn report_rows(
 		if unit < low || unit > high || transaction.amount == Money::ZERO {
 			continue;
 		}
-		let row = fields(budget, transaction);
-		let passes = |condition: &Condition| condition.matches(&row);
-		let keep = if conditions.is_empty() {
-			true
-		} else if report.conditions_or {
-			conditions.iter().any(passes)
-		} else {
-			conditions.iter().all(passes)
-		};
-		if !keep {
+		if !filter.matches(budget, transaction)? {
 			continue;
 		}
+		let row = fields(budget, transaction);
 		let key = (
 			interval_key(date, report.interval),
 			row.account,
@@ -365,265 +347,6 @@ pub fn report_rows(
 	Ok((finish(assets), finish(debts)))
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum FieldName {
-	Category,
-	CategoryGroup,
-	Payee,
-	Account,
-	Notes,
-	ImportedPayee,
-	Amount,
-	Date,
-	Cleared,
-	Reconciled,
-	Transfer,
-	Parent,
-}
-
-#[derive(Clone, Debug)]
-enum Test {
-	Equals(Option<String>),
-	NotEquals(Option<String>),
-	OneOf(Vec<String>),
-	NotOneOf(Vec<String>),
-	Contains(String, bool),
-	Number(&'static str, i64, Sign),
-	Between(i64, i64),
-	Day(&'static str, NaiveDate),
-	Within(NaiveDate, NaiveDate),
-	Flag(bool),
-	All(Vec<Condition>),
-}
-
-#[derive(Clone, Copy, Debug)]
-enum Sign {
-	Any,
-	Inflow,
-	Outflow,
-}
-
-#[derive(Clone, Debug)]
-struct Condition {
-	field: FieldName,
-	test: Test,
-}
-
-impl Condition {
-	/// `Ok(None)` drops a condition Actual drops too (an invalid one, or
-	/// `saved`, which has no condition type).
-	fn parse(json: &Json) -> Result<Option<Condition>, CoreError> {
-		let field = json.get("field").and_then(Json::as_str).unwrap_or_default();
-		let op = json.get("op").and_then(Json::as_str).unwrap_or_default();
-		let value = json.get("value").unwrap_or(&Json::Null);
-		let options = json.get("options");
-		let option =
-			|name: &str| options.and_then(|o| o.get(name)).and_then(Json::as_bool) == Some(true);
-		let name = match field {
-			"category" => FieldName::Category,
-			"category_group" => FieldName::CategoryGroup,
-			"payee" => FieldName::Payee,
-			"account" => FieldName::Account,
-			"notes" => FieldName::Notes,
-			"imported_payee" => FieldName::ImportedPayee,
-			"amount" => FieldName::Amount,
-			"date" => FieldName::Date,
-			"cleared" => FieldName::Cleared,
-			"reconciled" => FieldName::Reconciled,
-			"transfer" => FieldName::Transfer,
-			"parent" => FieldName::Parent,
-			"saved" => return Ok(None),
-			other => return Err(unsupported(format!("the condition field {other:?}"))),
-		};
-		let cant = || unsupported(format!("the condition {field} {op}"));
-		let text = |value: &Json| match value {
-			Json::Null => None,
-			Json::String(text) => Some(text.clone()),
-			other => Some(other.stringify()),
-		};
-		let lower = matches!(name, FieldName::Notes | FieldName::ImportedPayee);
-		let prepare = |value: &Json| text(value).map(|t| if lower { t.to_lowercase() } else { t });
-		let list = || {
-			value
-				.as_array()
-				.unwrap_or_default()
-				.iter()
-				.filter_map(&prepare)
-				.filter(|item| !item.is_empty())
-				.collect::<Vec<_>>()
-		};
-		let make = |test| Ok(Some(Condition { field: name, test }));
-		match name {
-			FieldName::Category
-			| FieldName::CategoryGroup
-			| FieldName::Payee
-			| FieldName::Account
-			| FieldName::Notes
-			| FieldName::ImportedPayee => match op {
-				"is" if name == FieldName::Category && matches!(value, Json::Null) => {
-					make(Test::All(vec![
-						Condition {
-							field: FieldName::Category,
-							test: Test::Equals(None),
-						},
-						Condition {
-							field: FieldName::Transfer,
-							test: Test::Flag(false),
-						},
-						Condition {
-							field: FieldName::Parent,
-							test: Test::Flag(false),
-						},
-					]))
-				}
-				"isNot" if name == FieldName::Category && matches!(value, Json::Null) => {
-					make(Test::All(vec![
-						Condition {
-							field: FieldName::Category,
-							test: Test::NotEquals(None),
-						},
-						Condition {
-							field: FieldName::Parent,
-							test: Test::Flag(false),
-						},
-					]))
-				}
-				"is" => make(Test::Equals(prepare(value))),
-				"isNot" => make(Test::NotEquals(prepare(value))),
-				"oneOf" => make(Test::OneOf(list())),
-				"notOneOf" => make(Test::NotOneOf(list())),
-				"contains" | "doesNotContain" if lower => make(Test::Contains(
-					prepare(value).unwrap_or_default(),
-					op == "contains",
-				)),
-				_ => Err(cant()),
-			},
-			FieldName::Amount => {
-				let sign = if option("inflow") {
-					Sign::Inflow
-				} else if option("outflow") {
-					Sign::Outflow
-				} else {
-					Sign::Any
-				};
-				let number = || value.as_i64().ok_or_else(cant);
-				match op {
-					"is" => make(Test::Number("=", number()?, sign)),
-					"gt" => make(Test::Number(">", number()?, sign)),
-					"gte" => make(Test::Number(">=", number()?, sign)),
-					"lt" => make(Test::Number("<", number()?, sign)),
-					"lte" => make(Test::Number("<=", number()?, sign)),
-					"isbetween" => {
-						let a = value.get("num1").and_then(Json::as_i64).ok_or_else(cant)?;
-						let b = value.get("num2").and_then(Json::as_i64).ok_or_else(cant)?;
-						make(Test::Between(a.min(b), a.max(b)))
-					}
-					_ => Err(cant()),
-				}
-			}
-			FieldName::Date => {
-				let raw = value.as_str().ok_or_else(cant)?;
-				let date = parse_date(raw).ok_or_else(cant)?;
-				match (op, raw.len()) {
-					("is", 10) => make(Test::Within(date, date)),
-					("is", 7) => make(Test::Within(date, month_end(date))),
-					("is", 4) => make(Test::Within(
-						date,
-						NaiveDate::from_ymd_opt(date.year(), 12, 31).ok_or_else(cant)?,
-					)),
-					("gt", 10) => make(Test::Day(">", date)),
-					("gte", 10) => make(Test::Day(">=", date)),
-					("lt", 10) => make(Test::Day("<", date)),
-					("lte", 10) => make(Test::Day("<=", date)),
-					_ => Err(cant()),
-				}
-			}
-			FieldName::Cleared
-			| FieldName::Reconciled
-			| FieldName::Transfer
-			| FieldName::Parent => match (op, value) {
-				("is", Json::Bool(flag)) => make(Test::Flag(*flag)),
-				_ => Err(cant()),
-			},
-		}
-	}
-
-	fn matches(&self, row: &Fields) -> bool {
-		let transaction = row.transaction;
-		let id = |field: FieldName| -> Option<String> {
-			match field {
-				FieldName::Category => row.category.map(ToString::to_string),
-				FieldName::CategoryGroup => row.category_group.map(ToString::to_string),
-				FieldName::Payee => row.payee.map(ToString::to_string),
-				FieldName::Account => row.account.map(ToString::to_string),
-				FieldName::Notes => transaction.notes.as_ref().map(|t| t.to_lowercase()),
-				FieldName::ImportedPayee => transaction
-					.imported_payee
-					.as_ref()
-					.map(|t| t.to_lowercase()),
-				_ => None,
-			}
-		};
-		match &self.test {
-			Test::All(parts) => parts.iter().all(|part| part.matches(row)),
-			Test::Equals(None) => id(self.field).is_none(),
-			Test::Equals(Some(value)) if value.is_empty() => {
-				id(self.field).is_none_or(|actual| actual.is_empty())
-			}
-			Test::Equals(Some(value)) => id(self.field).as_ref() == Some(value),
-			Test::NotEquals(None) => id(self.field).is_some(),
-			Test::NotEquals(Some(value)) => id(self.field).as_ref() != Some(value),
-			Test::OneOf(values) => id(self.field).is_some_and(|actual| values.contains(&actual)),
-			Test::NotOneOf(values) => {
-				!values.is_empty() && id(self.field).is_none_or(|actual| !values.contains(&actual))
-			}
-			Test::Contains(needle, wanted) => {
-				let found = id(self.field)
-					.filter(|text| !text.is_empty())
-					.is_some_and(|text| {
-						like(&normalise(&format!("%{needle}%")), &normalise(&text))
-					});
-				found == *wanted
-			}
-			Test::Number(op, value, sign) => {
-				let amount = transaction.amount.minor();
-				let (ok, actual) = match sign {
-					Sign::Any => (true, amount),
-					Sign::Inflow => (amount > 0, amount),
-					Sign::Outflow => (amount < 0, -amount),
-				};
-				ok && compare(op, actual, *value)
-			}
-			Test::Between(low, high) => (*low..=*high).contains(&transaction.amount.minor()),
-			Test::Day(op, date) => compare(
-				op,
-				transaction.date.naive().num_days_from_ce(),
-				date.num_days_from_ce(),
-			),
-			Test::Within(first, last) => (*first..=*last).contains(&transaction.date.naive()),
-			Test::Flag(flag) => {
-				let actual = match self.field {
-					FieldName::Cleared => transaction.cleared,
-					FieldName::Reconciled => transaction.reconciled,
-					FieldName::Transfer => transaction.transfer.is_some(),
-					_ => false,
-				};
-				actual == *flag
-			}
-		}
-	}
-}
-
-fn compare<T: Ord>(op: &str, a: T, b: T) -> bool {
-	match op {
-		"=" => a == b,
-		">" => a > b,
-		">=" => a >= b,
-		"<" => a < b,
-		_ => a <= b,
-	}
-}
-
 /// Actual's `getNormalisedString` for the letters it can meet in Latin text:
 /// lowercase, a few letters that have no decomposition, then accents removed.
 pub(crate) fn normalise(text: &str) -> String {
@@ -645,7 +368,7 @@ pub(crate) fn normalise(text: &str) -> String {
 
 /// Actual's `UNICODE_LIKE`: `%` is any run, `?` one character, and the match
 /// may start anywhere.
-fn like(pattern: &str, text: &str) -> bool {
+pub(crate) fn like(pattern: &str, text: &str) -> bool {
 	let pattern: Vec<char> = pattern.chars().collect();
 	let text: Vec<char> = text.chars().collect();
 	(0..=text.len()).any(|start| glob(&pattern, text.get(start..).unwrap_or_default()))

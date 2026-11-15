@@ -13,6 +13,10 @@
 
 `eval` and `arithmetic-vectors` can't use the bundle: `@actual-app/api` tree-shakes `evalArithmetic` and `currencyToAmount` away. They import the pinned, unmodified `packages/loot-core/src/shared/arithmetic.ts` and `util.ts` from `reference/actual` (or `ACTUAL_REFERENCE_DIR`) through a module hook that adds the `.ts` extension and resolves `date-fns` from the oracle's own `node_modules` (`src/reference.ts`). They refuse to run, naming `cargo xtask reference`, when that checkout is missing or isn't at the manifest's commit. `npm test` checks that `arithmetic-vectors` reproduces the committed file and skips those tests when the checkout is missing.
 
+`widgets <zip> <requests.json>` runs Actual's own dashboard card code from the same checkout: each request is `{id, type, meta, firstDayOfWeekIdx}`, and the oracle resolves the card's time range with `calculateTimeRange` and runs the card's spreadsheet from `packages/desktop-client/src/components/reports`. The hook resolves `@actual-app/core/*` and the `#` aliases through the checkout's own `package.json` files, every other package from the oracle's `node_modules`, and swaps the client connection for `src/shims/connection.ts`, which forwards each `send` to the open Actual session. Output is canonical JSON with dates as `yyyy-MM-dd` and non-integer numbers as their JS text, so readers that round a float's last digit can't make a false mismatch. A card that throws comes back as `{error}`.
+
+`dashboards <zip>` imports the zip and returns what Actual's dashboard and report pages read: the live `dashboard_pages` and `dashboard` rows through AQL (with `meta` parsed) and the saved reports through `report/get`. The dashboard journey test compares it with what Veritas shows after its edits.
+
 All commands also take `--today <YYYY-MM-DD>` (default `2026-11-09`) and `--seed <n>` (default `1`).
 
 ## Running it
@@ -180,9 +184,15 @@ Ops run in order. The first failure stops the run and names the op's index. Amou
 | `updateSchedule` | `id`, `fields?` (`schedules` columns such as `completed` or `posts_transaction`), `conditions?`, `resetNextDate?` | `internal.send('schedule/update')`, which merges the conditions with `updateConditions` and may reset the next date |
 | `setNote` | `id` (an entity id, `account-<id>`, `budget-<month>`, …), `note` | `api.updateNote` |
 | `createTag` | `id`, `tag`, `color?`, `description?` | `api.createTag` |
-| `createCustomReport` | `id`, `report` (a `CustomReportEntity` without `id`) | `internal.send('report/create')` |
+| `createCustomReport` | `id`, `report` or `reportText` (a `CustomReportEntity` without `id`; as text, nested JSON such as `conditions` keeps its key order) | `internal.send('report/create')` |
+| `updateCustomReport` | `id`, `setText`, `appendConditionsText?` | `internal.send('report/update')` with the stored entity from `report/get`, the conditions appended and the fields in `setText` over it, as the report editor saves |
 | `createDashboardPage` | `id`, `name` | `internal.send('dashboard-create')` |
-| `addDashboardWidget` | `id`, `page`, `type`, `width`, `height`, `x?`, `y?`, `meta?` | `internal.send('dashboard-add-widget')`, which keeps the supplied id |
+| `renameDashboardPage` | `id`, `name` | `internal.send('dashboard-rename')` |
+| `deleteDashboardPage` | `id` | `internal.send('dashboard-delete')`, which tombstones the page and its widgets and refuses the last page |
+| `addDashboardWidget` | `id`, `page`, `type`, `width`, `height`, `x?`, `y?`, `meta?` or `metaText?` | `internal.send('dashboard-add-widget')`, which keeps the supplied id |
+| `updateWidgetMeta` | `id`, `setText`, `appendConditionsText?` | `internal.send('dashboard-update-widget')` with the stored meta, the conditions appended and the keys in `setText` over it, as a card's settings save |
+| `moveWidget` | `id`, `x`, `y`, `width`, `height` | `internal.send('dashboard-update-widget')` with the frame only |
+| `removeWidget` | `id` | `internal.send('dashboard-remove-widget')` |
 | `createFilter` | `id`, `name`, `conditions`, `conditionsOp?` | `internal.send('filter-create')` |
 | `setPreference` | `id`, `value` | `api.setPreference`. Setting `budgetType` switches between envelope and tracking. Actual rebuilds the sheet for the new type without awaiting it (`reference/actual/packages/loot-core/src/server/sync/index.ts:552`), so the oracle then recreates the budgets and reopens the file. |
 
