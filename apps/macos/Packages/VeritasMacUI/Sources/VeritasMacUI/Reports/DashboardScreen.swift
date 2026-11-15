@@ -65,7 +65,7 @@ struct DashboardScreen: View {
 			}
 		}
 		.sheet(item: $configuring) { card in
-			WidgetConfigSheet(card: card, reports: reports) { config in
+			WidgetConfigSheet(card: card, reports: reports, choices: model.filterChoices()) { config in
 				Task { await model.configure(card, config) }
 			}
 		}
@@ -511,6 +511,7 @@ private struct BigFigure: View {
 		case .percent(let value): (value / 100).formatted(.percent.precision(.fractionLength(0...1)))
 		case .number(let value): value.formatted(.number.precision(.fractionLength(0...2)))
 		case .days(let value): value == 1 ? "1 day" : "\(value) days"
+		case .undefined: ""
 		}
 	}
 

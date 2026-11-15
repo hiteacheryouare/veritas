@@ -116,6 +116,8 @@ public final class CustomReportsModel {
 	@ObservationIgnored let workspace: WorkspaceModel
 	@ObservationIgnored public let standard: StandardReportModel
 
+	public func filterChoices() -> FilterChoices { FilterChoices(workspace: workspace) }
+
 	public init(workspace: WorkspaceModel, thisMonth: Month? = nil) {
 		self.workspace = workspace
 		standard = StandardReportModel(workspace: workspace, thisMonth: thisMonth)
@@ -235,6 +237,8 @@ public final class DashboardModel {
 	public var isEditing = false
 
 	@ObservationIgnored let workspace: WorkspaceModel
+
+	public func filterChoices() -> FilterChoices { FilterChoices(workspace: workspace) }
 
 	public init(workspace: WorkspaceModel) {
 		self.workspace = workspace

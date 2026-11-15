@@ -7,14 +7,16 @@ import VeritasKit
 struct WidgetConfigSheet: View {
 	let card: DashboardCard
 	let reports: [CustomReportItem]
+	let choices: FilterChoices?
 	let save: (WidgetConfig) -> Void
 	@State private var config: WidgetConfig
 	@State private var months: Int
 	@Environment(\.dismiss) private var dismiss
 
-	init(card: DashboardCard, reports: [CustomReportItem], save: @escaping (WidgetConfig) -> Void) {
+	init(card: DashboardCard, reports: [CustomReportItem], choices: FilterChoices? = nil, save: @escaping (WidgetConfig) -> Void) {
 		self.card = card
 		self.reports = reports
+		self.choices = choices
 		self.save = save
 		_config = State(initialValue: card.config)
 		let frame = card.config.timeFrame
@@ -90,7 +92,7 @@ struct WidgetConfigSheet: View {
 				}
 				if kind.hasFilters {
 					Section("Filters") {
-						ConditionsEditor(conditions: $config.conditions, matchAny: $config.conditionsOr)
+						ConditionsEditor(conditions: $config.conditions, matchAny: $config.conditionsOr, choices: choices)
 					}
 				}
 			}
@@ -110,6 +112,7 @@ struct WidgetConfigSheet: View {
 			.padding(Spacing.s5)
 		}
 		.frame(width: 520, height: 600)
+		.task { await choices?.load() }
 		.containerIdentifier("sheet.widgetConfig")
 	}
 
@@ -138,6 +141,7 @@ private struct MonthChoice: View {
 struct ConditionsEditor: View {
 	@Binding var conditions: [ReportCondition]
 	@Binding var matchAny: Bool
+	var choices: FilterChoices?
 
 	var body: some View {
 		if conditions.count > 1 {
@@ -171,10 +175,23 @@ struct ConditionsEditor: View {
 					.buttonStyle(.borderless)
 					.accessibilityLabel("Remove filter")
 				}
-				TextField("Value", text: condition.text, prompt: Text("Value"))
+				if let options = choices?.options(for: condition.wrappedValue) {
+					Picker("Value", selection: condition.text) {
+						if !options.contains(where: { $0.id == condition.wrappedValue.text }) {
+							Text("Choose").tag(condition.wrappedValue.text)
+						}
+						ForEach(options) { option in
+							Text(option.group.map { "\(option.name) (\($0))" } ?? option.name).tag(option.id)
+						}
+					}
 					.labelsHidden()
-					.textFieldStyle(.roundedBorder)
-					.accessibilityIdentifier("filters.value")
+					.accessibilityIdentifier("filters.choice")
+				} else {
+					TextField("Value", text: condition.text, prompt: Text("Value"))
+						.labelsHidden()
+						.textFieldStyle(.roundedBorder)
+						.accessibilityIdentifier("filters.value")
+				}
 			}
 			.onChange(of: condition.wrappedValue.field) {
 				if !ReportCondition.operators(for: condition.wrappedValue.field).contains(where: { $0.id == condition.wrappedValue.op }) { condition.wrappedValue.op = "is" }
