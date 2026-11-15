@@ -232,6 +232,9 @@ pub struct DashboardPage {
 	pub id: DashboardPageId,
 	pub name: Option<String>,
 	pub tombstone: bool,
+	/// The row's SQLite rowid, so creation order. Actual's page query has no
+	/// `ORDER BY`, so it lists pages in this order and opens the first.
+	pub position: i64,
 }
 
 /// One `dashboard` row. `kind` is Actual's widget `type`, kept as text so
