@@ -55,9 +55,9 @@ fn export_metadata(metadata_path: &Path) -> Result<Vec<u8>, CoreError> {
 
 static NEXT_PARTIAL: AtomicU64 = AtomicU64::new(0);
 
-/// A temp name beside `to` that no other export, in this process or another,
-/// is using: the zip is written there and renamed over `to`.
-fn partial_path(to: &Path) -> Result<PathBuf, CoreError> {
+/// A temp name beside `to` that no other writer, in this process or another,
+/// is using: the file is written there and renamed over `to`.
+pub(crate) fn partial_path(to: &Path) -> Result<PathBuf, CoreError> {
 	let name = to
 		.file_name()
 		.ok_or_else(|| CoreError::Io(format!("{} has no file name", to.display())))?;

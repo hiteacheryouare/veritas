@@ -320,6 +320,9 @@ fn r_rep_3_hidden_archived_deleted_and_closed_goal_categories_are_labeled() {
 			closed_month: None,
 			released_to: None,
 			released: None,
+			activity_seen_through: None,
+			activity_seen_total: None,
+			close_month_dismissed_available: None,
 		},
 	);
 	book.meta("Old Gym", CategoryKind::Expense);

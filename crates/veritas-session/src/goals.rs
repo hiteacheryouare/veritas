@@ -99,7 +99,7 @@ pub fn goals(data: &BudgetData, sheet: &EnvelopeSheet) -> Result<Vec<GoalView>, 
 		let (later_budget, new_activity) = match (goal.status, goal.closed_month) {
 			(GoalStatus::Closed, Some(closed)) => (
 				later_budget(data, sheet, &goal.category, closed),
-				new_activity(sheet, &goal.category, closed),
+				new_activity(sheet, goal, closed),
 			),
 			_ => (Vec::new(), false),
 		};
@@ -222,6 +222,9 @@ pub fn create_goal(
 		closed_month: None,
 		released_to: None,
 		released: None,
+		activity_seen_through: None,
+		activity_seen_total: None,
+		close_month_dismissed_available: None,
 	};
 	let id = goal.id.clone();
 	planned.push(Row::Goal(goal));
@@ -440,17 +443,82 @@ fn later_budget(
 		.collect()
 }
 
-/// The close left the envelope at zero, so any balance in that month or
-/// activity after it came later.
-fn new_activity(sheet: &EnvelopeSheet, category: &CategoryId, closed: YearMonth) -> bool {
-	available(sheet, category, closed) != Money::ZERO
-		|| sheet
+/// GOAL-6 (D72). The close left the envelope at zero, so (A) a balance in
+/// the close month, or (B) activity after it, came later. A dismiss stores
+/// what it saw, and the notice returns only when that changes.
+fn new_activity(sheet: &EnvelopeSheet, goal: &Goal, closed: YearMonth) -> bool {
+	let ending = available(sheet, &goal.category, closed);
+	let balance = ending != Money::ZERO && Some(ending) != goal.close_month_dismissed_available;
+	let seen_through = goal.activity_seen_through.unwrap_or(closed);
+	let later = sheet
+		.months()
+		.iter()
+		.filter(|month| **month > seen_through)
+		.any(|month| activity(sheet, &goal.category, *month) != Money::ZERO);
+	let seen_changed = goal.activity_seen_through.is_some()
+		&& activity_through(sheet, &goal.category, closed, seen_through).ok()
+			!= goal.activity_seen_total;
+	balance || later || seen_changed
+}
+
+/// The category's transaction activity in `month`: every row but a split's
+/// parent, as the envelope sheet sums it.
+fn activity(sheet: &EnvelopeSheet, category: &CategoryId, month: YearMonth) -> Money {
+	sheet
+		.category(month, category)
+		.map_or(Money::ZERO, |cell| cell.spent)
+}
+
+fn activity_through(
+	sheet: &EnvelopeSheet,
+	category: &CategoryId,
+	from: YearMonth,
+	through: YearMonth,
+) -> Result<Money, CoreError> {
+	Money::checked_sum(
+		sheet
 			.months()
 			.iter()
-			.filter(|month| **month > closed)
-			.any(|month| {
-				sheet
-					.category(*month, category)
-					.is_some_and(|c| c.spent != Money::ZERO)
-			})
+			.filter(|month| (from..=through).contains(*month))
+			.map(|month| activity(sheet, category, *month)),
+	)
+}
+
+/// GOAL-6's dismiss (D72): stores what the notice saw, so it returns only on
+/// something new. No money moves.
+pub fn dismiss_goal_activity(
+	data: &BudgetData,
+	sheet: &EnvelopeSheet,
+	id: &GoalId,
+) -> Result<Vec<Row>, CoreError> {
+	let goal = live_goal(data, id)?;
+	let (GoalStatus::Closed, Some(closed)) = (goal.status, goal.closed_month) else {
+		return Err(CoreError::Invalid("This goal isn't closed.".to_owned()));
+	};
+	let seen_through = sheet
+		.months()
+		.iter()
+		.copied()
+		.filter(|month| *month >= closed)
+		.filter(|month| activity(sheet, &goal.category, *month) != Money::ZERO)
+		.max()
+		.unwrap_or(closed);
+	let ending = available(sheet, &goal.category, closed);
+	let balance_showing =
+		ending != Money::ZERO && Some(ending) != goal.close_month_dismissed_available;
+	Ok(vec![Row::Goal(Goal {
+		activity_seen_through: Some(seen_through),
+		activity_seen_total: Some(activity_through(
+			sheet,
+			&goal.category,
+			closed,
+			seen_through,
+		)?),
+		close_month_dismissed_available: if balance_showing {
+			Some(ending)
+		} else {
+			goal.close_month_dismissed_available
+		},
+		..goal.clone()
+	})])
 }
