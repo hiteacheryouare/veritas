@@ -973,7 +973,8 @@ fn pausing_resuming_skipping_editing_and_ending_bills_matches_actual_over_a_mont
 fn a_failed_service_commit_or_bill_save_never_touches_last_schedule_run() {
 	// §10, contract v8: lastScheduleRun is written after the commit, so a
 	// commit that fails leaves the day to run again, and a bill save that
-	// fails doesn't clear it.
+	// fails doesn't clear it. A failed run never fails `maintain`: the shell
+	// reads it from state() until a later run works.
 	let scratch = Scratch::new("failed-commit");
 	let base = household_base(&scratch);
 	let session = import(&scratch, &base, "veritas");
@@ -988,15 +989,25 @@ fn a_failed_service_commit_or_bill_save_never_touches_last_schedule_run() {
 		.unwrap();
 	let session = reopen(&scratch, "veritas");
 	see(&session, "2026-11-02");
-	let failed = session.maintain("2026-11-02".to_owned());
+	let failed = session.maintain("2026-11-02".to_owned()).unwrap();
+	assert!(failed.entities.is_empty(), "{failed:?}");
+	let problem = session.state().unwrap().schedule_problem;
 	assert!(
-		matches!(failed, Err(FfiError::Storage { .. })),
-		"{failed:?}"
+		problem
+			.as_deref()
+			.is_some_and(|problem| problem.contains("the disk said no")),
+		"{problem:?}"
 	);
 	assert_eq!(
 		last_run(&scratch, "veritas"),
 		None,
 		"a failed run doesn't mark the day done"
+	);
+	let again = session.maintain("2026-11-02".to_owned()).unwrap();
+	assert!(again.entities.is_empty());
+	assert!(
+		session.state().unwrap().schedule_problem.is_some(),
+		"each tick tries again and keeps the problem while it lasts"
 	);
 	assert_eq!(
 		bill_on(&session, "rent", "2026-11-02").status,
@@ -1007,6 +1018,7 @@ fn a_failed_service_commit_or_bill_save_never_touches_last_schedule_run() {
 		.execute_batch("DROP TRIGGER cowboy_veto")
 		.unwrap();
 	session.maintain("2026-11-02".to_owned()).unwrap();
+	assert_eq!(session.state().unwrap().schedule_problem, None);
 	assert_eq!(last_run(&scratch, "veritas").as_deref(), Some("2026-11-02"));
 	assert_eq!(
 		bill_on(&session, "rent", "2026-11-02").status,

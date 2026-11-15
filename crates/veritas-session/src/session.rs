@@ -110,6 +110,7 @@ pub struct Session<B: Backend> {
 	last_snapshot: Option<DateTime<Utc>>,
 	open_check: Option<Pending>,
 	snapshot_problem: Option<CoreError>,
+	schedule_problem: Option<String>,
 	audit: Option<AuditReport>,
 	backup_folder: Option<PathBuf>,
 	last_backup: Option<BackupResult>,
@@ -152,6 +153,7 @@ impl<B: Backend> Session<B> {
 			last_snapshot: None,
 			open_check: None,
 			snapshot_problem: None,
+			schedule_problem: None,
 			audit: None,
 			backup_folder: None,
 			last_backup: None,
@@ -287,6 +289,12 @@ impl<B: Backend> Session<B> {
 		self.snapshot_problem.as_ref()
 	}
 
+	/// Why the last run of the daily schedule service failed, until a later
+	/// run works. A failed run never stops editing or the rest of `maintain`.
+	pub fn schedule_problem(&self) -> Option<&str> {
+		self.schedule_problem.as_deref()
+	}
+
 	/// What the background check found: SQLite's integrity check and the
 	/// invariant audit. `None` until the check finishes, or when it couldn't
 	/// run. Findings are reported and never fixed; only damage SQLite itself
@@ -381,8 +389,15 @@ impl<B: Backend> Session<B> {
 	/// day, gated by `metadata.json`'s `lastScheduleRun`, post due and missed
 	/// auto-post bills and move paid ones on, as one undo step. The day is
 	/// marked done after the commit, outside SQLite, unless a bill was left
-	/// to Actual (D60), so Actual's own service still runs it.
+	/// to Actual (D60), so Actual's own service still runs it. The outcome is
+	/// also kept for `schedule_problem`.
 	pub fn run_schedules(&mut self, today: CivilDate) -> Result<ChangeSet, CoreError> {
+		let ran = self.run_schedule_service(today);
+		self.schedule_problem = ran.as_ref().err().map(ToString::to_string);
+		ran
+	}
+
+	fn run_schedule_service(&mut self, today: CivilDate) -> Result<ChangeSet, CoreError> {
 		self.poll();
 		if self.read_only().is_some() {
 			return Ok(ChangeSet::default());

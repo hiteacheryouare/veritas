@@ -160,6 +160,7 @@ impl<B: Backend> Core<B> {
 				can_redo: session.can_redo(),
 				checking: session.open_check_pending(),
 				snapshot_problem: session.snapshot_problem().map(ToString::to_string),
+				schedule_problem: session.schedule_problem().map(ToOwned::to_owned),
 				skipped_rows: session.load_report().skipped.len() as u64,
 				audit_findings: session
 					.audit_report()
@@ -357,7 +358,7 @@ impl<B: Backend> Core<B> {
 			let today = crate::budget::civil_date(today)?;
 			let flipped = session.poll();
 			session.snapshot_if_due()?;
-			let posted = session.run_schedules(today)?;
+			let posted = session.run_schedules(today).unwrap_or_default();
 			Ok(match flipped {
 				Some(flipped) => flipped,
 				None => posted,
