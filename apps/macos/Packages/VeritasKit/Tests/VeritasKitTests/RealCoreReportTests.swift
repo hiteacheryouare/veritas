@@ -147,8 +147,12 @@ struct RealCoreReportTests {
 			card = try #require(model.sheet?.cards.first { $0.id == added.id })
 			#expect((card.x, card.y, card.width, card.height) == (3, bottom + 1, 6, 2))
 			for (leading, trailing, bottomEdge) in [(0, 20, 1), (-20, 0, 0), (9, 0, 0), (0, -9, -9)] as [(Int64, Int64, Int64)] {
+				let before = card
 				await model.resize(card, leading: leading, top: 0, trailing: trailing, bottom: bottomEdge)
 				card = try #require(model.sheet?.cards.first { $0.id == added.id })
+				if leading == 0, before.x + card.minimumSize.width <= DashboardModel.columns {
+					#expect(card.x == before.x, "a trailing resize clamps the width and leaves the card where it is")
+				}
 				let minimum = card.minimumSize
 				#expect(card.x >= 0 && card.x + card.width <= DashboardModel.columns, "inside the grid: \(card.x)+\(card.width)")
 				#expect(card.width >= minimum.width && card.height >= minimum.height, "never under its minimum: \(card.width)x\(card.height)")
