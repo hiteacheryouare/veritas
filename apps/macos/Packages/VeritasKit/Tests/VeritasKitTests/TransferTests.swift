@@ -271,6 +271,11 @@ struct TransferTests {
 		existing.rateText = "abc"
 		#expect(await existing.save(to: "carloan") == false)
 		#expect(existing.problem == "Can't read abc as a rate.")
+		#expect(workspaceAlert(of: accounts) == nil, "the rate's problem shows once, beside the field")
+	}
+
+	private func workspaceAlert(of accounts: AccountsModel) -> ErrorAlert? {
+		accounts.workspace.alert
 	}
 
 	@Test func escrowAndFeesGoToTheCoreAndThePrincipalCanBeBudgeted() async {

@@ -201,6 +201,13 @@ public final class WorkspaceModel {
 		}
 	}
 
+	/// A read whose failure the caller shows itself, next to the field that
+	/// caused it, so no alert repeats it.
+	public func quietly<T: Sendable>(_ read: @Sendable (any BudgetSession) async throws -> T) async throws -> T? {
+		guard let session else { return nil }
+		return try await read(session)
+	}
+
 	/// A write that isn't a `Command`, such as a dashboard edit. Like
 	/// `perform`, it shows its own error and refreshes on success.
 	@discardableResult

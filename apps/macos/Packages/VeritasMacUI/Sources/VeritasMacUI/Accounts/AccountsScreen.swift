@@ -108,6 +108,13 @@ struct AccountsScreen: View {
 	@ViewBuilder private func menu(_ account: AccountDetail) -> some View {
 		Button("Open Register") { workspace.go(to: .account(id: account.id)) }
 		Divider()
+		Group {
+			editingMenu(account)
+		}
+		.disabled(model.isReadOnly)
+	}
+
+	@ViewBuilder private func editingMenu(_ account: AccountDetail) -> some View {
 		Button("Rename…") { renaming = account }
 		Button(account.note == nil ? "Add Note…" : "Edit Note…") { noting = account }
 		if !account.closed {

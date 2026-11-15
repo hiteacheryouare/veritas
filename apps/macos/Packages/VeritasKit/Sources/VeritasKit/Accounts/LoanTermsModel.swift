@@ -36,7 +36,7 @@ public final class LoanTermsModel: Identifiable {
 		let rate = rateText.trimmingCharacters(in: .whitespaces)
 		if !rate.isEmpty {
 			let style = workspace.numberStyle
-			guard let bps = await workspace.report({ try await $0.evaluateRate(rate, style: style) }) else {
+			guard let bps = try? await workspace.quietly({ try await $0.evaluateRate(rate, style: style) }) else {
 				problem = "Can't read \(rate) as a rate."
 				return nil
 			}
