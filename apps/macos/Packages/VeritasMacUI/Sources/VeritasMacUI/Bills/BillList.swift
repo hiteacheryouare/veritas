@@ -66,7 +66,7 @@ private struct BillRow: View {
 	private var isActive: Bool { bill.state == .active }
 	private var canEdit: Bool { bill.draft != nil && !model.isReadOnly }
 	private var amount: BillAmount? { bill.draft?.amount ?? bill.scheduledAmount.map { .exact(amount: $0) } }
-	private var when: String { bill.draft.map { BillWords.schedule($0.date) } ?? "Edit in Actual" }
+	private var when: String { bill.draft.map { BillWords.schedule($0.date) } ?? bill.nextDate.map(BillWords.day) ?? "" }
 	private var postsEstimate: Bool { bill.autoPost && amount?.isEstimate == true }
 	private var posting: String {
 		if !isActive { return BillWords.state(bill.state) }
@@ -92,7 +92,7 @@ private struct BillRow: View {
 				}
 				.frame(width: BillList.Column.amount, alignment: .trailing)
 				Text(when)
-					.foregroundStyle(bill.draft == nil ? .textTertiary : .textSecondary)
+					.foregroundStyle(.textSecondary)
 					.lineLimit(1)
 					.frame(width: BillList.Column.when, alignment: .leading)
 				Text(model.route(bill))
@@ -152,6 +152,9 @@ private struct BillRow: View {
 	@ViewBuilder private var menu: some View {
 		if canEdit {
 			Button("Edit…") { Task { await model.edit(bill) } }
+		} else if bill.draft == nil {
+			Button("Edit in Actual") {}
+				.disabled(true)
 		}
 		if isActive {
 			Button("Pause") { Task { await model.pause(bill.id) } }
