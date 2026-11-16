@@ -130,23 +130,13 @@ pub enum AverageSpan {
 pub struct BudgetEditor<'a> {
 	budget: &'a BudgetData,
 	sheet: &'a EnvelopeSheet,
-	format: NumberFormat,
-	hide_fraction: bool,
 }
 
 impl<'a> BudgetEditor<'a> {
-	pub fn new(
-		budget: &'a BudgetData,
-		sheet: &'a EnvelopeSheet,
-		format: NumberFormat,
-		hide_fraction: bool,
-	) -> Self {
-		BudgetEditor {
-			budget,
-			sheet,
-			format,
-			hide_fraction,
-		}
+	/// No number format is taken: Actual's budget handlers write their
+	/// movement notes with the server's default formatter.
+	pub fn new(budget: &'a BudgetData, sheet: &'a EnvelopeSheet) -> Self {
+		BudgetEditor { budget, sheet }
 	}
 
 	/// `budget/budget-amount`.
@@ -584,17 +574,20 @@ impl<'a> BudgetEditor<'a> {
 		to: Destination,
 	) -> Result<(String, String), CoreError> {
 		let id = format!("budget-{month}");
-		// Actual divides by the currency's places, then formats with the
-		// budget's usual 2 fraction digits (`integerToCurrency`), so a yen
-		// move of 500 reads "500.00", or "500" with fractions hidden.
+		// `addMovementNotes` runs on the server, where `integerToCurrency`
+		// divides by the currency's places and formats with the default
+		// formatter: comma-dot with 2 fraction digits, whatever the budget's
+		// number format or hideFraction (only the client calls
+		// `setNumberFormat`, prefsSlice.ts:66). A yen move of 500 reads
+		// "500.00" and a hidden-fraction USD move of 123456 "1,234.56".
 		let places = self.budget.format.decimal_places().min(2);
 		let as_two_places = safe(amount)?
 			.checked_mul(10_i64.pow(u32::from(2 - places)))
 			.ok_or(CoreError::Overflow)?;
 		let display = edit_text(
 			Money::from_minor(as_two_places),
-			self.format,
-			self.hide_fraction,
+			NumberFormat::CommaDot,
+			false,
 		);
 		let name = |category: &CategoryId| {
 			self.budget

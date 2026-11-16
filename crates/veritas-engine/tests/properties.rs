@@ -56,7 +56,7 @@ proptest! {
 		let month = sheet.months()[month];
 		let before = *sheet.summary(month).unwrap();
 		let mut after_budget = budget.0.clone();
-		veritas_engine::BudgetEditor::new(&budget.0, &sheet, veritas_engine::NumberFormat::CommaDot, false)
+		veritas_engine::BudgetEditor::new(&budget.0, &sheet)
 			.move_budget(month, cents(amount), &cat(EXPENSES[from]), &Envelope::Category(cat(EXPENSES[to])))
 			.unwrap()
 			.apply_to(&mut after_budget);
