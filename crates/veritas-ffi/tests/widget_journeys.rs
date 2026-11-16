@@ -24,8 +24,9 @@ use std::thread::Thread;
 use serde_json::{Value, json};
 use veritas_ffi::{
 	AgeGranularity, AgeTrend, CancelToken, Change, Command, DashboardPage, DashboardWidget,
-	EntityKind, FormulaValue, RuleCondition, RuleConditionOp, RuleField, RuleValue, Session,
-	SplitLineDraft, TransactionDraft, WidgetConfig, WidgetTimeFrame, WidgetView,
+	EntityKind, ForecastCardSource, FormulaValue, RuleCondition, RuleConditionOp, RuleField,
+	RuleValue, SankeyCardColor, Session, SplitLineDraft, TransactionDraft, WidgetConfig,
+	WidgetTimeFrame, WidgetView,
 };
 
 const MAIN: &str = "48f79e8a-0a29-4f3c-a7a3-9c04110766ad";
@@ -328,11 +329,58 @@ fn as_actual(view: &WidgetView) -> Option<Value> {
 			compare,
 			compare_to,
 			difference,
+			days,
 			..
 		} => json!({
 			"compare": month_text(compare), "compareTo": month_text(compare_to),
 			"difference": difference,
+			"days": days.iter().map(|day| json!({
+				"day": format!("{:02}", day.day),
+				"compare": day.compare, "compareTo": day.compare_to,
+				"average": day.average, "budget": number(day.budget),
+			})).collect::<Vec<_>>(),
 		}),
+		WidgetView::Sankey {
+			range,
+			first,
+			last,
+			nodes,
+			links,
+			..
+		} => json!({
+			"start": range.start, "end": range.end,
+			"boundedStart": month_text(first), "boundedEnd": month_text(last),
+			"nodes": nodes.iter().map(|node| json!({
+				"key": node.key, "percentageLabel": node.percentage, "color": sankey_color(node.color),
+			})).collect::<Vec<_>>(),
+			"links": links.iter().map(|link| json!({
+				"source": link.source,
+				"target": link.target.map_or(-1, i64::from),
+				"value": link.value,
+				"tooltipInfo": link.folded.iter().map(|folded| json!({"name": folded.name, "value": folded.value})).collect::<Vec<_>>(),
+				"color": link.color.map(sankey_color),
+			})).collect::<Vec<_>>(),
+		}),
+		WidgetView::BalanceForecast {
+			range,
+			source,
+			has_forecast,
+			points,
+			low,
+			scheduled,
+			..
+		} => json!({
+			"start": range.start, "end": range.end,
+			"source": match source {
+				ForecastCardSource::Schedules => "schedules",
+				ForecastCardSource::TrackingBudget => "tracking-budget",
+			},
+			"hasForecast": has_forecast,
+			"points": points.iter().map(|point| json!({"date": point.date, "balance": point.balance})).collect::<Vec<_>>(),
+			"low": low.as_ref().map(|low| json!({"date": low.date, "balance": low.balance})),
+			"scheduled": scheduled,
+		}),
+		WidgetView::Problem { .. } => json!({"error": true}),
 		WidgetView::Formula { value, .. } => match value {
 			FormulaValue::Error { error } => json!({"error": error.message}),
 			FormulaValue::Number { value } => json!({"value": number(*value), "type": "number"}),
@@ -451,6 +499,16 @@ fn as_actual(view: &WidgetView) -> Option<Value> {
 	})
 }
 
+fn sankey_color(color: SankeyCardColor) -> String {
+	match color {
+		SankeyCardColor::Palette { index } => format!("var(--color-chartQual{})", index + 1),
+		SankeyCardColor::ToBudgetPositive => "var(--color-toBudgetPositive)".to_owned(),
+		SankeyCardColor::ToBudgetNegative => "var(--color-toBudgetNegative)".to_owned(),
+		SankeyCardColor::Gray => "var(--color-reportsGray)".to_owned(),
+		SankeyCardColor::Blue => "var(--color-reportsBlue)".to_owned(),
+	}
+}
+
 /// The days `summary-spreadsheet.ts` turns the card's range into: the first
 /// of the start's month, and the end's month end, or today in the current
 /// month.
@@ -471,6 +529,9 @@ fn summary_days(result: &Value, today: &str) -> (String, String) {
 /// The part of Actual's card output that `as_actual` rebuilds.
 fn theirs_comparable(kind: &str, result: &Value, today: &str) -> Value {
 	let data = &result["data"];
+	if result.get("error").is_some() && kind != "formula-card" {
+		return json!({"error": true});
+	}
 	match kind {
 		"summary-card" => {
 			let (start, end) = summary_days(result, today);
@@ -496,7 +557,33 @@ fn theirs_comparable(kind: &str, result: &Value, today: &str) -> Value {
 		"spending-card" => json!({
 			"compare": result["compare"], "compareTo": result["compareTo"],
 			"difference": result["difference"],
+			"days": data["intervalData"].as_array().unwrap().iter().map(|day| json!({
+				"day": day["day"], "compare": day["compare"], "compareTo": day["compareTo"],
+				"average": day["average"], "budget": day["budget"],
+			})).collect::<Vec<_>>(),
 		}),
+		"sankey-card" => json!({
+			"start": result["start"], "end": result["end"],
+			"boundedStart": result["boundedStart"], "boundedEnd": result["boundedEnd"],
+			"nodes": data["nodes"].as_array().unwrap().iter().map(|node| json!({
+				"key": node["key"], "percentageLabel": node["percentageLabel"], "color": node["color"],
+			})).collect::<Vec<_>>(),
+			"links": data["links"],
+		}),
+		"balance-forecast-card" => {
+			let points = result["points"].as_array().unwrap();
+			let low = match (&result["lowest"], points.last()) {
+				(Value::Object(_), Some(last)) if result["lowest"]["date"] != last["date"] => {
+					json!({"date": result["lowest"]["date"], "balance": result["lowest"]["balance"]})
+				}
+				_ => Value::Null,
+			};
+			json!({
+				"start": result["start"], "end": result["end"], "source": result["source"],
+				"hasForecast": result["forecast"]["dataPoints"].as_array().is_some_and(|points| !points.is_empty()),
+				"points": points, "low": low, "scheduled": result["scheduled"],
+			})
+		}
 		"formula-card" if !result["error"].is_null() => json!({"error": result["error"]}),
 		"formula-card" => json!({"value": result["value"], "type": result["type"]}),
 		"monte-carlo-card" => json!({
@@ -638,6 +725,8 @@ fn same_cards_as_actual(oracle: &Path, session: &Session, zip: &Path, today: &st
 			"spending-card",
 			"formula-card",
 			"monte-carlo-card",
+			"sankey-card",
+			"balance-forecast-card",
 		];
 		let Some(shown) = as_actual(&widget.view) else {
 			assert!(
@@ -653,8 +742,12 @@ fn same_cards_as_actual(oracle: &Path, session: &Session, zip: &Path, today: &st
 		let meta: Value = row["meta"]
 			.as_str()
 			.map_or(Value::Null, |text| serde_json::from_str(text).unwrap());
+		let oracle_card = match widget.kind.as_str() {
+			"balance-forecast-card" => "forecast-card",
+			other => other,
+		};
 		requests.push(
-			json!({"id": widget.id, "type": widget.kind, "meta": meta, "firstDayOfWeekIdx": "0"}),
+			json!({"id": widget.id, "type": oracle_card, "meta": meta, "firstDayOfWeekIdx": "0"}),
 		);
 		expected.push((widget.id.clone(), widget.kind.clone(), meta, shown));
 	}
@@ -667,18 +760,29 @@ fn same_cards_as_actual(oracle: &Path, session: &Session, zip: &Path, today: &st
 		1,
 	))
 	.unwrap();
+	let mut failures = Vec::new();
 	for (id, kind, meta, shown) in &expected {
 		let result = &theirs[id.as_str()];
 		assert!(
-			kind == "formula-card" || result.get("error").is_none(),
+			kind == "formula-card"
+				|| result.get("error").is_none()
+				|| shown == &json!({"error": true}),
 			"Actual's {kind} failed on {meta}: {result}"
 		);
-		assert_eq!(
-			shown,
-			&theirs_comparable(kind, result, today),
-			"{kind} {id} on {today} with {meta}"
-		);
+		let actuals = theirs_comparable(kind, result, today);
+		if shown != &actuals {
+			failures.push(format!(
+				"{kind} {id} on {today} with {meta}\n ours:   {shown}\n Actual: {actuals}"
+			));
+		}
 	}
+	assert!(
+		failures.is_empty(),
+		"{} of {} cards differ from Actual's:\n{}",
+		failures.len(),
+		expected.len(),
+		failures.join("\n\n")
+	);
 	expected.len()
 }
 
