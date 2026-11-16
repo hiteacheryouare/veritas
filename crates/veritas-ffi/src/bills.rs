@@ -7,8 +7,8 @@ use veritas_domain::{
 	AccountId, BudgetData, CategoryId, CivilDate, CoreError, Money, PayeeId, ScheduleId,
 };
 use veritas_rules::{
-	Bill, BillAmount as CoreAmount, BillDate as CoreDate, Frequency, Repeat, RepeatEnd,
-	RepeatPattern, ScheduleStatus, WeekendMove, bill_dates, bill_from_schedule, bill_status,
+	AmountKind, Bill, BillAmount as CoreAmount, BillDate as CoreDate, Frequency, NotABill, Repeat,
+	RepeatEnd, RepeatPattern, ScheduleStatus, WeekendMove, bill_dates, bill_status,
 };
 
 use crate::FfiError;
@@ -116,6 +116,43 @@ pub struct BillDraft {
 	pub auto_post: bool,
 }
 
+/// How a bill's amount matches a payment (`ScheduleAmountCell`,
+/// `dc/components/schedules/SchedulesTable.tsx:98-146`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum BillAmountKind {
+	Exact,
+	About,
+	Between,
+}
+
+/// Why a bill is read-only ("Edit in Actual").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum BillReadOnlyReason {
+	/// The schedule's rule is gone.
+	MissingRule,
+	/// The rule's stored conditions or actions can't be read.
+	UnreadableRule,
+	/// No amount condition `extractScheduleConds` finds
+	/// (`lc/shared/schedules.ts:255-281`).
+	NoAmount,
+	/// The amount, or an end of its range, isn't a whole number of minor units.
+	UnsupportedAmount,
+	/// No date condition.
+	NoDate,
+	/// A date or repeat shape the bill editor can't show.
+	UnsupportedDate,
+}
+
+/// What a bill's rule holds besides what the bill editor shows. Saving
+/// keeps it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum BillCustomPart {
+	/// Conditions besides payee, account, date and amount.
+	ExtraConditions,
+	/// Actions besides the bill's link and one plain category.
+	ExtraActions,
+}
+
 /// Pause and End both complete the schedule in Actual; only the label differs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum BillState {
@@ -158,6 +195,25 @@ pub struct BillSummary {
 	/// The schedule's rule also holds conditions or actions the bill doesn't
 	/// show; saving keeps them.
 	pub custom_rule: bool,
+	/// v13. `nil` when the schedule has no amount condition.
+	#[uniffi(default = None)]
+	pub amount_kind: Option<BillAmountKind>,
+	/// v13. Why `draft` is `nil`; set exactly when it is.
+	#[uniffi(default = None)]
+	pub read_only_reason: Option<BillReadOnlyReason>,
+	/// v13. What makes `custom_rule` true; empty exactly when it is false.
+	#[uniffi(default = [])]
+	pub custom_parts: Vec<BillCustomPart>,
+	/// v13. The amount of the most recent live transaction linked to the
+	/// bill, in the bill's account when it has one, split lines left out.
+	#[uniffi(default = None)]
+	pub last_paid_amount: Option<i64>,
+	/// v13. That transaction's date, `YYYY-MM-DD`.
+	#[uniffi(default = None)]
+	pub last_paid_date: Option<String>,
+	/// v13. Whether Skip moves the bill: active, with a later date to move to.
+	#[uniffi(default = false)]
+	pub can_skip: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -177,6 +233,15 @@ pub struct UpcomingBill {
 	pub name: Option<String>,
 	pub payee_name: Option<String>,
 	pub account_id: Option<String>,
+	/// v13.
+	#[uniffi(default = None)]
+	pub account_name: Option<String>,
+	/// v13. The bill's category, `nil` for a read-only bill or one without one.
+	#[uniffi(default = None)]
+	pub category_name: Option<String>,
+	/// v13.
+	#[uniffi(default = None)]
+	pub amount_kind: Option<BillAmountKind>,
 	/// `YYYY-MM-DD`.
 	pub date: String,
 	pub scheduled_amount: Option<i64>,
@@ -188,6 +253,7 @@ pub struct UpcomingBill {
 
 const UPCOMING_DAYS: i64 = 7;
 const NEXT_DATES: usize = 5;
+const MAX_PREVIEW_DATES: u32 = 100;
 
 fn weekday_of(weekday: BillWeekday) -> Weekday {
 	match weekday {
@@ -351,6 +417,17 @@ fn payee_name(data: &BudgetData, payee: &PayeeId) -> Option<String> {
 	}
 }
 
+fn read_only_reason(reason: NotABill) -> BillReadOnlyReason {
+	match reason {
+		NotABill::MissingRule => BillReadOnlyReason::MissingRule,
+		NotABill::UnreadableRule => BillReadOnlyReason::UnreadableRule,
+		NotABill::NoAmount => BillReadOnlyReason::NoAmount,
+		NotABill::UnsupportedAmount => BillReadOnlyReason::UnsupportedAmount,
+		NotABill::NoDate => BillReadOnlyReason::NoDate,
+		NotABill::UnsupportedDate => BillReadOnlyReason::UnsupportedDate,
+	}
+}
+
 fn summary(data: &BudgetData, id: &ScheduleId, today: CivilDate) -> Result<BillSummary, CoreError> {
 	let schedule = data
 		.schedules
@@ -360,10 +437,31 @@ fn summary(data: &BudgetData, id: &ScheduleId, today: CivilDate) -> Result<BillS
 			entity: "bill",
 			id: id.to_string(),
 		})?;
-	let view = data
-		.rules
-		.get(&schedule.rule)
-		.and_then(|rule| bill_from_schedule(schedule, rule, data));
+	let read = veritas_rules::read_bill(schedule, data.rules.get(&schedule.rule), data);
+	let read_only = read.as_ref().err().copied().map(read_only_reason);
+	let view = read.ok();
+	// A schedule whose rule is missing or unreadable has no facts to read,
+	// but it is still listed, read-only.
+	let readable = !matches!(
+		read_only,
+		Some(BillReadOnlyReason::MissingRule | BillReadOnlyReason::UnreadableRule)
+	);
+	let last_paid = if readable {
+		veritas_rules::last_paid(data, id)?
+	} else {
+		None
+	};
+	let status = if readable {
+		bill_status(data, id, UPCOMING_DAYS, today)?
+	} else {
+		veritas_rules::status(
+			schedule.next_date,
+			schedule.completed,
+			false,
+			UPCOMING_DAYS,
+			today,
+		)
+	};
 	let (payee, account, amount) =
 		veritas_rules::schedule_parts(data, id).unwrap_or((None, None, None));
 	let state = match (schedule.completed, data.schedule_meta.get(id)) {
@@ -390,9 +488,27 @@ fn summary(data: &BudgetData, id: &ScheduleId, today: CivilDate) -> Result<BillS
 		auto_post: schedule.posts_transaction,
 		next_date: schedule.next_date.map(|date| date.to_string()),
 		state,
-		status: bill_status_of(bill_status(data, id, UPCOMING_DAYS, today)?),
+		status: bill_status_of(status),
 		custom_rule: view.as_ref().is_some_and(|view| view.custom_rule),
+		custom_parts: view.as_ref().map_or_else(Vec::new, |view| {
+			[
+				(view.extra_conditions, BillCustomPart::ExtraConditions),
+				(view.extra_actions, BillCustomPart::ExtraActions),
+			]
+			.into_iter()
+			.filter_map(|(on, part)| on.then_some(part))
+			.collect()
+		}),
 		draft: view.map(|view| draft(&view.bill)),
+		amount_kind: veritas_rules::amount_kind(schedule, data).map(|kind| match kind {
+			AmountKind::Exact => BillAmountKind::Exact,
+			AmountKind::About => BillAmountKind::About,
+			AmountKind::Between => BillAmountKind::Between,
+		}),
+		read_only_reason: read_only,
+		last_paid_amount: last_paid.map(|(_, amount)| amount.minor()),
+		last_paid_date: last_paid.map(|(date, _)| date.to_string()),
+		can_skip: readable && veritas_rules::can_skip(data, id)?,
 	})
 }
 
@@ -441,7 +557,10 @@ pub(crate) fn bill_detail(
 		Vec::new()
 	};
 	Ok(BillDetail {
-		paid_today_counts: veritas_rules::counts_as_paid(data, &id, today)?,
+		paid_today_counts: match bill.read_only_reason {
+			Some(BillReadOnlyReason::MissingRule | BillReadOnlyReason::UnreadableRule) => false,
+			_ => veritas_rules::counts_as_paid(data, &id, today)?,
+		},
 		bill,
 		next_dates,
 	})
@@ -489,6 +608,14 @@ pub(crate) fn upcoming(
 				name: bill.name.clone(),
 				payee_name: bill.payee_name.clone(),
 				account_id: bill.account_id.clone(),
+				account_name: bill.account_name.clone(),
+				category_name: bill
+					.category_id
+					.as_ref()
+					.and_then(|id| data.categories.get(&CategoryId::new(id.as_str())))
+					.filter(|category| !category.tombstone)
+					.map(|category| category.name.clone()),
+				amount_kind: bill.amount_kind,
 				date: date.to_string(),
 				scheduled_amount: bill.scheduled_amount,
 				is_income: bill.is_income,
@@ -504,6 +631,40 @@ pub(crate) fn upcoming(
 			.then_with(|| a.bill_id.cmp(&b.bill_id))
 	});
 	Ok(out)
+}
+
+/// The dates the schedule editor previews for a draft's date, up to
+/// `count` (Actual's editor shows 3, `dc/hooks/useScheduleEdit.ts:325-328`;
+/// its repeat picker 4, `dc/components/select/RecurringSchedulePicker.tsx:412-415`).
+pub(crate) fn preview_dates(
+	model: &BillDraft,
+	today: CivilDate,
+	count: u32,
+) -> Result<Vec<String>, CoreError> {
+	if count > MAX_PREVIEW_DATES {
+		return Err(CoreError::Invalid(format!(
+			"Preview at most {MAX_PREVIEW_DATES} dates"
+		)));
+	}
+	Ok(bill(model)?
+		.upcoming_dates(today, count as usize)?
+		.into_iter()
+		.map(|date| date.to_string())
+		.collect())
+}
+
+/// The next dates Actual's schedule editor previews for an unsaved or edited
+/// bill, at most `count` (up to 100): a one-time date when it is `today` or
+/// later, or the repeat's next occurrences from `today`, each moved off the
+/// weekend. `Invalid` where Actual's editor says "Invalid rule". Nothing is
+/// saved, and a draft the preview accepts can still fail `createBill`'s checks.
+#[uniffi::export]
+pub fn preview_bill_dates(
+	bill: BillDraft,
+	today: String,
+	count: u32,
+) -> Result<Vec<String>, FfiError> {
+	crate::guard(|| preview_dates(&bill, civil_date(&today)?, count))
 }
 
 #[uniffi::export]
