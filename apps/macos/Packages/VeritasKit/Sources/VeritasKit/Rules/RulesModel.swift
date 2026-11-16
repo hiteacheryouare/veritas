@@ -126,6 +126,8 @@ public final class RulesModel {
 		defer { isPreviewing = false }
 		guard let result = await workspace.attempt({ session in
 			let matches = try await session.rulePreview(source)
+			// TEMPORARY, until contract v13's `RuleMatch.reconciled`: one
+			// register lookup per match, only to learn whether it's reconciled.
 			var reconciled = Set<String>()
 			for match in matches {
 				if let row = try? await session.registerRow(match.parentId ?? match.transactionId), row.reconciled {
