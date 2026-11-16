@@ -804,3 +804,111 @@ fn a_dashboard_rework_reads_back_in_actual_as_veritas_wrote_it() {
 		}
 	}
 }
+
+#[test]
+fn an_unsaved_report_previews_what_saving_it_shows_and_previewing_writes_nothing() {
+	// The editor's New report: settings typed before any save, filters
+	// included, previewed as the user changes them. Saving it must show what
+	// the last preview showed, a preview must never write or add an undo
+	// step, and once the save is undone the same draft still previews.
+	let scratch = Scratch::new("preview-new");
+	let session = block_on(Session::import_actual_zip(
+		text(&root().join("fixtures/synthetic/all-features.zip")),
+		text(&scratch.join("veritas")),
+		CancelToken::new(),
+	))
+	.unwrap();
+	let preview = |settings: &CustomReportSettings| {
+		block_on(session.preview_custom_report(
+			settings.clone(),
+			TODAY.to_owned(),
+			CancelToken::new(),
+		))
+		.unwrap()
+	};
+	let main = dashboards(&session)[0].id.clone();
+	perform(
+		&session,
+		Command::RenameDashboard {
+			page_id: main.clone(),
+			name: "Overview".to_owned(),
+		},
+	);
+	let reports_before = session.custom_reports().unwrap();
+	let mut draft = block_on(session.custom_report(
+		SPENDING_REPORT.to_owned(),
+		TODAY.to_owned(),
+		CancelToken::new(),
+	))
+	.unwrap()
+	.settings;
+	draft.id = String::new();
+	draft.name = String::new();
+	draft.conditions = Vec::new();
+	draft.interval = ReportIntervalUnit::Yearly;
+	let unfiltered = preview(&draft);
+	assert_eq!(unfiltered.problem, None);
+	draft.name = "Big outflows".to_owned();
+	draft.conditions = vec![condition(
+		"amount",
+		"gte",
+		"5000",
+		Some(r#"{"outflow":true}"#),
+	)];
+	let filtered = preview(&draft);
+	assert_eq!(filtered.problem, None);
+	assert_eq!(filtered.settings.conditions, draft.conditions);
+	assert_eq!(filtered.settings.interval, ReportIntervalUnit::Yearly);
+	let filtered_total = filtered.data.as_ref().unwrap().total;
+	assert!(
+		filtered_total != 0 && filtered_total.abs() < unfiltered.data.as_ref().unwrap().total.abs(),
+		"the filter narrows the unsaved report: {filtered_total} of {}",
+		unfiltered.data.as_ref().unwrap().total
+	);
+	draft.name = "Spending by category".to_owned();
+	assert_eq!(
+		preview(&draft).data,
+		filtered.data,
+		"a draft named like a saved report still previews as the draft"
+	);
+	draft.name = "Big outflows".to_owned();
+	assert_eq!(
+		session.custom_reports().unwrap(),
+		reports_before,
+		"previewing saves nothing"
+	);
+	session.undo().unwrap();
+	assert_eq!(
+		dashboards(&session)[0].name,
+		"Main",
+		"previewing adds no undo step: undo takes back the rename before it"
+	);
+	session.redo().unwrap();
+
+	let id = created(
+		&perform(
+			&session,
+			Command::CreateCustomReport {
+				settings: draft.clone(),
+			},
+		),
+		EntityKind::CustomReport,
+	);
+	let saved =
+		block_on(session.custom_report(id.clone(), TODAY.to_owned(), CancelToken::new())).unwrap();
+	assert_eq!(
+		saved.data, filtered.data,
+		"saving shows what the preview showed"
+	);
+	assert_eq!(saved.settings.conditions, filtered.settings.conditions);
+	draft.id = id.clone();
+	assert_eq!(preview(&draft).data, filtered.data);
+
+	session.undo().unwrap();
+	assert_eq!(session.custom_reports().unwrap(), reports_before);
+	assert_eq!(
+		preview(&draft).data,
+		filtered.data,
+		"the id of a report whose save was undone previews as a new report"
+	);
+}
