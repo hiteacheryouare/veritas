@@ -161,6 +161,20 @@ fn movement_notes_follow_the_number_format_and_name_deleted_categories_like_actu
 		.unwrap();
 	assert!(writes.notes[0].1.contains("Reassigned 21 from"));
 
+	let mut yen = small_fixture();
+	yen.0.format.currency_code = Some("JPY".to_owned());
+	let sheet = yen.sheet(TODAY);
+	for (hide, text) in [(false, "Reassigned 500.00 from"), (true, "Reassigned 500 from")] {
+		let writes = BudgetEditor::new(&yen.0, &sheet, NumberFormat::CommaDot, hide)
+			.move_budget(ym("2026-10"), cents(500), &cat("groceries"), &to("dining"))
+			.unwrap();
+		assert!(
+			writes.notes[0].1.contains(text),
+			"integerToCurrency divides by the currency's places: {}",
+			writes.notes[0].1
+		);
+	}
+
 	let mut budget = small_fixture();
 	budget.category("dining", "everyday", false).tombstone = true;
 	budget.edit(|e| {

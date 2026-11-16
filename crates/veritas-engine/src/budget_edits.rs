@@ -584,8 +584,15 @@ impl<'a> BudgetEditor<'a> {
 		to: Destination,
 	) -> Result<(String, String), CoreError> {
 		let id = format!("budget-{month}");
+		// Actual divides by the currency's places, then formats with the
+		// budget's usual 2 fraction digits (`integerToCurrency`), so a yen
+		// move of 500 reads "500.00", or "500" with fractions hidden.
+		let places = self.budget.format.decimal_places().min(2);
+		let as_two_places = safe(amount)?
+			.checked_mul(10_i64.pow(u32::from(2 - places)))
+			.ok_or(CoreError::Overflow)?;
 		let display = edit_text(
-			Money::from_minor(safe(amount)?),
+			Money::from_minor(as_two_places),
 			self.format,
 			self.hide_fraction,
 		);
