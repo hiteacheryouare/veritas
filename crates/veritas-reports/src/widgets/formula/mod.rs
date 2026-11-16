@@ -15,7 +15,7 @@ use std::collections::HashMap;
 
 use chrono::{Datelike, NaiveDate};
 use veritas_domain::{
-	BudgetData, BudgetType, Category, CategoryGroupId, CategoryId, CoreError, YearMonth,
+	BudgetData, BudgetType, Category, CategoryGroupId, CategoryId, CoreError, Money, YearMonth,
 };
 use veritas_engine::EnvelopeSheet;
 
@@ -260,6 +260,10 @@ enum CellValue {
 }
 
 impl CellValue {
+	fn money(self) -> Money {
+		Money::from_minor(self.number())
+	}
+
 	fn number(self) -> i64 {
 		match self {
 			CellValue::Amount(amount) => amount,
@@ -419,7 +423,7 @@ impl<'a> Data<'a> {
 			.get("timeFrame")
 			.filter(|frame| matches!(frame, Json::Object(_)));
 		let mode = frame.and_then(|frame| frame.get("mode"));
-		let mut cents = 0_i64;
+		let mut total = Money::ZERO;
 		if truthy(mode) {
 			if !matches!(mode, Some(Json::String(_))) {
 				return Err(unsupported(
@@ -448,14 +452,14 @@ impl<'a> Data<'a> {
 			check_year(first)?;
 			check_year(last)?;
 			for row in filtered_rows_between(self.budget, &filter, first, last) {
-				cents += row?.amount.minor();
+				total = total.checked_add(row?.amount)?;
 			}
 		} else {
 			for row in filtered_rows(self.budget, &filter) {
-				cents += row?.amount.minor();
+				total = total.checked_add(row?.amount)?;
 			}
 		}
-		Ok(cents as f64 / 100.0)
+		Ok(total.minor() as f64 / 100.0)
 	}
 
 	/// `extractQueryCategories` and `getCategoriesFromConditions`
@@ -676,45 +680,46 @@ impl<'a> Data<'a> {
 			_ => None,
 		};
 		if let Some(pattern) = pattern {
-			let mut total = 0_i64;
+			let mut total = Money::ZERO;
 			for &index in &months {
 				for id in ids {
-					total += self.read(month(index), pattern, id).number();
+					total = total.checked_add(self.read(month(index), pattern, id).money())?;
 				}
 			}
-			return Ok(Ok(total as f64 / 100.0));
+			return Ok(Ok(total.minor() as f64 / 100.0));
 		}
 		let carried = |balance: i64, carryover: CellValue| {
 			balance > 0 || (balance < 0 && carryover.number() != 0)
 		};
-		let mut running = 0_i64;
+		let mut running = Money::ZERO;
 		for id in ids {
 			let before = month(first - 1);
 			let balance = self.read(before, "leftover-", id).number();
 			if carried(balance, self.read(before, "carryover-", id)) {
-				running += balance;
+				running = running.checked_add(Money::from_minor(balance))?;
 			}
 		}
 		let mut balances = Vec::with_capacity(months.len());
 		for &index in &months {
-			let (mut budgeted, mut spent, mut next) = (0_i64, 0_i64, 0_i64);
+			let (mut budgeted, mut spent, mut next) = (Money::ZERO, Money::ZERO, Money::ZERO);
 			for id in ids {
-				budgeted += self.read(month(index), "budget-", id).number();
-				spent += self.read(month(index), "sum-amount-", id).number();
+				budgeted = budgeted.checked_add(self.read(month(index), "budget-", id).money())?;
+				spent = spent.checked_add(self.read(month(index), "sum-amount-", id).money())?;
 				let balance = self.read(month(index), "leftover-", id).number();
 				if carried(balance, self.read(month(index), "carryover-", id)) {
-					next += balance;
+					next = next.checked_add(Money::from_minor(balance))?;
 				}
 			}
-			balances.push((running, budgeted + spent + running));
+			let end = budgeted.checked_add(spent)?.checked_add(running)?;
+			balances.push((running, end));
 			running = next;
 		}
 		let value = if dimension == "balance_start" {
-			balances.first().map_or(0, |(start, _)| *start)
+			balances.first().map_or(Money::ZERO, |(start, _)| *start)
 		} else {
-			balances.last().map_or(0, |(_, end)| *end)
+			balances.last().map_or(Money::ZERO, |(_, end)| *end)
 		};
-		Ok(Ok(value as f64 / 100.0))
+		Ok(Ok(value.minor() as f64 / 100.0))
 	}
 }
 
