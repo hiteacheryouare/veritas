@@ -53,6 +53,31 @@ public enum BillWords {
 		return formatter.string(from: NSNumber(value: number)) ?? "\(number)"
 	}
 
+	/// "November 2026" for any date in it.
+	public static func month(_ date: String) -> String {
+		Month(date: date)?.date().map { $0.formatted(.dateTime.month(.wide).year()) } ?? date
+	}
+
+	/// "about 90.00", "2,400.00 to 2,600.00": the magnitudes on the register scale.
+	public static func amount(_ amount: BillAmount, format: MoneyFormat) -> (qualifier: String?, figures: String) {
+		switch amount.magnitudes {
+		case .exact(let amount): (nil, format.amount(amount, on: .register))
+		case .about(let amount): ("about", format.amount(amount, on: .register))
+		case .between(let low, let high): (nil, "\(format.amount(low, on: .register)) to \(format.amount(high, on: .register))")
+		}
+	}
+
+	/// "month" or "months", for "Every 2 months".
+	public static func unit(_ frequency: BillFrequency, count: UInt32) -> String {
+		let one = count == 1
+		switch frequency {
+		case .daily: return one ? "day" : "days"
+		case .weekly: return one ? "week" : "weeks"
+		case .monthly: return one ? "month" : "months"
+		case .yearly: return one ? "year" : "years"
+		}
+	}
+
 	public static func status(_ status: BillStatus) -> String {
 		switch status {
 		case .paid: "Paid"

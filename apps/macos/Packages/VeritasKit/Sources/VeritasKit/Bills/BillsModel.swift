@@ -24,7 +24,93 @@ public struct BillEditing: Hashable, Sendable {
 	}
 }
 
+public enum BillAmountKind: CaseIterable, Hashable, Sendable {
+	case exact
+	case about
+	case between
+}
+
+/// The editor's fields over the draft's enums: switching once to repeating
+/// keeps the date as the start, and back again keeps the start.
+public extension BillEditing {
+	var repeats: Bool {
+		get { rule != nil }
+		set {
+			switch (newValue, draft.date) {
+			case (true, .once(let date)):
+				draft.date = .repeat(repeat: BillRepeat(start: date, interval: 1, frequency: .monthly, patterns: [], weekend: nil, end: .never))
+			case (false, .repeat(let rule)):
+				draft.date = .once(date: rule.start)
+			default:
+				break
+			}
+		}
+	}
+
+	/// Nil for a one-time bill. Setting it on a one-time bill does nothing.
+	var rule: BillRepeat? {
+		get {
+			if case .repeat(let rule) = draft.date { return rule }
+			return nil
+		}
+		set {
+			guard let newValue, repeats else { return }
+			draft.date = .repeat(repeat: newValue)
+		}
+	}
+
+	/// The one-time date, or the repeating bill's start.
+	var firstDate: String {
+		get {
+			switch draft.date {
+			case .once(let date): date
+			case .repeat(let rule): rule.start
+			}
+		}
+		set {
+			switch draft.date {
+			case .once: draft.date = .once(date: newValue)
+			case .repeat(var rule):
+				rule.start = newValue
+				draft.date = .repeat(repeat: rule)
+			}
+		}
+	}
+}
+
 public extension BillAmount {
+	init(kind: BillAmountKind, low: Int64, high: Int64) {
+		switch kind {
+		case .exact: self = .exact(amount: low)
+		case .about: self = .about(amount: low)
+		case .between: self = .between(low: low, high: high)
+		}
+	}
+
+	var kind: BillAmountKind {
+		switch self {
+		case .exact: .exact
+		case .about: .about
+		case .between: .between
+		}
+	}
+
+	/// The single amount, or a range's low end.
+	var low: Int64 {
+		switch self {
+		case .exact(let amount), .about(let amount): amount
+		case .between(let low, _): low
+		}
+	}
+
+	/// A range's high end, or the single amount.
+	var high: Int64 {
+		switch self {
+		case .exact(let amount), .about(let amount): amount
+		case .between(_, let high): high
+		}
+	}
+
 	var magnitudes: BillAmount {
 		switch self {
 		case .exact(let amount): .exact(amount: abs(amount))
@@ -99,6 +185,31 @@ public final class BillsModel {
 
 	public func bill(_ id: String) -> BillSummary? {
 		bills.first { $0.id == id }
+	}
+
+	public var activeBills: [BillSummary] { bills.filter { $0.state == .active } }
+	public var stoppedBills: [BillSummary] { bills.filter { $0.state != .active } }
+
+	/// The timeline in the core's order, split at each month.
+	public var timelineMonths: [(month: String, bills: [UpcomingBill])] {
+		var months: [(month: String, bills: [UpcomingBill])] = []
+		for item in timeline {
+			let month = String(item.date.prefix(7))
+			if months.last?.month == month {
+				months[months.count - 1].bills.append(item)
+			} else {
+				months.append((month, [item]))
+			}
+		}
+		return months
+	}
+
+	/// "Checking → Rent": the account, then the category, or the payee when
+	/// there's no category, such as a transfer. Income reads the other way.
+	public func route(_ bill: BillSummary) -> String {
+		let account = bill.accountName ?? names.account(bill.accountId) ?? "No account"
+		guard let other = names.category(bill.categoryId) ?? bill.payeeName ?? names.payee(bill.payeeId) else { return account }
+		return bill.isIncome ? "\(other) → \(account)" : "\(account) → \(other)"
 	}
 
 	public func startNew(isIncome: Bool = false) {
