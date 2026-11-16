@@ -26,6 +26,22 @@ pub struct NetWorthPeriod {
 	/// The first day of the period (a week's first day for Weekly).
 	pub start: NaiveDate,
 	pub net_worth: Money,
+	/// The positive balances, and the negative ones as a magnitude.
+	pub assets: Money,
+	pub debt: Money,
+	/// Against the period before, or the balance before the first period.
+	pub change: Money,
+}
+
+/// One account's area in the stacked mode (`NetWorthGraph.tsx:295-325`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NetWorthStack {
+	pub account: AccountId,
+	pub name: String,
+	/// The account's balance at each period.
+	pub balances: Vec<Money>,
+	/// `chartQual1` to `chartQual9`, as 0 to 8.
+	pub color: u8,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -45,7 +61,13 @@ pub struct NetWorthCard {
 	/// The accounts with a balance other than zero in some period, in
 	/// Actual's account order.
 	pub accounts: Vec<AccountId>,
+	/// The same accounts as the stacked mode stacks them: by their balances
+	/// summed over the periods, smallest first, ties in account order.
+	pub stacked: Vec<NetWorthStack>,
 }
+
+/// `getColorScale('qualitative')`'s length.
+const PALETTE: u8 = 9;
 
 struct AccountBalances {
 	starting: Money,
@@ -290,22 +312,61 @@ pub fn net_worth_card(
 		.iter()
 		.map(|account| accounts[&account.id].starting)
 		.collect();
+	let mut previous = Money::checked_sum(running.iter().copied())?;
 	let mut has_balance = vec![false; listed.len()];
+	let mut balances: Vec<Vec<Money>> = vec![Vec::with_capacity(periods_list.len()); listed.len()];
 	let mut periods = Vec::with_capacity(periods_list.len());
 	for period in periods_list {
 		let mut total = Money::ZERO;
+		let mut assets = Money::ZERO;
+		let mut debt = Money::ZERO;
 		for (index, account) in listed.iter().enumerate() {
 			if let Some(amount) = accounts[&account.id].by_period.get(&period) {
 				running[index] = running[index].checked_add(*amount)?;
 			}
-			has_balance[index] |= running[index] != Money::ZERO;
-			total = total.checked_add(running[index])?;
+			let balance = running[index];
+			has_balance[index] |= balance != Money::ZERO;
+			balances[index].push(balance);
+			if balance.is_negative() {
+				debt = debt.checked_sub(balance)?;
+			} else {
+				assets = assets.checked_add(balance)?;
+			}
+			total = total.checked_add(balance)?;
 		}
 		periods.push(NetWorthPeriod {
 			start: period,
 			net_worth: total,
+			assets,
+			debt,
+			change: total.checked_sub(previous)?,
 		});
+		previous = total;
 	}
+	let mut stacked: Vec<(i128, AccountId, String, Vec<Money>)> = listed
+		.iter()
+		.zip(balances)
+		.zip(&has_balance)
+		.filter(|(_, has)| **has)
+		.map(|((account, balances), _)| {
+			let sum = balances
+				.iter()
+				.map(|balance| i128::from(balance.minor()))
+				.sum();
+			(sum, account.id.clone(), account.name.clone(), balances)
+		})
+		.collect();
+	stacked.sort_by_key(|(sum, ..)| *sum);
+	let stacked = stacked
+		.into_iter()
+		.zip((0..PALETTE).cycle())
+		.map(|((_, account, name, balances), color)| NetWorthStack {
+			account,
+			name,
+			balances,
+			color,
+		})
+		.collect();
 	let first = periods
 		.first()
 		.map_or(Money::ZERO, |period| period.net_worth);
@@ -328,6 +389,7 @@ pub fn net_worth_card(
 			.filter(|(_, has)| **has)
 			.map(|(account, _)| account.id.clone())
 			.collect(),
+		stacked,
 		periods,
 	})
 }

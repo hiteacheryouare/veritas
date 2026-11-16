@@ -807,6 +807,15 @@ fn d73_net_worth_card_matches_actual() {
 				"lowestNetWorth": money(ours.lowest),
 				"highestNetWorth": money(ours.highest),
 				"accounts": ours.accounts.iter().map(ToString::to_string).collect::<Vec<_>>(),
+				"details": ours.periods.iter().map(|period| json!({
+					"assets": period.assets.minor(), "debt": period.debt.minor(),
+					"change": period.change.minor(),
+				})).collect::<Vec<_>>(),
+				"stacked": ours.stacked.iter().map(|stack| json!({
+					"id": stack.account.to_string(), "name": stack.name,
+					"points": stack.balances.iter().map(|balance| balance.minor()).collect::<Vec<_>>(),
+					"color": format!("var(--color-chartQual{})", stack.color + 1),
+				})).collect::<Vec<_>>(),
 			});
 			assert_eq!(
 				ours, expected["data"],

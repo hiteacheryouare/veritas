@@ -35,7 +35,9 @@ pub use formula::{
 	formula_card,
 };
 pub use monte_carlo::{MonteCarloCard, MonteCarloChartPoint, monte_carlo_card};
-pub use net_worth::{NetWorthCard, NetWorthInterval, NetWorthPeriod, net_worth_card};
+pub use net_worth::{
+	NetWorthCard, NetWorthInterval, NetWorthPeriod, NetWorthStack, net_worth_card,
+};
 pub use sankey::{
 	SankeyCard, SankeyColor, SankeyLabel, SankeyLayer, SankeyLink, SankeyMode, SankeyNode,
 	SankeySort, sankey_card, sankey_height_limit,

@@ -48,6 +48,24 @@ const run = async (spreadsheet: (sheet: unknown, setData: (data: unknown) => voi
 	return data;
 };
 
+// NetWorthGraph.tsx:295-325, which Node can't load as TSX: the accounts with
+// a balance, by their balances summed over the points, smallest first, each
+// colored by its place in getColorScale('qualitative').
+const stackedAccounts = (accounts: Array<{ id: string; name: string }>, points: Array<Record<string, unknown>>) => {
+	const totals: Record<string, number> = {};
+	for (const account of accounts) {
+		totals[account.id] = points.reduce((sum, point) => sum + (Number(point[account.id]) || 0), 0);
+	}
+	return [...accounts]
+		.sort((a, b) => totals[a.id] - totals[b.id])
+		.map((account, index) => ({
+			id: account.id,
+			name: account.name,
+			points: points.map(point => point[account.id]),
+			color: `var(--color-chartQual${(index % 9) + 1})`
+		}));
+};
+
 // The numbers each card shows, from Actual's own card and spreadsheet code
 // for the same meta, as of the oracle's fixed today.
 export const widgetData = async ({ internal }: ActualSession, requests: WidgetRequest[]) => {
@@ -139,7 +157,8 @@ export const widgetData = async ({ internal }: ActualSession, requests: WidgetRe
 			const difference = data && Math.round(data.intervalData[todayDay][selection] - data.intervalData[todayDay].compare);
 			return { compare, compareTo, difference, data };
 		},
-		// NetWorthCard.tsx's range and spreadsheet. The card's labels need a locale
+		// NetWorthCard.tsx's range and spreadsheet, plus the stacked mode's
+		// accounts in NetWorthGraph.tsx's order and colors (stackedAccounts below). The card's labels need a locale
 		// and formatter, so only the numbers come back.
 		'net-worth-card': async ({ meta, firstDayOfWeekIdx }) => {
 			const { createSpreadsheet } = await loadSource(`${REPORTS}/spreadsheets/net-worth-spreadsheet.ts`);
@@ -171,7 +190,13 @@ export const widgetData = async ({ internal }: ActualSession, requests: WidgetRe
 					totalChange: data.totalChange,
 					lowestNetWorth: data.lowestNetWorth,
 					highestNetWorth: data.highestNetWorth,
-					accounts: data.accounts.map((account: any) => account.id)
+					accounts: data.accounts.map((account: any) => account.id),
+					details: data.graphData.data.map((point: any) => ({
+						assets: Number(point.assets),
+						debt: -Number(point.debt),
+						change: Number(point.change)
+					})),
+					stacked: stackedAccounts(data.accounts, data.graphData.data)
 				}
 			};
 		},
