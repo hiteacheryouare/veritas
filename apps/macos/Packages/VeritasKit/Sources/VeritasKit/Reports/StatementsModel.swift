@@ -70,6 +70,13 @@ public struct StatementDocument: Hashable, Sendable {
 	public let basis: String
 	public let lines: [StatementLine]
 
+	public init(kind: StatementKind, entity: String, basis: String, lines: [StatementLine]) {
+		self.kind = kind
+		self.entity = entity
+		self.basis = basis
+		self.lines = lines
+	}
+
 	public var title: String { kind.documentTitle }
 
 	/// "Household Balance sheet 2026-11-09.pdf".

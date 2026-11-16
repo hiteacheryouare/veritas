@@ -159,7 +159,8 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 	func overview() async throws -> BudgetOverview {
 		BudgetOverview(
 			name: name, directory: StubLaunch.budgetDirectory, readOnly: readOnly, accountGroups: accountGroups,
-			format: hidesDecimals ? MoneyFormat(Self.hiddenDecimals, currency: Self.dollar) : nil
+			format: hidesDecimals ? MoneyFormat(Self.hiddenDecimals, currency: Self.dollar) : nil,
+			currencyCode: Self.dollar.code
 		)
 	}
 
