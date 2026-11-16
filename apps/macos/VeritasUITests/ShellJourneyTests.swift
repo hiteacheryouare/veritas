@@ -29,7 +29,7 @@ final class ShellJourneyTests: XCTestCase {
 		app.sidebar("bills").click()
 		XCTAssertTrue(app.screen("bills").waitForExistence(timeout: 5))
 		app.sidebar("account.checking").click()
-		XCTAssertTrue(app.screen("account:checking").waitForExistence(timeout: 5))
+		XCTAssertTrue(registerOpens("Checking", in: app))
 		app.sidebar("reports").click()
 		XCTAssertTrue(app.sidebar("netProfit").waitForExistence(timeout: 5))
 		app.sidebar("netProfit").click()
@@ -60,12 +60,12 @@ final class ShellJourneyTests: XCTestCase {
 
 		app.buttons["toolbar.goToAnything"].click()
 		XCTAssertTrue(field.waitForExistence(timeout: 5))
-		field.typeText("card")
+		field.typeText("visa")
 		attachScreenshot(of: app, named: "palette")
 		app.typeKey(.downArrow, modifierFlags: [])
 		app.typeKey(.upArrow, modifierFlags: [])
 		app.typeKey(.return, modifierFlags: [])
-		XCTAssertTrue(app.screen("account:card").waitForExistence(timeout: 5))
+		XCTAssertTrue(registerOpens("Visa", in: app))
 
 		app.typeKey("k", modifierFlags: .command)
 		XCTAssertTrue(field.waitForExistence(timeout: 5))
@@ -108,5 +108,13 @@ final class ShellJourneyTests: XCTestCase {
 		app.typeKey("3", modifierFlags: .command)
 		XCTAssertTrue(app.screen("bills").waitForExistence(timeout: 5))
 		XCTAssertFalse(dense.exists)
+	}
+
+	/// The register is one screen for every account, so the window title says which one opened.
+	@MainActor
+	private func registerOpens(_ account: String, in app: XCUIApplication) -> Bool {
+		guard app.screen("register").waitForExistence(timeout: 5) else { return false }
+		let titled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "title == %@", account), object: app.windows.firstMatch)
+		return XCTWaiter().wait(for: [titled], timeout: 5) == .completed
 	}
 }
