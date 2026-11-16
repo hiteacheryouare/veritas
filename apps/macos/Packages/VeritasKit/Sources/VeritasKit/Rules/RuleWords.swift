@@ -59,11 +59,12 @@ public enum RuleWords {
 		}
 	}
 
+	/// The Rules page's group headers, in the order Actual runs the stages.
 	public static func stage(_ stage: RuleStage) -> String {
 		switch stage {
-		case .pre: "Runs first"
-		case .default: ""
-		case .post: "Runs last"
+		case .pre: "Before"
+		case .default: "Default"
+		case .post: "After"
 		}
 	}
 

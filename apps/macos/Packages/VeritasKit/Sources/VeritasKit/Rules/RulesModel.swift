@@ -113,7 +113,8 @@ public final class RulesModel {
 	}
 
 	/// Finds the rows the rule would change. The editor's draft previews
-	/// unsaved; a saved rule previews as stored. Every row starts ticked, as in Actual.
+	/// unsaved; a saved rule previews as stored. Every row starts ticked, as in
+	/// Actual, except reconciled ones, which stay pickable (Ryan's ruling).
 	public func preview(_ source: RuleSource) async {
 		isPreviewing = true
 		defer { isPreviewing = false }
@@ -129,7 +130,7 @@ public final class RulesModel {
 		}) else { return }
 		switch result {
 		case .success(let rows):
-			applying = RuleApplying(source: source, rows: rows, selected: Set(rows.map(\.id)))
+			applying = RuleApplying(source: source, rows: rows, selected: Set(rows.filter { !$0.reconciled }.map(\.id)))
 		case .failure(let error):
 			if case .draft = source {
 				editing?.problem = ErrorPresentation.coreMessage(error)
