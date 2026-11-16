@@ -22,7 +22,7 @@ public enum WidgetKind: String, CaseIterable, Hashable, Sendable {
 		switch self {
 		case .netWorth: "Net worth"
 		case .cashFlow: "Cash flow"
-		case .spending: "Spending analysis"
+		case .spending: "Monthly Spending"
 		case .budgetAnalysis: "Budget analysis"
 		case .customReport: "Custom report"
 		case .crossover: "Crossover point"
