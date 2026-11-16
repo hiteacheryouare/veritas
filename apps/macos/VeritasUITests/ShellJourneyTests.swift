@@ -79,15 +79,15 @@ final class ShellJourneyTests: XCTestCase {
 	}
 
 	@MainActor
-	func testAddTransactionFindAndDenseOpenTheirPlaceholders() {
+	func testShortcutsAddATransactionFindAndToggleDense() {
 		let app = XCUIApplication.veritas(stub: "open")
 		XCTAssertTrue(app.screen("budget").waitForExistence(timeout: 10))
 		app.screen("budget").click()
 
 		app.typeKey("n", modifierFlags: .command)
-		let sheet = app.descendants(matching: .any)["sheet.addTransaction"]
+		let sheet = app.descendants(matching: .any)["sheet.transaction"]
 		XCTAssertTrue(sheet.waitForExistence(timeout: 5))
-		XCTAssertTrue(app.staticTexts["Add transaction"].exists)
+		XCTAssertTrue(sheet.staticTexts["Add transaction"].exists)
 		app.typeKey(.escape, modifierFlags: [])
 		XCTAssertTrue(sheet.waitForDisappearance())
 
