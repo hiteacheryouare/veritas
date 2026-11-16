@@ -43,6 +43,8 @@ public final class MoveMoneyModel: Identifiable {
 	/// False until an amount is typed: the preview then only says what kind of move it is.
 	public private(set) var showsAfter = false
 	public private(set) var loan: LoanPaymentPreview?
+	/// The interest the last preview read. A 0 interest writes no interest line, so it needs no category.
+	public private(set) var previewedInterest: Int64 = 0
 	public private(set) var problem: String?
 
 	@ObservationIgnored let workspace: WorkspaceModel
@@ -99,7 +101,7 @@ public final class MoveMoneyModel: Identifiable {
 		if asksPurpose, !purpose.isAnswered { return false }
 		if isLoanPayment, isNew {
 			if case .interestAbovePayment? = loan?.problem { return false }
-			if principalCategoryID == nil || interestCategoryID == nil { return false }
+			if principalCategoryID == nil || (previewedInterest != 0 && interestCategoryID == nil) { return false }
 		}
 		return true
 	}
@@ -155,6 +157,7 @@ public final class MoveMoneyModel: Identifiable {
 		}
 		let total = max(await amount.peek() ?? 0, 0)
 		let interestPart = max(await interest.peek() ?? 0, 0)
+		previewedInterest = interestPart
 		let escrowPart = max(await escrow.peek() ?? 0, 0)
 		let feesPart = max(await fees.peek() ?? 0, 0)
 		let day = TransactionEditorModel.civilDate(date)
@@ -201,7 +204,11 @@ public final class MoveMoneyModel: Identifiable {
 				}
 				parts.append(part)
 			}
-			guard let principalCategory = principalCategoryID, let interestCategory = interestCategoryID else { return false }
+			guard let principalCategory = principalCategoryID, parts[0] == 0 || interestCategoryID != nil else { return false }
+			// v10's draft needs an interest category, but the core reads it only for a
+			// nonzero interest line (contract: each line only when its part isn't 0).
+			// v12 (#72) makes it optional.
+			let interestCategory = interestCategoryID ?? ""
 			let payment = LoanPaymentDraft(
 				id: UUID().uuidString.lowercased(), fromAccountId: fromID, loanAccountId: toID, date: day, total: moved,
 				interest: parts[0], escrow: parts[1], fees: parts[2], principalCategoryId: principalCategory, interestCategoryId: interestCategory,

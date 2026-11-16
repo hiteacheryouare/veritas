@@ -274,6 +274,39 @@ struct RealCoreAccountsTests {
 		}
 	}
 
+	@Test func aPaymentShortOfItsPartsIsShortByInterestEscrowAndFeesLessTheTotal() async throws {
+		// DEBT-2.2: $50 against $30 interest and $40 escrow is $20 short, and can't be saved.
+		try await RealBudget.with { budget in
+			let move = MoveMoneyModel(workspace: budget.workspace, fromID: Self.carLoan)
+			await move.load()
+			move.typeAmount("50")
+			move.interest.type("30")
+			move.escrow.type("40")
+			await move.refreshPreview()
+			#expect(move.loan?.problem == .interestAbovePayment(shortBy: 2_000))
+			#expect(!move.canSave)
+		}
+	}
+
+	@Test func aPaymentWithNoInterestSavesWithoutAnInterestCategory() async throws {
+		// A 0 interest writes no interest line, so it needs no category.
+		try await RealBudget.with { budget in
+			let workspace = budget.workspace
+			let principal = try #require(await workspace.report { try await $0.createKindCategory(kind: .debtPrincipal, name: "Car principal", unhideGroup: false) })
+			let move = MoveMoneyModel(workspace: workspace, fromID: Self.carLoan)
+			await move.load()
+			move.typeAmount("250")
+			move.interest.type("0")
+			move.principalCategoryID = principal
+			move.interestCategoryID = nil
+			await move.refreshPreview()
+			#expect(move.canSave)
+			#expect(await move.save())
+			let payment = try #require(try await Self.allRows(workspace, .account(accountId: Self.checking)).first { $0.amount == -25_000 })
+			#expect(payment.lines.isEmpty ? payment.categoryId == principal : payment.lines.allSatisfy { $0.categoryId == principal })
+		}
+	}
+
 	@Test func payeesRenameMergeAndFavoriteAndTheRegisterFollows() async throws {
 		// R-ACC-5.
 		try await RealBudget.with { budget in
