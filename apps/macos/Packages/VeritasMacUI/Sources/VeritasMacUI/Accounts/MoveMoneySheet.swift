@@ -122,11 +122,19 @@ struct MoveMoneySheet: View {
 				.padding(.vertical, Spacing.s2)
 				.frame(maxWidth: .infinity, alignment: .leading)
 				.background(.surfaceHover, in: .rect(cornerRadius: Radius.control))
-				.accessibilityElement(children: .combine)
+				// A combined label isn't rebuilt when the After row is inserted, so it's spelled out.
+				.accessibilityElement(children: .ignore)
+				.accessibilityLabel(balanceLabel(balance))
 				.accessibilityIdentifier("\(id).balance")
 			}
 		}
 		.frame(maxWidth: .infinity, alignment: .leading)
+	}
+
+	func balanceLabel(_ balance: BalanceAfter) -> String {
+		let now = "Now \(model.format.currency(balance.now, on: .register))"
+		guard model.showsAfter else { return now }
+		return "\(now), After \(model.format.currency(balance.after, on: .register))"
 	}
 }
 
