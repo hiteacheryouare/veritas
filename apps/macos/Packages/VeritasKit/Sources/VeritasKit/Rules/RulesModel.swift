@@ -10,6 +10,12 @@ public struct RuleEditing: Hashable, Sendable {
 	/// The core's `Invalid` message, shown beside the sentence.
 	public var problem: String?
 
+	public init(id: String?, draft: RuleDraft, problem: String? = nil) {
+		self.id = id
+		self.draft = draft
+		self.problem = problem
+	}
+
 	public var isNew: Bool { id == nil }
 	public var isSplit: Bool { draft.actions.contains { $0.splitIndex > 0 } }
 }
