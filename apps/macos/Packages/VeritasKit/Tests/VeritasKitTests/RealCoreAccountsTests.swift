@@ -354,6 +354,37 @@ struct RealCoreAccountsTests {
 		}
 	}
 
+	@Test func afterAPaymentWithNoInterestTheNextPaymentPrefillsNoInterest() async throws {
+		// DEBT-3: the next payment starts from the last one's figures. The last
+		// one had no interest, $40 escrow and $5 fees, so it pre-fills 0 interest
+		// and $40 escrow, never escrow's figure as interest.
+		try await RealBudget.with { budget in
+			let workspace = budget.workspace
+			let principal = try #require(await workspace.report { try await $0.createKindCategory(kind: .debtPrincipal, name: "Car principal", unhideGroup: false) })
+			let move = MoveMoneyModel(workspace: workspace, fromID: Self.carLoan)
+			await move.load()
+			move.typeAmount("300")
+			move.interest.type("0")
+			move.showsEscrowAndFees = true
+			move.escrow.type("40")
+			move.fees.type("5")
+			move.principalCategoryID = principal
+			move.interestCategoryID = nil
+			move.escrowCategoryID = AllFeatures.household
+			move.feesCategoryID = AllFeatures.funMoney
+			await move.refreshPreview()
+			#expect(await move.save())
+			#expect(try budget.sqlite("SELECT count(*) FROM transactions WHERE category = ''") == [["0"]], "the empty interest category v10 is sent is never written")
+			let defaults = try #require(await workspace.report { try await $0.loanPaymentDefaults(Self.carLoan, today: WorkspaceModel.today()) })
+			withKnownIssue("Known core bug: loanPaymentDefaults reads the last payment's expense lines by position, so with no interest line the escrow line comes back as interest and the fees line as escrow") {
+				#expect(defaults.total == 29_500, "the last payment less its fees: \(String(describing: defaults.total))")
+				#expect(defaults.interest == 0, "interest: \(String(describing: defaults.interest))")
+				#expect(defaults.escrow == 4_000, "escrow: \(String(describing: defaults.escrow))")
+				#expect(defaults.interestCategoryId != AllFeatures.household, "escrow's envelope isn't the interest envelope")
+			}
+		}
+	}
+
 	@Test func aReadOnlyBudgetOffersNoWrites() async throws {
 		try await RealBudget.with { budget in
 			let directory = try budget.directory
