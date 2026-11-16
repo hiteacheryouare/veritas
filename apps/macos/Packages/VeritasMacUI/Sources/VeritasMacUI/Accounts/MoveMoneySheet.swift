@@ -309,9 +309,14 @@ struct TransferPurposeSection: View {
 }
 
 extension MoveMoneySheet {
-	/// DEBT-2.2: `shortBy` is interest + escrow + fees − total.
+	/// DEBT-2.2: `shortBy` is interest + escrow + fees − total. With fractions
+	/// hidden it rounds up to the next whole unit for display (#74), so a
+	/// shortfall never reads as 0. Replaced by the core's message after #72.
 	static func shortText(_ shortBy: Int64, format: MoneyFormat) -> String {
-		"This payment is \(format.currency(shortBy, on: .register)) less than its interest, escrow and fees."
+		let shown = format.hidesDecimals || format.decimalPlaces == 0
+			? format.wholeCurrency((shortBy + 99) / 100 * 100, on: .register)
+			: format.currency(shortBy, on: .register)
+		return "This payment is \(shown) less than its interest, escrow and fees."
 	}
 }
 

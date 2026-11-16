@@ -77,4 +77,17 @@ struct LoanShortfallWordsTests {
 		let dollars = MoneyFormat(currencySymbol: "$", decimalPlaces: 2)
 		#expect(MoveMoneySheet.shortText(2_000, format: dollars) == "This payment is $20.00 less than its interest, escrow and fees.")
 	}
+
+	@Test func aShortfallRoundsUpToAWholeUnitWhenFractionsAreHidden() {
+		// #74: display only, and never "$0".
+		let dollars = MoneyFormat(currencySymbol: "$", decimalPlaces: 2)
+		var hidden = dollars
+		hidden.hidesDecimals = true
+		let yen = MoneyFormat(currencySymbol: "¥", decimalPlaces: 0)
+		#expect(MoveMoneySheet.shortText(2_001, format: dollars).contains("$20.01 less"))
+		#expect(MoveMoneySheet.shortText(2_001, format: hidden).contains("$21 less"))
+		#expect(MoveMoneySheet.shortText(1, format: hidden).contains("$1 less"))
+		#expect(MoveMoneySheet.shortText(2_000, format: hidden).contains("$20 less"))
+		#expect(MoveMoneySheet.shortText(1, format: yen).contains("¥1 less"))
+	}
 }
