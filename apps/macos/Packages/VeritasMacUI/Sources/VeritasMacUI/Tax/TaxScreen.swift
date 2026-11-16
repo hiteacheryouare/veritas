@@ -9,6 +9,7 @@ import VeritasKit
 struct TaxScreen: View {
 	let workspace: WorkspaceModel
 	@State private var model: TaxSummaryModel
+	@FocusState private var hasKeyFocus: Bool
 
 	init(workspace: WorkspaceModel, model: TaxSummaryModel? = nil) {
 		self.workspace = workspace
@@ -62,6 +63,16 @@ struct TaxScreen: View {
 			.frame(maxWidth: .infinity, alignment: .leading)
 		}
 		.background(.surfaceWindow)
+		.focusable()
+		.focusEffectDisabled()
+		.focused($hasKeyFocus)
+		.defaultFocus($hasKeyFocus, true)
+		.focusedSceneValue(\.budgetMonths, BudgetMonthActions(
+			canGoBack: true,
+			canGoForward: model.canGoForward,
+			previous: { Task { await model.previous() } },
+			next: { Task { await model.next() } }
+		))
 		.toolbar {
 			ToolbarItemGroup(placement: .navigation) {
 				PeriodStepper(canGoForward: model.canGoForward, previous: { Task { await model.previous() } }, next: { Task { await model.next() } }, id: "tax")
