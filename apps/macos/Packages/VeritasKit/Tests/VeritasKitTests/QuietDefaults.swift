@@ -51,6 +51,9 @@ extension BudgetSession {
 	func payees() async throws -> [PayeeDetail] { [] }
 	func accounts() async throws -> AccountList { AccountList(accounts: [], groups: []) }
 	func registerRow(_ id: String) async throws -> RegisterRow { throw FfiError.NotFound(entity: "transaction", id: id) }
+	func balanceSheet(asOf: String) async throws -> BalanceSheet { throw FfiError.Invalid(message: "no balance sheet in this fake") }
+	func ownersEquity(first: String, last: String) async throws -> OwnersEquity { throw FfiError.Invalid(message: "no owner's equity in this fake") }
+	func taxSummary(year: Int32) async throws -> TaxSummary { throw FfiError.Invalid(message: "no tax summary in this fake") }
 }
 
 extension BudgetLibrary {

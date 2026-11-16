@@ -275,6 +275,21 @@ final class CoreBudgetSession: BudgetSession {
 		return try await Core.run { try session.accounts() }
 	}
 
+	func balanceSheet(asOf: String) async throws -> BalanceSheet {
+		let session = session
+		return try await Core.cancellable { try await session.balanceSheet(asOf: asOf, cancel: $0) }
+	}
+
+	func ownersEquity(first: String, last: String) async throws -> OwnersEquity {
+		let session = session
+		return try await Core.cancellable { try await session.ownersEquity(first: first, last: last, cancel: $0) }
+	}
+
+	func taxSummary(year: Int32) async throws -> TaxSummary {
+		let session = session
+		return try await Core.cancellable { try await session.taxSummary(year: year, cancel: $0) }
+	}
+
 	func registerRow(_ id: String) async throws -> RegisterRow {
 		let session = session
 		return try await Core.run { try session.registerRow(transactionId: id) }

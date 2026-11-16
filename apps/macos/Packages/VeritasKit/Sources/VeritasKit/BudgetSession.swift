@@ -175,6 +175,12 @@ public protocol BudgetSession: AnyObject, Sendable {
 	func payees() async throws -> [PayeeDetail]
 	func accounts() async throws -> AccountList
 	func registerRow(_ id: String) async throws -> RegisterRow
+	/// The balance sheet at the end of `asOf`, `YYYY-MM-DD` (R-REP-7).
+	func balanceSheet(asOf: String) async throws -> BalanceSheet
+	/// Owner's equity over inclusive `YYYY-MM-DD` dates (R-REP-7).
+	func ownersEquity(first: String, last: String) async throws -> OwnersEquity
+	/// One tax year's buckets, detail, conflicts and CSVs (R-REP-8).
+	func taxSummary(year: Int32) async throws -> TaxSummary
 }
 
 /// The budgets in the app's budgets folder: new ones, Actual imports and reopened ones.

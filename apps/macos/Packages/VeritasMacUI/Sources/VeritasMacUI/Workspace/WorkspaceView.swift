@@ -20,6 +20,10 @@ struct WorkspaceView: View {
 					BillsScreen(workspace: model)
 				} else if model.destination == .screen(.rules) {
 					RulesScreen(workspace: model)
+				} else if model.destination == .screen(.statements) {
+					StatementsScreen(workspace: model)
+				} else if model.destination == .screen(.tax) {
+					TaxScreen(workspace: model)
 				} else if model.destination == .screen(.goals) {
 					GoalsScreen(workspace: model)
 				} else if model.destination == .screen(.reports) || model.destination == .screen(.dashboard) {

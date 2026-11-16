@@ -296,6 +296,9 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 	func payees() async throws -> [PayeeDetail] { StubBills.payees }
 	func accounts() async throws -> AccountList { StubBills.accounts }
 	func registerRow(_ id: String) async throws -> RegisterRow { try ruleStore.registerRow(id) }
+	func balanceSheet(asOf: String) async throws -> BalanceSheet { try StubStatements.balanceSheet(asOf: asOf) }
+	func ownersEquity(first: String, last: String) async throws -> OwnersEquity { try StubStatements.ownersEquity(first: first, last: last) }
+	func taxSummary(year: Int32) async throws -> TaxSummary { try StubTax.summary(year: year) }
 
 	private func writable() throws {
 		if let readOnly { throw FfiError.ReadOnly(reason: readOnly) }
