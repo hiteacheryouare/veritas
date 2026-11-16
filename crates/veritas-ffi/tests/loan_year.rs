@@ -2544,6 +2544,120 @@ fn a_yen_household_funds_each_principal_as_its_preview_said_until_to_budget_runs
 	actual_finds_every_row_sound(&by_id(&actual, "transactions"));
 }
 
+fn actual_applies(oracle: &Path, zip: &Path, ops: Value, out: &Path) {
+	let file = out.with_extension("ops.json");
+	std::fs::write(
+		&file,
+		serde_json::json!({"version": 1, "ops": ops}).to_string(),
+	)
+	.unwrap();
+	let output = std::process::Command::new("node")
+		.current_dir(oracle)
+		.arg("src/main.ts")
+		.arg("apply")
+		.arg(zip)
+		.arg(&file)
+		.arg("--out")
+		.arg(out)
+		.args(["--today", TODAY, "--seed", "21"])
+		.output()
+		.expect("node runs");
+	assert!(
+		output.status.success(),
+		"Actual couldn't apply the ops: {}",
+		String::from_utf8_lossy(&output.stderr)
+	);
+}
+
+#[test]
+fn a_budget_move_writes_the_same_movement_note_as_actuals() {
+	// The 0-place movement note fix, against Actual itself: the same move
+	// and the same cover of an overspent envelope, made once in Veritas and
+	// once by Actual's budget handlers with the budget's currency, must
+	// leave the month's note text identical. A new yen budget (which hides
+	// fractions), a USD budget that hides fractions, and a EUR budget
+	// written 1.234,56.
+	let december = Month {
+		year: 2026,
+		month: 12,
+	};
+	let mut differ = Vec::new();
+	for (label, currency, style, hide) in [
+		("yen-note", "JPY", NumberStyle::CommaDot, false),
+		("usd-whole-note", "USD", NumberStyle::CommaDot, true),
+		("eur-note", "EUR", NumberStyle::DotComma, false),
+	] {
+		let (scratch, session) = fresh_budget(label, Some(currency), style, hide);
+		let checking = account(&session, "Checking", NewAccountKind::Checking, 0, None);
+		let groceries = expense_category(&session, "Groceries");
+		let dining = expense_category(&session, "Dining Out");
+		let gifts = expense_category(&session, "Gifts");
+		for (category, amount) in [(&groceries, 300_000), (&dining, 100_000)] {
+			perform(
+				&session,
+				Command::SetBudget {
+					month: december,
+					category_id: category.clone(),
+					amount,
+				},
+			);
+		}
+		let mut gift = entry("gift", &checking, "2026-12-03", -1_234_567);
+		gift.category_id = Some(gifts.clone());
+		perform(&session, Command::AddTransaction { transaction: gift });
+		let base = scratch.join("base.zip");
+		block_on(session.export_actual_zip(text(&base), CancelToken::new())).unwrap();
+		perform(
+			&session,
+			Command::MoveBudget {
+				month: december,
+				amount: 123_456,
+				from_category_id: Some(groceries.clone()),
+				to_category_id: Some(dining.clone()),
+			},
+		);
+		perform(
+			&session,
+			Command::CoverOverspending {
+				month: december,
+				category_id: gifts.clone(),
+				from_category_id: Some(dining.clone()),
+				amount: Some(2_500),
+			},
+		);
+		let ours = scratch.join("veritas.zip");
+		block_on(session.export_actual_zip(text(&ours), CancelToken::new())).unwrap();
+		let Some(oracle) = oracle() else {
+			return;
+		};
+		let theirs = scratch.join("actual.zip");
+		actual_applies(
+			&oracle,
+			&base,
+			serde_json::json!([
+				{"op": "moveBudget", "month": "2026-12", "from": groceries, "to": dining, "amount": 123_456, "currencyCode": currency},
+				{"op": "coverOverspending", "month": "2026-12", "from": dining, "to": gifts, "amount": 2_500, "currencyCode": currency},
+			]),
+			&theirs,
+		);
+		let note = |zip: &Path| -> String {
+			by_id(&actual_reads(&oracle, zip), "notes")["budget-2026-12"]["note"]
+				.as_str()
+				.unwrap()
+				.to_owned()
+		};
+		let (ours, theirs) = (note(&ours), note(&theirs));
+		if ours != theirs {
+			differ.push(format!("{label}\n ours:   {ours:?}\n Actual: {theirs:?}"));
+		}
+	}
+	assert!(
+		differ.is_empty(),
+		"the month's note, Veritas against Actual:\n{}",
+		differ.join("\n")
+	);
+}
+
 #[test]
 fn every_new_budget_carries_hide_fraction_as_actuals_currency_picker_leaves_it() {
 	// createBudget's hideFraction, read back by Actual: true for the three
