@@ -69,6 +69,21 @@ public enum ErrorPresentation: Hashable, Sendable {
 		}
 	}
 
+	/// The core's own words for an error, for a place that shows it beside the edit.
+	public static func coreMessage(_ error: any Error) -> String {
+		guard let error = error as? FfiError else { return String(describing: error) }
+		switch error {
+		case .NotFound(let entity, let id): return "\(entity) \"\(id)\" doesn't exist."
+		case .Invalid(let message), .NotAnActualBudget(let message), .Storage(let message), .Io(let message), .Internal(let message):
+			return message
+		default:
+			switch ErrorPresentation(error).withoutField {
+			case .alert(let alert): return alert.title
+			default: return String(describing: error)
+			}
+		}
+	}
+
 	/// Away from a field there is nowhere to show an inline message, so it becomes an alert.
 	public var withoutField: ErrorPresentation {
 		if case .inline(let message) = self {

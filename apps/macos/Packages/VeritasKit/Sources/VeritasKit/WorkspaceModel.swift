@@ -208,6 +208,19 @@ public final class WorkspaceModel {
 		return try await read(session)
 	}
 
+	/// A read whose error the caller shows where it happened, such as the
+	/// report editor's preview. Nil when no budget is open or it was cancelled.
+	public func attempt<T: Sendable>(_ read: @Sendable (any BudgetSession) async throws -> T) async -> Result<T, any Error>? {
+		guard let session else { return nil }
+		do {
+			return .success(try await read(session))
+		} catch FfiError.Cancelled {
+			return nil
+		} catch {
+			return .failure(error)
+		}
+	}
+
 	/// A write that isn't a `Command`, such as a dashboard edit. Like
 	/// `perform`, it shows its own error and refreshes on success.
 	@discardableResult

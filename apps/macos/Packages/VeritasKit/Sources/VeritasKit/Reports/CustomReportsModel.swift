@@ -112,6 +112,8 @@ public final class CustomReportsModel {
 	/// True while the draft is a new report that isn't saved yet.
 	public private(set) var isCreating = false
 	public private(set) var preview: CustomReportView?
+	/// The core's error when the draft can't be previewed, shown in place of the preview.
+	public private(set) var previewProblem: String?
 
 	@ObservationIgnored let workspace: WorkspaceModel
 	@ObservationIgnored public let standard: StandardReportModel
@@ -156,6 +158,7 @@ public final class CustomReportsModel {
 		isCreating = false
 		self.draft = draft
 		preview = view
+		previewProblem = nil
 	}
 
 	/// A new report with Actual's defaults: spending by category over the
@@ -170,6 +173,7 @@ public final class CustomReportsModel {
 		isCreating = true
 		draft = ReportDraft(settings: settings)
 		preview = nil
+		previewProblem = nil
 		await refreshPreview()
 	}
 
@@ -193,14 +197,21 @@ public final class CustomReportsModel {
 	public func cancelEditing() {
 		draft = nil
 		preview = nil
+		previewProblem = nil
 		isCreating = false
 	}
 
 	public func refreshPreview() async {
 		guard let draft else { return }
 		let today = WorkspaceModel.today()
-		if let preview = await workspace.report({ try await $0.previewReport(draft, today: today) }), self.draft == draft {
+		guard let result = await workspace.attempt({ try await $0.previewReport(draft, today: today) }), self.draft == draft else { return }
+		switch result {
+		case .success(let preview):
 			self.preview = preview
+			previewProblem = nil
+		case .failure(let error):
+			preview = nil
+			previewProblem = ErrorPresentation.coreMessage(error)
 		}
 	}
 
@@ -215,6 +226,7 @@ public final class CustomReportsModel {
 		}
 		self.draft = nil
 		preview = nil
+		previewProblem = nil
 		isCreating = false
 		await load()
 		return true
@@ -278,14 +290,16 @@ public final class DashboardModel {
 	}
 
 	public func resize(_ card: DashboardCard, columns: Int64 = 0, rows: Int64 = 0) async {
-		await place(card, x: card.x, y: card.y, width: card.width + columns, height: card.height + rows)
+		await resize(card, trailing: columns, bottom: rows)
 	}
 
 	/// Resizing from an edge or corner: `leading` and `top` edges move the
-	/// origin as the size changes, so the opposite edge stays put.
+	/// origin as the size changes, so the opposite edge stays put. The width
+	/// stops at the grid's edge, as react-grid-layout clamps it in Actual.
 	public func resize(_ card: DashboardCard, leading: Int64 = 0, top: Int64 = 0, trailing: Int64 = 0, bottom: Int64 = 0) async {
 		let minimum = card.minimumSize
-		let width = min(max(card.width - leading + trailing, minimum.width), Self.columns)
+		let room = leading == 0 ? Self.columns - card.x : card.x + card.width
+		let width = max(min(card.width - leading + trailing, room), minimum.width)
 		let height = max(card.height - top + bottom, minimum.height)
 		let x = leading == 0 ? card.x : card.x + card.width - width
 		let y = top == 0 ? card.y : card.y + card.height - height

@@ -342,20 +342,20 @@ private struct WidgetHeader: View {
 
 	@ViewBuilder private var headline: some View {
 		switch card.content {
-		case .netWorth(let points):
+		case .netWorth(let points, let change):
 			if let last = points.last {
 				VStack(alignment: .trailing, spacing: 2) {
 					ReportAmount(amount: last.netWorth, format: format, weight: .semibold)
-					if let first = points.first, points.count > 1 {
-						Signed(amount: last.netWorth - first.netWorth, format: format)
+					if let change {
+						Signed(amount: change, format: format)
 					}
 				}
 			}
 		case .cashFlow(_, _, let net, let classified):
 			Signed(amount: net, format: format, weight: .semibold)
 				.accessibilityLabel("\(classified ? "Net Profit" : "Money in less money out") \(format.amount(net, on: .register))")
-		case .spending(_, let spent, _, let compare, _):
-			Signed(amount: compare - spent, format: format, weight: .semibold)
+		case .spending(_, _, _, _, let difference, _):
+			Signed(amount: difference, format: format, weight: .semibold)
 		case .calendar(_, _, let income, let expenses):
 			HStack(spacing: Spacing.s2) {
 				Label(format.amount(income, on: .register), systemImage: "arrow.up")
@@ -418,7 +418,7 @@ private struct WidgetBody: View {
 		switch card.content {
 		case .summary(let figure), .formula(let figure):
 			BigFigure(figure: figure, format: format)
-		case .netWorth(let points):
+		case .netWorth(let points, _):
 			Chart(points, id: \.month) { point in
 				AreaMark(x: .value("Month", ReportPeriod.shortMonth(point.month)), y: .value("Net worth", Double(point.netWorth) / 100))
 					.foregroundStyle(Color.moneyIncomeFill.opacity(0.16))
@@ -429,7 +429,7 @@ private struct WidgetBody: View {
 			.chartYScale(domain: .automatic(includesZero: false))
 		case .cashFlow(let income, let expenses, _, let classified):
 			PairBars(first: (classified ? "Income" : "Money in", income, Color.moneyIncomeFill), second: (classified ? "Expenses" : "Money out", expenses, Color.chartExpense), format: format)
-		case .spending(let month, let spent, let compareMonth, let compareSpent, let classified):
+		case .spending(let month, let spent, let compareMonth, let compareSpent, _, let classified):
 			VStack(alignment: .leading, spacing: Spacing.s1) {
 				Text(card.config.conditions.isEmpty ? (classified ? "Spending" : "Everything except income categories") : "Selected rows")
 					.font(.text(.caption))
@@ -666,7 +666,7 @@ enum CardWords {
 	/// A card still on Net Profit's figures gets no raw-movement caption.
 	static func caption(_ card: DashboardCard) -> String? {
 		switch card.content {
-		case .cashFlow(_, _, _, true), .spending(_, _, _, _, true): return nil
+		case .cashFlow(_, _, _, true), .spending(_, _, _, _, _, true): return nil
 		default: return caption(card.kind)
 		}
 	}

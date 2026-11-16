@@ -190,7 +190,7 @@ public enum CardFigure: Hashable, Sendable {
 	case percent(Double)
 	case number(Double)
 	case days(Int)
-	/// A share with nothing to divide by: drawn blank, never "NaN%" or "∞%".
+	/// A NaN or infinite result, such as a percentage of nothing. Drawn blank.
 	case undefined
 
 	public var isNegative: Bool {
@@ -199,6 +199,7 @@ public enum CardFigure: Hashable, Sendable {
 		case .money(let value): value < 0
 		case .percent(let value), .number(let value): value < 0
 		case .days(let value): value < 0
+		case .undefined: false
 		}
 	}
 }
@@ -231,11 +232,11 @@ public struct ForecastPoint: Hashable, Sendable {
 
 /// What a card draws. `pending` is a kind the core doesn't compute yet.
 public enum CardContent: Hashable, Sendable {
-	case netWorth([NetWorthMonth])
+	case netWorth([NetWorthMonth], change: Int64?)
 	/// `classified` is Net Profit's figures, which the core sends until the
 	/// card switches to Actual's own numbers; it decides the labels (ST-10.10).
 	case cashFlow(income: Int64, expenses: Int64, netProfit: Int64, classified: Bool)
-	case spending(month: Month, spent: Int64, compareMonth: Month, compareSpent: Int64, classified: Bool)
+	case spending(month: Month, spent: Int64, compareMonth: Month, compareSpent: Int64, difference: Int64, classified: Bool)
 	case sankey(SankeyReport)
 	case customReport(CustomReportView)
 	case markdown(String)
@@ -359,13 +360,13 @@ extension DashboardCard {
 		let content: CardContent
 		switch widget.view {
 		case .netWorth(let points):
-			content = .netWorth(points)
+			content = .netWorth(points, change: widget.view.change)
 			if let first = points.first, let last = points.last { range = ReportPeriod(first: first.month, last: last.month) }
 		case .cashFlow(let first, let last, let income, let expenses, let netProfit):
 			content = .cashFlow(income: income, expenses: expenses, netProfit: netProfit, classified: true)
 			range = ReportPeriod(first: first, last: last)
 		case .spending(let month, let spent, let compareMonth, let compareSpent):
-			content = .spending(month: month, spent: spent, compareMonth: compareMonth, compareSpent: compareSpent, classified: true)
+			content = .spending(month: month, spent: spent, compareMonth: compareMonth, compareSpent: compareSpent, difference: widget.view.difference ?? 0, classified: true)
 		case .sankey(let report):
 			content = .sankey(report)
 			range = period(report.first, report.last)

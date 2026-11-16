@@ -453,6 +453,19 @@ struct DashboardEditingTests {
 		])
 	}
 
+	@Test func resizingPastTheRightEdgeClampsTheWidthAndKeepsTheCardInPlace() async {
+		let model = await open()
+		guard let card = model.sheet?.cards.first else { Issue.record("no card"); return }
+		await model.resize(card, columns: 9)
+		await model.resize(card, trailing: 9, bottom: 1)
+		await model.resize(card, leading: -9)
+		#expect(session.commands == [
+			.placeWidget(widgetId: "w", x: 2, y: 0, width: 10, height: 2),
+			.placeWidget(widgetId: "w", x: 2, y: 0, width: 10, height: 3),
+			.placeWidget(widgetId: "w", x: 0, y: 0, width: 8, height: 2)
+		])
+	}
+
 	@Test func aNewDashboardIsShownOnceMade() async {
 		let model = await open()
 		await model.createDashboard(named: "  Taxes ")
