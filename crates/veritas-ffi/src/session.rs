@@ -922,6 +922,15 @@ pub(crate) mod tests {
 			(format.symbol_first, format.symbol_space)
 		};
 		assert_eq!(placement(&core), (Some(false), Some(true)));
+		assert!(
+			!core
+				.overview()
+				.unwrap()
+				.number_format
+				.unwrap()
+				.hide_decimals,
+			"a 2-place currency shows its fraction"
+		);
 		core.close().unwrap();
 
 		let db = scratch.0.join("budget").join("db.sqlite");
@@ -971,6 +980,51 @@ pub(crate) mod tests {
 			"unset: Actual's default, not the table"
 		);
 		core.close().unwrap();
+	}
+
+	#[test]
+	fn a_new_zero_place_budget_hides_the_fraction_as_actuals_picker_does() {
+		// CLS-12.3, Currency.tsx:115-122: picking a 0-place currency sets
+		// hideFraction to true, and any other currency to false.
+		for (code, hidden) in [("JPY", "true"), ("KRW", "true"), ("USD", "false")] {
+			let scratch = Scratch::new(&format!("hide-{code}"));
+			let core = Core::<veritas_store::Store>::create_budget(
+				code,
+				&scratch.budget(),
+				&crate::NumberFormat {
+					currency: Some(code.to_owned()),
+					style: crate::NumberStyle::CommaDot,
+					hide_decimals: false,
+					symbol_first: None,
+					symbol_space: None,
+				},
+				&crate::NewBudgetOptions {
+					retirement_401k: false,
+					hsa: false,
+					accounts: Vec::new(),
+				},
+				&CancelToken::default(),
+			)
+			.unwrap();
+			let shown = core
+				.overview()
+				.unwrap()
+				.number_format
+				.unwrap()
+				.hide_decimals;
+			assert_eq!(shown.to_string(), hidden, "{code}");
+			core.close().unwrap();
+			let stored: String =
+				rusqlite::Connection::open(scratch.0.join("budget").join("db.sqlite"))
+					.unwrap()
+					.query_row(
+						"SELECT value FROM preferences WHERE id = 'hideFraction'",
+						[],
+						|row| row.get(0),
+					)
+					.unwrap();
+			assert_eq!(stored, hidden, "{code}");
+		}
 	}
 
 	#[test]
