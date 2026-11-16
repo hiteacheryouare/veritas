@@ -1345,6 +1345,191 @@ fn every_new_card_matches_actual_on_a_brand_new_empty_budget() {
 	assert!(compared >= 5 * (7 + 24), "{compared}");
 }
 
+#[test]
+fn filters_veritas_cannot_type_or_actual_does_not_define_survive_saves_as_actuals_editor_keeps_them()
+ {
+	// A card and a custom report whose filters came from a newer Actual: a
+	// repeating date (typed as `.raw`), a field and an op Actual 26.11 doesn't
+	// define, a named filter and an outflow range. Veritas renames
+	// both, which must leave every filter's text exactly as stored; then it
+	// drops the first filter and edits another, which must come out as
+	// Actual's editor saves the same edit.
+	let scratch = Scratch::new("filter-text");
+	let Some(oracle) = oracle() else {
+		return;
+	};
+	let plain = r#"{"field":"notes","op":"contains","value":"trip","type":"string"}"#;
+	let repeating_value = r#"{"start":"2026-01-31","frequency":"monthly","interval":1,"patterns":[{"type":"day","value":-1}],"skipWeekend":true,"weekendSolveMode":"before","endMode":"never"}"#;
+	let repeating =
+		format!(r#"{{"field":"date","op":"is","value":{repeating_value},"type":"date"}}"#);
+	let unknown_field =
+		r#"{"field":"mood","op":"is","value":"happy","type":"string","since":"27.1"}"#;
+	let amount = r#"{"field":"amount","op":"gt","value":-50000,"type":"number"}"#;
+	let unknown_op = r#"{"field":"notes","op":"startsWith","value":"Re","type":"string"}"#;
+	let named = format!(
+		r#"{{"field":"category","op":"oneOf","value":["{GROCERIES}","{DINING_OUT}"],"type":"id","customName":"Food"}}"#
+	);
+	let outflow = r#"{"field":"amount","op":"isbetween","value":{"num1":1000,"num2":90000},"type":"number","options":{"outflow":true}}"#;
+	let stored = [
+		plain.to_owned(),
+		repeating.clone(),
+		unknown_field.to_owned(),
+		amount.to_owned(),
+		unknown_op.to_owned(),
+		named.clone(),
+		outflow.to_owned(),
+	];
+	let list = |items: &[&str]| format!("[{}]", items.join(","));
+	let all: Vec<&str> = stored.iter().map(String::as_str).collect();
+	let base = scratch.join("base.zip");
+	apply(
+		&oracle,
+		&all_features(),
+		json!([
+			{"op": "addDashboardWidget", "id": "filter-card", "page": MAIN, "type": "summary-card",
+				"x": 0, "y": 50, "width": 4, "height": 2,
+				"metaText": format!(r#"{{"name":"Filtered","conditions":{},"conditionsOp":"and"}}"#, list(&all))},
+			{"op": "updateCustomReport", "id": SPENDING_REPORT,
+				"setText": format!(r#"{{"conditions":{}}}"#, list(&all))},
+		]),
+		&base,
+		12,
+	);
+	let stored_text = |zip: &Path| -> (String, String) {
+		let dump = raw_dump(&oracle, zip);
+		let meta: Value = serde_json::from_str(
+			table(&dump, "dashboard")["filter-card"]["meta"]
+				.as_str()
+				.unwrap(),
+		)
+		.unwrap();
+		let report = table(&dump, "custom_reports")[SPENDING_REPORT]["conditions"]
+			.as_str()
+			.unwrap()
+			.to_owned();
+		let card_text = table(&dump, "dashboard")["filter-card"]["meta"]
+			.as_str()
+			.unwrap()
+			.to_owned();
+		let start = card_text.find("\"conditions\":").unwrap() + "\"conditions\":".len();
+		let len = serde_json::to_string(&meta["conditions"]).unwrap().len();
+		(card_text[start..start + len].to_owned(), report)
+	};
+	assert_eq!(stored_text(&base), (list(&all), list(&all)));
+
+	let session = import(&base, &scratch.join("veritas"));
+	let config = widget(&dashboards(&session, "2026-11-13"), "filter-card")
+		.config
+		.clone();
+	let report = block_on(session.custom_report(
+		SPENDING_REPORT.to_owned(),
+		"2026-11-13".to_owned(),
+		CancelToken::new(),
+	))
+	.unwrap()
+	.settings;
+	assert_eq!(
+		config.conditions, report.conditions,
+		"the card and the report read the same filters the same way"
+	);
+	assert_eq!(
+		config.conditions.len(),
+		5,
+		"the field and op Actual doesn't define aren't listed: {:?}",
+		config.conditions
+	);
+	assert_eq!(config.conditions[1].field, RuleField::Date);
+	let RuleValue::Raw { json: shown } = &config.conditions[1].value else {
+		panic!("a repeating date is raw: {:?}", config.conditions[1]);
+	};
+	assert_eq!(
+		serde_json::from_str::<Value>(shown).unwrap(),
+		serde_json::from_str::<Value>(repeating_value).unwrap(),
+		"a repeating date comes back with its stored value"
+	);
+	assert_eq!(config.conditions[4].field, RuleField::AmountOutflow);
+
+	let mut renamed = config.clone();
+	renamed.name = Some("Filtered, renamed".to_owned());
+	perform(
+		&session,
+		Command::SetWidgetConfig {
+			widget_id: "filter-card".to_owned(),
+			config: renamed,
+		},
+	);
+	let mut renamed_report = report.clone();
+	renamed_report.name = "Spending, renamed".to_owned();
+	perform(
+		&session,
+		Command::SaveCustomReport {
+			settings: renamed_report,
+		},
+	);
+	let renamed_zip = scratch.join("renamed.zip");
+	export(&session, &renamed_zip);
+	assert_eq!(
+		stored_text(&renamed_zip),
+		(list(&all), list(&all)),
+		"a rename leaves every filter's text as stored"
+	);
+
+	let mut edited = config.clone();
+	edited.conditions.remove(0);
+	let at = edited
+		.conditions
+		.iter()
+		.position(|condition| condition.field == RuleField::Amount)
+		.unwrap();
+	edited.conditions[at].value = RuleValue::Amount { amount: -60_000 };
+	perform(
+		&session,
+		Command::SetWidgetConfig {
+			widget_id: "filter-card".to_owned(),
+			config: edited.clone(),
+		},
+	);
+	let mut edited_report = report;
+	edited_report.conditions = edited.conditions.clone();
+	perform(
+		&session,
+		Command::SaveCustomReport {
+			settings: edited_report,
+		},
+	);
+	let ours = scratch.join("veritas-edit.zip");
+	export(&session, &ours);
+
+	let new_amount = r#"{"field":"amount","op":"gt","value":-60000,"type":"number"}"#;
+	let actuals_edit = list(&[
+		&repeating,
+		unknown_field,
+		new_amount,
+		unknown_op,
+		&named,
+		outflow,
+	]);
+	let theirs = scratch.join("actual-edit.zip");
+	apply(
+		&oracle,
+		&base,
+		json!([
+			{"op": "updateWidgetMeta", "id": "filter-card",
+				"setText": format!(r#"{{"conditions":{actuals_edit}}}"#)},
+			{"op": "updateCustomReport", "id": SPENDING_REPORT,
+				"setText": format!(r#"{{"conditions":{actuals_edit}}}"#)},
+		]),
+		&theirs,
+		13,
+	);
+	assert_eq!(stored_text(&theirs), (actuals_edit.clone(), actuals_edit));
+	assert_eq!(
+		stored_text(&ours),
+		stored_text(&theirs),
+		"Veritas's edit against Actual's"
+	);
+}
+
 /// Everything the dashboard editor shows, as text: `WidgetView` holds
 /// floats, so it compares through `Debug`.
 fn editor(session: &Session) -> String {
