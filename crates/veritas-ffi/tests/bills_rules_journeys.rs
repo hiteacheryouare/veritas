@@ -2129,7 +2129,19 @@ fn an_auto_posted_about_or_between_bill_reads_as_an_estimate_until_edited_or_cle
 		Some(RENT),
 		true,
 	);
+	let tie = bill(
+		"Sewer",
+		CITY_POWER,
+		BillAmount::Between {
+			low: -1_001,
+			high: -1_000,
+		},
+		monthly("2026-11-03", None),
+		Some(UTILITIES),
+		true,
+	);
 	create(&setup, "water", water);
+	create(&setup, "tie", tie);
 	create(&setup, "power", power);
 	create(&setup, "rent", rent);
 	let base = scratch.join("base.zip");
@@ -2146,6 +2158,13 @@ fn an_auto_posted_about_or_between_bill_reads_as_an_estimate_until_edited_or_cle
 			"{who} posts each bill once"
 		);
 		assert_eq!(water[0].amount, -7_500, "{who}: Math.round(-7500.5)");
+		let tie = scheduled_rows(session, "tie");
+		assert_eq!(
+			(tie.len(), tie[0].amount),
+			(1, -1_000),
+			"{who}: a negative tie rounds toward +∞, as Math.round does"
+		);
+		assert!(tie[0].is_unconfirmed_estimate, "{who}");
 		assert_eq!(power[0].amount, -9_000, "{who}");
 		assert!(water[0].is_unconfirmed_estimate, "{who}: Between");
 		assert!(power[0].is_unconfirmed_estimate, "{who}: About");

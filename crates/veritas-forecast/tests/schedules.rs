@@ -178,7 +178,7 @@ fn fc_2_estimates_use_linked_payments_and_midpoints() {
 	assert_eq!(electric[0].certainty, Certainty::Estimate);
 	let water = of(&result, "Water");
 	assert_eq!(water[0].date, date("2027-01-20"));
-	assert_eq!(water[0].amount, cents(-4001));
+	assert_eq!(water[0].amount, cents(-4000), "Math.round(-4000.5)");
 }
 
 #[test]

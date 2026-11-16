@@ -259,7 +259,19 @@ fn fc_2_amount_per_occurrence() {
 	let between = ScheduleAmount::IsBetween(cents(-9001), cents(-11000))
 		.per_occurrence(&book.budget, &electric)
 		.unwrap();
-	assert_eq!(between.0, cents(-10001));
+	assert_eq!(between.0, cents(-10000), "Math.round(-10000.5) is -10000");
+	let tie = ScheduleAmount::IsBetween(cents(-1001), cents(-1000))
+		.per_occurrence(&book.budget, &electric)
+		.unwrap();
+	assert_eq!(
+		tie.0,
+		cents(-1000),
+		"a negative tie goes toward +∞, as Math.round"
+	);
+	let positive = ScheduleAmount::IsBetween(cents(1000), cents(1001))
+		.per_occurrence(&book.budget, &electric)
+		.unwrap();
+	assert_eq!(positive.0, cents(1001));
 	let exact = ScheduleAmount::Is(cents(-165000))
 		.per_occurrence(&book.budget, &electric)
 		.unwrap();
