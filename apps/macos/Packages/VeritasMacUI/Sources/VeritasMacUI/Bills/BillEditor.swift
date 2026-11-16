@@ -36,8 +36,19 @@ struct BillEditor: View {
 
 	var body: some View {
 		VStack(alignment: .leading, spacing: Spacing.s4) {
-			Text(title)
-				.font(.text(.title, weight: .semibold))
+			HStack(alignment: .firstTextBaseline, spacing: Spacing.s3) {
+				Text(title)
+					.font(.text(.title, weight: .semibold))
+				if customRule {
+					Text("Has extra rule parts")
+						.font(.text(.caption))
+						.foregroundStyle(.textSecondary)
+						.padding(.horizontal, Spacing.s2)
+						.padding(.vertical, 2)
+						.background(RoundedRectangle(cornerRadius: Radius.field).strokeBorder(Color.edgeControl))
+						.accessibilityIdentifier("billEditor.customRule")
+				}
+			}
 			ScrollView {
 				VStack(alignment: .leading, spacing: Spacing.s4) {
 					who
@@ -56,12 +67,6 @@ struct BillEditor: View {
 				}
 			}
 			.scrollBounceBehavior(.basedOnSize)
-			if customRule {
-				Text("Saving keeps the extra conditions and actions on this bill's rule.")
-					.font(.text(.caption))
-					.foregroundStyle(.textSecondary)
-					.accessibilityIdentifier("billEditor.customRule")
-			}
 			if let problem = model.editing?.problem ?? low.problem ?? high.problem {
 				ProblemNote(text: problem)
 					.accessibilityIdentifier("billEditor.problem")
