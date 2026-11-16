@@ -60,8 +60,6 @@ private struct ApplyRow: View {
 	let row: RulePreviewRow
 	let isSelected: Bool
 
-	private var movesReconciledBalance: Bool { row.reconciled && row.changesAmount }
-
 	var body: some View {
 		let match = row.match
 		HStack(alignment: .firstTextBaseline, spacing: Spacing.s3) {
@@ -95,10 +93,10 @@ private struct ApplyRow: View {
 				ForEach(Array(match.splitLines.enumerated()), id: \.offset) { index, line in
 					splitLine(index + 1, line)
 				}
-				if movesReconciledBalance {
+				if row.movesReconciledBalance {
 					Text("Changes a reconciled balance")
 						.font(.text(.caption, weight: .semibold))
-						.foregroundStyle(.moneyOverspent)
+						.foregroundStyle(.moneyLow)
 						.accessibilityIdentifier("applyRule.row.\(row.id).reconciledWarning")
 				}
 			}
@@ -106,26 +104,25 @@ private struct ApplyRow: View {
 		.font(.text(.body))
 		.padding(.horizontal, Spacing.s4)
 		.padding(.vertical, Spacing.s2)
-		.background(movesReconciledBalance ? AnyShapeStyle(Color.moneyOverspent.opacity(0.08)) : AnyShapeStyle(.clear))
+		.background(row.movesReconciledBalance ? AnyShapeStyle(Color.moneyLow.opacity(0.08)) : AnyShapeStyle(.clear))
 		.accessibilityElement(children: .contain)
 		.accessibilityIdentifier("applyRule.row.\(row.id)")
 	}
 
 	private func changeLine(_ change: RuleFieldChange) -> some View {
-		let field = RuleWords.field(of: change.field)
 		let isAmount = change.field == .amount
 		return HStack(alignment: .firstTextBaseline, spacing: Spacing.s2) {
 			Text(RuleWords.changed(change.field))
 				.foregroundStyle(.textSecondary)
 				.frame(width: 96, alignment: .leading)
-			Text(shown(change.before, on: field))
+			Text(shown(change.before, on: change.field))
 				.foregroundStyle(.textSecondary)
 			Text("→").foregroundStyle(.textTertiary).accessibilityHidden(true)
-			Text(shown(change.after, on: field))
+			Text(shown(change.after, on: change.field))
 				.font(.text(.body, weight: .medium))
 		}
 		.font(isAmount ? .figures(.body) : .text(.body))
-		.foregroundStyle(isAmount && row.reconciled ? Color.moneyOverspent : Color.textPrimary)
+		.foregroundStyle(row.movesReconciledBalance(change) ? Color.moneyLow : Color.textPrimary)
 	}
 
 	private func splitLine(_ number: Int, _ line: RuleSplitLine) -> some View {
@@ -145,8 +142,7 @@ private struct ApplyRow: View {
 		}
 	}
 
-	private func shown(_ value: RuleValue, on field: RuleField?) -> String {
-		let words = RuleWords.value(value, on: field, names: model.names, format: model.format)
-		return words.isEmpty ? "nothing" : words
+	private func shown(_ value: RuleValue, on field: RuleChangedField) -> String {
+		RuleWords.change(value, on: field, names: model.names, format: model.format)
 	}
 }

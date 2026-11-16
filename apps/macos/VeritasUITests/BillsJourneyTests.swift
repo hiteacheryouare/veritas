@@ -83,15 +83,41 @@ final class BillsJourneyTests: XCTestCase {
 	}
 
 	@MainActor
-	func testAReadOnlyBillShowsEditInActual() {
+	func testAReadOnlyBillShowsItsNextDateAndEditInActualInItsMenu() {
 		let app = openBills()
 		let insurance = element(app, "bill.insurance")
 		XCTAssertTrue(insurance.waitForExistence(timeout: 5))
-		XCTAssertTrue(insurance.label.contains("Edit in Actual"), insurance.label)
+		XCTAssertTrue(insurance.label.hasPrefix("Car insurance, 610.00, Mar 8"), insurance.label)
+		XCTAssertFalse(insurance.label.contains("Edit in Actual"), insurance.label)
 		insurance.click()
 		XCTAssertFalse(element(app, "sheet.billEditor").waitForExistence(timeout: 2), "a bill Veritas can't show doesn't open the editor")
 		insurance.rightClick()
 		XCTAssertNil(contextItem(app, "Edit…"))
+		XCTAssertEqual(contextItem(app, "Edit in Actual")?.isEnabled, false, "the menu says where to edit it")
+		app.typeKey(.escape, modifierFlags: [])
+	}
+
+	@MainActor
+	func testIncomeIsReceived() {
+		let app = openBills()
+		let received = app.buttons["upcoming.paycheck.paid"]
+		XCTAssertEqual(received.label, "Received")
+		XCTAssertEqual(app.buttons["upcoming.electric.paid"].label, "Paid")
+		received.click()
+		let markReceived = app.buttons["upcoming.paycheck.markPaid"]
+		XCTAssertTrue(markReceived.waitForExistence(timeout: 5))
+		XCTAssertEqual(markReceived.label, "Mark received")
+		app.buttons["upcoming.paycheck.cancelPay"].click()
+		XCTAssertTrue(markReceived.waitForDisappearance())
+	}
+
+	@MainActor
+	func testTheTrayMenuPostsForTheOccurrenceDateOrToday() {
+		let app = openBills()
+		app.buttons["upcoming.car.more"].click()
+		XCTAssertNotNil(contextItem(app, "Post for Nov 12"))
+		XCTAssertNotNil(contextItem(app, "Post today"))
+		XCTAssertNil(contextItem(app, "Post Now"))
 		app.typeKey(.escape, modifierFlags: [])
 	}
 

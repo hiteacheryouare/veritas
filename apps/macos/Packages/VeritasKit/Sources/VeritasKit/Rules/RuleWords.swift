@@ -126,6 +126,31 @@ public enum RuleWords {
 		}
 	}
 
+	/// One side of an apply preview's change. An empty payee or category
+	/// reads "No payee" or "No category", so a line reads "No category → Household".
+	public static func change(_ value: RuleValue, on changed: RuleChangedField, names: BudgetNames, format: MoneyFormat) -> String {
+		if isEmpty(value) {
+			switch changed {
+			case .payee: return "No payee"
+			case .category: return "No category"
+			case .notes: return "No notes"
+			case .importedPayee: return "No imported payee"
+			case .schedule: return "No bill"
+			default: return "nothing"
+			}
+		}
+		let words = Self.value(value, on: field(of: changed), names: names, format: format)
+		return words.isEmpty ? "nothing" : words
+	}
+
+	private static func isEmpty(_ value: RuleValue) -> Bool {
+		switch value {
+		case .id(.none), .nothing: true
+		case .text(let text): text.isEmpty
+		default: false
+		}
+	}
+
 	/// The field a changed column names, so its ids read as names.
 	public static func field(of changed: RuleChangedField) -> RuleField? {
 		switch changed {

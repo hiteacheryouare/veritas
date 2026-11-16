@@ -55,7 +55,7 @@ private struct TimelineRow: View {
 				.foregroundStyle(.textSecondary)
 				.lineLimit(1)
 				.frame(width: 210, alignment: .leading)
-			Text(item.status == .upcoming ? "" : BillWords.status(item.status))
+			Text(item.status == .upcoming ? "" : BillWords.status(item.status, isIncome: item.isIncome))
 				.font(.text(.caption))
 				.foregroundStyle(item.status == .missed ? AnyShapeStyle(.moneyOverspent) : AnyShapeStyle(.textSecondary))
 				.frame(width: 64, alignment: .leading)

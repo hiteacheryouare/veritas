@@ -165,17 +165,20 @@ struct RealCoreRulesTests {
 		}
 	}
 
+	private func reconcileHardwareRefund(_ budget: RealBudget) async throws {
+		let directory = try budget.directory
+		await budget.workspace.closeBudget()
+		try ActualDatabase.execute(
+			directory.appending(path: "db.sqlite"),
+			"UPDATE transactions SET reconciled = 1, cleared = 1 WHERE id = '\(Self.hardwareRefund)'"
+		)
+		await budget.workspace.reopen(directory: directory)
+		try #require(budget.workspace.phase == .open)
+	}
+
 	@Test func aReconciledRowIsFlaggedAndLeftUnticked() async throws {
 		try await RealBudget.with { budget in
-			let directory = try budget.directory
-			await budget.workspace.closeBudget()
-			try ActualDatabase.execute(
-				directory.appending(path: "db.sqlite"),
-				"UPDATE transactions SET reconciled = 1, cleared = 1 WHERE id = '\(Self.hardwareRefund)'"
-			)
-			await budget.workspace.reopen(directory: directory)
-			try #require(budget.workspace.phase == .open)
-
+			try await reconcileHardwareRefund(budget)
 			let model = await rules(budget)
 			model.startNew()
 			model.editing?.draft = draft(contains: Self.hardwareStore, then: [set(.amount, .amount(amount: 1_000))])
@@ -183,13 +186,28 @@ struct RealCoreRulesTests {
 			let applying = try #require(model.applying, "\(String(describing: model.editing?.problem))")
 			let locked = try #require(applying.rows.first { $0.id == Self.hardwareRefund })
 			#expect(locked.reconciled)
-			#expect(locked.changesAmount, "applying would move a reconciled balance")
+			#expect(locked.movesReconciledBalance, "applying would move a reconciled balance")
 			#expect(applying.reconciledRows.map(\.id) == [Self.hardwareRefund])
 			#expect(!applying.selected.contains(Self.hardwareRefund))
 			#expect(applying.selected.count == applying.rows.count - 1)
 
 			model.toggle(Self.hardwareRefund)
 			#expect(model.applying?.selected.contains(Self.hardwareRefund) == true, "a reconciled row stays pickable")
+		}
+	}
+
+	@Test func movingAReconciledRowToAnotherAccountIsFlagged() async throws {
+		try await RealBudget.with { budget in
+			try await reconcileHardwareRefund(budget)
+			let model = await rules(budget)
+			model.startNew()
+			model.editing?.draft = draft(contains: Self.hardwareStore, then: [set(.account, .id(id: F.checking))])
+			await model.preview(.draft(draft: try #require(model.editing?.draft)))
+			let applying = try #require(model.applying, "\(String(describing: model.editing?.problem))")
+			let locked = try #require(applying.rows.first { $0.id == Self.hardwareRefund })
+			#expect(locked.match.changes.map(\.field) == [.account])
+			#expect(locked.movesReconciledBalance, "moving it out of its account changes that account's reconciled balance")
+			#expect(applying.rows.filter { $0.id != Self.hardwareRefund }.allSatisfy { !$0.movesReconciledBalance })
 		}
 	}
 }

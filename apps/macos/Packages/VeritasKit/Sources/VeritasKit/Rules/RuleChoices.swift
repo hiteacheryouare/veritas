@@ -1,6 +1,10 @@
 import Foundation
 import VeritasCore
 
+// TEMPORARY, until contract v13's `ruleChoices()`. The menus below copy
+// Actual's rule editor by hand; once the core hands them over, this file
+// gets deleted and the editor reads the core's lists instead.
+
 /// What the sentence editor's menus offer, copied from Actual's rule editor:
 /// `FIELD_INFO` and `TYPE_INFO` in loot-core/src/shared/rules.ts, and
 /// `conditionFields`, `getActionFields` and `getSplitActionFields` in
