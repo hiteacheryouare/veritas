@@ -198,6 +198,11 @@ public final class MoveMoneyModel: Identifiable {
 		if isLoanPayment, isNew {
 			var parts: [Int64] = []
 			for field in [interest, escrow, fees] {
+				// A blank part is 0, as the preview reads it; only the total is required.
+				if field.text.trimmingCharacters(in: .whitespaces).isEmpty {
+					parts.append(0)
+					continue
+				}
 				guard let part = await field.commit() else {
 					problem = field.problem
 					return false

@@ -307,6 +307,26 @@ struct RealCoreAccountsTests {
 		}
 	}
 
+	@Test func blankInterestAndEscrowSaveAsAPrincipalOnlyPayment() async throws {
+		// DEBT-3 can leave interest blank. A blank part is 0, not a refused field.
+		try await RealBudget.with { budget in
+			let workspace = budget.workspace
+			let principal = try #require(await workspace.report { try await $0.createKindCategory(kind: .debtPrincipal, name: "Car principal", unhideGroup: false) })
+			let move = MoveMoneyModel(workspace: workspace, fromID: Self.carLoan)
+			await move.load()
+			move.typeAmount("275")
+			move.interest.type("")
+			move.escrow.type("")
+			move.principalCategoryID = principal
+			await move.refreshPreview()
+			#expect(move.loan?.principal == 27_500)
+			#expect(await move.save(), "\(String(describing: move.problem))")
+			let payment = try #require(try await Self.allRows(workspace, .account(accountId: Self.checking)).first { $0.amount == -27_500 })
+			let categories = payment.lines.isEmpty ? [payment.categoryId] : payment.lines.map(\.categoryId)
+			#expect(categories == [principal], "principal only: no interest or escrow line")
+		}
+	}
+
 	@Test func payeesRenameMergeAndFavoriteAndTheRegisterFollows() async throws {
 		// R-ACC-5.
 		try await RealBudget.with { budget in
