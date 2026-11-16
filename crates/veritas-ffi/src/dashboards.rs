@@ -981,11 +981,14 @@ fn card(inputs: &Inputs, kind: WidgetType, meta: Option<&Json>) -> Result<Widget
 	})
 }
 
-/// A card whose settings Actual can't draw either shows why, instead of
-/// failing the whole dashboard.
+/// A card whose settings Actual can't draw either, or whose sums overflow,
+/// shows why, instead of failing the whole dashboard.
 fn problem(result: Result<WidgetView, CoreError>) -> Result<WidgetView, CoreError> {
 	match result {
 		Err(CoreError::Invalid(message)) => Ok(WidgetView::Problem { message }),
+		Err(CoreError::Overflow) => Ok(WidgetView::Problem {
+			message: "The amounts on this card are too large to add up.".to_owned(),
+		}),
 		other => other,
 	}
 }
@@ -1035,7 +1038,7 @@ fn widget_view(
 			},
 			None => WidgetView::MissingReport,
 		},
-		WidgetContent::Card { kind, meta, .. } => problem(card(inputs, *kind, meta.as_ref()))?,
+		WidgetContent::Card { kind, meta, .. } => card(inputs, *kind, meta.as_ref())?,
 	})
 }
 
@@ -1066,7 +1069,7 @@ fn widget_views(
 	if threads <= 1 {
 		return widgets
 			.iter()
-			.map(|(widget, known)| widget_view(inputs, widget, *known))
+			.map(|(widget, known)| problem(widget_view(inputs, widget, *known)))
 			.collect();
 	}
 	let mut order: Vec<usize> = (0..widgets.len()).collect();
@@ -1082,7 +1085,7 @@ fn widget_views(
 							return views;
 						};
 						let (widget, known) = widgets[index];
-						views.push((index, widget_view(inputs, widget, known)));
+						views.push((index, problem(widget_view(inputs, widget, known))));
 					}
 				})
 			})
@@ -1466,6 +1469,65 @@ mod tests {
 		assert!((0.0..=100.0).contains(&success_percent));
 		assert!(end_age > start_age);
 		assert!(chart.iter().all(|point| point.p10 <= point.p90));
+	}
+
+	#[test]
+	fn a_card_whose_sums_overflow_shows_a_problem_and_the_rest_still_draw() {
+		let (_scratch, core) = imported("all-features");
+		add(&core, "cash-flow-card", blank());
+		let mut budget = data(&core);
+		let november: Vec<_> = budget
+			.transactions
+			.values()
+			.filter(|row| {
+				!row.tombstone
+					&& row.transfer.is_none()
+					&& row.date.naive() >= NaiveDate::from_ymd_opt(2026, 11, 1).unwrap()
+					&& row.date.naive() <= today().naive()
+					&& !budget.accounts[&row.account].off_budget
+			})
+			.map(|row| row.id.clone())
+			.collect();
+		let mut huge = budget.transactions[&november[0]].clone();
+		huge.amount = Money::from_minor(i64::MAX / 2 + 1);
+		let mut twin = huge.clone();
+		twin.id = veritas_domain::TransactionId::new("overflow-twin");
+		budget.transactions.insert(huge.id.clone(), huge);
+		budget.transactions.insert(twin.id.clone(), twin);
+		let inputs = Inputs {
+			budget: &budget,
+			sheet: None,
+			today: today(),
+		};
+		let mut views = Vec::new();
+		for page in reports::dashboards(&budget).unwrap() {
+			for widget in &page.widgets {
+				let WidgetContent::Card { kind, .. } = &widget.content else {
+					continue;
+				};
+				if matches!(
+					kind,
+					WidgetType::CashFlow | WidgetType::Summary | WidgetType::Calendar
+				) {
+					views.push((*kind, problem(widget_view(&inputs, widget, true)).unwrap()));
+				}
+			}
+		}
+		let message = "The amounts on this card are too large to add up.".to_owned();
+		assert!(
+			views
+				.iter()
+				.any(|(kind, view)| *kind == WidgetType::CashFlow
+					&& *view
+						== WidgetView::Problem {
+							message: message.clone()
+						})
+		);
+		assert!(
+			views
+				.iter()
+				.any(|(_, view)| !matches!(view, WidgetView::Problem { .. }))
+		);
 	}
 
 	#[test]
