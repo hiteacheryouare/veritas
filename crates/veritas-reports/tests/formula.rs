@@ -599,7 +599,7 @@ const OUT_OF_SCOPE: &[&str] = &[
 
 #[test]
 #[ignore = "clean-room formula engine pending"]
-fn d73_formula_card_matches_hyperformula() {
+fn d73_formula_card_matches_actual() {
 	let budget = fixture("all-features");
 	let mut cases: Vec<Case> = [
 		ARITHMETIC, COERCION, COMPARISON, LOGIC, AGGREGATES, ROUNDING, TEXT, DATES, ERRORS,
