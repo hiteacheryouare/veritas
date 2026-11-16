@@ -1530,6 +1530,41 @@ fn filters_veritas_cannot_type_or_actual_does_not_define_survive_saves_as_actual
 	);
 }
 
+#[test]
+fn a_daily_or_weekly_net_worth_card_whose_range_starts_after_today_shows_what_actual_shows() {
+	// A static range that starts after today, as when the clock is behind
+	// the months a card was set to. Actual clamps a daily or weekly range's
+	// end to today and still draws the first period, with the net worth as
+	// of today; Veritas must show the same point and headline, not an empty
+	// card reading 0.
+	let scratch = Scratch::new("net-worth-ahead");
+	let Some(oracle) = oracle() else {
+		return;
+	};
+	let ahead = json!({"start": "2026-10", "end": "2026-11", "mode": "static"});
+	let ops: Vec<Value> = ["Daily", "Weekly", "Monthly"]
+		.into_iter()
+		.enumerate()
+		.map(|(n, interval)| {
+			json!({"op": "addDashboardWidget", "id": format!("ahead-{interval}"), "page": DEEP_DIVE,
+				"type": "net-worth-card", "x": 0, "y": 80 + 2 * i64::try_from(n).unwrap(), "width": 4, "height": 2,
+				"meta": {"interval": interval, "timeFrame": ahead}})
+		})
+		.collect();
+	let actual_made = scratch.join("ahead.zip");
+	apply(
+		&oracle,
+		&all_features(),
+		Value::Array(ops),
+		&actual_made,
+		14,
+	);
+	let session = import(&actual_made, &scratch.join("veritas"));
+	let zip = scratch.join("veritas.zip");
+	export(&session, &zip);
+	same_cards_as_actual(&oracle, &session, &zip, "2026-04-01");
+}
+
 /// Everything the dashboard editor shows, as text: `WidgetView` holds
 /// floats, so it compares through `Debug`.
 fn editor(session: &Session) -> String {
