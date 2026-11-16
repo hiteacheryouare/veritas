@@ -112,16 +112,15 @@ private struct ApplyRow: View {
 	}
 
 	private func changeLine(_ change: RuleFieldChange) -> some View {
-		let field = RuleWords.field(of: change.field)
 		let isAmount = change.field == .amount
 		return HStack(alignment: .firstTextBaseline, spacing: Spacing.s2) {
 			Text(RuleWords.changed(change.field))
 				.foregroundStyle(.textSecondary)
 				.frame(width: 96, alignment: .leading)
-			Text(shown(change.before, on: field))
+			Text(shown(change.before, on: change.field))
 				.foregroundStyle(.textSecondary)
 			Text("→").foregroundStyle(.textTertiary).accessibilityHidden(true)
-			Text(shown(change.after, on: field))
+			Text(shown(change.after, on: change.field))
 				.font(.text(.body, weight: .medium))
 		}
 		.font(isAmount ? .figures(.body) : .text(.body))
@@ -145,8 +144,7 @@ private struct ApplyRow: View {
 		}
 	}
 
-	private func shown(_ value: RuleValue, on field: RuleField?) -> String {
-		let words = RuleWords.value(value, on: field, names: model.names, format: model.format)
-		return words.isEmpty ? "nothing" : words
+	private func shown(_ value: RuleValue, on field: RuleChangedField) -> String {
+		RuleWords.change(value, on: field, names: model.names, format: model.format)
 	}
 }
