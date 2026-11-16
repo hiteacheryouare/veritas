@@ -13,7 +13,7 @@ use crate::accounts::{
 use crate::blocking::{CancelToken as CancelHandle, run};
 use crate::budget::BudgetMonth;
 use crate::commands::Command;
-use crate::goals::{GoalClosePreview, GoalList, GoalSummary};
+use crate::goals::{GoalClosePreview, GoalList};
 use crate::records::NewBudgetOptions;
 use crate::records::{
 	AuditFinding, BackupInfo, CategoryHistory, Change, NumberFormat, Overview, Retention,
@@ -237,7 +237,8 @@ impl<B: Backend> Core<B> {
 		})
 	}
 
-	pub(crate) fn goals(&self, today: &str) -> Result<Vec<GoalSummary>, FfiError> {
+	#[cfg(test)]
+	pub(crate) fn goals(&self, today: &str) -> Result<Vec<crate::GoalSummary>, FfiError> {
 		self.goal_list(today).map(|list| list.goals)
 	}
 
