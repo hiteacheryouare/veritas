@@ -311,9 +311,10 @@ fn last_payment<'a>(data: &'a BudgetData, loan: &AccountId) -> Option<LastPaymen
 
 /// DEBT-3: from the last payment (principal line, then the first two expense
 /// lines as interest and escrow; the total is their sum, so a fee never
-/// lands in principal), else the loan's payment with DEBT-4's interest,
-/// else nothing. Then principal is capped at what is owed the day before
-/// `today`, shrinking the total by the same amount.
+/// lands in principal), else the loan's payment with interest left blank
+/// (DEBT-4's estimate is only a hint, never a default), else nothing. Then
+/// principal is capped at what is owed the day before `today`, a blank
+/// interest counting as 0, shrinking the total by the same amount.
 pub fn payment_defaults(
 	data: &BudgetData,
 	loan: &AccountId,
@@ -343,14 +344,10 @@ pub fn payment_defaults(
 			}
 		}
 		None => {
-			let meta = data.account_meta.get(loan).cloned().unwrap_or_default();
-			match meta.loan_payment {
+			let payment = data.account_meta.get(loan).and_then(|m| m.loan_payment);
+			match payment {
 				Some(payment) => PaymentDefaults {
 					total: Some(payment),
-					interest: meta
-						.loan_rate_bps
-						.map(|rate| interest_estimate(owed, rate))
-						.transpose()?,
 					escrow: Some(Money::ZERO),
 					..PaymentDefaults::default()
 				},

@@ -1038,6 +1038,28 @@ fn a_recorded_payment_is_the_split_actual_reads_and_prefills_the_next_one() {
 	}
 
 	let capped = loan_setup("cap", 20_000);
+	let first = capped
+		.session
+		.loan_payment_defaults(capped.loan.clone(), "2026-12-01".to_owned())
+		.unwrap();
+	assert_eq!(
+		(first.total, first.interest, first.escrow),
+		(Some(20_000), None, Some(0)),
+		"DEBT-3 source 2: the rate never pre-fills interest, and a blank interest caps as 0"
+	);
+	let hint = capped
+		.session
+		.loan_payment_preview(
+			capped.loan.clone(),
+			"2026-12-01".to_owned(),
+			20_000,
+			0,
+			0,
+			0,
+		)
+		.unwrap()
+		.estimate;
+	assert_eq!(hint, Some(163), "DEBT-4's hint is still offered: 20000 * 980 / 120000");
 	perform(
 		&capped.session,
 		Command::SetLoanTerms {

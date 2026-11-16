@@ -363,7 +363,10 @@ fn a_year_of_mortgage_payments_with_escrow_a_fee_edits_deletes_and_a_payoff_read
 			.estimate
 			.unwrap();
 		if n == 1 {
-			assert_eq!(defaults.interest, Some(hint), "DEBT-3 source 2 uses DEBT-4");
+			assert_eq!(
+				defaults.interest, None,
+				"DEBT-3 source 2 leaves interest blank; DEBT-4 is only a hint"
+			);
 		} else {
 			assert_eq!(
 				defaults.escrow,
