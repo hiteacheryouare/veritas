@@ -564,9 +564,15 @@ struct Inputs<'a> {
 	budget: &'a BudgetData,
 	sheet: Option<&'a EnvelopeSheet>,
 	today: CivilDate,
+	cancel: Option<&'a veritas_session::CancelToken>,
 }
 
 impl Inputs<'_> {
+	fn cancelled(&self) -> bool {
+		self.cancel
+			.is_some_and(veritas_session::CancelToken::is_cancelled)
+	}
+
 	fn sheet(&self, card: &str) -> Result<&EnvelopeSheet, CoreError> {
 		self.sheet
 			.ok_or_else(|| CoreError::Internal(format!("the {card} card needs the envelope sheet")))
@@ -984,16 +990,16 @@ fn card(inputs: &Inputs, kind: WidgetType, meta: Option<&Json>) -> Result<Widget
 	})
 }
 
-/// A card whose settings Actual can't draw either, or whose sums overflow,
-/// shows why, instead of failing the whole dashboard.
+/// A card that can't draw shows why, and the rest of the dashboard still
+/// draws. Only cancelling fails the page.
 fn problem(result: Result<WidgetView, CoreError>) -> Result<WidgetView, CoreError> {
-	match result {
-		Err(CoreError::Invalid(message)) => Ok(WidgetView::Problem { message }),
-		Err(CoreError::Overflow) => Ok(WidgetView::Problem {
-			message: "The amounts on this card are too large to add up.".to_owned(),
-		}),
-		other => other,
-	}
+	let message = match result {
+		Err(CoreError::Cancelled) | Ok(_) => return result,
+		Err(CoreError::Invalid(message)) => message,
+		Err(CoreError::Overflow) => "The amounts on this card are too large to add up.".to_owned(),
+		Err(error) => format!("This card can't be drawn: {error}."),
+	};
+	Ok(WidgetView::Problem { message })
 }
 
 fn stored_report(budget: &BudgetData, id: &CustomReportId) -> Option<CustomReport> {
@@ -1072,7 +1078,12 @@ fn widget_views(
 	if threads <= 1 {
 		return widgets
 			.iter()
-			.map(|(widget, known)| problem(widget_view(inputs, widget, *known)))
+			.map(|(widget, known)| {
+				if inputs.cancelled() {
+					return Err(CoreError::Cancelled);
+				}
+				problem(widget_view(inputs, widget, *known))
+			})
 			.collect();
 	}
 	let mut order: Vec<usize> = (0..widgets.len()).collect();
@@ -1087,6 +1098,10 @@ fn widget_views(
 						let Some(&index) = order.get(next.fetch_add(1, Ordering::Relaxed)) else {
 							return views;
 						};
+						if inputs.cancelled() {
+							views.push((index, Err(CoreError::Cancelled)));
+							return views;
+						}
 						let (widget, known) = widgets[index];
 						views.push((index, problem(widget_view(inputs, widget, known))));
 					}
@@ -1237,6 +1252,7 @@ impl Session {
 						budget,
 						sheet,
 						today,
+						cancel: Some(cancel),
 					})
 				})
 			})
@@ -1271,6 +1287,7 @@ mod tests {
 					budget,
 					sheet,
 					today: today(),
+					cancel: None,
 				})
 			})
 		})
@@ -1522,6 +1539,7 @@ mod tests {
 			budget: &budget,
 			sheet: None,
 			today: today(),
+			cancel: None,
 		};
 		let mut views = Vec::new();
 		for page in reports::dashboards(&budget).unwrap() {
@@ -1551,6 +1569,38 @@ mod tests {
 			views
 				.iter()
 				.any(|(_, view)| !matches!(view, WidgetView::Problem { .. }))
+		);
+	}
+
+	#[test]
+	fn cancelling_fails_the_page_and_nothing_else_does() {
+		let (_scratch, core) = imported("all-features");
+		let token = veritas_session::CancelToken::default();
+		token.cancel();
+		let cancelled = core.call(|session| {
+			let sheet = needs_sheet(session.data()?);
+			session.with_sheet_if(today(), sheet, |budget, sheet| {
+				dashboards(&Inputs {
+					budget,
+					sheet,
+					today: today(),
+					cancel: Some(&token),
+				})
+			})
+		});
+		assert!(
+			matches!(cancelled, Err(FfiError::Cancelled)),
+			"{cancelled:?}"
+		);
+		let missing = problem(Err(CoreError::NotFound {
+			entity: "account",
+			id: "gone".to_owned(),
+		}));
+		assert_eq!(
+			missing.ok(),
+			Some(WidgetView::Problem {
+				message: "This card can't be drawn: account gone doesn't exist.".to_owned()
+			})
 		);
 	}
 
