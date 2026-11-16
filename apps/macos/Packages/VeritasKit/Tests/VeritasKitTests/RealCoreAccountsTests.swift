@@ -276,6 +276,33 @@ struct RealCoreAccountsTests {
 		}
 	}
 
+	@Test func payeesRenameMergeAndFavoriteAndTheRegisterFollows() async throws {
+		// R-ACC-5.
+		try await RealBudget.with { budget in
+			let model = PayeesModel(workspace: budget.workspace)
+			await model.load()
+			let cafe = try #require(model.payees.first { $0.name == "Bean There Cafe" })
+			let trattoria = try #require(model.payees.first { $0.name == "Trattoria" })
+			let transfer = try #require(model.payees.first { $0.transferAccountId == Self.savings })
+			let rows = try await Self.allRows(budget.workspace, .all)
+			let both = rows.filter { $0.payeeId == cafe.id || $0.payeeId == trattoria.id }.count
+
+			#expect(await model.rename(cafe.id, to: "Bean There"))
+			model.selection = [cafe.id, trattoria.id, transfer.id]
+			#expect(Set(model.mergeable.map(\.id)) == [cafe.id, trattoria.id], "an account's transfer payee isn't merged")
+			await model.merge(into: cafe.id)
+			await model.setFavorite(cafe.id, true)
+			let merged = try #require(model.payees.first { $0.id == cafe.id })
+			#expect(merged.name == "Bean There" && merged.favorite)
+			#expect(merged.transactions == UInt64(both), "Trattoria's rows now count under it")
+			#expect(!model.payees.contains { $0.id == trattoria.id })
+			#expect(model.payees.contains { $0.id == transfer.id })
+			let after = try await Self.allRows(budget.workspace, .all)
+			#expect(after.filter { $0.payeeName == "Bean There" }.count == both, "the register reads every merged row under the new name")
+			#expect(after.count == rows.count, "merging keeps every row")
+		}
+	}
+
 	@Test func aReadOnlyBudgetOffersNoWrites() async throws {
 		try await RealBudget.with { budget in
 			let directory = try budget.directory
