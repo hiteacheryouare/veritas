@@ -30,7 +30,7 @@ struct UpcomingRow: View {
 				VStack(alignment: .leading, spacing: 1) {
 					Text(BillWords.day(item.date))
 						.font(.figures(.body, weight: .semibold))
-					Text(BillWords.status(item.status))
+					Text(BillWords.status(item.status, isIncome: item.isIncome))
 						.font(.text(.caption))
 						.foregroundStyle(item.status == .missed ? AnyShapeStyle(.moneyOverspent) : AnyShapeStyle(.textSecondary))
 				}
@@ -53,7 +53,7 @@ struct UpcomingRow: View {
 					}
 					.frame(width: 190, alignment: .trailing)
 					HStack(spacing: Spacing.s2) {
-						Button("Paid", action: openPay)
+						Button(BillWords.paid(isIncome: item.isIncome), action: openPay)
 							.controlSize(.small)
 							.accessibilityIdentifier("upcoming.\(item.billId).paid")
 						actions
@@ -75,7 +75,7 @@ struct UpcomingRow: View {
 		.background(isPaying || isSelected ? AnyShapeStyle(.accentSoft) : AnyShapeStyle(.clear))
 		.motion(.fast, value: isSelected)
 		.accessibilityElement(children: .contain)
-		.accessibilityLabel("\(name), \(BillWords.day(item.date)), \(BillWords.status(item.status))")
+		.accessibilityLabel("\(name), \(BillWords.day(item.date)), \(BillWords.status(item.status, isIncome: item.isIncome))")
 		.accessibilityAddTraits(isSelected ? .isSelected : [])
 		.accessibilityIdentifier("upcoming.\(item.billId)")
 	}
@@ -83,8 +83,10 @@ struct UpcomingRow: View {
 	private var actions: some View {
 		Menu {
 			Button("Skip") { Task { await model.skip(item.billId) } }
-			Button("Post Now") { Task { await model.postNow(item.billId, datedToday: false) } }
-			Button("Post Today") { Task { await model.postNow(item.billId, datedToday: true) } }
+			if item.date != model.today {
+				Button(BillWords.postFor(item.date)) { Task { await model.postNow(item.billId, datedToday: false) } }
+			}
+			Button("Post today") { Task { await model.postNow(item.billId, datedToday: true) } }
 			Divider()
 			Button("Pause") { Task { await model.pause(item.billId) } }
 			Button("End") { Task { await model.end(item.billId) } }
@@ -127,7 +129,7 @@ private struct PayForm: View {
 
 	private var fields: some View {
 		HStack(spacing: Spacing.s2) {
-			DatePicker("Paid on", selection: $date, displayedComponents: .date)
+			DatePicker(BillWords.paidOn(isIncome: item.isIncome), selection: $date, displayedComponents: .date)
 				.labelsHidden()
 				.fixedSize()
 				.accessibilityIdentifier("upcoming.\(item.billId).date")
@@ -139,7 +141,7 @@ private struct PayForm: View {
 				}
 			}
 			.frame(width: 120, height: Size.controlSmall)
-			Button("Mark paid", action: markPaid)
+			Button(BillWords.markPaid(isIncome: item.isIncome), action: markPaid)
 				.buttonStyle(.borderedProminent)
 				.controlSize(.small)
 				.accessibilityIdentifier("upcoming.\(item.billId).markPaid")

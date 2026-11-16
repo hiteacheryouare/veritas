@@ -86,9 +86,38 @@ public enum BillWords {
 		}
 	}
 
-	public static func status(_ status: BillStatus) -> String {
+	/// The tray's button for one occurrence: "Paid", or "Received" for income.
+	public static func paid(isIncome: Bool) -> String {
+		isIncome ? "Received" : "Paid"
+	}
+
+	/// The tray's inline confirm: "Mark paid", or "Mark received" for income.
+	public static func markPaid(isIncome: Bool) -> String {
+		isIncome ? "Mark received" : "Mark paid"
+	}
+
+	/// The date picker's label beside it: "Paid on" or "Received on".
+	public static func paidOn(isIncome: Bool) -> String {
+		isIncome ? "Received on" : "Paid on"
+	}
+
+	/// "Post for Nov 15": posts the occurrence on its own date, not today's.
+	public static func postFor(_ date: String) -> String {
+		"Post for \(day(date))"
+	}
+
+	/// The editor's line under Auto-post for an estimated amount. Nil for an exact one.
+	public static func estimate(_ kind: BillAmountKind) -> String? {
+		switch kind {
+		case .exact: nil
+		case .about: "Auto-post adds a transaction for this amount."
+		case .between: "Auto-post adds a transaction for the middle of the range."
+		}
+	}
+
+	public static func status(_ status: BillStatus, isIncome: Bool) -> String {
 		switch status {
-		case .paid: "Paid"
+		case .paid: paid(isIncome: isIncome)
 		case .due: "Due"
 		case .upcoming: "Upcoming"
 		case .missed: "Missed"

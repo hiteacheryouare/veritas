@@ -196,10 +196,10 @@ struct BillEditor: View {
 				.fixedSize()
 				.accessibilityIdentifier("billEditor.posting")
 			}
-			if editing.draft.autoPost && amountKind != .exact {
+			if editing.draft.autoPost, let estimate = BillWords.estimate(amountKind) {
 				divider
 				Label {
-					Text("Auto-post records the estimate as a real transaction.")
+					Text(estimate)
 				} icon: {
 					Image(systemName: "exclamationmark.triangle")
 						.imageScale(.small)
