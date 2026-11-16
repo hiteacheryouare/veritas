@@ -136,7 +136,8 @@ final class StubDashboards: @unchecked Sendable {
 				months: span,
 				expenses: expenses,
 				income: income,
-				crossover: span.last.map { $0.adding(months: 2) }
+				crossover: span.last.map { $0.adding(months: 2) },
+				years: 3.2
 			)
 		case .budgetAnalysis:
 			return .budgetAnalysis(months: months, budgeted: [452_000, 455_000, 460_000, 458_000, 462_000, 465_000], spent: [438_820, 490_255, 610_490, 451_137, 461_844, 310_566])
