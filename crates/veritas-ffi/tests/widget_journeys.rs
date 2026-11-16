@@ -797,6 +797,79 @@ fn every_native_card_matches_actuals_card_code_on_a_budget_both_apps_edited() {
 	);
 }
 
+/// The same cards in a 0-place currency (D63): Actual's card code reads raw
+/// integers whatever the currency, so Veritas must never rescale a card.
+#[test]
+fn every_native_card_matches_actuals_card_code_in_a_zero_place_currency() {
+	let scratch = Scratch::new("yen");
+	let Some(oracle) = oracle() else {
+		return;
+	};
+	let card = |id: &str, kind: &str, y: i64, meta: Value| {
+		json!({"op": "addDashboardWidget", "id": id, "page": DEEP_DIVE, "type": kind,
+			"x": 0, "y": 60 + 3 * y, "width": 4, "height": 3, "meta": meta})
+	};
+	let spring = json!({"start": "2026-02", "end": "2026-05", "mode": "static"});
+	let ops = json!([
+		{"op": "setPreference", "id": "defaultCurrencyCode", "value": "JPY"},
+		{"op": "addTransactions", "account": CHECKING, "transactions": [
+			{"date": "2026-03-02", "amount": -1_234, "payee": TRATTORIA, "category": DINING_OUT},
+			{"date": "2026-03-15", "amount": -98_765, "payee": SKYAIR, "category": VACATION},
+			{"date": "2026-04-01", "amount": -7, "category": GROCERIES},
+			{"date": "2026-04-30", "amount": -50_001, "payee": {"transferTo": SAVINGS}},
+		]},
+		{"op": "setBudgetAmount", "month": "2026-04", "category": GROCERIES, "amount": 33_333},
+		card("yen-summary", "summary-card", 0, json!({"content": "{\"type\":\"avgPerMonth\"}", "timeFrame": spring})),
+		card("yen-calendar", "calendar-card", 1, json!({"timeFrame": spring})),
+		card("yen-age", "age-of-money-card", 2, json!({"timeFrame": spring})),
+		card("yen-analysis", "budget-analysis-card", 3, json!({"timeFrame": spring})),
+		card("yen-crossover", "crossover-card", 4, json!({"incomeAccountIds": [BROKERAGE],
+			"expenseCategoryIds": [GROCERIES, DINING_OUT], "timeFrame": spring})),
+		card("yen-net-worth", "net-worth-card", 5, json!({"mode": "stacked", "timeFrame": spring})),
+		card("yen-cash-flow", "cash-flow-card", 6, json!({"timeFrame": spring})),
+		card("yen-spending", "spending-card", 7, json!({"mode": "budget"})),
+		card("yen-formula", "formula-card", 8, json!({"formula": "=BUDGET_QUERY(\"budgeted\", {\"fc093a41-2d11-4d98-a211-e5db92205f23\"}, \"2026-04\", \"2026-04\")"})),
+		card("yen-monte-carlo", "monte-carlo-card", 9, json!({"simulationCount": 1000,
+			"currentAge": 50, "targetAge": 80, "pots": [{"id": "linked", "accountId": CHECKING}],
+			"spendingPhases": [{"id": "all", "annualWithdrawal": 1_000_000}]})),
+	]);
+	let actual_made = scratch.join("yen.zip");
+	apply(&oracle, &all_features(), ops, &actual_made, 11);
+	let session = import(&actual_made, &scratch.join("veritas"));
+	assert_eq!(
+		session
+			.overview()
+			.unwrap()
+			.number_format
+			.unwrap()
+			.currency
+			.as_deref(),
+		Some("JPY")
+	);
+	let pages = dashboards(&session, "2026-11-13");
+	assert!(
+		matches!(
+			widget(&pages, "yen-formula").view,
+			WidgetView::Formula {
+				value: FormulaValue::Number { value },
+				..
+			} if value == 333.33
+		),
+		"BUDGET_QUERY reads the yen budget at 2 places, as Actual does: {:?}",
+		widget(&pages, "yen-formula").view
+	);
+	let zip = scratch.join("veritas.zip");
+	export(&session, &zip);
+	let mut compared = 0;
+	for today in ["2026-04-15", "2026-11-13"] {
+		compared += same_cards_as_actual(&oracle, &session, &zip, today);
+	}
+	assert!(
+		compared >= 2 * 10,
+		"every yen card at each today ({compared})"
+	);
+}
+
 /// Everything the dashboard editor shows, as text: `WidgetView` holds
 /// floats, so it compares through `Debug`.
 fn editor(session: &Session) -> String {
