@@ -558,11 +558,8 @@ fn fund_principal(
 	let sheet = EnvelopeSheet::compute(data, draft.date)?;
 	let format = NumberFormat::from_preference(data.format.number_format.as_deref().unwrap_or(""));
 	let editor = BudgetEditor::new(data, &sheet, format, data.format.hide_fraction);
-	let writes = editor.fund_from_to_budget(
-		draft.date.year_month(),
-		amount,
-		&draft.principal_category,
-	)?;
+	let writes =
+		editor.fund_from_to_budget(draft.date.year_month(), amount, &draft.principal_category)?;
 	Ok(crate::writes::rows(data, &writes))
 }
 

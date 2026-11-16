@@ -200,16 +200,16 @@ mod tests {
 
 	#[test]
 	fn copy_shows_a_register_amount_in_the_budgets_currency() {
-		let prefs = |code: Option<&str>, style: &str, hide: bool, after: bool, space: bool| {
-			FormatPrefs {
+		let prefs =
+			|code: Option<&str>, style: &str, hide: bool, after: bool, space: bool| FormatPrefs {
 				number_format: Some(style.to_owned()),
 				hide_fraction: hide,
 				currency_code: code.map(str::to_owned),
 				symbol_position: Some(if after { "after" } else { "before" }.to_owned()),
 				symbol_space: Some(space.to_string()),
-			}
-		};
-		let text = |minor, prefs: &FormatPrefs| register_currency_text(Money::from_minor(minor), prefs);
+			};
+		let text =
+			|minor, prefs: &FormatPrefs| register_currency_text(Money::from_minor(minor), prefs);
 		let usd = prefs(Some("USD"), "comma-dot", false, false, false);
 		assert_eq!(text(2_000, &usd), "$20.00", "DEBT-2.2's example");
 		assert_eq!(text(-123_456, &usd), "\u{2212}$1,234.56");
@@ -218,7 +218,11 @@ mod tests {
 		assert_eq!(text(50_050, &yen), "¥501", "half away from zero");
 		let eur = prefs(Some("EUR"), "dot-comma", false, true, true);
 		assert_eq!(text(123_456, &eur), "1.234,56\u{202F}€");
-		assert_eq!(text(2_000, &FormatPrefs::default()), "20.00", "no currency, no symbol");
+		assert_eq!(
+			text(2_000, &FormatPrefs::default()),
+			"20.00",
+			"no currency, no symbol"
+		);
 		assert_eq!(text(-40, &yen), "¥0", "no minus on a figure shown as zero");
 	}
 

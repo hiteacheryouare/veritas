@@ -1067,7 +1067,11 @@ fn a_recorded_payment_is_the_split_actual_reads_and_prefills_the_next_one() {
 		)
 		.unwrap()
 		.estimate;
-	assert_eq!(hint, Some(163), "DEBT-4's hint is still offered: 20000 * 980 / 120000");
+	assert_eq!(
+		hint,
+		Some(163),
+		"DEBT-4's hint is still offered: 20000 * 980 / 120000"
+	);
 	perform(
 		&capped.session,
 		Command::SetLoanTerms {
