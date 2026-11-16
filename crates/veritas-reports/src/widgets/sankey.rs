@@ -78,7 +78,7 @@ pub enum SankeySort {
 	BudgetOrder,
 }
 
-/// A node's words. Actual's English text for each is in `english`.
+/// A node's words. Actual's English text for each is in `actual_english`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SankeyLabel {
 	/// A payee, account, category group or category, by its own name.
@@ -100,8 +100,9 @@ pub enum SankeyLabel {
 }
 
 impl SankeyLabel {
-	/// The text Actual's card shows before translation.
-	pub fn english(&self) -> String {
+	/// The text Actual's card shows before translation. Only the oracle
+	/// check reads it; the shell words labels under ST-10.10.
+	pub fn actual_english(&self) -> String {
 		match self {
 			SankeyLabel::Name(name) => name.clone(),
 			SankeyLabel::Budgeted => "Budgeted".to_owned(),

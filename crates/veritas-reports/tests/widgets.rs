@@ -849,7 +849,7 @@ fn sankey_as_actual(ours: &SankeyCard, theirs: &Value) -> Value {
 		.nodes
 		.iter()
 		.map(|node| {
-			let mut name = json!(node.label.english());
+			let mut name = json!(node.label.actual_english());
 			if node.key.ends_with("__NEGATIVE")
 				&& let Some(theirs) = their_name(&node.key)
 			{
