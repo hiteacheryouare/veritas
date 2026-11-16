@@ -72,7 +72,7 @@ struct RealCoreReportTests {
 			fresh.conditions = [big]
 			model.draft = fresh
 			await model.refreshPreview()
-			withKnownIssue("Known bug: an unsaved report has no id, the core's previewCustomReport answers NotFound for it, and the editor drops that quietly, so a new report shows no preview until it's saved") {
+			withKnownIssue("Known gap until v11: an unsaved report has no id and the core's previewCustomReport answers NotFound for it, so a new report shows the core's error instead of a preview until it's saved") {
 				#expect(model.preview != nil)
 			}
 			#expect(model.preview != nil || model.previewProblem != nil, "the editor shows a preview or the core's error, never nothing")
@@ -146,6 +146,9 @@ struct RealCoreReportTests {
 			await model.resize(card, columns: 2)
 			card = try #require(model.sheet?.cards.first { $0.id == added.id })
 			#expect((card.x, card.y, card.width, card.height) == (3, bottom + 1, 6, 2))
+			await model.resize(card, trailing: 20, bottom: 1)
+			card = try #require(model.sheet?.cards.first { $0.id == added.id })
+			#expect((card.x, card.width, card.height) == (3, 9, 3), "widened past the edge, the width stops there and the card stays put")
 			for (leading, trailing, bottomEdge) in [(0, 20, 1), (-20, 0, 0), (9, 0, 0), (0, -9, -9)] as [(Int64, Int64, Int64)] {
 				let before = card
 				await model.resize(card, leading: leading, top: 0, trailing: trailing, bottom: bottomEdge)
