@@ -60,8 +60,6 @@ private struct ApplyRow: View {
 	let row: RulePreviewRow
 	let isSelected: Bool
 
-	private var movesReconciledBalance: Bool { row.reconciled && row.changesAmount }
-
 	var body: some View {
 		let match = row.match
 		HStack(alignment: .firstTextBaseline, spacing: Spacing.s3) {
@@ -95,10 +93,10 @@ private struct ApplyRow: View {
 				ForEach(Array(match.splitLines.enumerated()), id: \.offset) { index, line in
 					splitLine(index + 1, line)
 				}
-				if movesReconciledBalance {
+				if row.movesReconciledBalance {
 					Text("Changes a reconciled balance")
 						.font(.text(.caption, weight: .semibold))
-						.foregroundStyle(.moneyOverspent)
+						.foregroundStyle(.moneyLow)
 						.accessibilityIdentifier("applyRule.row.\(row.id).reconciledWarning")
 				}
 			}
@@ -106,7 +104,7 @@ private struct ApplyRow: View {
 		.font(.text(.body))
 		.padding(.horizontal, Spacing.s4)
 		.padding(.vertical, Spacing.s2)
-		.background(movesReconciledBalance ? AnyShapeStyle(Color.moneyOverspent.opacity(0.08)) : AnyShapeStyle(.clear))
+		.background(row.movesReconciledBalance ? AnyShapeStyle(Color.moneyLow.opacity(0.08)) : AnyShapeStyle(.clear))
 		.accessibilityElement(children: .contain)
 		.accessibilityIdentifier("applyRule.row.\(row.id)")
 	}
@@ -124,7 +122,7 @@ private struct ApplyRow: View {
 				.font(.text(.body, weight: .medium))
 		}
 		.font(isAmount ? .figures(.body) : .text(.body))
-		.foregroundStyle(isAmount && row.reconciled ? Color.moneyOverspent : Color.textPrimary)
+		.foregroundStyle(row.movesReconciledBalance(change) ? Color.moneyLow : Color.textPrimary)
 	}
 
 	private func splitLine(_ number: Int, _ line: RuleSplitLine) -> some View {

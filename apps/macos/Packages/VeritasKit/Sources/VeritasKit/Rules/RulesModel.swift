@@ -23,13 +23,20 @@ public struct RuleEditing: Hashable, Sendable {
 /// One row "Apply to existing" would change.
 public struct RulePreviewRow: Hashable, Identifiable, Sendable {
 	public let match: RuleMatch
-	/// The register's reconciled flag. Applying moves a locked balance when
-	/// this row's amount changes (Fred on #63).
+	/// The register's reconciled flag.
 	public let reconciled: Bool
 
 	public var id: String { match.transactionId }
 
-	public var changesAmount: Bool { match.changes.contains { $0.field == .amount } }
+	/// A reconciled row whose amount or account would change: applying moves
+	/// a reconciled balance (Fred on #63 and #73).
+	public var movesReconciledBalance: Bool {
+		match.changes.contains(where: movesReconciledBalance)
+	}
+
+	public func movesReconciledBalance(_ change: RuleFieldChange) -> Bool {
+		reconciled && (change.field == .amount || change.field == .account)
+	}
 }
 
 /// "Apply to existing": the preview, the rows ticked, and the result.
