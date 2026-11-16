@@ -90,6 +90,21 @@ pub struct GoalSummary {
 	pub new_activity: bool,
 }
 
+/// v12. The Goals screen (R-GOAL-1/3/4): every goal, and what a 0-place
+/// budget changes in how they read (CLS-12.10, CLS-12.14).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct GoalList {
+	pub goals: Vec<GoalSummary>,
+	/// CLS-12.10's line, set only in a 0-place budget, for any view that
+	/// shows a goal's Available or progress.
+	pub mixed_scale_note: Option<String>,
+	/// A 0-place budget (CLS-12.14): a goal's `available` and its "X of
+	/// target" figure are labeled only "Available", whatever their sign or
+	/// tone, never "over", "left" or "remaining", and Spending to date sits
+	/// on its own row, apart from Available.
+	pub zero_places: bool,
+}
+
 /// What closing a goal will do, for the confirmation sheet (DEBT-8.3).
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct GoalClosePreview {
@@ -103,16 +118,20 @@ pub struct GoalClosePreview {
 	pub destination_available_after: i64,
 }
 
-pub(crate) fn summaries(
+pub(crate) fn goal_list(
 	data: &BudgetData,
 	sheet: &EnvelopeSheet,
 	classification: &Classification,
-) -> Result<Vec<GoalSummary>, CoreError> {
+) -> Result<GoalList, CoreError> {
 	let zero_places = data.format.decimal_places() == 0;
-	Ok(goals::goals(data, sheet, classification)?
-		.into_iter()
-		.map(|view| summary(view, zero_places))
-		.collect())
+	Ok(GoalList {
+		goals: goals::goals(data, sheet, classification)?
+			.into_iter()
+			.map(|view| summary(view, zero_places))
+			.collect(),
+		mixed_scale_note: crate::budget::mixed_scale_note(data),
+		zero_places,
+	})
 }
 
 pub(crate) fn close_preview(

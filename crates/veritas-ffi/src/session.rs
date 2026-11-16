@@ -13,7 +13,7 @@ use crate::accounts::{
 use crate::blocking::{CancelToken as CancelHandle, run};
 use crate::budget::BudgetMonth;
 use crate::commands::Command;
-use crate::goals::{GoalClosePreview, GoalSummary};
+use crate::goals::{GoalClosePreview, GoalList, GoalSummary};
 use crate::records::NewBudgetOptions;
 use crate::records::{
 	AuditFinding, BackupInfo, CategoryHistory, Change, NumberFormat, Overview, Retention,
@@ -228,13 +228,17 @@ impl<B: Backend> Core<B> {
 		self.call(|session| crate::accounts::reconciliation(session.data()?, account, statement))
 	}
 
-	pub(crate) fn goals(&self, today: &str) -> Result<Vec<GoalSummary>, FfiError> {
+	pub(crate) fn goal_list(&self, today: &str) -> Result<GoalList, FfiError> {
 		self.call(|session| {
 			session.with_sheet_and_classification(
 				crate::budget::civil_date(today)?,
-				crate::goals::summaries,
+				crate::goals::goal_list,
 			)
 		})
+	}
+
+	pub(crate) fn goals(&self, today: &str) -> Result<Vec<GoalSummary>, FfiError> {
+		self.goal_list(today).map(|list| list.goals)
 	}
 
 	pub(crate) fn goal_close_preview(
@@ -501,9 +505,10 @@ impl Session {
 		self.core.reconciliation(&account_id, statement_balance)
 	}
 
-	/// Every goal, in budget order, as of `today` (`YYYY-MM-DD`).
-	pub fn goals(&self, today: String) -> Result<Vec<GoalSummary>, FfiError> {
-		self.core.goals(&today)
+	/// Every goal, in budget order, as of `today` (`YYYY-MM-DD`). v12: with
+	/// the 0-place budget's note and flag (CLS-12.10, CLS-12.14).
+	pub fn goals(&self, today: String) -> Result<GoalList, FfiError> {
+		self.core.goal_list(&today)
 	}
 
 	/// What `Command::CloseGoal` would move, before the user confirms. `None`
@@ -2102,6 +2107,15 @@ pub(crate) mod tests {
 				"Spending is recorded at 2 places and budgets at 0, so these numbers mix both, as in Actual."
 			)
 		);
+		let list = core.goal_list(&today).unwrap();
+		assert_eq!(
+			list.mixed_scale_note, month.mixed_scale_note,
+			"CLS-12.10: the Goals screen carries the same line"
+		);
+		assert!(
+			list.zero_places,
+			"CLS-12.14: the shell words Available from this, never from the tone"
+		);
 	}
 
 	#[test]
@@ -2143,6 +2157,8 @@ pub(crate) mod tests {
 		let (_, today) = this_month();
 		let month = core.budget_month(NOVEMBER, &today).unwrap();
 		assert_eq!(month.mixed_scale_note, None);
+		let list = core.goal_list(&today).unwrap();
+		assert_eq!((list.mixed_scale_note, list.zero_places), (None, false));
 		let expected = match month.to_budget {
 			..0 => crate::MoneyTone::Overspent,
 			0 => crate::MoneyTone::Neutral,
@@ -2330,6 +2346,66 @@ pub(crate) mod tests {
 			budgeted(&core, DECEMBER, &destination),
 			dest_december + 30_000
 		);
+	}
+
+	#[test]
+	fn a_closed_goal_counts_new_activity_only_from_on_budget_rows() {
+		// GOAL-6 as landed: a month's net activity sums the live rows in the
+		// category in on-budget accounts. An off-budget row carrying the
+		// category (an imported file can hold one) raises no notice.
+		use crate::NewAccountKind::{Checking, Investment};
+		let (_scratch, core) = imported("goal-off-budget");
+		let checking = new_account(&core, "Everyday", Checking, 0);
+		let brokerage = new_account(&core, "Brokerage", Investment, 0);
+		let id = new_goal(&core, "New laptop", 100_000, None);
+		let category = goal_of(&core, &id).category_id;
+		let on = |today: &str| {
+			core.goals(today)
+				.unwrap()
+				.into_iter()
+				.find(|goal| goal.id == id)
+				.unwrap()
+		};
+		on("2027-03-10");
+		core.perform(Command::CloseGoal {
+			goal_id: id.clone(),
+			release_to_category_id: None,
+			also_move_later: false,
+		})
+		.unwrap();
+		let row = |id: &str, account: &str, amount: i64| veritas_domain::Transaction {
+			id: veritas_domain::TransactionId::new(id),
+			account: veritas_domain::AccountId::new(account),
+			date: veritas_domain::CivilDate::new(2027, 4, 5).unwrap(),
+			amount: veritas_domain::Money::from_minor(amount),
+			payee: None,
+			imported_payee: None,
+			category: Some(veritas_domain::CategoryId::new(category.as_str())),
+			notes: None,
+			cleared: true,
+			reconciled: false,
+			split: veritas_domain::SplitRole::None,
+			transfer: None,
+			schedule: None,
+			starting_balance: false,
+			sort_order: 1.0,
+			tombstone: false,
+			split_error: None,
+		};
+		let write = |transaction| {
+			core.call(|session| {
+				session.perform(&Rows(vec![veritas_domain::Row::Transaction(transaction)]))?;
+				Ok(())
+			})
+			.unwrap();
+		};
+		write(row("off-budget", &brokerage, -1_000));
+		assert!(
+			!on("2027-04-20").new_activity,
+			"an off-budget row isn't activity in the envelope"
+		);
+		write(row("on-budget", &checking, -1_000));
+		assert!(on("2027-04-20").new_activity, "(B) after the on-budget row");
 	}
 
 	#[test]

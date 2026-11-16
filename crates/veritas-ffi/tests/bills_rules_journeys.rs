@@ -2037,7 +2037,7 @@ fn an_older_budget_opened_read_only_shows_its_goals_and_bills_and_stays_as_it_wa
 		Some(veritas_ffi::ReadOnlyKind::TrackingBudget)
 	);
 	see(&session, "2026-11-02");
-	let goals = session.goals("2026-11-02".to_owned()).unwrap();
+	let goals = session.goals("2026-11-02".to_owned()).unwrap().goals;
 	let bike = goals.iter().find(|g| g.id == goal).unwrap();
 	assert_eq!(bike.state, veritas_ffi::GoalState::Closed);
 	assert!(!bike.new_activity);
