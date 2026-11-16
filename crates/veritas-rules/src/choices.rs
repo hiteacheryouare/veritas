@@ -1,9 +1,13 @@
-//! What Actual's rule editor offers, so the sentence editor's pickers come
-//! from the same tables instead of a copy in the app: the condition fields
-//! and their ops (`dc/components/rules/RuleEditor.tsx:1004-1019`, ops from
-//! `getValidOps`, `lc/shared/rules.ts:110-118`), the action ops and fields
-//! (`RuleEditor.tsx:443-460`, `519-521`) and the split amount methods
-//! (`dc/util/rule.ts:26-33`), with the feature flags Actual ships off.
+//! A port of the choices Actual's rule editor offers (v26.11.0), so the
+//! sentence editor's pickers come from the same tables instead of a copy in
+//! the app: `TYPE_INFO`, `FIELD_INFO` and `getValidOps` from
+//! `packages/loot-core/src/shared/rules.ts` (lines 6-118); `conditionFields`,
+//! `getActionFields`, `getSplitActionFields`, the action op list and the
+//! inflow and outflow op filter from
+//! `packages/desktop-client/src/components/rules/RuleEditor.tsx` (lines
+//! 443-460, 508-521, 965-976 and 1004-1019); and `getAllocationMethods` from
+//! `packages/desktop-client/src/util/rule.ts` (lines 26-33). Actual's
+//! feature flags for action templating and formulas are taken as off.
 
 use crate::condition::{AmountSign, Field, FieldKind, Op};
 use crate::sentence::ActionOp;
