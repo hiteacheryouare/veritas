@@ -796,7 +796,7 @@ fn payment(
 #[test]
 fn the_wizard_previews_the_split_and_refuses_a_payment_below_its_interest() {
 	// DEBT-2.1 to 2.3, DEBT-4, DEBT-5 L-1, L-2, L-8 and L-9.
-	use veritas_ffi::LoanPaymentProblem::{InterestAbovePayment, PaysOff};
+	use veritas_ffi::LoanPaymentProblem::{PaymentTooSmall, PaysOff};
 	let setup = loan_setup("preview", 980_000);
 	let session = &setup.session;
 	let preview = |date: &str, total, interest| {
@@ -817,7 +817,7 @@ fn the_wizard_previews_the_split_and_refuses_a_payment_below_its_interest() {
 	);
 	assert_eq!(
 		preview("2026-11-20", 5_000, 8_000).problem,
-		Some(InterestAbovePayment { short_by: 3_000 })
+		Some(PaymentTooSmall { short_by: 3_000 })
 	);
 	assert_eq!(
 		preview("2026-11-20", 990_000, 0).problem,
@@ -871,9 +871,16 @@ fn the_wizard_previews_the_split_and_refuses_a_payment_below_its_interest() {
 		"checking isn't a loan"
 	);
 
-	assert!(refused(session.perform(Command::RecordLoanPayment {
-		payment: payment(&setup, "too-small", "2026-11-20", 5_000, 8_000),
-	})));
+	let mut too_small = payment(&setup, "too-small", "2026-11-20", 5_000, 3_000);
+	too_small.escrow = 4_000;
+	too_small.escrow_category_id = Some(setup.escrow.clone());
+	match session.perform(Command::RecordLoanPayment { payment: too_small }) {
+		Err(veritas_ffi::FfiError::Invalid { message }) => assert!(
+			message.starts_with("This payment is 20.00 less than its interest, escrow and fees."),
+			"DEBT-2.2 names the shortfall in the budget's format: {message}"
+		),
+		other => panic!("DEBT-2.2 refuses it: {other:?}"),
+	}
 	assert!(session.register_row("too-small".to_owned()).is_err());
 }
 

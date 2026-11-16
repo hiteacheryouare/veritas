@@ -4,7 +4,7 @@
 //! commit evaluates the text as it stands. Anything that doesn't evaluate to
 //! a storable amount keeps the old value (D37) with a reason the UI can show.
 
-use veritas_domain::Money;
+use veritas_domain::{FormatPrefs, Money};
 
 use crate::arithmetic::{NumberFormat, eval_arithmetic};
 
@@ -72,6 +72,42 @@ pub fn edit_text_at(
 		text.push_str(&format!("{fraction:0width$}", width = usize::from(places)));
 	}
 	text
+}
+
+/// A register-scale amount as copy shows it (CLS-12.3): the budget's
+/// currency places (rounded half away from zero when fewer than 2, or when
+/// the budget hides fractions), its number style, a true minus, and the
+/// symbol placed and spaced by the budget's preferences, unset reading as
+/// Actual's default (before, no space).
+pub fn register_currency_text(amount: Money, prefs: &FormatPrefs) -> String {
+	let format = NumberFormat::from_preference(prefs.number_format.as_deref().unwrap_or(""));
+	let whole = prefs.hide_fraction || prefs.decimal_places() == 0;
+	let magnitude = Money::from_minor(amount.minor().saturating_abs());
+	let digits = edit_text_at(magnitude, format, whole, 2);
+	let shown_zero = digits.chars().all(|c| !c.is_ascii_digit() || c == '0');
+	let sign = if amount.is_negative() && !shown_zero {
+		"\u{2212}"
+	} else {
+		""
+	};
+	let symbol = prefs
+		.currency_code
+		.as_deref()
+		.and_then(veritas_domain::currency)
+		.map_or("", |currency| currency.symbol);
+	if symbol.is_empty() {
+		return format!("{sign}{digits}");
+	}
+	let space = if prefs.symbol_space.as_deref() == Some("true") {
+		"\u{202F}"
+	} else {
+		""
+	};
+	if prefs.symbol_position.as_deref() == Some("after") {
+		format!("{sign}{digits}{space}{symbol}")
+	} else {
+		format!("{sign}{symbol}{space}{digits}")
+	}
 }
 
 fn group_digits(whole: u64, format: NumberFormat) -> String {
@@ -161,6 +197,30 @@ pub fn js_round(value: f64) -> f64 {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn copy_shows_a_register_amount_in_the_budgets_currency() {
+		let prefs = |code: Option<&str>, style: &str, hide: bool, after: bool, space: bool| {
+			FormatPrefs {
+				number_format: Some(style.to_owned()),
+				hide_fraction: hide,
+				currency_code: code.map(str::to_owned),
+				symbol_position: Some(if after { "after" } else { "before" }.to_owned()),
+				symbol_space: Some(space.to_string()),
+			}
+		};
+		let text = |minor, prefs: &FormatPrefs| register_currency_text(Money::from_minor(minor), prefs);
+		let usd = prefs(Some("USD"), "comma-dot", false, false, false);
+		assert_eq!(text(2_000, &usd), "$20.00", "DEBT-2.2's example");
+		assert_eq!(text(-123_456, &usd), "\u{2212}$1,234.56");
+		let yen = prefs(Some("JPY"), "comma-dot", true, false, false);
+		assert_eq!(text(2_000, &yen), "¥20", "CLS-12.3: R / 100 at 0 places");
+		assert_eq!(text(50_050, &yen), "¥501", "half away from zero");
+		let eur = prefs(Some("EUR"), "dot-comma", false, true, true);
+		assert_eq!(text(123_456, &eur), "1.234,56\u{202F}€");
+		assert_eq!(text(2_000, &FormatPrefs::default()), "20.00", "no currency, no symbol");
+		assert_eq!(text(-40, &yen), "¥0", "no minus on a figure shown as zero");
+	}
 
 	#[test]
 	fn edit_text_follows_the_currencys_places() {

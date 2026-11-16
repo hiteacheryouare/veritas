@@ -112,9 +112,9 @@ impl From<veritas_domain::LoanTerms> for LoanTerms {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum LoanPaymentProblem {
-	/// DEBT-2.2: interest, escrow and fees are more than the payment. Saving
-	/// is refused.
-	InterestAbovePayment { short_by: i64 },
+	/// v12. DEBT-2.2: interest, escrow and fees together are more than the
+	/// payment, by `short_by`. Saving is refused. Was `InterestAbovePayment`.
+	PaymentTooSmall { short_by: i64 },
 	/// DEBT-2.3: "This pays off the loan and leaves a credit of $X". A warning.
 	PaysOff { credit: i64 },
 }
@@ -366,8 +366,8 @@ impl Session {
 				estimate: preview.estimate.map(Money::minor),
 				rate_bps: preview.rate_bps,
 				problem: preview.problem.map(|problem| match problem {
-					loans::PaymentProblem::InterestAbovePayment { short_by } => {
-						LoanPaymentProblem::InterestAbovePayment {
+					loans::PaymentProblem::PaymentTooSmall { short_by } => {
+						LoanPaymentProblem::PaymentTooSmall {
 							short_by: short_by.minor(),
 						}
 					}

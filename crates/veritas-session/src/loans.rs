@@ -7,6 +7,7 @@ use veritas_domain::{
 	AccountId, AccountKind, AccountMeta, AccountMetaRow, BudgetData, CategoryId, CategoryKind,
 	CivilDate, CoreError, LoanTerms, Money, Row, SplitRole, Transaction, TransactionId,
 };
+use veritas_engine::register_currency_text;
 use veritas_rules::RuleBook;
 
 use crate::accounts::live_account;
@@ -184,8 +185,9 @@ impl Parts {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PaymentProblem {
-	/// DEBT-2.2: the parts besides principal are more than the payment. Blocks saving.
-	InterestAbovePayment { short_by: Money },
+	/// DEBT-2.2: interest, escrow and fees together are more than the
+	/// payment. Blocks saving.
+	PaymentTooSmall { short_by: Money },
 	/// DEBT-2.3: principal is more than what is owed. A warning.
 	PaysOff { credit: Money },
 }
@@ -223,7 +225,7 @@ pub fn payment_preview(
 		.map(|rate| interest_estimate(outstanding, rate))
 		.transpose()?;
 	let problem = if principal.is_negative() {
-		Some(PaymentProblem::InterestAbovePayment {
+		Some(PaymentProblem::PaymentTooSmall {
 			short_by: principal.checked_neg()?,
 		})
 	} else if principal > outstanding {
@@ -420,8 +422,8 @@ pub fn record_payment(
 	let principal = draft.parts.principal()?;
 	if principal.is_negative() {
 		return Err(CoreError::Invalid(format!(
-			"The payment is {} less than its interest, escrow and fees. Record unpaid interest as an adjustment on the loan instead.",
-			principal.checked_neg()?
+			"This payment is {} less than its interest, escrow and fees. Record unpaid interest as an adjustment on the loan instead.",
+			register_currency_text(principal.checked_neg()?, &data.format)
 		)));
 	}
 	if draft.parts.total == Money::ZERO {
