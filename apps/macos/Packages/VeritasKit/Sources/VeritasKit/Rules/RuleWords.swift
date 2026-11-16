@@ -59,6 +59,48 @@ public enum RuleWords {
 		}
 	}
 
+	public static func action(_ kind: RuleChoices.ActionKind) -> String {
+		switch kind {
+		case .set(let field): "set \(Self.field(field))"
+		case .prependNotes: action(RuleActionOp.prependNotes)
+		case .appendNotes: action(RuleActionOp.appendNotes)
+		case .deleteTransaction: action(RuleActionOp.deleteTransaction)
+		}
+	}
+
+	/// Actual's allocation menu (desktop-client/src/util/rule.ts).
+	public static func allocation(_ allocation: RuleChoices.Allocation) -> String {
+		switch allocation {
+		case .fixedAmount: "a fixed amount"
+		case .percent: "a fixed percent of the remainder"
+		case .remainder: "an equal portion of the remainder"
+		}
+	}
+
+	/// A condition as the rules list reads it: `imported payee contains "AMZN"`.
+	public static func condition(_ condition: RuleCondition, names: BudgetNames, format: MoneyFormat) -> String {
+		let words = "\(field(condition.field)) \(op(condition.op, on: condition.field))"
+		let shown = value(condition.value, on: condition.field, names: names, format: format)
+		return shown.isEmpty ? words : "\(words) \(shown)"
+	}
+
+	/// An action as the rules list reads it, after Actual's ActionExpression.
+	public static func action(_ action: RuleAction, names: BudgetNames, format: MoneyFormat) -> String {
+		switch action.op {
+		case .set:
+			let field = action.field
+			return "set \(field.map { Self.field($0) } ?? "") to \(value(action.value, on: field, names: names, format: format))"
+		case .prependNotes, .appendNotes:
+			return "\(Self.action(action.op)) \(value(action.value, on: .notes, names: names, format: format))"
+		case .deleteTransaction, .linkSchedule:
+			return Self.action(action.op)
+		case .setSplitAmount:
+			let allocation = RuleChoices.Allocation(action.value)
+			let words = "\(Self.action(action.op)) \(Self.allocation(allocation))"
+			return allocation == .remainder ? words : "\(words): \(value(action.value, on: .amount, names: names, format: format))"
+		}
+	}
+
 	/// The Rules page's group headers, in the order Actual runs the stages.
 	public static func stage(_ stage: RuleStage) -> String {
 		switch stage {
