@@ -11,7 +11,7 @@ use veritas_domain::{
 	Account, AccountId, BudgetData, BudgetType, Category, CategoryGroup, CategoryGroupId,
 	CategoryId, CivilDate, Money, SplitRole, Transaction, TransactionId, YearMonth,
 };
-use veritas_engine::{AverageSpan, BudgetEditor, EnvelopeSheet, NumberFormat, SheetChange};
+use veritas_engine::{AverageSpan, BudgetEditor, EnvelopeSheet, SheetChange};
 
 const CATEGORIES: usize = 500;
 const GROUPS: usize = 25;
@@ -121,7 +121,7 @@ fn benches(c: &mut Criterion) {
 	});
 
 	let mut edit = |month: YearMonth, step: i64| {
-		let editor = BudgetEditor::new(&budget, &sheet, NumberFormat::CommaDot, false);
+		let editor = BudgetEditor::new(&budget, &sheet);
 		let writes = editor
 			.set_budget(
 				month,
@@ -167,7 +167,7 @@ fn benches(c: &mut Criterion) {
 	});
 
 	let mut average = |all: bool| {
-		let editor = BudgetEditor::new(&budget, &sheet, NumberFormat::CommaDot, false);
+		let editor = BudgetEditor::new(&budget, &sheet);
 		let writes = if all {
 			editor.set_average(current, AverageSpan::Three).unwrap()
 		} else {

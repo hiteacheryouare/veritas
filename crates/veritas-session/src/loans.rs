@@ -7,7 +7,7 @@ use veritas_domain::{
 	AccountId, AccountKind, AccountMeta, AccountMetaRow, BudgetData, CategoryId, CategoryKind,
 	CivilDate, CoreError, LoanTerms, Money, Row, SplitRole, Transaction, TransactionId,
 };
-use veritas_engine::{BudgetEditor, EnvelopeSheet, NumberFormat, register_currency_text};
+use veritas_engine::{BudgetEditor, EnvelopeSheet, register_currency_text};
 use veritas_rules::RuleBook;
 
 use crate::accounts::live_account;
@@ -629,8 +629,7 @@ fn fund_principal(
 		return Ok(Vec::new());
 	}
 	let sheet = EnvelopeSheet::compute(data, date)?;
-	let format = NumberFormat::from_preference(data.format.number_format.as_deref().unwrap_or(""));
-	let editor = BudgetEditor::new(data, &sheet, format, data.format.hide_fraction);
+	let editor = BudgetEditor::new(data, &sheet);
 	let writes = editor.transfer_available(date.year_month(), amount, &category)?;
 	Ok(crate::writes::rows(data, &writes))
 }
