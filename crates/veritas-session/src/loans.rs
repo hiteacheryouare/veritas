@@ -200,6 +200,8 @@ pub struct PaymentPreview {
 	pub estimate: Option<Money>,
 	pub rate_bps: Option<i64>,
 	pub problem: Option<PaymentProblem>,
+	/// What `fund_principal` would budget for this principal (A.6).
+	pub principal_funding: Money,
 }
 
 fn loan_account(data: &BudgetData, loan: &AccountId, date: CivilDate) -> Result<(), CoreError> {
@@ -241,6 +243,7 @@ pub fn payment_preview(
 		estimate,
 		rate_bps,
 		problem,
+		principal_funding: principal_funding(data, date, principal)?,
 	})
 }
 
@@ -371,7 +374,8 @@ pub fn payment_defaults(
 /// What the wizard saves (DEBT-6). `id` names the payment to replace when it
 /// is a live split; otherwise it is the new payment's id. A part's category
 /// is needed only when the part isn't 0. `fund_principal` also budgets the
-/// principal from To Budget into its envelope (A.6).
+/// principal from To Budget into its envelope (A.6, `principal_funding`);
+/// it is refused when the draft replaces a payment.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PaymentDraft {
 	pub id: Option<TransactionId>,
@@ -502,6 +506,11 @@ pub fn record_payment(
 				.is_some_and(|row| alive(data, row) && row.split == SplitRole::Parent)
 		})
 		.cloned();
+	if draft.fund_principal && replacing.is_some() {
+		return Err(CoreError::Invalid(
+			"Budget the principal when you record a payment, not when you edit one. Move the budget by hand instead.".to_owned(),
+		));
+	}
 	let split = Draft {
 		id: if replacing.is_some() {
 			None
@@ -536,30 +545,59 @@ pub fn record_payment(
 			id
 		}
 	};
-	if draft.fund_principal && principal != Money::ZERO {
+	if draft.fund_principal {
 		let with_payment = crate::writes::applied(data, &rows);
-		rows.extend(fund_principal(&with_payment, draft, principal)?);
+		rows.extend(fund_principal(&with_payment, &id, draft.date, principal)?);
 	}
 	Ok((rows, id))
 }
 
-/// DEBT-6 A.6: the principal line is spending in its envelope, so the
-/// wizard budgets it from To Budget in the payment's month, with Actual's
-/// movement note. The principal is register scale and a budget cell is
-/// budget scale, so a 0-place budget funds it in whole units (CLS-12.11).
-/// Like typing the amount into the cell, it is not limited to what To
-/// Budget holds.
+/// DEBT-6 A.6: what funding `principal` budgets from To Budget in the
+/// month of `date`, as Actual's `transferAvailable` moves it
+/// (`budget/actions.ts:578-593`): the principal on the budget scale, whole
+/// units rounded half up in a 0-place budget (CLS-12.11), then clamped to
+/// `max(0, min(amount, to_budget))`.
+pub fn principal_funding(
+	data: &BudgetData,
+	date: CivilDate,
+	principal: Money,
+) -> Result<Money, CoreError> {
+	if principal <= Money::ZERO {
+		return Ok(Money::ZERO);
+	}
+	let amount = principal.register_to_budget_scale(data.format.decimal_places())?;
+	let sheet = EnvelopeSheet::compute(data, date)?;
+	let to_budget = sheet
+		.summary(date.year_month())
+		.map_or(Money::ZERO, |month| month.to_budget);
+	Ok(amount.min(to_budget).max(Money::ZERO))
+}
+
+/// Budgets the principal line actually written (rules may have moved it to
+/// another category) through `transferAvailable`, which writes no movement
+/// note. Nothing is written when the amount comes to 0.
 fn fund_principal(
 	data: &BudgetData,
-	draft: &PaymentDraft,
+	payment: &TransactionId,
+	date: CivilDate,
 	principal: Money,
 ) -> Result<Vec<Row>, CoreError> {
-	let amount = principal.register_to_budget_scale(data.format.decimal_places())?;
-	let sheet = EnvelopeSheet::compute(data, draft.date)?;
+	let category = children(data, payment)
+		.into_iter()
+		.find(|line| line.transfer.is_some())
+		.and_then(|line| line.category.clone())
+		.and_then(|category| data.resolve_category(&category).cloned());
+	let Some(category) = category else {
+		return Ok(Vec::new());
+	};
+	let amount = principal_funding(data, date, principal)?;
+	if amount == Money::ZERO {
+		return Ok(Vec::new());
+	}
+	let sheet = EnvelopeSheet::compute(data, date)?;
 	let format = NumberFormat::from_preference(data.format.number_format.as_deref().unwrap_or(""));
 	let editor = BudgetEditor::new(data, &sheet, format, data.format.hide_fraction);
-	let writes =
-		editor.fund_from_to_budget(draft.date.year_month(), amount, &draft.principal_category)?;
+	let writes = editor.transfer_available(date.year_month(), amount, &category)?;
 	Ok(crate::writes::rows(data, &writes))
 }
 

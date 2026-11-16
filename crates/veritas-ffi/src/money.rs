@@ -173,6 +173,11 @@ pub struct LoanPaymentPreview {
 	pub estimate: Option<i64>,
 	pub rate_bps: Option<i64>,
 	pub problem: Option<LoanPaymentProblem>,
+	/// v12. What `fundPrincipal` would budget for this principal in the
+	/// payment's month, on the budget scale: whole units in a 0-place budget,
+	/// clamped to what To Budget holds, as Actual's `transferAvailable`
+	/// moves it. 0 means nothing would be budgeted.
+	pub principal_funding: i64,
 }
 
 /// DEBT-3's pre-fill. Every field may be empty; fees are never pre-filled.
@@ -191,8 +196,10 @@ pub struct LoanPaymentDefaults {
 /// payment to replace when it is an existing split; otherwise it picks the
 /// new payment's id, and `nil` lets the core pick. v12: a part's category is
 /// needed only when the part isn't 0, interest's included, and
-/// `fund_principal` also budgets the principal from To Budget into its
-/// envelope in the payment's month, on the budget scale (A.6, CLS-12.11).
+/// `fund_principal` also budgets the principal from To Budget into the
+/// principal line's envelope in the payment's month, exactly
+/// `LoanPaymentPreview.principal_funding` (A.6). It is `Invalid` on a draft
+/// that replaces a payment.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct LoanPaymentDraft {
 	pub id: Option<String>,
@@ -425,6 +432,7 @@ impl Session {
 				outstanding: preview.outstanding.minor(),
 				estimate: preview.estimate.map(Money::minor),
 				rate_bps: preview.rate_bps,
+				principal_funding: preview.principal_funding.minor(),
 				problem: preview.problem.map(|problem| match problem {
 					loans::PaymentProblem::PaymentTooSmall { short_by } => {
 						LoanPaymentProblem::PaymentTooSmall {

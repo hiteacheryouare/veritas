@@ -1575,8 +1575,12 @@ fn the_wizard_funds_the_principal_from_to_budget_on_the_budget_scale_and_actual_
 		year: 2026,
 		month: 12,
 	};
-	for (currency, principal, budgeted) in [("USD", 32_017, 32_017), ("JPY", 3_200_000, 32_000)] {
-		let scratch = Scratch::new(&format!("fund-{currency}"));
+	for (currency, principal, budgeted) in [
+		("USD", 32_017, 32_017),
+		("JPY", 3_200_000, 32_000),
+		("JPY", 3_200_050, 32_001),
+	] {
+		let scratch = Scratch::new(&format!("fund-{currency}-{principal}"));
 		let session = block_on(Session::create_budget(
 			currency.to_owned(),
 			text(&scratch.join("budget")),
@@ -1912,4 +1916,169 @@ fn hidden_and_archived_principal_categories_are_offered_back_before_a_new_one() 
 		}
 	);
 	assert_eq!(group_name(&student), "Loans paid");
+}
+
+#[test]
+fn funding_a_principal_is_clamped_to_to_budget_skips_a_zero_and_never_rides_on_an_edit() {
+	// DEBT-6 A.6 under Fred's review of #72: the move is Actual's
+	// transferAvailable (max(0, min(amount, To Budget)), no movement note),
+	// the preview says what it will budget, a principal that rounds to 0
+	// yen writes nothing, and an edited payment can't fund again.
+	use veritas_ffi::CategoryKind;
+	let december = Month {
+		year: 2026,
+		month: 12,
+	};
+	let budget = |label: &str, currency: &str, starting: i64| {
+		let scratch = Scratch::new(label);
+		let session = block_on(Session::create_budget(
+			label.to_owned(),
+			text(&scratch.join("budget")),
+			NumberFormat {
+				currency: Some(currency.to_owned()),
+				style: NumberStyle::CommaDot,
+				hide_decimals: false,
+				symbol_first: None,
+				symbol_space: None,
+			},
+			NewBudgetOptions {
+				retirement_401k: false,
+				hsa: false,
+				accounts: Vec::new(),
+			},
+			CancelToken::new(),
+		))
+		.unwrap();
+		let checking = account(
+			&session,
+			"Checking",
+			NewAccountKind::Checking,
+			starting,
+			None,
+		);
+		let loan = account(&session, "Car loan", NewAccountKind::Loan, 9_000_000, None);
+		let veritas_ffi::KindTarget::One {
+			category_id: category,
+		} = session.kind_target(CategoryKind::DebtPrincipal).unwrap()
+		else {
+			panic!("one principal category");
+		};
+		let draft = LoanPaymentDraft {
+			id: Some("pay".to_owned()),
+			from_account_id: checking,
+			loan_account_id: loan.clone(),
+			date: "2026-12-05".to_owned(),
+			total: 0,
+			interest: 0,
+			escrow: 0,
+			fees: 0,
+			principal_category_id: category.clone(),
+			interest_category_id: None,
+			escrow_category_id: None,
+			fees_category_id: None,
+			notes: None,
+			cleared: false,
+			fund_principal: true,
+		};
+		(scratch, session, loan, category, draft)
+	};
+	let budgeted = |session: &Session, category: &str| {
+		envelope_budgeted(
+			&session.budget_month(december, TODAY.to_owned()).unwrap(),
+			category,
+		)
+	};
+	let note = |scratch: &Scratch| -> Option<String> {
+		rusqlite::Connection::open(scratch.join("budget").join("db.sqlite"))
+			.unwrap()
+			.query_row(
+				"SELECT note FROM notes WHERE id = 'budget-2026-12'",
+				[],
+				|row| row.get(0),
+			)
+			.ok()
+	};
+
+	let (scratch, session, loan, category, draft) = budget("fund-short", "USD", 10_000);
+	let to_budget = session
+		.budget_month(december, TODAY.to_owned())
+		.unwrap()
+		.to_budget;
+	assert!(to_budget > 0 && to_budget < 32_017, "{to_budget}");
+	let preview = session
+		.loan_payment_preview(loan.clone(), "2026-12-05".to_owned(), 32_017, 0, 0, 0)
+		.unwrap();
+	assert_eq!(preview.principal_funding, to_budget, "clamped to To Budget");
+	perform(
+		&session,
+		Command::RecordLoanPayment {
+			payment: LoanPaymentDraft {
+				total: 32_017,
+				..draft.clone()
+			},
+		},
+	);
+	assert_eq!(budgeted(&session, &category), to_budget);
+	assert_eq!(
+		session
+			.budget_month(december, TODAY.to_owned())
+			.unwrap()
+			.to_budget,
+		0
+	);
+	assert_eq!(
+		note(&scratch),
+		None,
+		"transferAvailable writes no movement note"
+	);
+	let again = session
+		.loan_payment_preview(loan.clone(), "2026-12-05".to_owned(), 5_000, 0, 0, 0)
+		.unwrap();
+	assert_eq!(again.principal_funding, 0, "nothing left to budget");
+	assert!(
+		matches!(
+			session.perform(Command::RecordLoanPayment {
+				payment: LoanPaymentDraft {
+					total: 30_000,
+					..draft.clone()
+				},
+			}),
+			Err(FfiError::Invalid { .. })
+		),
+		"an edited payment can't fund its principal again"
+	);
+	assert_eq!(shown(&session, "pay").amount, -32_017, "nothing changed");
+	perform(
+		&session,
+		Command::RecordLoanPayment {
+			payment: LoanPaymentDraft {
+				total: 30_000,
+				fund_principal: false,
+				..draft
+			},
+		},
+	);
+	assert_eq!(
+		shown(&session, "pay").amount,
+		-30_000,
+		"editing without it works"
+	);
+
+	let (_yen_scratch, yen, loan, category, draft) = budget("fund-zero", "JPY", 10_000_000);
+	let preview = yen
+		.loan_payment_preview(loan, "2026-12-05".to_owned(), 49, 0, 0, 0)
+		.unwrap();
+	assert_eq!(preview.principal_funding, 0, "0.49 yen rounds to 0");
+	let change = perform(
+		&yen,
+		Command::RecordLoanPayment {
+			payment: LoanPaymentDraft { total: 49, ..draft },
+		},
+	);
+	assert_eq!(budgeted(&yen, &category), 0);
+	assert!(
+		change.entities.iter().all(|e| e.month.is_none()),
+		"no budget cell is written: {:?}",
+		change.entities
+	);
 }
