@@ -20,10 +20,10 @@ use std::thread::Thread;
 
 use serde_json::Value;
 use veritas_ffi::{
-	CancelToken, Change, Command, EntityKind, FfiError, LoanPaymentDraft, LoanTerms, Month,
-	NetProfitLine, NewAccount, NewAccountKind, RegisterFilter, RegisterRow, RegisterScope,
-	RegisterSort, RegisterSortKey, ReportDrill, Session, SplitLineDraft, TransactionDraft,
-	TransferPurpose,
+	BudgetMonth, CancelToken, Change, Command, EntityKind, FfiError, LoanPaymentDraft, LoanTerms,
+	Month, NetProfitLine, NewAccount, NewAccountKind, NewBudgetOptions, NumberFormat, NumberStyle,
+	RegisterFilter, RegisterRow, RegisterScope, RegisterSort, RegisterSortKey, ReportDrill, Session,
+	SplitLineDraft, TransactionDraft, TransferPurpose,
 };
 
 const TODAY: &str = "2026-12-31";
@@ -394,11 +394,12 @@ fn a_year_of_mortgage_payments_with_escrow_a_fee_edits_deletes_and_a_payoff_read
 					escrow: escrow_part,
 					fees: fee,
 					principal_category_id: principal.clone(),
-					interest_category_id: interest.clone(),
+					interest_category_id: Some(interest.clone()),
 					escrow_category_id: Some(escrow.clone()),
 					fees_category_id: (fee > 0).then(|| fees.clone()),
 					notes: Some(format!("Payment {n}")),
 					cleared: true,
+					fund_principal: false,
 				},
 			},
 		);
@@ -544,11 +545,12 @@ fn a_year_of_mortgage_payments_with_escrow_a_fee_edits_deletes_and_a_payoff_read
 				escrow: 20_000,
 				fees: 0,
 				principal_category_id: principal.clone(),
-				interest_category_id: interest.clone(),
+				interest_category_id: Some(interest.clone()),
 				escrow_category_id: Some(escrow.clone()),
 				fees_category_id: None,
 				notes: Some("Payoff".to_owned()),
 				cleared: true,
+				fund_principal: false,
 			},
 		},
 	);
@@ -1549,4 +1551,126 @@ fn cls_4_1_picks_the_right_group_around_hidden_and_income_groups() {
 		"Debt",
 		"debt is unaffected"
 	);
+}
+
+fn envelope_budgeted(month: &BudgetMonth, category: &str) -> i64 {
+	month
+		.groups
+		.iter()
+		.flat_map(|g| &g.envelopes)
+		.find(|e| e.id == category)
+		.unwrap()
+		.budgeted
+}
+
+#[test]
+fn the_wizard_funds_the_principal_from_to_budget_on_the_budget_scale_and_actual_agrees() {
+	// DEBT-6 A.6 with D63's two scales. A USD budget funds 32017 cents of
+	// principal as 32017; a yen budget's principal of 3,200,000 (register
+	// scale, 32,000 yen) is budgeted as 32000 (budget scale). The payment
+	// and the move are one undo step, and a payment with no interest needs
+	// no interest category (DEBT-2).
+	use veritas_ffi::CategoryKind;
+	let december = Month {
+		year: 2026,
+		month: 12,
+	};
+	for (currency, principal, budgeted) in [("USD", 32_017, 32_017), ("JPY", 3_200_000, 32_000)] {
+		let scratch = Scratch::new(&format!("fund-{currency}"));
+		let session = block_on(Session::create_budget(
+			currency.to_owned(),
+			text(&scratch.join("budget")),
+			NumberFormat {
+				currency: Some(currency.to_owned()),
+				style: NumberStyle::CommaDot,
+				hide_decimals: false,
+				symbol_first: None,
+				symbol_space: None,
+			},
+			NewBudgetOptions {
+				retirement_401k: false,
+				hsa: false,
+				accounts: Vec::new(),
+			},
+			CancelToken::new(),
+		))
+		.unwrap();
+		let checking = account(&session, "Checking", NewAccountKind::Checking, 10_000_000, None);
+		let loan = account(&session, "Car loan", NewAccountKind::Loan, 9_000_000, None);
+		let veritas_ffi::KindTarget::One {
+			category_id: category,
+		} = session.kind_target(CategoryKind::DebtPrincipal).unwrap()
+		else {
+			panic!("{currency}: the starter set has one principal category");
+		};
+		let month = || session.budget_month(december, TODAY.to_owned()).unwrap();
+		let before = month();
+		let draft = LoanPaymentDraft {
+			id: Some("pay".to_owned()),
+			from_account_id: checking.clone(),
+			loan_account_id: loan.clone(),
+			date: "2026-12-05".to_owned(),
+			total: principal,
+			interest: 0,
+			escrow: 0,
+			fees: 0,
+			principal_category_id: category.clone(),
+			interest_category_id: None,
+			escrow_category_id: None,
+			fees_category_id: None,
+			notes: None,
+			cleared: false,
+			fund_principal: true,
+		};
+		assert!(
+			matches!(
+				session.perform(Command::RecordLoanPayment {
+					payment: LoanPaymentDraft {
+						interest: 100,
+						total: principal + 100,
+						..draft.clone()
+					},
+				}),
+				Err(FfiError::Invalid { .. })
+			),
+			"{currency}: interest that isn't 0 needs its category"
+		);
+		perform(&session, Command::RecordLoanPayment { payment: draft });
+		assert_eq!(shown(&session, "pay").lines.len(), 1, "{currency}");
+		let after = month();
+		assert_eq!(
+			envelope_budgeted(&after, &category),
+			envelope_budgeted(&before, &category) + budgeted,
+			"{currency}"
+		);
+		assert_eq!(after.to_budget, before.to_budget - budgeted, "{currency}");
+		session.undo().unwrap();
+		let undone = month();
+		assert_eq!(envelope_budgeted(&undone, &category), 0, "{currency}");
+		assert!(session.register_row("pay".to_owned()).is_err(), "one undo step");
+		session.redo().unwrap();
+
+		let zip = scratch.join("funded.zip");
+		block_on(session.export_actual_zip(text(&zip), CancelToken::new())).unwrap();
+		let Some(oracle) = oracle() else {
+			continue;
+		};
+		let actual = actual_reads(&oracle, &zip);
+		let theirs = &actual["computed"]["months"]["2026-12"];
+		assert_eq!(
+			theirs["categories"][&category]["budgeted"].as_i64(),
+			Some(budgeted),
+			"{currency}: Actual reads the cell on the budget scale"
+		);
+		assert_eq!(
+			theirs["categories"][&category]["spent"].as_i64(),
+			Some(-principal),
+			"{currency}"
+		);
+		assert_eq!(
+			theirs["toBudget"].as_i64(),
+			Some(month().to_budget),
+			"{currency}: To Budget agrees"
+		);
+	}
 }

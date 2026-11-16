@@ -785,11 +785,12 @@ fn payment(
 		escrow: 0,
 		fees: 0,
 		principal_category_id: setup.principal.clone(),
-		interest_category_id: setup.interest.clone(),
+		interest_category_id: Some(setup.interest.clone()),
 		escrow_category_id: None,
 		fees_category_id: None,
 		notes: None,
 		cleared: true,
+		fund_principal: false,
 	}
 }
 

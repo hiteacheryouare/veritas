@@ -145,7 +145,10 @@ pub struct LoanPaymentDefaults {
 
 /// What the wizard saves (DEBT-6). Amounts are positive cents. `id` names the
 /// payment to replace when it is an existing split; otherwise it picks the
-/// new payment's id, and `nil` lets the core pick.
+/// new payment's id, and `nil` lets the core pick. v12: a part's category is
+/// needed only when the part isn't 0, interest's included, and
+/// `fund_principal` also budgets the principal from To Budget into its
+/// envelope in the payment's month, on the budget scale (A.6, CLS-12.11).
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct LoanPaymentDraft {
 	pub id: Option<String>,
@@ -157,11 +160,13 @@ pub struct LoanPaymentDraft {
 	pub escrow: i64,
 	pub fees: i64,
 	pub principal_category_id: String,
-	pub interest_category_id: String,
+	pub interest_category_id: Option<String>,
 	pub escrow_category_id: Option<String>,
 	pub fees_category_id: Option<String>,
 	pub notes: Option<String>,
 	pub cleared: bool,
+	#[uniffi(default = false)]
+	pub fund_principal: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -217,11 +222,12 @@ pub(crate) fn record_loan_payment(
 		date: civil_date(&draft.date)?,
 		parts: parts(draft.total, draft.interest, draft.escrow, draft.fees),
 		principal_category: CategoryId::new(draft.principal_category_id.as_str()),
-		interest_category: CategoryId::new(draft.interest_category_id.as_str()),
+		interest_category: draft.interest_category_id.as_deref().map(CategoryId::new),
 		escrow_category: draft.escrow_category_id.as_deref().map(CategoryId::new),
 		fees_category: draft.fees_category_id.as_deref().map(CategoryId::new),
 		notes: draft.notes.clone(),
 		cleared: draft.cleared,
+		fund_principal: draft.fund_principal,
 	};
 	loans::record_payment(data, &core, &RuleBook::new(data), now_ms).map(|(rows, _)| rows)
 }

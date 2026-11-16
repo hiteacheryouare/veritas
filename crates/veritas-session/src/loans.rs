@@ -7,7 +7,7 @@ use veritas_domain::{
 	AccountId, AccountKind, AccountMeta, AccountMetaRow, BudgetData, CategoryId, CategoryKind,
 	CivilDate, CoreError, LoanTerms, Money, Row, SplitRole, Transaction, TransactionId,
 };
-use veritas_engine::register_currency_text;
+use veritas_engine::{BudgetEditor, EnvelopeSheet, NumberFormat, register_currency_text};
 use veritas_rules::RuleBook;
 
 use crate::accounts::live_account;
@@ -369,7 +369,9 @@ pub fn payment_defaults(
 }
 
 /// What the wizard saves (DEBT-6). `id` names the payment to replace when it
-/// is a live split; otherwise it is the new payment's id.
+/// is a live split; otherwise it is the new payment's id. A part's category
+/// is needed only when the part isn't 0. `fund_principal` also budgets the
+/// principal from To Budget into its envelope (A.6).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PaymentDraft {
 	pub id: Option<TransactionId>,
@@ -378,11 +380,12 @@ pub struct PaymentDraft {
 	pub date: CivilDate,
 	pub parts: Parts,
 	pub principal_category: CategoryId,
-	pub interest_category: CategoryId,
+	pub interest_category: Option<CategoryId>,
 	pub escrow_category: Option<CategoryId>,
 	pub fees_category: Option<CategoryId>,
 	pub notes: Option<String>,
 	pub cleared: bool,
+	pub fund_principal: bool,
 }
 
 fn category_of_kind(
@@ -462,16 +465,8 @@ pub fn record_payment(
 		})?;
 		line(principal, &draft.principal_category, Some(to_loan))?;
 	}
-	if draft.parts.interest != Money::ZERO {
-		category_of_kind(
-			data,
-			&draft.interest_category,
-			CategoryKind::Expense,
-			"interest",
-		)?;
-		line(draft.parts.interest, &draft.interest_category, None)?;
-	}
 	for (amount, category, what) in [
+		(draft.parts.interest, &draft.interest_category, "interest"),
 		(draft.parts.escrow, &draft.escrow_category, "escrow"),
 		(draft.parts.fees, &draft.fees_category, "fees"),
 	] {
@@ -541,7 +536,34 @@ pub fn record_payment(
 			id
 		}
 	};
+	if draft.fund_principal && principal != Money::ZERO {
+		let with_payment = crate::writes::applied(data, &rows);
+		rows.extend(fund_principal(&with_payment, draft, principal)?);
+	}
 	Ok((rows, id))
+}
+
+/// DEBT-6 A.6: the principal line is spending in its envelope, so the
+/// wizard budgets it from To Budget in the payment's month, with Actual's
+/// movement note. The principal is register scale and a budget cell is
+/// budget scale, so a 0-place budget funds it in whole units (CLS-12.11).
+/// Like typing the amount into the cell, it is not limited to what To
+/// Budget holds.
+fn fund_principal(
+	data: &BudgetData,
+	draft: &PaymentDraft,
+	principal: Money,
+) -> Result<Vec<Row>, CoreError> {
+	let amount = principal.register_to_budget_scale(data.format.decimal_places())?;
+	let sheet = EnvelopeSheet::compute(data, draft.date)?;
+	let format = NumberFormat::from_preference(data.format.number_format.as_deref().unwrap_or(""));
+	let editor = BudgetEditor::new(data, &sheet, format, data.format.hide_fraction);
+	let writes = editor.fund_from_to_budget(
+		draft.date.year_month(),
+		amount,
+		&draft.principal_category,
+	)?;
+	Ok(crate::writes::rows(data, &writes))
 }
 
 #[cfg(test)]
