@@ -498,6 +498,52 @@ pub fn skip(budget: &BudgetData, id: &ScheduleId) -> Result<SchedulePlan, CoreEr
 	Ok(plan)
 }
 
+/// Whether Skip would move this bill. Actual's schedules page offers
+/// "Skip next scheduled date" on any schedule that isn't completed
+/// (`dc/components/schedules/SchedulesTable.tsx:189-194`), but
+/// `skipNextDate` (`lc/server/schedules/app.ts:505-507`) writes only when
+/// `getNextDateAfter` (`lc/shared/schedules.ts:320-338`) finds a different
+/// date (`app.ts:254-262`): never for a one-time date, a schedule without a
+/// next date, or the last occurrence of one that ends.
+pub fn can_skip(budget: &BudgetData, id: &ScheduleId) -> Result<bool, CoreError> {
+	let facts = schedule_facts(budget, id)?;
+	Ok(!facts.schedule.completed && !skip(budget, id)?.writes.is_empty())
+}
+
+/// The date and amount of the most recent live transaction linked to the
+/// bill, in Actual's default transaction order (date newest first, then
+/// starting balances last, then `sort_order` newest first, then id;
+/// `lc/server/aql/schema/index.ts:278-285`). Split lines are left out, so a
+/// split payment counts whole. When the bill has an account, only rows in
+/// it count: a transfer bill's other leg links the bill too, with the
+/// opposite sign.
+pub fn last_paid(
+	budget: &BudgetData,
+	id: &ScheduleId,
+) -> Result<Option<(CivilDate, Money)>, CoreError> {
+	let facts = schedule_facts(budget, id)?;
+	let latest = budget
+		.transactions
+		.values()
+		.filter(|t| {
+			!t.tombstone
+				&& t.schedule.as_ref() == Some(id)
+				&& !matches!(t.split, veritas_domain::SplitRole::Child { .. })
+				&& facts
+					.account
+					.as_ref()
+					.is_none_or(|account| &t.account == account)
+		})
+		.min_by(|a, b| {
+			b.date
+				.cmp(&a.date)
+				.then(a.starting_balance.cmp(&b.starting_balance))
+				.then(b.sort_order.total_cmp(&a.sort_order))
+				.then(a.id.cmp(&b.id))
+		});
+	Ok(latest.map(|t| (t.date, t.amount)))
+}
+
 /// End a bill: Actual's Complete only sets `completed`.
 pub fn complete(budget: &BudgetData, id: &ScheduleId) -> Result<SchedulePlan, CoreError> {
 	let facts = schedule_facts(budget, id)?;

@@ -17,7 +17,7 @@ use crate::condition::{DateValue, Field, Op, parse_date_value};
 use crate::js;
 use crate::jsontext::{array_items, string, with_member, write_array, write_object};
 use crate::recur::Frequency;
-use crate::schedule::{next_date_from, validate_schedule_date};
+use crate::schedule::{next_date_from, upcoming_dates, validate_schedule_date};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BillAmount {
@@ -91,6 +91,38 @@ pub struct BillView {
 	pub completed: bool,
 	pub next_date: Option<CivilDate>,
 	pub custom_rule: bool,
+	/// The rule has conditions besides the four `extractScheduleConds` finds.
+	pub extra_conditions: bool,
+	/// The rule has actions besides `link-schedule` and one plain `set category`.
+	pub extra_actions: bool,
+}
+
+/// Why a schedule can't be shown as a bill, so the bill screen lists it
+/// read-only ("Edit in Actual").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NotABill {
+	/// No live rule has the schedule's `rule` id.
+	MissingRule,
+	/// The rule's conditions or actions aren't JSON arrays.
+	UnreadableRule,
+	/// No `amount` condition with `is`, `isapprox` or `isbetween`
+	/// (`extractScheduleConds`, `lc/shared/schedules.ts:255-281`).
+	NoAmount,
+	/// The amount, or an end of its range, isn't a whole number of cents.
+	UnsupportedAmount,
+	/// No `date` condition with `is` or `isapprox`.
+	NoDate,
+	/// The date isn't a `YYYY-MM-DD` day or a RecurConfig the bill editor shows.
+	UnsupportedDate,
+}
+
+/// How the bill's amount condition matches, as `_amountOp` in `v_schedules`
+/// (`ScheduleAmountCell`, `dc/components/schedules/SchedulesTable.tsx:98-146`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AmountKind {
+	Exact,
+	About,
+	Between,
 }
 
 /// `schedules_json_paths`: where each schedule condition sits in the rule's
@@ -344,6 +376,22 @@ impl Bill {
 	/// The first date on or after `today`, as `createSchedule` stores it.
 	pub fn next_date(&self, today: CivilDate) -> Result<Option<CivilDate>, CoreError> {
 		next_date_from(&self.date_value()?, today).map_err(|error| invalid(error.to_string()))
+	}
+
+	/// The dates the schedule editor previews for this date, up to `count`
+	/// (`dc/hooks/useScheduleEdit.ts:302-333`): a one-time date when it is
+	/// today or later, else nothing; a recurrence through
+	/// `schedule/get-upcoming-dates` (`lc/server/schedules/app.ts:513-532`).
+	/// `Invalid` where Actual shows "Invalid rule"
+	/// (`dc/components/select/RecurringSchedulePicker.tsx:410-418`).
+	pub fn upcoming_dates(
+		&self,
+		today: CivilDate,
+		count: usize,
+	) -> Result<Vec<CivilDate>, CoreError> {
+		let invalid_rule = || invalid("This repeat can't be expanded into dates");
+		let date = self.date_value().map_err(|_| invalid_rule())?;
+		upcoming_dates(&date, today, count).map_err(|_| invalid_rule())
 	}
 
 	fn date_value(&self) -> Result<DateValue, CoreError> {
@@ -618,6 +666,17 @@ pub fn json_paths(conditions_json: &str) -> JsonPaths {
 	}
 }
 
+/// The kind of a schedule's amount condition, `None` when it has none.
+pub fn amount_kind(schedule: &Schedule, budget: &BudgetData) -> Option<AmountKind> {
+	let rule = budget.rules.get(&schedule.rule)?;
+	let conditions: Vec<Value> = serde_json::from_str(&rule.conditions_json).ok()?;
+	match conditions[schedule_slots(&conditions).amount?]["op"].as_str()? {
+		"isbetween" => Some(AmountKind::Between),
+		"isapprox" => Some(AmountKind::About),
+		_ => Some(AmountKind::Exact),
+	}
+}
+
 /// Reads a schedule as a bill. `None` when its date or amount is a shape the
 /// bill screen can't show; such a schedule is listed read-only.
 pub fn bill_from_schedule(
@@ -625,8 +684,23 @@ pub fn bill_from_schedule(
 	rule: &Rule,
 	budget: &BudgetData,
 ) -> Option<BillView> {
-	let conditions: Vec<Value> = serde_json::from_str(&rule.conditions_json).ok()?;
-	let actions: Vec<Value> = serde_json::from_str(&rule.actions_json).ok()?;
+	read_bill(schedule, Some(rule), budget).ok()
+}
+
+/// Reads a schedule as a bill, or says why the bill screen can't show it.
+/// A tombstoned rule counts as missing.
+pub fn read_bill(
+	schedule: &Schedule,
+	rule: Option<&Rule>,
+	budget: &BudgetData,
+) -> Result<BillView, NotABill> {
+	let rule = rule
+		.filter(|rule| !rule.tombstone)
+		.ok_or(NotABill::MissingRule)?;
+	let conditions: Vec<Value> =
+		serde_json::from_str(&rule.conditions_json).map_err(|_| NotABill::UnreadableRule)?;
+	let actions: Vec<Value> =
+		serde_json::from_str(&rule.actions_json).map_err(|_| NotABill::UnreadableRule)?;
 	let slots = schedule_slots(&conditions);
 	let value = |slot: Option<usize>| slot.map(|index| &conditions[index]["value"]);
 	// `v_schedules._payee` is `payee_mapping.targetId`: no row, no payee.
@@ -636,25 +710,37 @@ pub fn bill_from_schedule(
 	let account = value(slots.account)
 		.and_then(Value::as_str)
 		.map(AccountId::new);
-	let amount_value = value(slots.amount)?;
-	let amount = match conditions[slots.amount?]["op"].as_str()? {
-		"isbetween" => BillAmount::Between(
-			Money::from_minor(amount_value.get("num1").and_then(js::integer)?),
-			Money::from_minor(amount_value.get("num2").and_then(js::integer)?),
-		),
-		"isapprox" => BillAmount::About(Money::from_minor(js::integer(amount_value)?)),
-		_ => BillAmount::Exact(Money::from_minor(js::integer(amount_value)?)),
+	let amount_slot = slots.amount.ok_or(NotABill::NoAmount)?;
+	let amount_value = &conditions[amount_slot]["value"];
+	let cents = |value: Option<&Value>| {
+		value
+			.and_then(js::integer)
+			.map(Money::from_minor)
+			.ok_or(NotABill::UnsupportedAmount)
 	};
-	let date = match value(slots.date)? {
-		Value::String(text) => BillDate::Once(js::strict_date(text)?.into()),
-		config => BillDate::Repeat(Repeat::from_json(config)?),
+	let amount = match conditions[amount_slot]["op"].as_str() {
+		Some("isbetween") => BillAmount::Between(
+			cents(amount_value.get("num1"))?,
+			cents(amount_value.get("num2"))?,
+		),
+		Some("isapprox") => BillAmount::About(cents(Some(amount_value))?),
+		_ => BillAmount::Exact(cents(Some(amount_value))?),
+	};
+	let date = match value(slots.date).ok_or(NotABill::NoDate)? {
+		Value::String(text) => BillDate::Once(
+			js::strict_date(text)
+				.ok_or(NotABill::UnsupportedDate)?
+				.into(),
+		),
+		config => BillDate::Repeat(Repeat::from_json(config).ok_or(NotABill::UnsupportedDate)?),
 	};
 	let mut category = None;
-	let mut custom = conditions.len()
+	let extra_conditions = conditions.len()
 		!= [slots.payee, slots.account, slots.amount, slots.date]
 			.iter()
 			.flatten()
 			.count();
+	let mut extra_actions = false;
 	for action in &actions {
 		let plain_category = action["op"] == "set"
 			&& action["field"] == "category"
@@ -664,10 +750,10 @@ pub fn bill_from_schedule(
 		} else if plain_category && category.is_none() {
 			category = action["value"].as_str().map(CategoryId::new);
 		} else {
-			custom = true;
+			extra_actions = true;
 		}
 	}
-	Some(BillView {
+	Ok(BillView {
 		id: schedule.id.clone(),
 		bill: Bill {
 			name: schedule.name.clone(),
@@ -680,7 +766,9 @@ pub fn bill_from_schedule(
 		},
 		completed: schedule.completed,
 		next_date: schedule.next_date,
-		custom_rule: custom,
+		custom_rule: extra_conditions || extra_actions,
+		extra_conditions,
+		extra_actions,
 	})
 }
 
@@ -942,6 +1030,64 @@ mod tests {
 			})
 			.is_err()
 		);
+	}
+
+	#[test]
+	fn a_schedule_the_bill_screen_cant_show_says_why() {
+		let budget = BudgetData::empty(BudgetType::Envelope);
+		let (schedule, rule) = stored(&rent(), "s");
+		let with = |conditions: &str, actions: &str| Rule {
+			conditions_json: conditions.into(),
+			actions_json: actions.into(),
+			..rule.clone()
+		};
+		let date = r#"{"op":"isapprox","field":"date","value":"2026-12-01"}"#;
+		let amount = r#"{"op":"is","field":"amount","value":-100}"#;
+		let reason = |rule: Option<&Rule>| read_bill(&schedule, rule, &budget).err();
+		assert_eq!(reason(None), Some(NotABill::MissingRule));
+		let gone = Rule {
+			tombstone: true,
+			..rule.clone()
+		};
+		assert_eq!(reason(Some(&gone)), Some(NotABill::MissingRule));
+		assert_eq!(
+			reason(Some(&with("{", "[]"))),
+			Some(NotABill::UnreadableRule)
+		);
+		assert_eq!(
+			reason(Some(&with(&format!("[{date}]"), "[]"))),
+			Some(NotABill::NoAmount)
+		);
+		assert_eq!(
+			reason(Some(&with(
+				&format!(r#"[{date},{{"op":"is","field":"amount","value":-12.5}}]"#),
+				"[]"
+			))),
+			Some(NotABill::UnsupportedAmount)
+		);
+		assert_eq!(
+			reason(Some(&with(&format!("[{amount}]"), "[]"))),
+			Some(NotABill::NoDate)
+		);
+		assert_eq!(
+			reason(Some(&with(
+				&format!(
+					r#"[{amount},{{"op":"isapprox","field":"date","value":{{"start":"2026-12-01","frequency":"hourly"}}}}]"#
+				),
+				"[]"
+			))),
+			Some(NotABill::UnsupportedDate)
+		);
+		let custom = read_bill(
+			&schedule,
+			Some(&with(
+				&format!(r#"[{amount},{date},{{"op":"contains","field":"notes","value":"x"}}]"#),
+				r#"[{"op":"set","field":"notes","value":"rent"}]"#,
+			)),
+			&budget,
+		)
+		.unwrap();
+		assert!(custom.custom_rule && custom.extra_conditions && custom.extra_actions);
 	}
 
 	#[test]

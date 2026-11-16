@@ -139,6 +139,50 @@ pub fn schedule_dates(
 	Ok(dates)
 }
 
+/// The schedule editor's preview of a date (`dc/hooks/useScheduleEdit.ts:302-333`).
+/// A one-time day is shown when it is `today` or later. A recurrence is
+/// `getUpcomingDates` (`server/schedules/app.ts:513-532`): its first `count`
+/// occurrences from `today`, each then moved off the weekend, so unlike
+/// [`schedule_dates`] an occurrence before `today` never moves onto it and two
+/// occurrences can move onto the same day.
+pub fn upcoming_dates(
+	date: &DateValue,
+	today: CivilDate,
+	count: usize,
+) -> Result<Vec<CivilDate>, RecurError> {
+	let recurrence = match date {
+		DateValue::Day(day) => {
+			let day = CivilDate::from(*day);
+			return Ok(if day >= today && count > 0 {
+				vec![day]
+			} else {
+				Vec::new()
+			});
+		}
+		DateValue::Month(_) | DateValue::Year(_) => return Ok(Vec::new()),
+		DateValue::Recur(recurrence) => recurrence,
+	};
+	let mut dates = Vec::new();
+	let mut from = Some(today.naive());
+	while dates.len() < count {
+		let Some(occurrence) = from
+			.map(|from| recurrence.first_on_or_after(from))
+			.transpose()?
+			.flatten()
+		else {
+			break;
+		};
+		let shown = if recurrence.skip_weekend {
+			skip_weekend(occurrence, &recurrence.weekend_solve_mode)?
+		} else {
+			occurrence
+		};
+		dates.push(CivilDate::from(shown));
+		from = occurrence.succ_opt();
+	}
+	Ok(dates)
+}
+
 /// The checks Actual's API makes before it expands a schedule date
 /// (`validateScheduleDate`, `server/api.ts:132-159`). The app itself is more
 /// lenient, but a bill Veritas saves should pass these so it can't hold a
