@@ -32,7 +32,8 @@ final class BillsJourneyTests: XCTestCase {
 		attachScreenshot(of: app, named: "paying")
 		markPaid.click()
 		XCTAssertTrue(element(app, "upcoming.electric").waitForDisappearance(), "paid, so it leaves the tray")
-		XCTAssertTrue(waitUntil { self.element(app, "bill.electric").label.contains("next Dec 15") }, element(app, "bill.electric").label)
+		let electric = element(app, "bill.electric")
+		XCTAssertTrue(waitUntil { electric.label.contains("next Dec 15") }, electric.label)
 	}
 
 	@MainActor
@@ -104,6 +105,7 @@ final class BillsJourneyTests: XCTestCase {
 		return app
 	}
 
+	@MainActor
 	private func element(_ app: XCUIApplication, _ identifier: String) -> XCUIElement {
 		app.descendants(matching: .any)[identifier]
 	}
