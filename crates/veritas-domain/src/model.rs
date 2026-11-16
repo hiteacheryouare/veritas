@@ -255,13 +255,28 @@ pub struct Widget {
 
 /// Actual's synced number-format preferences, as stored: `numberFormat`
 /// (`comma-dot`, `dot-comma`, `space-comma`, `apostrophe-dot` or another
-/// value a newer Actual writes), `hideFraction` and `defaultCurrencyCode`.
-/// `None` means the preference isn't set, which Actual reads as its default.
+/// value a newer Actual writes), `hideFraction`, `defaultCurrencyCode`,
+/// `currencySymbolPosition` (`before` or `after`) and
+/// `currencySpaceBetweenAmountAndSymbol` (`true` or `false`). `None` means
+/// the preference isn't set.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct FormatPrefs {
 	pub number_format: Option<String>,
 	pub hide_fraction: bool,
 	pub currency_code: Option<String>,
+	pub symbol_position: Option<String>,
+	pub symbol_space: Option<String>,
+}
+
+impl FormatPrefs {
+	/// The places budget cells use: the currency's, or 2 for no currency or
+	/// a code Actual's table doesn't list (CLS-12.7).
+	pub fn decimal_places(&self) -> u8 {
+		self.currency_code
+			.as_deref()
+			.and_then(crate::currency)
+			.map_or(2, |currency| currency.decimal_places)
+	}
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -122,7 +122,8 @@ fn column_or_null(conn: &Connection, table: &str, column: &str) -> Result<String
 }
 
 /// Actual's number-format preferences. `hideFraction` is on only when it is
-/// the text `true`, as Actual's useFormat reads it.
+/// the text `true`, as Actual's useFormat reads it. An empty value is read as
+/// not set.
 fn format_prefs(conn: &Connection) -> Result<FormatPrefs, CoreError> {
 	let mut prefs = FormatPrefs::default();
 	if !table_exists(conn, "preferences")? {
@@ -131,7 +132,8 @@ fn format_prefs(conn: &Connection) -> Result<FormatPrefs, CoreError> {
 	let mut statement = conn
 		.prepare(
 			"SELECT id, CAST(value AS TEXT) FROM preferences \
-			 WHERE id IN ('numberFormat', 'hideFraction', 'defaultCurrencyCode')",
+			 WHERE id IN ('numberFormat', 'hideFraction', 'defaultCurrencyCode', \
+			 'currencySymbolPosition', 'currencySpaceBetweenAmountAndSymbol')",
 		)
 		.map_err(storage)?;
 	let mut rows = statement.query([]).map_err(storage)?;
@@ -141,7 +143,9 @@ fn format_prefs(conn: &Connection) -> Result<FormatPrefs, CoreError> {
 		match id.as_str() {
 			"numberFormat" => prefs.number_format = value,
 			"hideFraction" => prefs.hide_fraction = value.as_deref() == Some("true"),
-			_ => prefs.currency_code = value,
+			"defaultCurrencyCode" => prefs.currency_code = value,
+			"currencySymbolPosition" => prefs.symbol_position = value.filter(|v| !v.is_empty()),
+			_ => prefs.symbol_space = value.filter(|v| !v.is_empty()),
 		}
 	}
 	Ok(prefs)

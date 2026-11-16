@@ -134,7 +134,7 @@ private struct NetProfitChart: View {
 			Chart(bars) { bar in
 				BarMark(
 					x: .value("Month", bar.month),
-					y: .value("Amount", Double(bar.amount) / 100),
+					y: .value("Amount", model.format.chartValue(bar.amount, on: .register)),
 					width: .fixed(26)
 				)
 				.position(by: .value("Series", bar.series))
@@ -147,7 +147,7 @@ private struct NetProfitChart: View {
 					AxisGridLine().foregroundStyle(Color.chartGrid)
 					AxisValueLabel {
 						if let amount = value.as(Double.self) {
-							Text("\(Int(amount / 1000))k").font(.figures(.caption)).foregroundStyle(.textTertiary)
+							Text(model.format.axisLabel(amount)).font(.figures(.caption)).foregroundStyle(.textTertiary)
 						}
 					}
 				}

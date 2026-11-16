@@ -45,7 +45,8 @@ impl<B: Backend> SharedSession<B> {
 	}
 
 	/// Closes the budget: its connection and its writer lock go now, not when
-	/// the last reference to this value does. Later calls fail.
+	/// the last reference to this value does, once the background open check
+	/// and its snapshot have finished. Later calls fail.
 	pub fn close(&self) -> Result<(), CoreError> {
 		let session = self.lock()?.take();
 		drop(session);

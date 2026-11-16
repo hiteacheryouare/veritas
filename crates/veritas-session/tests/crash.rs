@@ -282,6 +282,8 @@ fn create_until_killed() {
 			currency: Some("USD".to_owned()),
 			style: NumberStyle::CommaDot,
 			hide_decimals: false,
+			symbol_first: true,
+			symbol_space: false,
 		},
 		retirement_401k: true,
 		hsa: false,

@@ -181,38 +181,43 @@ pub fn currencies() -> Result<Vec<Currency>, FfiError> {
 	})
 }
 
-/// The text an amount field shows when it opens (R-BUD-3): grouping
+/// The text a register amount field shows when it opens (R-BUD-3): grouping
 /// separators, no currency symbol, a hyphen for negatives, so typing `+12.34`
-/// after it adds to the value.
-#[uniffi::export]
-pub fn amount_edit_text(amount: i64, style: NumberStyle) -> Result<String, FfiError> {
-	use veritas_engine::{NumberFormat as EngineFormat, edit_text};
+/// after it adds to the value. With `hide_decimals` a whole amount drops its
+/// `.00`, and cents that aren't zero stay, as Actual's register keeps them
+/// (`integerToCurrencyWithDecimal`), so reopening never rounds a value away.
+#[uniffi::export(default(hide_decimals = false))]
+pub fn amount_edit_text(
+	amount: i64,
+	style: NumberStyle,
+	hide_decimals: bool,
+) -> Result<String, FfiError> {
 	guard(|| {
-		let format =
-			EngineFormat::from_preference(veritas_domain::NumberStyle::from(style).actual_value());
-		Ok(edit_text(
+		Ok(veritas_engine::register_edit_text(
 			veritas_domain::Money::from_minor(amount),
-			format,
-			false,
+			engine_format(style),
+			hide_decimals,
 		))
 	})
 }
 
 /// What a budget cell or goal amount field shows when it opens, at the
-/// currency's `decimal_places` (D63, CLS-12): `amountEditText` for budget
-/// amounts. In a 0-place budget 5000 shows `5,000`, and
-/// `evaluateBudgetAmount` reads that back as 5000.
-#[uniffi::export]
+/// currency's `decimal_places` (D63, CLS-12): Actual's `forEdit`. In a
+/// 0-place budget 5000 shows `5,000`, and `evaluateBudgetAmount` reads that
+/// back as 5000. With `hide_decimals` the fraction is dropped and the amount
+/// rounded half away from zero, as `forEdit` does (`useFormat.ts`).
+#[uniffi::export(default(hide_decimals = false))]
 pub fn budget_amount_edit_text(
 	amount: i64,
 	style: NumberStyle,
 	decimal_places: u8,
+	hide_decimals: bool,
 ) -> Result<String, FfiError> {
 	guard(|| {
 		Ok(veritas_engine::edit_text_at(
 			veritas_domain::Money::from_minor(amount),
 			engine_format(style),
-			false,
+			hide_decimals,
 			decimal_places,
 		))
 	})
@@ -410,10 +415,30 @@ mod tests {
 			(1_234_567, 3, NumberStyle::CommaDot, "1,234.567"),
 			(123_450, 2, NumberStyle::SpaceComma, "1\u{202f}234,50"),
 		] {
-			let text = budget_amount_edit_text(amount, style, places).unwrap();
+			let text = budget_amount_edit_text(amount, style, places, false).unwrap();
 			assert_eq!(text, shown);
 			assert_eq!(evaluate_budget_amount(text, style, places).unwrap(), amount);
 		}
+	}
+
+	#[test]
+	fn a_budget_that_hides_decimals_opens_fields_without_them() {
+		// Budget cells follow Actual's forEdit: no fraction, rounded half away
+		// from zero. The register drops only a fraction of .00, as Actual's
+		// integerToCurrencyWithDecimal does, so cents are never rounded away.
+		let budget = |amount, places| {
+			budget_amount_edit_text(amount, NumberStyle::CommaDot, places, true).unwrap()
+		};
+		assert_eq!(budget(123_450, 2), "1,235");
+		assert_eq!(budget(-123_449, 2), "-1,234");
+		assert_eq!(budget(5_000, 0), "5,000");
+		let register = |amount| amount_edit_text(amount, NumberStyle::DotComma, true).unwrap();
+		assert_eq!(register(123_400), "1.234");
+		assert_eq!(register(123_456), "1.234,56");
+		assert_eq!(
+			amount_edit_text(123_400, NumberStyle::DotComma, false).unwrap(),
+			"1.234,00"
+		);
 	}
 
 	#[test]

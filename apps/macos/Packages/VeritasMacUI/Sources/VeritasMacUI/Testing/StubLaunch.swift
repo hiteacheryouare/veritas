@@ -153,7 +153,7 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 
 	let canExport = true
 
-	static let hiddenDecimals = NumberFormat(currency: "USD", style: .commaDot, hideDecimals: true)
+	static let hiddenDecimals = NumberFormat(currency: "USD", style: .commaDot, hideDecimals: true, symbolFirst: true, symbolSpace: false)
 	static let dollar = Currency(code: "USD", name: "US Dollar", symbol: "$", decimalPlaces: 2, numberFormat: .commaDot, symbolFirst: true)
 
 	func overview() async throws -> BudgetOverview {

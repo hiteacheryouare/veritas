@@ -116,6 +116,8 @@ fn usd() -> NumberFormat {
 		currency: Some("USD".to_owned()),
 		style: NumberStyle::CommaDot,
 		hide_decimals: false,
+		symbol_first: None,
+		symbol_space: None,
 	}
 }
 

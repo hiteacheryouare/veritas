@@ -17,19 +17,41 @@ struct DashboardOnRealBudgetTests {
 		// Fred on #60: a percentage card with a zero divisor shows a plain
 		// "no data", never "NaN%" or "∞%". The Architect's call: the figure is blank.
 		// The card is stored as Actual stores it: a divisor filter that matches nothing.
+		// Two cards stored as Actual stores them: a divisor filter that matches
+		// nothing gives ∞, and a dividend filter that matches nothing too gives NaN.
 		let content = #"{\"type\":\"percentage\",\"divisorConditions\":[{\"field\":\"notes\",\"op\":\"contains\",\"value\":\"zzz-no-such-note\"}],\"divisorConditionsOp\":\"and\",\"divisorAllTimeDateRange\":false}"#
-		let meta = #"{"name":"Share of nothing","content":""# + content + #"","timeFrame":{"start":"2026-01-01","end":"2026-11-30","mode":"yearToDate"}}"#
-		try await withBudget(inserting: "UPDATE dashboard SET tombstone = 1; INSERT INTO dashboard (id, type, width, height, x, y, meta, tombstone, dashboard_page_id) VALUES ('pct-zero', 'summary-card', 3, 2, 0, 0, '\(meta)', 0, '\(Self.mainPage)')") { workspace in
+		let infinite = #"{"name":"Share of nothing","content":""# + content + #"","timeFrame":{"start":"2026-01-01","end":"2026-11-30","mode":"yearToDate"}}"#
+		let undefined = #"{"name":"Nothing of nothing","content":""# + content + #"","conditions":[{"field":"notes","op":"contains","value":"zzz-also-nothing"}],"timeFrame":{"start":"2026-01-01","end":"2026-11-30","mode":"yearToDate"}}"#
+		let sql = "UPDATE dashboard SET tombstone = 1; "
+			+ "INSERT INTO dashboard (id, type, width, height, x, y, meta, tombstone, dashboard_page_id) VALUES ('pct-inf', 'summary-card', 3, 2, 0, 0, '\(infinite)', 0, '\(Self.mainPage)'); "
+			+ "INSERT INTO dashboard (id, type, width, height, x, y, meta, tombstone, dashboard_page_id) VALUES ('pct-nan', 'summary-card', 3, 2, 3, 0, '\(undefined)', 0, '\(Self.mainPage)')"
+		try await withBudget(inserting: sql) { workspace in
 			let model = DashboardModel(workspace: workspace)
 			await model.load()
-			let card = try #require(model.sheet?.cards.first { $0.id == "pct-zero" })
-			#expect(card.content == .summary(.undefined), "the core's non-finite result arrives as an undefined figure")
-
-			#expect(model.sheet?.cards.map(\.id) == ["pct-zero"], "the card is alone on its page")
-			let texts = try await Self.texts(in: DashboardScreen(workspace: workspace, model: model), size: CGSize(width: 700, height: 360))
-			#expect(texts.contains("Share of nothing"), "the card is drawn: \(texts)")
+			#expect(Set(model.sheet?.cards.map(\.id) ?? []) == ["pct-inf", "pct-nan"], "the two cards are alone on their page")
+			for id in ["pct-inf", "pct-nan"] {
+				let card = try #require(model.sheet?.cards.first { $0.id == id })
+				#expect(card.content == .summary(.undefined), "\(id): the core's non-finite result arrives as an undefined figure")
+			}
+			let texts = try await Self.texts(in: DashboardScreen(workspace: workspace, model: model), size: CGSize(width: 900, height: 360))
+			#expect(texts.contains("Share of nothing") && texts.contains("Nothing of nothing"), "both cards are drawn: \(texts)")
 			let figure = texts.filter { $0.contains("%") || $0.contains("∞") || $0.contains("NaN") }
 			#expect(figure.isEmpty, "\(figure)")
+		}
+	}
+
+	@Test func aNewReportsEditorShowsTheCoresErrorWhereThePreviewWouldBe() async throws {
+		// Until the core previews unsaved settings (v11), the editor shows why, never nothing.
+		try await withBudget(inserting: "SELECT 1") { workspace in
+			let model = CustomReportsModel(workspace: workspace, thisMonth: Month(year: 2026, month: 10))
+			await model.load()
+			await model.startNew()
+			if model.preview == nil {
+				let problem = try #require(model.previewProblem, "no preview, so the core's error")
+				let texts = try await Self.texts(in: CustomReportsScreen(workspace: workspace, model: model), size: CGSize(width: 1200, height: 820))
+				#expect(texts.contains { $0.contains("Couldn't preview") }, "the error is drawn: \(texts)")
+				#expect(!problem.isEmpty)
+			}
 		}
 	}
 

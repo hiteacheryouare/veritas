@@ -20,6 +20,8 @@ public struct MoneyFormat: Hashable, Sendable {
 
 	public var currencySymbol: String
 	public var symbolFirst: Bool
+	/// A narrow no-break space (U+202F) between the symbol and the digits.
+	public var symbolSpace: Bool
 	public var groupingSeparator: String
 	public var decimalSeparator: String
 	/// Lakh and crore grouping (`1,00,000.33`): three digits, then twos.
@@ -32,6 +34,7 @@ public struct MoneyFormat: Hashable, Sendable {
 	public init(
 		currencySymbol: String = "$",
 		symbolFirst: Bool = true,
+		symbolSpace: Bool = false,
 		groupingSeparator: String = ",",
 		decimalSeparator: String = ".",
 		groupsInTwosAfterThousands: Bool = false,
@@ -40,6 +43,7 @@ public struct MoneyFormat: Hashable, Sendable {
 	) {
 		self.currencySymbol = currencySymbol
 		self.symbolFirst = symbolFirst
+		self.symbolSpace = symbolSpace
 		self.groupingSeparator = groupingSeparator
 		self.decimalSeparator = decimalSeparator
 		self.groupsInTwosAfterThousands = groupsInTwosAfterThousands
@@ -58,7 +62,10 @@ public struct MoneyFormat: Hashable, Sendable {
 
 	/// The budget's own preferences and its currency's row in `currencies()`.
 	/// A budget with no currency, or one Actual's table doesn't list, has no
-	/// symbol and two places, as in Actual (`getCurrency`, CLS-12.7).
+	/// symbol and two places, as in Actual (`getCurrency`, CLS-12.7). The
+	/// symbol's position and spacing are the budget's preferences, which
+	/// `overview()` always sets; unset reads as Actual's default, before with
+	/// no space.
 	public init(_ format: NumberFormat, currency: Currency?) {
 		let separators: (grouping: String, decimal: String) = switch format.style {
 		case .commaDot: (",", ".")
@@ -69,7 +76,8 @@ public struct MoneyFormat: Hashable, Sendable {
 		}
 		self.init(
 			currencySymbol: currency?.symbol ?? "",
-			symbolFirst: currency?.symbolFirst ?? true,
+			symbolFirst: format.symbolFirst ?? true,
+			symbolSpace: format.symbolSpace ?? false,
 			groupingSeparator: separators.grouping,
 			decimalSeparator: separators.decimal,
 			groupsInTwosAfterThousands: format.style == .commaDotIn,
@@ -98,6 +106,23 @@ public struct MoneyFormat: Hashable, Sendable {
 		return sign(minorUnits, magnitude) + withSymbol(digits(magnitude, places: 0))
 	}
 
+	/// A figure for a chart's axis, in whole units of the currency: register
+	/// amounts always carry 2 places, budget amounts the budget's own.
+	public func chartValue(_ minorUnits: Int64, on scale: Scale) -> Double {
+		chartValue(Double(minorUnits), on: scale)
+	}
+
+	public func chartValue(_ minorUnits: Double, on scale: Scale) -> Double {
+		minorUnits / pow(10, Double(impliedPlaces(scale)))
+	}
+
+	/// `$12k`, `−$800`: a chart axis label for a `chartValue`, with the symbol where the budget puts it.
+	public func axisLabel(_ units: Double) -> String {
+		let whole = Int64(units.rounded())
+		let digits = whole.magnitude >= 1000 ? "\(whole.magnitude / 1000)k" : "\(whole.magnitude)"
+		return (whole < 0 ? "\u{2212}" : "") + withSymbol(digits)
+	}
+
 	private var shownPlaces: Int {
 		hidesDecimals ? 0 : Int(decimalPlaces)
 	}
@@ -110,7 +135,9 @@ public struct MoneyFormat: Hashable, Sendable {
 	}
 
 	private func withSymbol(_ digits: String) -> String {
-		symbolFirst ? currencySymbol + digits : digits + currencySymbol
+		guard !currencySymbol.isEmpty else { return digits }
+		let space = symbolSpace ? "\u{202F}" : ""
+		return symbolFirst ? currencySymbol + space + digits : digits + space + currencySymbol
 	}
 
 	/// No minus on an amount that rounds to zero.

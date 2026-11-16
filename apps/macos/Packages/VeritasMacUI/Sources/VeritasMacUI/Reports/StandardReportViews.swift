@@ -18,10 +18,10 @@ struct StandardReportView: View {
 				}
 				Card {
 					Chart(model.netWorth, id: \.month) { point in
-						LineMark(x: .value("Month", ReportPeriod.shortMonth(point.month)), y: .value("Net worth", Double(point.netWorth) / 100))
+						LineMark(x: .value("Month", ReportPeriod.shortMonth(point.month)), y: .value("Net worth", model.format.chartValue(point.netWorth, on: .register)))
 							.foregroundStyle(Color.moneyIncomeFill)
 							.lineStyle(StrokeStyle(lineWidth: 2.5))
-						PointMark(x: .value("Month", ReportPeriod.shortMonth(point.month)), y: .value("Net worth", Double(point.netWorth) / 100))
+						PointMark(x: .value("Month", ReportPeriod.shortMonth(point.month)), y: .value("Net worth", model.format.chartValue(point.netWorth, on: .register)))
 							.foregroundStyle(Color.moneyIncomeFill)
 					}
 					.chartYAxis { thousandsAxis }
@@ -37,10 +37,10 @@ struct StandardReportView: View {
 				Card {
 					Chart(model.netProfit?.months ?? [], id: \.first) { column in
 						let month = column.month.map(ReportPeriod.shortMonth) ?? ""
-						BarMark(x: .value("Month", month), y: .value("Amount", Double(column.income.total) / 100), width: .fixed(22))
+						BarMark(x: .value("Month", month), y: .value("Amount", model.format.chartValue(column.income.total, on: .register)), width: .fixed(22))
 							.position(by: .value("Series", "Income"))
 							.foregroundStyle(Color.moneyIncomeFill)
-						BarMark(x: .value("Month", month), y: .value("Amount", Double(column.expenses.total) / 100), width: .fixed(22))
+						BarMark(x: .value("Month", month), y: .value("Amount", model.format.chartValue(column.expenses.total, on: .register)), width: .fixed(22))
 							.position(by: .value("Series", "Expenses"))
 							.foregroundStyle(Color.chartExpense)
 					}
@@ -58,7 +58,7 @@ struct StandardReportView: View {
 			AxisGridLine().foregroundStyle(Color.chartGrid)
 			AxisValueLabel {
 				if let amount = value.as(Double.self) {
-					Text("\(Int(amount / 1000))k").font(.figures(.caption)).foregroundStyle(.textTertiary)
+					Text(model.format.axisLabel(amount)).font(.figures(.caption)).foregroundStyle(.textTertiary)
 				}
 			}
 		}
