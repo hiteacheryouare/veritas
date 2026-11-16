@@ -1,6 +1,8 @@
 import Foundation
 import VeritasCore
 
+// Adapted from Actual (MIT): desktop-client/src/util/rule.ts.
+
 /// The words of a rule sentence, as Actual's rules page reads them
 /// (desktop-client/src/util/rule.ts).
 public enum RuleWords {
