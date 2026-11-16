@@ -965,8 +965,8 @@ fn a_recorded_payment_is_the_split_actual_reads_and_prefills_the_next_one() {
 		.unwrap();
 	assert_eq!(
 		(l5b.total, l5b.interest, l5b.escrow),
-		(Some(42_500), Some(8_000), Some(2_500)),
-		"L-5b: the fee reads as escrow and never lands in principal"
+		(Some(40_000), Some(8_000), Some(0)),
+		"L-5b (D76): the recorded fee is never pre-filled, and never read as escrow"
 	);
 
 	let mut escrowed = payment(&setup, "l1", "2026-11-20", 200_000, 100_000);
@@ -1088,4 +1088,243 @@ fn a_recorded_payment_is_the_split_actual_reads_and_prefills_the_next_one() {
 		(Some(20_000), None, Some(0)),
 		"L-7 without a rate: principal capped at what's owed"
 	);
+}
+
+fn actual_apply(oracle: &Path, zip: &Path, ops: Value, out: &Path, seed: u32) {
+	let file = out.with_extension("ops.json");
+	std::fs::write(
+		&file,
+		serde_json::json!({"version": 1, "ops": ops}).to_string(),
+	)
+	.unwrap();
+	let output = std::process::Command::new("node")
+		.current_dir(oracle)
+		.arg("src/main.ts")
+		.arg("apply")
+		.arg(zip)
+		.arg(&file)
+		.arg("--out")
+		.arg(out)
+		.args(["--today", TODAY, "--seed", &seed.to_string()])
+		.output()
+		.expect("node runs");
+	assert!(
+		output.status.success(),
+		"Actual couldn't apply the ops: {}",
+		String::from_utf8_lossy(&output.stderr)
+	);
+}
+
+#[test]
+fn the_next_payment_prefills_only_the_parts_the_wizard_recorded() {
+	// DEBT-3 with D76: the wizard records which expense line is interest,
+	// escrow or fees in veritas_loan_payment_part, and the pre-fill reads
+	// parts only through that. L-5b, L-5c, an edit rewriting the mapping, a
+	// line the wizard didn't write, a mapped line deleted in Actual, and
+	// L-5d's payment made in Actual, which pre-fills no expense line.
+	let setup = loan_setup("parts", 980_000);
+	let session = &setup.session;
+	let defaults = |session: &Session, date: &str| {
+		session
+			.loan_payment_defaults(setup.loan.clone(), date.to_owned())
+			.unwrap()
+	};
+	let mut l5b = payment(&setup, "b", "2026-11-20", 42_500, 8_000);
+	l5b.fees = 2_500;
+	l5b.fees_category_id = Some(setup.escrow.clone());
+	perform(session, Command::RecordLoanPayment { payment: l5b });
+	let next = defaults(session, "2026-12-01");
+	assert_eq!(
+		(next.total, next.interest, next.escrow),
+		(Some(40_000), Some(8_000), Some(0)),
+		"L-5b: 32000 + 8000 + 0, the fee neither pre-filled nor read as escrow"
+	);
+	assert_eq!(
+		(next.interest_category_id, next.escrow_category_id),
+		(Some(setup.interest.clone()), None)
+	);
+
+	let mut l5c = payment(&setup, "b", "2026-11-20", 36_500, 0);
+	l5c.interest_category_id = None;
+	l5c.escrow = 4_000;
+	l5c.escrow_category_id = Some(setup.escrow.clone());
+	l5c.fees = 500;
+	l5c.fees_category_id = Some(setup.interest.clone());
+	perform(session, Command::RecordLoanPayment { payment: l5c });
+	let next = defaults(session, "2026-12-01");
+	assert_eq!(
+		(next.total, next.interest, next.escrow),
+		(Some(36_000), None, Some(4_000)),
+		"L-5c after an edit: interest blank, not the escrow read by position"
+	);
+	assert_eq!(next.escrow_category_id, Some(setup.escrow.clone()));
+	let parts = |scratch: &Scratch| -> Vec<(String, i64)> {
+		let conn = rusqlite::Connection::open(scratch.join("budget").join("db.sqlite")).unwrap();
+		let mut statement = conn
+			.prepare("SELECT part, tombstone FROM veritas_loan_payment_part WHERE payment = 'b' ORDER BY tombstone, part")
+			.unwrap();
+		statement
+			.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+			.unwrap()
+			.collect::<Result<_, _>>()
+			.unwrap()
+	};
+	assert_eq!(
+		parts(&setup._scratch),
+		[
+			("escrow".to_owned(), 0),
+			("fees".to_owned(), 0),
+			("fees".to_owned(), 1),
+			("interest".to_owned(), 1),
+		],
+		"the edit tombstones the old rows and writes new ones"
+	);
+
+	let row = shown(session, "b");
+	let mut lines: Vec<veritas_ffi::SplitLineDraft> = row
+		.lines
+		.iter()
+		.map(|line| veritas_ffi::SplitLineDraft {
+			id: Some(line.id.clone()),
+			amount: line.amount,
+			payee_id: line.payee_id.clone(),
+			payee_name: None,
+			category_id: line.category_id.clone(),
+			notes: None,
+		})
+		.collect();
+	lines.push(veritas_ffi::SplitLineDraft {
+		id: None,
+		amount: -1_200,
+		payee_id: None,
+		payee_name: None,
+		category_id: Some(setup.interest.clone()),
+		notes: None,
+	});
+	perform(
+		session,
+		Command::EditTransaction {
+			transaction_id: "b".to_owned(),
+			transaction: veritas_ffi::TransactionDraft {
+				id: Some("b".to_owned()),
+				account_id: row.account_id.clone(),
+				date: row.date.clone(),
+				amount: row.amount - 1_200,
+				payee_id: row.payee_id.clone(),
+				payee_name: None,
+				category_id: None,
+				notes: None,
+				cleared: row.cleared,
+				splits: lines,
+			},
+		},
+	);
+	assert_eq!(
+		defaults(session, "2026-12-01"),
+		next,
+		"a line the wizard didn't write is ignored"
+	);
+
+	let zip = setup._scratch.join("parts.zip");
+	block_on(session.export_actual_zip(text(&zip), CancelToken::new())).unwrap();
+	let Some(oracle) = oracle() else {
+		return;
+	};
+	let actual = actual_reads(&oracle, &zip);
+	assert!(
+		by_id(&actual, "transactions").contains_key("b"),
+		"Actual opens the budget with veritas_loan_payment_part in it"
+	);
+	// Actual's API deletes a split line by updating its split without it
+	// (`api/transaction-update`, loot-core/src/server/api.ts:645-663, through
+	// shared/transactions.ts updateTransaction).
+	let kept: Vec<Value> = shown(session, "b")
+		.lines
+		.iter()
+		.filter(|line| line.amount != -4_000)
+		.map(|line| {
+			serde_json::json!({
+				"id": line.id,
+				"amount": line.amount,
+				"category": line.category_id,
+				"payee": line.payee_id,
+			})
+		})
+		.collect();
+	let deleted = setup._scratch.join("deleted.zip");
+	actual_apply(
+		&oracle,
+		&zip,
+		serde_json::json!([{"op": "updateTransaction", "id": "b", "fields": {"subtransactions": kept}}]),
+		&deleted,
+		11,
+	);
+	let after_delete = Scratch::new("parts-deleted");
+	let reopened = block_on(Session::import_actual_zip(
+		text(&deleted),
+		text(&after_delete.join("budget")),
+		CancelToken::new(),
+	))
+	.unwrap();
+	let next = defaults(&reopened, "2026-12-01");
+	assert_eq!(
+		(
+			next.total,
+			next.interest,
+			next.escrow,
+			next.escrow_category_id
+		),
+		(Some(32_000), None, Some(0), None),
+		"the escrow line deleted in Actual is gone from the mapping; the fee row still makes it usable"
+	);
+	reopened.close().unwrap();
+
+	let made = setup._scratch.join("made-in-actual.zip");
+	actual_apply(
+		&oracle,
+		&zip,
+		serde_json::json!([{
+			"op": "addTransactions",
+			"account": setup.checking,
+			"transactions": [{
+				"id": "in-actual",
+				"date": "2026-12-10",
+				"amount": -40_000,
+				"subtransactions": [
+					{"amount": -32_000, "payee": {"transferTo": setup.loan}, "category": setup.principal},
+					{"amount": -8_000, "category": setup.interest},
+				],
+			}],
+		}]),
+		&made,
+		12,
+	);
+	let in_actual = Scratch::new("parts-actual");
+	let opened = block_on(Session::import_actual_zip(
+		text(&made),
+		text(&in_actual.join("budget")),
+		CancelToken::new(),
+	))
+	.unwrap();
+	let next = defaults(&opened, "2026-12-15");
+	assert_eq!(
+		(
+			next.total,
+			next.interest,
+			next.escrow,
+			next.from_account_id.as_deref(),
+			next.principal_category_id.as_deref(),
+			next.interest_category_id,
+		),
+		(
+			Some(40_000),
+			None,
+			Some(0),
+			Some(setup.checking.as_str()),
+			Some(setup.principal.as_str()),
+			None,
+		),
+		"L-5d: made in Actual, so the loan's usual payment, interest blank, escrow 0"
+	);
+	opened.close().unwrap();
 }
