@@ -162,7 +162,7 @@ fn household(savings_transfer_payee: &str) -> Vec<Bill> {
 		bill(
 			"Gym",
 			p(5),
-			BillAmount::Between(Money::from_minor(-4_000), Money::from_minor(-4_500)),
+			BillAmount::Between(Money::from_minor(-4_500), Money::from_minor(-4_000)),
 			monthly(
 				"2026-01-31",
 				vec![RepeatPattern::Day(-1)],

@@ -97,8 +97,8 @@ fn random_bill(rng: &mut Rng, n: usize) -> Bill {
 		amount: match rng.below(4) {
 			0 => BillAmount::About(Money::from_minor(amount)),
 			1 => BillAmount::Between(
-				Money::from_minor(amount),
 				Money::from_minor(amount - 1 - rng.below(5000) as i64),
+				Money::from_minor(amount),
 			),
 			_ => BillAmount::Exact(Money::from_minor(amount)),
 		},

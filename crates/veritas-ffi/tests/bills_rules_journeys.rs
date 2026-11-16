@@ -2106,8 +2106,8 @@ fn an_auto_posted_about_or_between_bill_reads_as_an_estimate_until_edited_or_cle
 		"Water",
 		CITY_POWER,
 		BillAmount::Between {
-			low: -6_001,
-			high: -9_000,
+			low: -9_000,
+			high: -6_001,
 		},
 		monthly("2026-11-03", None),
 		Some(UTILITIES),
