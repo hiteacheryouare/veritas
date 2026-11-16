@@ -2216,3 +2216,330 @@ fn funding_lands_in_the_principal_line_as_written_even_with_a_matching_rule() {
 	);
 	assert_eq!(envelope_budgeted(&month(), &elsewhere), elsewhere_before);
 }
+
+fn fresh_budget(
+	label: &str,
+	currency: Option<&str>,
+	style: NumberStyle,
+	hide: bool,
+) -> (Scratch, Arc<Session>) {
+	let scratch = Scratch::new(label);
+	let session = block_on(Session::create_budget(
+		label.to_owned(),
+		text(&scratch.join("budget")),
+		NumberFormat {
+			currency: currency.map(str::to_owned),
+			style,
+			hide_decimals: hide,
+			symbol_first: None,
+			symbol_space: None,
+		},
+		NewBudgetOptions {
+			retirement_401k: false,
+			hsa: false,
+			accounts: Vec::new(),
+		},
+		CancelToken::new(),
+	))
+	.unwrap();
+	(scratch, session)
+}
+
+fn principal_target(session: &Session) -> String {
+	let veritas_ffi::KindTarget::One { category_id } = session
+		.kind_target(veritas_ffi::CategoryKind::DebtPrincipal)
+		.unwrap()
+	else {
+		panic!("the starter set has one principal category");
+	};
+	category_id
+}
+
+fn expense_category(session: &Session, name: &str) -> String {
+	session
+		.budget_month(
+			Month {
+				year: 2026,
+				month: 12,
+			},
+			TODAY.to_owned(),
+		)
+		.unwrap()
+		.groups
+		.iter()
+		.filter(|g| !g.is_income)
+		.flat_map(|g| &g.envelopes)
+		.find(|e| e.name == name)
+		.unwrap_or_else(|| panic!("no starter envelope {name}"))
+		.id
+		.clone()
+}
+
+#[test]
+fn a_payment_too_small_names_its_shortfall_in_the_budgets_own_currency_rounded_up_when_whole() {
+	// DEBT-2.2 copy in four real setups. The preview keeps the exact
+	// shortfall; the refusal names it as the budget writes money, and when
+	// only whole units are shown it rounds up, so 20.50 short never reads
+	// as 20.
+	for (currency, style, hide, interest, expected) in [
+		(Some("JPY"), NumberStyle::CommaDot, false, 52_050, "¥21"),
+		(Some("JPY"), NumberStyle::CommaDot, false, 52_000, "¥20"),
+		(Some("USD"), NumberStyle::CommaDot, true, 52_050, "$21"),
+		(Some("USD"), NumberStyle::CommaDot, false, 52_050, "$20.50"),
+		(
+			Some("EUR"),
+			NumberStyle::DotComma,
+			false,
+			152_050,
+			"1.020,50\u{202F}€",
+		),
+		(None, NumberStyle::CommaDot, true, 52_001, "21"),
+	] {
+		let label = format!("short-{}-{hide}-{interest}", currency.unwrap_or("none"));
+		let (_scratch, session) = fresh_budget(&label, currency, style, hide);
+		let checking = account(&session, "Checking", NewAccountKind::Checking, 0, None);
+		let loan = account(&session, "Car loan", NewAccountKind::Loan, 9_000_000, None);
+		let total = 50_000;
+		let preview = session
+			.loan_payment_preview(loan.clone(), "2026-12-05".to_owned(), total, interest, 0, 0)
+			.unwrap();
+		assert_eq!(
+			preview.problem,
+			Some(veritas_ffi::LoanPaymentProblem::PaymentTooSmall {
+				short_by: interest - total
+			}),
+			"{label}: the preview keeps the exact shortfall"
+		);
+		let refused = session.perform(Command::RecordLoanPayment {
+			payment: LoanPaymentDraft {
+				id: Some("short".to_owned()),
+				from_account_id: checking,
+				loan_account_id: loan,
+				date: "2026-12-05".to_owned(),
+				total,
+				interest,
+				escrow: 0,
+				fees: 0,
+				principal_category_id: principal_target(&session),
+				interest_category_id: Some(expense_category(&session, "Groceries")),
+				escrow_category_id: None,
+				fees_category_id: None,
+				notes: None,
+				cleared: false,
+				fund_principal: true,
+			},
+		});
+		match refused {
+			Err(FfiError::Invalid { message }) => assert_eq!(
+				message,
+				format!(
+					"This payment is {expected} less than its interest, escrow and fees. Record unpaid interest as an adjustment on the loan instead."
+				),
+				"{label}"
+			),
+			other => panic!("{label}: DEBT-2.2 refuses it: {other:?}"),
+		}
+		assert!(session.register_row("short".to_owned()).is_err(), "{label}");
+	}
+}
+
+#[test]
+fn a_yen_household_funds_each_principal_as_its_preview_said_until_to_budget_runs_out() {
+	// A yen budget (register rows ×100, budget cells in whole yen) paying a
+	// car loan through the year's last weeks. Before each payment the
+	// preview says what funding it will budget; after it, the principal
+	// envelope moved by exactly that and To Budget by its opposite, in
+	// whichever month the payment is dated. Half a yen rounds up, less
+	// rounds to nothing and writes no cell, To Budget (which adds the
+	// register-scale income to budget-scale cells, CLS-12.10) is never
+	// pushed below 0, and transferAvailable leaves no movement note. Actual reads the
+	// same cells and To Budget.
+	let december = Month {
+		year: 2026,
+		month: 12,
+	};
+	let january = Month {
+		year: 2027,
+		month: 1,
+	};
+	let (scratch, session) =
+		fresh_budget("fund-yen-year", Some("JPY"), NumberStyle::CommaDot, false);
+	let checking = account(&session, "Checking", NewAccountKind::Checking, 0, None);
+	let loan = account(&session, "Car loan", NewAccountKind::Loan, 90_000_000, None);
+	let principal = principal_target(&session);
+	let income = session
+		.budget_month(december, TODAY.to_owned())
+		.unwrap()
+		.groups
+		.iter()
+		.find(|g| g.is_income)
+		.unwrap()
+		.envelopes[0]
+		.id
+		.clone();
+	let mut pay = entry("salary", &checking, "2026-12-01", 100_000);
+	pay.category_id = Some(income);
+	perform(&session, Command::AddTransaction { transaction: pay });
+	let budgeted = |month: Month| {
+		envelope_budgeted(
+			&session.budget_month(month, TODAY.to_owned()).unwrap(),
+			&principal,
+		)
+	};
+	let to_budget = |month: Month| {
+		session
+			.budget_month(month, TODAY.to_owned())
+			.unwrap()
+			.to_budget
+	};
+	assert_eq!(
+		to_budget(december),
+		100_000,
+		"To Budget adds the register-scale salary as stored (CLS-12.10)"
+	);
+
+	let mut expected_total = 0;
+	for (n, (date, total, funded)) in [
+		("2026-12-05", 49, 0),
+		("2026-12-06", 50, 1),
+		("2026-12-10", 3_200_050, 32_001),
+		("2026-12-20", 6_000_000, 60_000),
+		("2026-12-28", 1_200_000, 7_998),
+		("2026-12-30", 500_000, 0),
+	]
+	.into_iter()
+	.enumerate()
+	{
+		let month = december;
+		let preview = session
+			.loan_payment_preview(loan.clone(), date.to_owned(), total, 0, 0, 0)
+			.unwrap();
+		assert_eq!(
+			preview.principal_funding, funded,
+			"payment {n}: the preview"
+		);
+		assert_eq!(
+			preview.principal_funding_asked,
+			(total + 50) / 100,
+			"payment {n}: asked is the whole-yen principal before the clamp"
+		);
+		let (cell, left) = (budgeted(month), to_budget(month));
+		let change = perform(
+			&session,
+			Command::RecordLoanPayment {
+				payment: LoanPaymentDraft {
+					id: Some(format!("pay-{n}")),
+					from_account_id: checking.clone(),
+					loan_account_id: loan.clone(),
+					date: date.to_owned(),
+					total,
+					interest: 0,
+					escrow: 0,
+					fees: 0,
+					principal_category_id: principal.clone(),
+					interest_category_id: None,
+					escrow_category_id: None,
+					fees_category_id: None,
+					notes: None,
+					cleared: true,
+					fund_principal: true,
+				},
+			},
+		);
+		assert_eq!(
+			budgeted(month) - cell,
+			funded,
+			"payment {n}: what the preview said was budgeted"
+		);
+		assert_eq!(
+			left - to_budget(month),
+			funded,
+			"payment {n}: taken from To Budget"
+		);
+		assert!(to_budget(month) >= 0, "payment {n}: never below 0");
+		if funded == 0 {
+			assert!(
+				change.entities.iter().all(|e| e.month.is_none()),
+				"payment {n}: nothing to budget writes no cell: {:?}",
+				change.entities
+			);
+		}
+		expected_total += funded;
+	}
+	assert_eq!(budgeted(december), expected_total);
+	assert_eq!(to_budget(december), 0);
+
+	let mut bonus = entry("bonus", &checking, "2027-01-02", 20_000_000);
+	bonus.category_id = session
+		.budget_month(january, TODAY.to_owned())
+		.unwrap()
+		.groups
+		.iter()
+		.find(|g| g.is_income)
+		.map(|g| g.envelopes[0].id.clone());
+	perform(&session, Command::AddTransaction { transaction: bonus });
+	let january_left = to_budget(january);
+	assert!(january_left > 0, "{january_left}");
+	let preview = session
+		.loan_payment_preview(loan.clone(), "2027-01-05".to_owned(), 500_000, 0, 0, 0)
+		.unwrap();
+	assert_eq!(
+		preview.principal_funding,
+		5_000.min(january_left),
+		"January's To Budget"
+	);
+	perform(
+		&session,
+		Command::RecordLoanPayment {
+			payment: LoanPaymentDraft {
+				id: Some("january".to_owned()),
+				from_account_id: checking.clone(),
+				loan_account_id: loan.clone(),
+				date: "2027-01-05".to_owned(),
+				total: 500_000,
+				interest: 0,
+				escrow: 0,
+				fees: 0,
+				principal_category_id: principal.clone(),
+				interest_category_id: None,
+				escrow_category_id: None,
+				fees_category_id: None,
+				notes: None,
+				cleared: true,
+				fund_principal: true,
+			},
+		},
+	);
+	assert_eq!(
+		budgeted(january),
+		preview.principal_funding,
+		"funded in the payment's month"
+	);
+	assert_eq!(budgeted(december), expected_total, "December untouched");
+
+	let zip = scratch.join("funded.zip");
+	block_on(session.export_actual_zip(text(&zip), CancelToken::new())).unwrap();
+	let Some(oracle) = oracle() else {
+		return;
+	};
+	let actual = actual_reads(&oracle, &zip);
+	for (month, key) in [(december, "2026-12"), (january, "2027-01")] {
+		let theirs = &actual["computed"]["months"][key];
+		assert_eq!(
+			theirs["categories"][&principal]["budgeted"].as_i64(),
+			Some(budgeted(month)),
+			"{key}: Actual reads the funded cell"
+		);
+		assert_eq!(
+			theirs["toBudget"].as_i64(),
+			Some(to_budget(month)),
+			"{key}: Actual's To Budget agrees"
+		);
+	}
+	let notes = by_id(&actual, "notes");
+	assert!(
+		notes.keys().all(|id| !id.starts_with("budget-20")),
+		"transferAvailable writes no movement note: {notes:?}"
+	);
+	actual_finds_every_row_sound(&by_id(&actual, "transactions"));
+}
