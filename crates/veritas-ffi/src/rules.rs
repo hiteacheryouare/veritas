@@ -546,30 +546,80 @@ fn new_filter(condition: &RuleCondition) -> Result<Json, CoreError> {
 	)
 }
 
-/// The filters to store. One equal to a stored filter keeps its JSON
-/// exactly, and a stored filter Veritas can't type stays where it was.
+/// Pairs each condition with a stored filter it equals, in order and each
+/// at most once: the longest such pairing, as a diff would find it.
+fn kept_pairs(
+	conditions: &[RuleCondition],
+	typed: &[(usize, RuleCondition)],
+) -> Vec<(usize, usize)> {
+	let (rows, columns) = (typed.len(), conditions.len());
+	let mut longest = vec![vec![0_usize; columns + 1]; rows + 1];
+	for row in (0..rows).rev() {
+		for column in (0..columns).rev() {
+			longest[row][column] = if typed[row].1 == conditions[column] {
+				longest[row + 1][column + 1] + 1
+			} else {
+				longest[row + 1][column].max(longest[row][column + 1])
+			};
+		}
+	}
+	let mut pairs = Vec::new();
+	let (mut row, mut column) = (0, 0);
+	while row < rows && column < columns {
+		if typed[row].1 == conditions[column] {
+			pairs.push((typed[row].0, column));
+			row += 1;
+			column += 1;
+		} else if longest[row + 1][column] >= longest[row][column + 1] {
+			row += 1;
+		} else {
+			column += 1;
+		}
+	}
+	pairs
+}
+
+/// The filters to store, as Actual's filter editor keeps them. A condition
+/// paired with an equal stored filter keeps that filter's exact JSON, even
+/// when two stored filters type the same (one with a `customName`, say).
+/// Between kept filters, a changed condition takes the place of the stored
+/// filter it replaces, and a stored filter Veritas can't type stays after
+/// the filter it followed.
 pub(crate) fn stored_filters(
 	budget: &BudgetData,
 	conditions: &[RuleCondition],
 	stored: &[Json],
 ) -> Result<Vec<Json>, CoreError> {
-	let typed: Vec<Option<RuleCondition>> = stored
+	let typed: Vec<(usize, RuleCondition)> = stored
 		.iter()
-		.map(|old| filter_condition(budget, old))
+		.enumerate()
+		.filter_map(|(index, old)| filter_condition(budget, old).map(|typed| (index, typed)))
 		.collect();
-	let mut written = conditions
+	let untyped = |index: usize| typed.iter().all(|(at, _)| *at != index);
+	let mut written = Vec::with_capacity(conditions.len() + stored.len());
+	let (mut next_stored, mut next_condition) = (0, 0);
+	let pairs = kept_pairs(conditions, &typed);
+	let ends = pairs
 		.iter()
-		.map(
-			|condition| match typed.iter().position(|old| old.as_ref() == Some(condition)) {
-				Some(index) => Ok(stored[index].clone()),
-				None => new_filter(condition),
-			},
-		)
-		.collect::<Result<Vec<_>, CoreError>>()?;
-	for (index, old) in typed.iter().enumerate() {
-		if old.is_none() {
-			written.insert(index.min(written.len()), stored[index].clone());
+		.map(|&(at, column)| (at, column, true))
+		.chain(std::iter::once((stored.len(), conditions.len(), false)));
+	for (kept_at, kept_column, kept) in ends {
+		for (index, old) in stored.iter().enumerate().take(kept_at).skip(next_stored) {
+			if untyped(index) {
+				written.push(old.clone());
+			} else if next_condition < kept_column {
+				written.push(new_filter(&conditions[next_condition])?);
+				next_condition += 1;
+			}
 		}
+		for condition in &conditions[next_condition..kept_column] {
+			written.push(new_filter(condition)?);
+		}
+		if kept {
+			written.push(stored[kept_at].clone());
+		}
+		next_stored = kept_at + 1;
+		next_condition = kept_column + 1;
 	}
 	Ok(written)
 }
@@ -701,6 +751,36 @@ mod tests {
 
 	fn condition(field: RuleField, op: RuleConditionOp, value: RuleValue) -> RuleCondition {
 		RuleCondition { field, op, value }
+	}
+
+	#[test]
+	fn filters_that_type_alike_keep_their_own_stored_text() {
+		let budget = BudgetData::empty(veritas_domain::BudgetType::Envelope);
+		let stored: Vec<Json> = [
+			r#"{"field":"notes","op":"contains","value":"trip","type":"string","customName":"Trips"}"#,
+			r#"{"field":"notes","op":"contains","value":"trip","type":"string"}"#,
+			r#"{"field":"mood","op":"is","value":"happy","type":"string"}"#,
+			r#"{"field":"amount","op":"gt","value":-500,"type":"number"}"#,
+		]
+		.iter()
+		.map(|text| Json::parse(text).unwrap())
+		.collect();
+		let typed = filter_conditions(&budget, &stored);
+		assert_eq!(typed.len(), 3);
+		assert_eq!(typed[0], typed[1]);
+		let text = |filters: &[Json]| filters.iter().map(Json::stringify).collect::<Vec<_>>();
+		assert_eq!(
+			text(&stored_filters(&budget, &typed, &stored).unwrap()),
+			text(&stored)
+		);
+		let mut edited = typed.clone();
+		edited[2].value = RuleValue::Amount { amount: -600 };
+		let written = text(&stored_filters(&budget, &edited, &stored).unwrap());
+		assert_eq!(written[..3], text(&stored)[..3]);
+		assert_eq!(
+			written[3],
+			r#"{"field":"amount","op":"gt","value":-600,"type":"number"}"#
+		);
 	}
 
 	fn set(field: RuleField, value: RuleValue) -> RuleAction {
