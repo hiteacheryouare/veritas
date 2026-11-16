@@ -6,6 +6,7 @@ extension Screen {
 		case .budget: "envelope"
 		case .accounts: "building.columns"
 		case .bills: "calendar"
+		case .rules: "list.bullet.indent"
 		case .goals: "target"
 		case .reports, .dashboard, .netProfit, .sankey, .customReports: "chart.bar"
 		case .insights, .forecast, .whatIfs, .wrapped, .statements, .tax: "chart.line.uptrend.xyaxis"

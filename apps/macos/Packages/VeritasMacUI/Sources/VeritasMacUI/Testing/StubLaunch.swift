@@ -127,6 +127,8 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 	private let budget = StubBudget()
 	private let reports = StubReports()
 	private lazy var dashboardStore = StubDashboards(reports: reports)
+	private let billStore = StubBills()
+	private let ruleStore = StubRules()
 
 	init(readOnly: ReadOnlyKind?, hasFindings: Bool = false, backupFails: Bool = false, hidesDecimals: Bool = false) {
 		self.readOnly = readOnly
@@ -231,6 +233,7 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 
 	func perform(_ command: Command) async throws {
 		if let readOnly { throw FfiError.ReadOnly(reason: readOnly) }
+		if try billStore.perform(command) || ruleStore.perform(command) { return }
 		switch command {
 		case .saveCustomReport(let settings): try reports.save(settings)
 		case .placeWidget(let id, let x, let y, let width, let height): try dashboardStore.place(id, x: x, y: y, width: width, height: height)
@@ -284,6 +287,15 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 		try writable()
 		return try reports.create(draft)
 	}
+
+	func bills(today: String) async throws -> [BillSummary] { billStore.bills() }
+	func bill(_ id: String, today: String) async throws -> BillDetail { try billStore.detail(id) }
+	func upcoming(days: UInt32, today: String) async throws -> [UpcomingBill] { billStore.upcoming(days: days) }
+	func rules() async throws -> [RuleSentence] { ruleStore.rules() }
+	func rulePreview(_ source: RuleSource) async throws -> [RuleMatch] { try ruleStore.preview(source) }
+	func payees() async throws -> [PayeeDetail] { StubBills.payees }
+	func accounts() async throws -> AccountList { StubBills.accounts }
+	func registerRow(_ id: String) async throws -> RegisterRow { try ruleStore.registerRow(id) }
 
 	private func writable() throws {
 		if let readOnly { throw FfiError.ReadOnly(reason: readOnly) }
