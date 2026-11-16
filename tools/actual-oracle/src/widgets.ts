@@ -469,11 +469,13 @@ export const widgetData = async ({ internal }: ActualSession, requests: WidgetRe
 	return results;
 };
 
-// useFormulaExecution's non-React flow, verbatim apart from returning
-// {result, error} where the hook calls setResult and setError, and pinning
-// the locale to en-US, since Node can't run the hook
-// (reference/actual/packages/desktop-client/src/hooks/useFormulaExecution.ts).
-// HyperFormula is bootstrapped the way bootstrapHyperFormula does it.
+// Copied from Actual v26.11.0 (commit 1766241e3f4b3c578e424c4fa15f1eb83c0da17d,
+// MIT), packages/desktop-client/src/hooks/useFormulaExecution.ts: the hook's
+// non-React flow, verbatim apart from returning {result, error} where the hook
+// calls setResult and setError, and pinning the locale to en-US, since Node
+// can't run the hook. HyperFormula is bootstrapped the way
+// bootstrapHyperFormula does it. HyperFormula itself (GPL-3.0-only) runs only
+// here in the test oracle, from its npm package; none of it ships in Veritas.
 let formulaModules: any = null;
 const loadFormulaModules = async () => {
 	if (formulaModules) {
