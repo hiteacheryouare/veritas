@@ -37,7 +37,7 @@ struct GoalCard: View {
 		.background(.surfaceGrouped, in: .rect(cornerRadius: Radius.section))
 		.overlay(RoundedRectangle(cornerRadius: Radius.section).strokeBorder(Color.edgeGrouped))
 		.accessibilityElement(children: .ignore)
-		.accessibilityLabel("\(goal.name), \(GoalWords.progressLabel(goal, format: format)), \(words.note)")
+		.accessibilityLabel("\(goal.name), \(format.wholeCurrency(goal.progressAmount, on: .budget)) of \(format.wholeCurrency(goal.target, on: .budget)), \(words.note)")
 		.accessibilityIdentifier("goal.\(goal.id)")
 	}
 }
@@ -47,26 +47,12 @@ struct GoalProgress: View {
 	let format: MoneyFormat
 
 	var body: some View {
-		if GoalWords.mixesScales(format) {
-			VStack(alignment: .leading, spacing: 2) {
-				HStack(spacing: 4) {
-					Text("Available")
-					Text(format.wholeCurrency(goal.progressAmount, on: .budget)).font(.figures(.body, weight: .semibold))
-				}
-				HStack(spacing: 4) {
-					Text("Target")
-					Text(format.wholeCurrency(goal.target, on: .budget)).font(.figures(.body, weight: .semibold))
-				}
-			}
-			.font(.text(.body))
-		} else {
-			HStack(spacing: 4) {
-				Text(format.wholeCurrency(goal.progressAmount, on: .budget)).font(.figures(.body, weight: .semibold))
-				Text("of")
-				Text(format.wholeCurrency(goal.target, on: .budget)).font(.figures(.body, weight: .semibold))
-			}
-			.font(.text(.body))
+		HStack(spacing: 4) {
+			Text(format.wholeCurrency(goal.progressAmount, on: .budget)).font(.figures(.body, weight: .semibold))
+			Text("of")
+			Text(format.wholeCurrency(goal.target, on: .budget)).font(.figures(.body, weight: .semibold))
 		}
+		.font(.text(.body))
 	}
 }
 

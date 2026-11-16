@@ -20,19 +20,6 @@ struct GoalWordsTests {
 		#expect(far.note == "On track for August 2027")
 	}
 
-	@Test func aZeroPlaceGoalNeverSaysOverOrLeft() {
-		// CLS-12.14, with made-up yen: a 300 budget and 500 of spending store
-		// -20000 as Available, which is an effect of the two scales.
-		let yen = MoneyFormat(currencySymbol: "¥", decimalPlaces: 0)
-		let goal = StubBudget.goal("fund", "Fund", target: 30_000, available: -20_000, date: nil, state: .reachedSpent, spent: 50_000)
-		let words = GoalWords(goal, format: yen, thisMonth: november)
-		#expect(words.note == "Reached → Spent")
-		#expect(words.detail == "Spending to date ¥500")
-		#expect(GoalWords.progressLabel(goal, format: yen).hasPrefix("available "))
-		let dollars = GoalWords(goal, format: MoneyFormat(), thisMonth: november)
-		#expect(dollars.detail?.hasSuffix("over") == true, "two places keep the plain wording")
-	}
-
 	@Test func aGoalBehindSaysWhatItNeedsAsAWarning() {
 		let words = GoalWords(active(pace: .behind(neededMonthly: 41_000)), format: MoneyFormat(), thisMonth: november)
 		#expect(words.note == "Behind, needs $410 a month")

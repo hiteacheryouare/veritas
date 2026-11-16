@@ -165,8 +165,7 @@ struct CloseGoalSheet: View {
 					}
 					.foregroundStyle(.textSecondary)
 				}
-				// CLS-12.14: in a 0-place budget Available mixes scales, so it is never called "over".
-				if let preview, preview.destinationAvailableAfter < 0, !GoalWords.mixesScales(goals.format) {
+				if let preview, preview.destinationAvailableAfter < 0 {
 					ProblemNote(text: "\(destinationName) will be \(goals.format.currency(-preview.destinationAvailableAfter, on: .budget)) over.")
 						.accessibilityIdentifier("closeGoal.warning")
 				}

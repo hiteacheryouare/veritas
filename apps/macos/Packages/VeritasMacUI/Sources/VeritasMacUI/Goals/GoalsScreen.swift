@@ -204,7 +204,7 @@ private struct LargeGoalCard: View {
 		.motion(.fast, value: isSelected)
 		.contentShape(.rect)
 		.accessibilityElement(children: .contain)
-		.accessibilityLabel("\(goal.name), \(GoalWords.progressLabel(goal, format: format)), \(words.note)")
+		.accessibilityLabel("\(goal.name), \(format.wholeCurrency(goal.progressAmount, on: .budget)) of \(format.wholeCurrency(goal.target, on: .budget)), \(words.note)")
 		.accessibilityAddTraits(isSelected ? .isSelected : [])
 		.accessibilityIdentifier("goal.\(goal.id)")
 	}

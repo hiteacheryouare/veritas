@@ -39,11 +39,6 @@ struct GoalWords {
 		case .reached:
 			note = "Reached"
 			detail = nil
-		case .reachedSpent where GoalWords.mixesScales(format):
-			// CLS-12.14: Available adds both scales here, so it never reads as
-			// over or left, and spending to date gets a line of its own.
-			note = "Reached → Spent"
-			detail = "Spending to date \(format.currency(goal.spent, on: .register))"
 		case .reachedSpent:
 			let available = format.currency(goal.available, on: .budget)
 			// CLS-12.14: in a 0-place budget the figure mixes scales, so it is only
@@ -61,20 +56,6 @@ struct GoalWords {
 			note = goal.closedMonth.map { "Closed \(GoalWords.monthYear($0))" } ?? "Closed"
 			detail = "\(format.amount(goal.spent, on: .register)) spent"
 		}
-	}
-
-	/// A 0-place budget, whose goal Available mixes the register's and the budget's scales (CLS-12.10).
-	static func mixesScales(_ format: MoneyFormat) -> Bool {
-		format.decimalPlaces == 0
-	}
-
-	/// What the card calls the goal's progress: "1,120 of 1,500", or in a
-	/// 0-place budget only "Available" and the target (CLS-12.14).
-	static func progressLabel(_ goal: GoalSummary, format: MoneyFormat) -> String {
-		if mixesScales(format) {
-			return "available \(format.wholeCurrency(goal.progressAmount, on: .budget)), target \(format.wholeCurrency(goal.target, on: .budget))"
-		}
-		return "\(format.wholeCurrency(goal.progressAmount, on: .budget)) of \(format.wholeCurrency(goal.target, on: .budget))"
 	}
 
 	/// The mockups name a near month alone ("On track for March") and a
