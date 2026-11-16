@@ -268,6 +268,17 @@ pub enum Command {
 		name: String,
 		unhide_group: bool,
 	},
+	/// v13. "What is this?" saved in one step: `envelope` creates, kinds or
+	/// revives the envelope, then the transaction is added (`transaction_id`
+	/// `nil`) or edited in it, as `addTransaction`/`editTransaction` would,
+	/// with its category set to that envelope. One SQLite transaction and
+	/// one undo step, so a refused transaction leaves no envelope behind. A
+	/// split draft is `Invalid`.
+	SaveTransactionWithEnvelope {
+		envelope: EnvelopeChange,
+		transaction_id: Option<String>,
+		transaction: crate::accounts::TransactionDraft,
+	},
 	/// v12. CLS-4.1: shows the hidden or archived category of `kind` that
 	/// `kindTarget` offered and the user confirmed, clearing its archive
 	/// date and showing its group too if hidden. `Invalid` while a visible
@@ -472,6 +483,7 @@ impl veritas_session::Command for Command {
 				| Command::CloseAccount { .. }
 				| Command::AddTransaction { .. }
 				| Command::EditTransaction { .. }
+				| Command::SaveTransactionWithEnvelope { .. }
 				| Command::AddReconcileAdjustment { .. }
 				| Command::CreateBill { .. }
 				| Command::EditBill { .. }
@@ -678,6 +690,32 @@ impl veritas_session::Command for Command {
 				)?);
 				learn(data, rows, &id, sheet.today())
 			}
+			Command::SaveTransactionWithEnvelope {
+				envelope,
+				transaction_id,
+				transaction,
+			} => {
+				if !transaction.splits.is_empty() {
+					return Err(CoreError::Invalid(
+						"Choose the envelope for each line of a split instead.".to_owned(),
+					));
+				}
+				let (mut rows, category) = envelope_rows(data, envelope)?;
+				let with_envelope = writes::applied(data, &rows);
+				let transaction = crate::accounts::TransactionDraft {
+					category_id: Some(category.to_string()),
+					..transaction.clone()
+				};
+				let save = match transaction_id {
+					Some(id) => Command::EditTransaction {
+						transaction_id: id.clone(),
+						transaction,
+					},
+					None => Command::AddTransaction { transaction },
+				};
+				rows.extend(save.plan_with_sheet(&with_envelope, sheet)?);
+				Ok(rows)
+			}
 			Command::AddReconcileAdjustment {
 				account_id,
 				statement_balance,
@@ -742,6 +780,55 @@ fn now_ms() -> f64 {
 
 /// Adds the rules `learn_categories` writes for the saved row and its lines,
 /// as Actual's desktop register does with its default `learn-categories` on.
+/// v13. What "What is this?" does to the envelope before saving the
+/// transaction in it.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum EnvelopeChange {
+	/// `setCategoryKind`'s change on an existing category.
+	SetKind {
+		category_id: String,
+		kind: crate::money::CategoryKind,
+	},
+	/// `createKindCategory`'s new category.
+	CreateKind {
+		kind: crate::money::CategoryKind,
+		name: String,
+		unhide_group: bool,
+	},
+	/// `reviveKindCategory`'s hidden or archived category.
+	Revive {
+		kind: crate::money::CategoryKind,
+		category_id: String,
+	},
+}
+
+fn envelope_rows(
+	data: &BudgetData,
+	envelope: &EnvelopeChange,
+) -> Result<(Vec<Row>, CategoryId), CoreError> {
+	match envelope {
+		EnvelopeChange::SetKind { category_id, kind } => {
+			let id = CategoryId::new(category_id.as_str());
+			Ok((
+				veritas_session::kinds::set_kind(data, &id, (*kind).into())?,
+				id,
+			))
+		}
+		EnvelopeChange::CreateKind {
+			kind,
+			name,
+			unhide_group,
+		} => veritas_session::kinds::create_kind_category(data, (*kind).into(), name, *unhide_group),
+		EnvelopeChange::Revive { kind, category_id } => {
+			let id = CategoryId::new(category_id.as_str());
+			Ok((
+				veritas_session::kinds::revive_kind_category(data, (*kind).into(), &id)?,
+				id,
+			))
+		}
+	}
+}
+
 fn learn(
 	data: &BudgetData,
 	mut rows: Vec<Row>,

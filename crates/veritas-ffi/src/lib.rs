@@ -31,7 +31,7 @@ pub use bills::{
 };
 pub use blocking::CancelToken;
 pub use budget::{BudgetMonth, EnvelopeGroup, EnvelopeRow, MoneyTone};
-pub use commands::Command;
+pub use commands::{Command, EnvelopeChange};
 pub use custom_reports::{
 	CustomReportBalances, CustomReportCell, CustomReportData, CustomReportGroup,
 	CustomReportInterval, CustomReportItem, CustomReportSettings, CustomReportView,

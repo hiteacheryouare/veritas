@@ -1328,3 +1328,100 @@ fn the_next_payment_prefills_only_the_parts_the_wizard_recorded() {
 	);
 	opened.close().unwrap();
 }
+
+#[test]
+fn what_is_this_saves_the_envelope_and_the_move_in_one_step() {
+	// v13: "What is this?" creates, kinds or revives the envelope and saves
+	// the move in it as one command and one undo step, so a refused move
+	// leaves no envelope behind.
+	use veritas_ffi::{CategoryKind, EnvelopeChange, KindTarget, TransactionDraft};
+	let scratch = Scratch::new("what-is-this");
+	let session = import(&scratch);
+	let checking = new_account(
+		&session,
+		"Joint checking",
+		NewAccountKind::Checking,
+		500_000,
+	);
+	let loan = new_loan(&session, "Car loan", 900_000, terms(None, None, None, None));
+	let to_loan = transfer_payee(&session, &loan);
+	let draft = |id: &str, account: &str, amount: i64| TransactionDraft {
+		id: Some(id.to_owned()),
+		account_id: account.to_owned(),
+		date: "2026-11-20".to_owned(),
+		amount,
+		payee_id: Some(to_loan.clone()),
+		payee_name: None,
+		category_id: None,
+		notes: None,
+		cleared: false,
+		splits: Vec::new(),
+	};
+	let create = EnvelopeChange::CreateKind {
+		kind: CategoryKind::DebtPrincipal,
+		name: "Car Loan Principal".to_owned(),
+		unhide_group: true,
+	};
+	assert_eq!(
+		session.kind_target(CategoryKind::DebtPrincipal).unwrap(),
+		KindTarget::None
+	);
+	assert!(
+		session
+			.perform(Command::SaveTransactionWithEnvelope {
+				envelope: create.clone(),
+				transaction_id: None,
+				transaction: draft("bad", "no-such-account", -10_000),
+			})
+			.is_err(),
+		"the move is refused"
+	);
+	assert_eq!(
+		session.kind_target(CategoryKind::DebtPrincipal).unwrap(),
+		KindTarget::None,
+		"and no envelope is left behind"
+	);
+
+	let change = perform(
+		&session,
+		Command::SaveTransactionWithEnvelope {
+			envelope: create,
+			transaction_id: None,
+			transaction: draft("move", &checking, -10_000),
+		},
+	);
+	let principal = created(&change, EntityKind::Category);
+	assert_eq!(
+		shown(&session, "move").category_id.as_deref(),
+		Some(principal.as_str()),
+		"the move is filed in the new envelope"
+	);
+	session.undo().unwrap();
+	assert!(session.register_row("move".to_owned()).is_err());
+	assert_eq!(
+		session.kind_target(CategoryKind::DebtPrincipal).unwrap(),
+		KindTarget::None,
+		"one undo takes back both"
+	);
+	session.redo().unwrap();
+
+	let other = category(&session, "Groceries");
+	perform(
+		&session,
+		Command::SaveTransactionWithEnvelope {
+			envelope: EnvelopeChange::SetKind {
+				category_id: principal.clone(),
+				kind: CategoryKind::DebtPrincipal,
+			},
+			transaction_id: Some("move".to_owned()),
+			transaction: draft("move", &checking, -12_000),
+		},
+	);
+	let edited = shown(&session, "move");
+	assert_eq!(
+		(edited.amount, edited.category_id.as_deref()),
+		(-12_000, Some(principal.as_str())),
+		"an edit is saved in the envelope too"
+	);
+	assert_ne!(other, principal);
+}
