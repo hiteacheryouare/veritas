@@ -34,9 +34,6 @@ public final class MoveMoneyModel: Identifiable {
 	public var escrowCategoryID: String?
 	public var feesCategoryID: String?
 	public var showsEscrowAndFees = false
-	/// DEBT-6 A.6: the principal envelope is spending in Actual's budget, so
-	/// the payment can fund it from To Budget in the same go.
-	public var budgetsPrincipal = false
 	public var date: Date
 	public var notes: String
 	public let purpose: TransferPurposeModel
@@ -88,10 +85,6 @@ public final class MoveMoneyModel: Identifiable {
 
 	public var isLoanPayment: Bool { preview?.toLoan == true }
 	public var asksPurpose: Bool { preview?.purpose == .ask && !isLoanPayment }
-
-	/// The payment's principal is at the register's 2 places and a budget
-	/// move at the currency's (CLS-12.9), so it's offered only where the two agree.
-	public var canBudgetPrincipal: Bool { workspace.budgetDecimalPlaces == 2 }
 
 	public func envelopeName(_ id: String) -> String? {
 		envelopes.lazy.flatMap(\.envelopes).first { $0.id == id }?.name
@@ -214,12 +207,8 @@ public final class MoveMoneyModel: Identifiable {
 				interest: parts[0], escrow: parts[1], fees: parts[2], principalCategoryId: principalCategory, interestCategoryId: interestCategory,
 				escrowCategoryId: escrowCategoryID, feesCategoryId: feesCategoryID, notes: note, cleared: false
 			)
-			let funding = budgetsPrincipal && canBudgetPrincipal ? loan.map { (Month(date: day), $0.principal, principalCategory) } : nil
 			return await workspace.change { session -> Bool in
 				try await session.recordLoanPayment(payment)
-				if let (month, principal, envelope) = funding, let month, principal > 0 {
-					try await session.perform(.moveBudget(month: month, amount: principal, fromCategoryId: nil, toCategoryId: envelope))
-				}
 				return true
 			} ?? false
 		}

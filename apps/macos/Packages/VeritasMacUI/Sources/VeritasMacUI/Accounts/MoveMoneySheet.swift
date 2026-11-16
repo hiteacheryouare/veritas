@@ -184,10 +184,6 @@ private struct LoanSplit: View {
 					.buttonStyle(.link)
 					.accessibilityIdentifier("moveMoney.showEscrow")
 			}
-			if model.canBudgetPrincipal, let principal = model.loan?.principal, principal > 0, let envelope = model.principalCategoryID, let name = model.envelopeName(envelope) {
-				Toggle("Budget \(model.format.amount(principal, on: .register)) for \(name) from To Budget", isOn: $model.budgetsPrincipal)
-					.accessibilityIdentifier("moveMoney.budgetPrincipal")
-			}
 			if let loan = model.loan {
 				switch loan.problem {
 				case .interestAbovePayment(let shortBy)?:

@@ -246,10 +246,11 @@ struct RealCoreAccountsTests {
 		}
 	}
 
-	@Test func budgetingThePrincipalFundsWhatThePaymentActuallyPaid() async throws {
-		// DEBT-6 A.6: "budget the principal from To Budget" moves the payment's
-		// principal into its envelope. Here the amount changes after the last
-		// preview and is saved before the next one lands.
+	@Test func aLoanPaymentLeavesThePrincipalEnvelopesBudgetAlone() async throws {
+		// DEBT-6 A.6: funding the principal waits for the core's
+		// LoanPaymentDraft.fundPrincipal (#72), so the sheet doesn't offer it
+		// and a payment changes no budget, even when the amount changes after
+		// the last preview.
 		try await RealBudget.with { budget in
 			let workspace = budget.workspace
 			let principal = try #require(await workspace.report { try await $0.createKindCategory(kind: .debtPrincipal, name: "Car principal", unhideGroup: false) })
@@ -264,15 +265,12 @@ struct RealCoreAccountsTests {
 			await move.refreshPreview()
 			#expect(move.loan?.principal == 31_750)
 			move.typeAmount("400")
-			move.budgetsPrincipal = true
 			#expect(await move.save())
 			let payment = try #require(try await Self.allRows(workspace, .account(accountId: Self.checking)).first { $0.amount == -40_000 && !$0.lines.isEmpty })
 			let paid = try #require(payment.lines.first { $0.categoryId == principal }).amount
 			#expect(paid == -33_750)
-			let funded = try #require(await workspace.budgetMonth(month)).row(principal).budgeted - before
-			withKnownIssue("Known bug: the principal budgeted is the last preview's (317.50), not the saved payment's (337.50)") {
-				#expect(funded == -paid, "the envelope gets what the payment paid")
-			}
+			let after = try #require(await workspace.budgetMonth(month)).row(principal).budgeted
+			#expect(after == before, "Veritas budgets nothing for the principal until the core does it in the same command")
 		}
 	}
 

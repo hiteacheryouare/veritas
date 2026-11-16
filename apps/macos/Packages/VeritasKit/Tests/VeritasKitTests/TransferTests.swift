@@ -279,8 +279,8 @@ struct TransferTests {
 		accounts.workspace.alert
 	}
 
-	@Test func escrowAndFeesGoToTheCoreAndThePrincipalCanBeBudgeted() async {
-		// DEBT-2's parts and DEBT-6 A.6.
+	@Test func escrowAndFeesGoToTheCoreAndNothingIsBudgeted() async {
+		// DEBT-2's parts. Funding the principal (DEBT-6 A.6) waits for the core's fundPrincipal (#72).
 		session.toLoan = true
 		session.defaults = .filled(total: 200_000, interest: 100_000, escrow: 40_000, principalCategoryId: "carloan-cat", interestCategoryId: "interest", escrowCategoryId: "savings-a")
 		let model = MoveMoneyModel(workspace: await workspace(), fromID: "checking", reader: FakeAmounts.reader)
@@ -292,16 +292,12 @@ struct TransferTests {
 		model.fees.type("25.00")
 		await model.refreshPreview()
 		#expect(model.loan?.principal == 57_500)
-		model.budgetsPrincipal = true
 		#expect(await model.save())
 		let payment = session.payments.last
 		#expect(payment?.escrow == 40_000)
 		#expect(payment?.fees == 2_500)
 		#expect(payment?.escrowCategoryId == "savings-a")
-		guard case .moveBudget(_, let amount, let from, let to) = session.commands.last else { Issue.record("no budget move"); return }
-		#expect(amount == model.loan?.principal)
-		#expect(from == nil)
-		#expect(to == "carloan-cat")
+		#expect(!session.commands.contains { if case .moveBudget = $0 { true } else { false } }, "a loan payment moves no budget")
 	}
 
 	@Test func interestAboveThePaymentCantBeSaved() async {
