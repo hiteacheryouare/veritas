@@ -277,6 +277,8 @@ pub struct ForecastCardPoint {
 pub enum FormulaErrorKind {
 	/// The text doesn't start with `=`.
 	NotAFormula,
+	/// Veritas has no formula engine yet (D75).
+	NotImplemented,
 	Cycle,
 	DivByZero,
 	Error,
@@ -291,13 +293,13 @@ pub enum FormulaErrorKind {
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct FormulaError {
 	pub kind: FormulaErrorKind,
-	/// Actual's exact text: `Formula error: DIV_BY_ZERO` or `Formula must
-	/// start with =`.
+	/// Actual's exact text, `Formula error: DIV_BY_ZERO` or `Formula must
+	/// start with =`, or Veritas's for `notImplemented`.
 	pub message: String,
 }
 
-/// The formula's result. A number is HyperFormula's, already rounded to 10
-/// significant digits, not yet formatted.
+/// The formula's result. A number is already rounded to 10 significant
+/// digits, as Actual exports it, not yet formatted.
 #[derive(Debug, Clone, PartialEq, uniffi::Enum)]
 pub enum FormulaValue {
 	Number { value: f64 },
@@ -772,6 +774,7 @@ fn formula_error(error: reports::FormulaError) -> FormulaError {
 	FormulaError {
 		kind: match error.kind {
 			K::NotAFormula => FormulaErrorKind::NotAFormula,
+			K::NotImplemented => FormulaErrorKind::NotImplemented,
 			K::Cycle => FormulaErrorKind::Cycle,
 			K::DivByZero => FormulaErrorKind::DivByZero,
 			K::Error => FormulaErrorKind::Error,
@@ -1423,7 +1426,23 @@ mod tests {
 	}
 
 	#[test]
-	fn the_formula_balance_forecast_and_monte_carlo_cards_draw_natively() {
+	fn a_formula_card_draws_while_the_engine_is_pending() {
+		let (_scratch, core) = imported("all-features");
+		let WidgetView::Formula {
+			formula,
+			value: FormulaValue::Error { error },
+			..
+		} = add(&core, "formula-card", blank())
+		else {
+			panic!("the formula card should draw");
+		};
+		assert_eq!(formula, "=SUM(1, 2, 3)");
+		assert_eq!(error.kind, FormulaErrorKind::NotImplemented);
+	}
+
+	#[test]
+	#[ignore = "clean-room formula engine pending"]
+	fn the_formula_card_shows_actuals_value_and_error() {
 		let (_scratch, core) = imported("all-features");
 		let formula = add(
 			&core,
@@ -1449,6 +1468,11 @@ mod tests {
 				..
 			} if (value - 6.0).abs() < f64::EPSILON
 		));
+	}
+
+	#[test]
+	fn the_balance_forecast_and_monte_carlo_cards_draw_natively() {
+		let (_scratch, core) = imported("all-features");
 		assert!(matches!(
 			add(&core, "balance-forecast-card", blank()),
 			WidgetView::BalanceForecast {

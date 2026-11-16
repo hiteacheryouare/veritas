@@ -1,15 +1,14 @@
 //! The formula card (`components/reports/reports/FormulaCard.tsx`,
 //! `FormulaResult.tsx`, `hooks/useFormulaExecution.ts`): an Excel-style
-//! formula that Actual evaluates with HyperFormula 3.5.0, reading its named
-//! queries' transaction sums and the envelope budget.
+//! formula reading its named queries' transaction sums and the envelope
+//! budget. This is Actual's plumbing around the formula; the formula itself
+//! goes to `engine` (D75).
 //!
 //! `colorFormula` is left out: its `theme_*` variables are the web app's CSS
 //! colors.
 
-mod dates;
-mod eval;
-mod js;
-mod syntax;
+mod engine;
+mod months;
 
 use std::collections::HashMap;
 
@@ -20,8 +19,7 @@ use veritas_domain::{
 use veritas_engine::EnvelopeSheet;
 
 use self::FormulaErrorKind as ErrorKind;
-use self::dates::SimpleDate;
-use self::eval::{BudgetRequest, Evaluator, Session, Value};
+use self::engine::{BudgetRequest, Names};
 use super::budget_analysis::{category_condition, category_passes};
 use super::{TimeRange, calculate_time_range, filtered_rows, filtered_rows_between};
 use crate::filter::TransactionFilter;
@@ -31,11 +29,13 @@ use crate::report_query::{parse_date, unsupported};
 /// The formula a new card shows (`FormulaCard.tsx:44`).
 pub const DEFAULT_FORMULA: &str = "=SUM(1, 2, 3)";
 
-/// HyperFormula's `ErrorType`s a formula can end in, plus the one Actual
-/// raises itself for text that isn't a formula.
+/// The error types Actual's card names in `Formula error: <type>`, the one
+/// it raises itself for text that isn't a formula, and `NotImplemented`
+/// while Veritas has no formula engine (D75).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FormulaErrorKind {
 	NotAFormula,
+	NotImplemented,
 	Cycle,
 	DivByZero,
 	Error,
@@ -48,10 +48,10 @@ pub enum FormulaErrorKind {
 }
 
 impl FormulaErrorKind {
-	/// HyperFormula's name for the error, `None` for `NotAFormula`.
-	pub fn hyperformula_type(self) -> Option<&'static str> {
+	/// The type Actual's card names, `None` for the two it doesn't.
+	pub fn error_type(self) -> Option<&'static str> {
 		Some(match self {
-			FormulaErrorKind::NotAFormula => return None,
+			FormulaErrorKind::NotAFormula | FormulaErrorKind::NotImplemented => return None,
 			FormulaErrorKind::Cycle => "CYCLE",
 			FormulaErrorKind::DivByZero => "DIV_BY_ZERO",
 			FormulaErrorKind::Error => "ERROR",
@@ -75,16 +75,19 @@ pub struct FormulaError {
 
 impl FormulaError {
 	fn new(kind: FormulaErrorKind) -> Self {
-		let message = match kind.hyperformula_type() {
-			Some(name) => format!("Formula error: {name}"),
-			None => "Formula must start with =".to_owned(),
+		let message = match (kind, kind.error_type()) {
+			(_, Some(name)) => format!("Formula error: {name}"),
+			(FormulaErrorKind::NotImplemented, None) => {
+				"Veritas can't compute formulas yet.".to_owned()
+			}
+			(_, None) => "Formula must start with =".to_owned(),
 		};
 		FormulaError { kind, message }
 	}
 }
 
-/// The cell's value as HyperFormula exports it: numbers already through its
-/// 10-significant-digit `cellValueRounding`, not yet formatted as money.
+/// The formula's value: a number already rounded to 10 significant digits,
+/// as Actual exports it, not yet formatted as money.
 #[derive(Clone, Debug, PartialEq)]
 pub enum FormulaValue {
 	Number(f64),
@@ -174,7 +177,6 @@ fn evaluate(
 			ErrorKind::NotAFormula,
 		)));
 	}
-	let ast = syntax::parse(formula);
 	let mut data = Data {
 		budget,
 		sheet,
@@ -183,20 +185,8 @@ fn evaluate(
 		cells: None,
 		cell_index: HashMap::new(),
 	};
-	let mut session = Session::default();
-	let day = SimpleDate {
-		year: f64::from(today.year()),
-		month: f64::from(today.month()),
-		day: f64::from(today.day()),
-	};
-	let run = |session: &mut Session| match &ast {
-		Some(ast) => Evaluator {
-			session,
-			today: day,
-		}
-		.eval(ast),
-		None => Ok(Value::Error(ErrorKind::Error)),
-	};
+	let mut session = Names::default();
+	let run = |session: &mut Names| engine::evaluate(formula, session, today);
 	run(&mut session)?;
 	for name in session.query_names.clone() {
 		let sum = data.query_sum(&name)?;
@@ -228,13 +218,7 @@ fn evaluate(
 			}
 		}
 	}
-	Ok(match run(&mut session)? {
-		Value::Number(number) => FormulaValue::Number(js::export_rounding(number)),
-		Value::Text(text) => FormulaValue::Text(text),
-		Value::Boolean(flag) => FormulaValue::Boolean(flag),
-		Value::Empty => FormulaValue::Empty,
-		Value::Error(kind) => FormulaValue::Error(FormulaError::new(kind)),
-	})
+	run(&mut session)
 }
 
 /// A cell `envelope-budget-month` lists (`server/budget/app.ts:209-261`).
@@ -432,14 +416,14 @@ impl<'a> Data<'a> {
 			}
 			let range = self.time_range(frame.unwrap_or(&Json::Null))?;
 			let month_like = |text: &str| text.split('-').count() == 2;
-			let first = js::parse_month_date(&range.start).map(|date| {
+			let first = months::parse_month_date(&range.start).map(|date| {
 				if month_like(&range.start) {
 					date.with_day(1).unwrap_or(date)
 				} else {
 					date
 				}
 			});
-			let last = js::parse_month_date(&range.end).map(|date| {
+			let last = months::parse_month_date(&range.end).map(|date| {
 				if month_like(&range.end) {
 					month_end(date)
 				} else {
@@ -653,8 +637,8 @@ impl<'a> Data<'a> {
 		}
 		let invalid = || Ok(Err("Invalid time value".to_owned()));
 		let (Some(start), Some(end)) = (
-			js::parse_month_date(&request.start),
-			js::parse_month_date(&request.end),
+			months::parse_month_date(&request.start),
+			months::parse_month_date(&request.end),
 		) else {
 			return invalid();
 		};

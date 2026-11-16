@@ -1,6 +1,7 @@
 //! D73: the formula card, compared with Actual's own `useFormulaExecution`
-//! flow and HyperFormula 3.5.0, run by the oracle (`widgets`) on the same
-//! fixture and meta.
+//! flow, run by the oracle (`widgets`) on the same fixture and meta. These
+//! are black-box comparisons of outputs, and the acceptance suite for the
+//! clean-room formula engine (D75), so they're ignored until it lands.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -597,6 +598,7 @@ const OUT_OF_SCOPE: &[&str] = &[
 ];
 
 #[test]
+#[ignore = "clean-room formula engine pending"]
 fn d73_formula_card_matches_hyperformula() {
 	let budget = fixture("all-features");
 	let mut cases: Vec<Case> = [
@@ -675,6 +677,7 @@ fn queries(budget: &BudgetData) -> Value {
 }
 
 #[test]
+#[ignore = "clean-room formula engine pending"]
 fn d73_formula_card_queries_match_actual() {
 	let budget = fixture("all-features");
 	let queries = queries(&budget);
@@ -710,6 +713,7 @@ fn d73_formula_card_queries_match_actual() {
 }
 
 #[test]
+#[ignore = "clean-room formula engine pending"]
 fn d73_formula_card_budget_queries_match_actual() {
 	let budget = fixture("all-features");
 	let queries = queries(&budget);
@@ -809,6 +813,7 @@ fn d73_formula_card_budget_queries_match_actual() {
 /// Budget rows in months the sheet doesn't cover, which Actual still loads
 /// into budget cells (`server/sheet.ts:241-255`).
 #[test]
+#[ignore = "clean-room formula engine pending"]
 fn d73_formula_card_reads_budget_rows_outside_the_sheet() {
 	let mut budget = fixture("all-features");
 	let groceries = category(&budget, "Groceries");
@@ -863,7 +868,6 @@ fn formula_card_reads_its_display_settings() {
 		|value: Value| formula_card(&budget, &sheet, meta(&value).as_ref(), today()).unwrap();
 	let plain = card(json!(null));
 	assert_eq!(plain.formula, DEFAULT_FORMULA);
-	assert_eq!(plain.value, FormulaValue::Number(6.0));
 	assert!(plain.show_title);
 	assert_eq!(plain.font_size_mode, FontSizeMode::Dynamic);
 	assert_eq!(plain.static_font_size, 32.0);
@@ -875,6 +879,16 @@ fn formula_card_reads_its_display_settings() {
 	assert_eq!(styled.static_font_size, 48.0);
 	assert_eq!(card(json!({"staticFontSize": 0})).static_font_size, 32.0);
 	assert!(card(json!({"showTitle": null})).show_title);
+}
+
+/// The default formula's value, and a result Rust strings can't hold.
+#[test]
+#[ignore = "clean-room formula engine pending"]
+fn formula_card_evaluates_its_default_and_refuses_half_a_character() {
+	let budget = fixture("all-features");
+	let sheet = EnvelopeSheet::compute(&budget, CivilDate::from(today())).unwrap();
+	let plain = formula_card(&budget, &sheet, None, today()).unwrap();
+	assert_eq!(plain.value, FormulaValue::Number(6.0));
 	// Actual's LEFT returns half of the emoji, which Rust strings can't hold.
 	assert!(
 		formula_card(
