@@ -22,6 +22,13 @@ struct MoneyFormatTests {
 		#expect(format.amount(minorUnits, on: .budget) == expected, "a 2-place currency has one scale")
 	}
 
+	@Test func statementsPutANegativeInParentheses() {
+		#expect(format.statement(-61_233, on: .register) == "(612.33)")
+		#expect(format.statement(214_018, on: .register) == "2,140.18")
+		#expect(format.statement(0, on: .register) == "0.00")
+		#expect(format.statement(Int64.min, on: .register) == "(92,233,720,368,547,758.08)")
+	}
+
 	@Test func chartsScaleEachAmountByItsOwnPlaces() {
 		let yen = MoneyFormat(NumberFormat(currency: "JPY", style: .commaDot, hideDecimals: false), currency: Currency(code: "JPY", name: "Yen", symbol: "¥", decimalPlaces: 0, numberFormat: .commaDot, symbolFirst: true))
 		#expect(yen.chartValue(Int64(12_000), on: .budget) == 12_000, "a 0-place budget amount is already whole yen")

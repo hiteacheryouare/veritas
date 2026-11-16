@@ -28,6 +28,7 @@ final class CoreBudgetSession: BudgetSession {
 				})
 			},
 			format: overview.numberFormat.map { MoneyFormat($0, currency: currency) },
+			currencyCode: currency.flatMap { $0.code.isEmpty ? nil : $0.code },
 			numberStyle: overview.numberFormat?.style ?? .commaDot,
 			scheduleProblem: state.scheduleProblem,
 			snapshotProblem: state.snapshotProblem

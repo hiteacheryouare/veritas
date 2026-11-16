@@ -42,6 +42,8 @@ public struct BudgetOverview: Hashable, Sendable {
 	/// with the overview so they are set before any screen shows the budget.
 	/// `nil` until the core reads the budget's own format.
 	public let format: MoneyFormat?
+	/// The budget currency's ISO 4217 code, `nil` when it has none.
+	public let currencyCode: String?
 	/// How amount fields read what's typed: the budget's separators.
 	public let numberStyle: NumberStyle
 	/// Why the last daily bill run failed, until one works.
@@ -58,6 +60,7 @@ public struct BudgetOverview: Hashable, Sendable {
 		isChecking: Bool = false,
 		accountGroups: [SidebarGroup],
 		format: MoneyFormat? = nil,
+		currencyCode: String? = nil,
 		numberStyle: NumberStyle = .commaDot,
 		scheduleProblem: String? = nil,
 		snapshotProblem: String? = nil
@@ -70,6 +73,7 @@ public struct BudgetOverview: Hashable, Sendable {
 		self.isChecking = isChecking
 		self.accountGroups = accountGroups
 		self.format = format
+		self.currencyCode = currencyCode
 		self.numberStyle = numberStyle
 		self.scheduleProblem = scheduleProblem
 		self.snapshotProblem = snapshotProblem
