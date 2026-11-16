@@ -753,6 +753,90 @@ mod tests {
 		RuleCondition { field, op, value }
 	}
 
+	/// Saving after only deletes, only edits or only additions in the
+	/// listed filters writes what Actual's editor writes for the same edits
+	/// to the whole stored list: unlisted filters keep their place between
+	/// the listed ones, and every untouched filter keeps its text.
+	#[test]
+	fn saving_edited_filters_matches_the_same_edits_to_the_whole_stored_list() {
+		let budget = BudgetData::empty(veritas_domain::BudgetType::Envelope);
+		let listed = |value: &str| {
+			format!(r#"{{"field":"notes","op":"contains","value":"{value}","type":"string"}}"#)
+		};
+		let unlisted =
+			|n: u64| format!(r#"{{"field":"mood{n}","op":"is","value":"x","type":"string"}}"#);
+		let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
+		let mut next = |below: u64| {
+			seed = seed
+				.wrapping_mul(6_364_136_223_846_793_005)
+				.wrapping_add(1_442_695_040_888_963_407);
+			(seed >> 33) % below
+		};
+		let mut checked = 0;
+		for case in 0..600_u64 {
+			let len = next(9);
+			let full: Vec<String> = (0..len)
+				.map(|n| {
+					if next(3) == 0 {
+						unlisted(n)
+					} else {
+						listed(&format!("s{n}"))
+					}
+				})
+				.collect();
+			let stored: Vec<Json> = full.iter().map(|text| Json::parse(text).unwrap()).collect();
+			let mut view = filter_conditions(&budget, &stored);
+			let mut expected = full.clone();
+			let typed_at = |expected: &[String]| -> Vec<usize> {
+				expected
+					.iter()
+					.enumerate()
+					.filter(|(_, text)| text.contains("\"notes\""))
+					.map(|(at, _)| at)
+					.collect()
+			};
+			let family = case % 3;
+			for step in 0..=next(3) {
+				let positions = typed_at(&expected);
+				match family {
+					0 if !view.is_empty() => {
+						let pick = usize::try_from(next(view.len() as u64)).unwrap();
+						view.remove(pick);
+						expected.remove(positions[pick]);
+					}
+					1 if !view.is_empty() => {
+						let pick = usize::try_from(next(view.len() as u64)).unwrap();
+						let value = format!("e{case}-{step}");
+						view[pick].value = RuleValue::Text {
+							text: value.clone(),
+						};
+						expected[positions[pick]] = listed(&value);
+					}
+					2 => {
+						let value = format!("a{case}-{step}");
+						view.push(RuleCondition {
+							field: RuleField::Notes,
+							op: crate::RuleConditionOp::Contains,
+							value: RuleValue::Text {
+								text: value.clone(),
+							},
+						});
+						expected.push(listed(&value));
+					}
+					_ => {}
+				}
+			}
+			let written: Vec<String> = stored_filters(&budget, &view, &stored)
+				.unwrap()
+				.iter()
+				.map(Json::stringify)
+				.collect();
+			assert_eq!(written, expected, "case {case}: stored {full:?}");
+			checked += 1;
+		}
+		assert_eq!(checked, 600);
+	}
+
 	#[test]
 	fn filters_that_type_alike_keep_their_own_stored_text() {
 		let budget = BudgetData::empty(veritas_domain::BudgetType::Envelope);
