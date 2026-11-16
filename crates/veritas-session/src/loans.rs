@@ -415,6 +415,24 @@ fn category_of_kind(
 	Ok(())
 }
 
+/// The DEBT-2.2 shortfall as copy shows it: when whole units are shown, a
+/// part of a unit rounds up, so the message never names less than is
+/// missing (5050 short reads "$51", never "$50").
+fn shortfall_shown(short_by: Money, data: &BudgetData) -> Result<Money, CoreError> {
+	if !(data.format.hide_fraction || data.format.decimal_places() == 0) {
+		return Ok(short_by);
+	}
+	let whole = short_by
+		.minor()
+		.checked_add(99)
+		.ok_or(CoreError::Overflow)?
+		/ 100;
+	whole
+		.checked_mul(100)
+		.map(Money::from_minor)
+		.ok_or(CoreError::Overflow)
+}
+
 /// DEBT-6's rows: a split from `from` whose payee is the lender, a principal
 /// line that transfers to the loan, and expense lines for interest, escrow
 /// and fees (parts of 0 get no line). A payment smaller than its other parts
@@ -430,7 +448,10 @@ pub fn record_payment(
 	if principal.is_negative() {
 		return Err(CoreError::Invalid(format!(
 			"This payment is {} less than its interest, escrow and fees. Record unpaid interest as an adjustment on the loan instead.",
-			register_currency_text(principal.checked_neg()?, &data.format)
+			register_currency_text(
+				shortfall_shown(principal.checked_neg()?, data)?,
+				&data.format
+			)
 		)));
 	}
 	if draft.parts.total == Money::ZERO {
@@ -614,6 +635,26 @@ mod tests {
 		assert_eq!(estimate(60_000, 1), Money::from_minor(1), "0.5 rounds up");
 		assert_eq!(estimate(59_999, 1), Money::ZERO);
 		assert_eq!(estimate(0, 980), Money::ZERO);
+	}
+
+	/// DEBT-2.2: with whole units shown, the named shortfall rounds up, so
+	/// it is never less than what is missing.
+	#[test]
+	fn a_shortfall_shown_in_whole_units_rounds_up() {
+		let mut data = BudgetData::empty(veritas_domain::BudgetType::Envelope);
+		let shown = |data: &BudgetData, minor| {
+			shortfall_shown(Money::from_minor(minor), data)
+				.unwrap()
+				.minor()
+		};
+		assert_eq!(shown(&data, 5_050), 5_050, "cents shown: exact");
+		data.format.hide_fraction = true;
+		assert_eq!(shown(&data, 5_050), 5_100);
+		assert_eq!(shown(&data, 5_001), 5_100);
+		assert_eq!(shown(&data, 5_000), 5_000);
+		data.format.hide_fraction = false;
+		data.format.currency_code = Some("JPY".to_owned());
+		assert_eq!(shown(&data, 2_001), 2_100, "0 places: 21 yen, not 20");
 	}
 
 	/// DEBT-2.1 and DEBT-5 L-1, L-4, L-5, L-9.
