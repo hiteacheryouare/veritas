@@ -106,6 +106,23 @@ public struct MoneyFormat: Hashable, Sendable {
 		return sign(minorUnits, magnitude) + withSymbol(digits(magnitude, places: 0))
 	}
 
+	/// A figure for a chart's axis, in whole units of the currency: register
+	/// amounts always carry 2 places, budget amounts the budget's own.
+	public func chartValue(_ minorUnits: Int64, on scale: Scale) -> Double {
+		chartValue(Double(minorUnits), on: scale)
+	}
+
+	public func chartValue(_ minorUnits: Double, on scale: Scale) -> Double {
+		minorUnits / pow(10, Double(impliedPlaces(scale)))
+	}
+
+	/// `$12k`, `−$800`: a chart axis label for a `chartValue`, with the symbol where the budget puts it.
+	public func axisLabel(_ units: Double) -> String {
+		let whole = Int64(units.rounded())
+		let digits = whole.magnitude >= 1000 ? "\(whole.magnitude / 1000)k" : "\(whole.magnitude)"
+		return (whole < 0 ? "\u{2212}" : "") + withSymbol(digits)
+	}
+
 	private var shownPlaces: Int {
 		hidesDecimals ? 0 : Int(decimalPlaces)
 	}
