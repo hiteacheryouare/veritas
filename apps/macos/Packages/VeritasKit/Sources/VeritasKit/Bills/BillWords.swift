@@ -22,9 +22,9 @@ public enum BillWords {
 		case .weekly: return every == 1 ? "Weekly" : "Every \(every) weeks"
 		case .yearly: return every == 1 ? "Yearly" : "Every \(every) years"
 		case .monthly:
-			let days = rule.patterns.isEmpty ? [ordinal(Int(rule.start.suffix(2)) ?? 1)] : rule.patterns.map(pattern)
+			let days = rule.patterns.isEmpty ? [ordinal(Int(rule.start.suffix(2)) ?? 1)] : rule.patterns.map { pattern($0).lowercasedLast }
 			let list = ListFormatter.localizedString(byJoining: days)
-			return every == 1 ? "\(list) of month" : "Every \(every) months, \(list)"
+			return every == 1 ? "\(list.prefix(1).uppercased())\(list.dropFirst()) of month" : "Every \(every) months, \(list)"
 		}
 	}
 
@@ -78,6 +78,14 @@ public enum BillWords {
 		}
 	}
 
+	public static func state(_ state: BillState) -> String {
+		switch state {
+		case .active: "Active"
+		case .paused: "Paused"
+		case .ended: "Ended"
+		}
+	}
+
 	public static func status(_ status: BillStatus) -> String {
 		switch status {
 		case .paid: "Paid"
@@ -87,5 +95,12 @@ public enum BillWords {
 		case .scheduled: "Scheduled"
 		case .completed: "Completed"
 		}
+	}
+}
+
+private extension String {
+	/// "last day" inside a list such as "3rd and last day".
+	var lowercasedLast: String {
+		hasPrefix("Last") ? "l" + dropFirst() : self
 	}
 }
