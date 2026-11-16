@@ -2543,3 +2543,221 @@ fn a_yen_household_funds_each_principal_as_its_preview_said_until_to_budget_runs
 	);
 	actual_finds_every_row_sound(&by_id(&actual, "transactions"));
 }
+
+#[test]
+fn every_new_budget_carries_hide_fraction_as_actuals_currency_picker_leaves_it() {
+	// createBudget's hideFraction, read back by Actual: true for the three
+	// 0-place currencies whatever the shell asked, false for a 2-place one
+	// unless the shell asked to hide it, and what Actual shows for a
+	// budget with no currency.
+	for (currency, hide, expected) in [
+		(Some("JPY"), false, Some("true")),
+		(Some("KRW"), false, Some("true")),
+		(Some("IRR"), false, Some("true")),
+		(Some("JPY"), true, Some("true")),
+		(Some("USD"), false, Some("false")),
+		(Some("USD"), true, Some("true")),
+		(Some("EUR"), false, Some("false")),
+		(None, true, Some("true")),
+	] {
+		let label = format!("hide-{}-{hide}", currency.unwrap_or("none"));
+		let (scratch, session) = fresh_budget(&label, currency, NumberStyle::CommaDot, hide);
+		let shown = session
+			.overview()
+			.unwrap()
+			.number_format
+			.unwrap()
+			.hide_decimals;
+		assert_eq!(
+			Some(shown.to_string().as_str()),
+			expected,
+			"{label}: overview"
+		);
+		let zip = scratch.join("new.zip");
+		block_on(session.export_actual_zip(text(&zip), CancelToken::new())).unwrap();
+		let Some(oracle) = oracle() else {
+			continue;
+		};
+		let actual = actual_reads(&oracle, &zip);
+		let preferences = by_id(&actual, "preferences");
+		assert_eq!(
+			preferences
+				.get("hideFraction")
+				.and_then(|row| row["value"].as_str()),
+			expected,
+			"{label}: Actual reads hideFraction"
+		);
+		assert_eq!(
+			preferences
+				.get("defaultCurrencyCode")
+				.and_then(|row| row["value"].as_str()),
+			currency,
+			"{label}"
+		);
+	}
+}
+
+#[test]
+fn a_closed_goals_new_activity_follows_what_actuals_envelope_counts() {
+	// GOAL-6 against Actual's own envelope: after a goal is closed, money
+	// moved out of checking to the brokerage under the goal's category is
+	// on-budget activity (Actual counts the on-budget side of an on→off
+	// transfer in the category) and raises the notice, while a row in the
+	// brokerage itself carrying that category is not activity in either
+	// app.
+	let (scratch, session) =
+		fresh_budget("goal6-transfer", Some("USD"), NumberStyle::CommaDot, false);
+	let checking = account(
+		&session,
+		"Checking",
+		NewAccountKind::Checking,
+		500_000,
+		None,
+	);
+	let brokerage = account(&session, "Brokerage", NewAccountKind::Investment, 0, None);
+	let goal = created(
+		&perform(
+			&session,
+			Command::CreateGoal {
+				name: "Down payment".to_owned(),
+				target: 300_000,
+				target_date: None,
+				icon: None,
+				color: None,
+			},
+		),
+		EntityKind::Goal,
+	);
+	let goals = |today: &str| session.goals(today.to_owned()).unwrap();
+	let summary = |today: &str| {
+		goals(today)
+			.goals
+			.into_iter()
+			.find(|g| g.id == goal)
+			.unwrap()
+	};
+	let category = summary("2026-11-20").category_id;
+	perform(
+		&session,
+		Command::CloseGoal {
+			goal_id: goal.clone(),
+			release_to_category_id: None,
+			also_move_later: false,
+		},
+	);
+	assert!(!summary("2026-12-20").new_activity, "freshly closed");
+
+	let mut stray = entry("stray", &brokerage, "2026-12-10", -2_000);
+	stray.category_id = Some(category.clone());
+	perform(&session, Command::AddTransaction { transaction: stray });
+	assert!(
+		!summary("2026-12-20").new_activity,
+		"a brokerage row isn't activity in the envelope"
+	);
+	let mut moved = entry("moved", &checking, "2026-12-12", -50_000);
+	moved.payee_id = Some(transfer_payee(&session, &brokerage));
+	moved.category_id = Some(category.clone());
+	perform(&session, Command::AddTransaction { transaction: moved });
+	assert!(
+		summary("2026-12-20").new_activity,
+		"the on-budget side of the move is new activity"
+	);
+	let zip = scratch.join("goal.zip");
+	block_on(session.export_actual_zip(text(&zip), CancelToken::new())).unwrap();
+	let Some(oracle) = oracle() else {
+		return;
+	};
+	let actual = actual_reads(&oracle, &zip);
+	assert_eq!(
+		actual["computed"]["months"]["2026-12"]["categories"][&category]["spent"].as_i64(),
+		Some(-50_000),
+		"Actual's envelope counts the move and not the brokerage row"
+	);
+}
+
+#[test]
+fn a_revived_principal_category_and_its_group_read_as_shown_in_actual_and_one_undo_hides_both() {
+	// CLS-4.1's revive, checked through Actual: an archived principal
+	// category in a hidden group comes back shown with its group in one
+	// step, Actual reads both as shown, and one undo leaves Actual reading
+	// both hidden again.
+	use veritas_ffi::{CategoryKind, KindTarget};
+	let scratch = Scratch::new("revive-actual");
+	let session = import(&scratch, "small");
+	let debt = created(
+		&perform(
+			&session,
+			Command::CreateCategoryGroup {
+				name: "Debt".to_owned(),
+			},
+		),
+		EntityKind::CategoryGroup,
+	);
+	let old = new_category(&session, &debt, "Old Car Loan");
+	perform(
+		&session,
+		Command::SetCategoryKind {
+			category_id: old.clone(),
+			kind: CategoryKind::DebtPrincipal,
+		},
+	);
+	perform(
+		&session,
+		Command::ArchiveCategory {
+			category_id: old.clone(),
+		},
+	);
+	perform(
+		&session,
+		Command::SetCategoryGroupHidden {
+			group_id: debt.clone(),
+			hidden: true,
+		},
+	);
+	let KindTarget::OneArchived { category } =
+		session.kind_target(CategoryKind::DebtPrincipal).unwrap()
+	else {
+		panic!("one archived match");
+	};
+	assert!(category.archived && category.group_is_hidden);
+	let hidden_in_actual = |label: &str| -> (i64, i64) {
+		let zip = scratch.join(&format!("{label}.zip"));
+		block_on(session.export_actual_zip(text(&zip), CancelToken::new())).unwrap();
+		let actual = actual_reads(&oracle().unwrap(), &zip);
+		(
+			by_id(&actual, "categories")[&old]["hidden"]
+				.as_i64()
+				.unwrap(),
+			by_id(&actual, "category_groups")[&debt]["hidden"]
+				.as_i64()
+				.unwrap(),
+		)
+	};
+	perform(
+		&session,
+		Command::ReviveKindCategory {
+			kind: CategoryKind::DebtPrincipal,
+			category_id: old.clone(),
+		},
+	);
+	assert_eq!(
+		session.kind_target(CategoryKind::DebtPrincipal).unwrap(),
+		KindTarget::One {
+			category_id: old.clone()
+		}
+	);
+	if oracle().is_none() {
+		return;
+	}
+	assert_eq!(hidden_in_actual("revived"), (0, 0), "shown, with its group");
+	session.undo().unwrap();
+	assert_eq!(
+		hidden_in_actual("undone"),
+		(1, 1),
+		"one undo hides both again"
+	);
+	assert!(matches!(
+		session.kind_target(CategoryKind::DebtPrincipal).unwrap(),
+		KindTarget::OneArchived { .. }
+	));
+}
