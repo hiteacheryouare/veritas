@@ -32,17 +32,61 @@ impl From<CategoryKind> for veritas_domain::CategoryKind {
 }
 
 /// Where CLS-4.1 files a loan payment's principal or a savings move.
+/// Visible categories always win; v12's hidden cases come only when none
+/// has the kind.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
 pub enum KindTarget {
-	/// No visible category has the kind: offer `createKindCategory`.
+	/// No category has the kind, visible or not: offer `createKindCategory`.
 	None,
 	One {
 		category_id: String,
 	},
-	/// The user picks.
+	/// Several visible: the user picks.
 	Several {
 		category_ids: Vec<String>,
 	},
+	/// v12. One hidden match: confirm 'Show "{name}" again and use it?' (with
+	/// the group when it is hidden too), then `reviveKindCategory`.
+	OneHidden {
+		category: HiddenCategoryMatch,
+	},
+	/// v12. One archived match: confirm 'Restore "{name}" and use it?', then
+	/// `reviveKindCategory`; or "Create a new category" under a free name.
+	OneArchived {
+		category: HiddenCategoryMatch,
+	},
+	/// v12. Several hidden or archived matches, in budget order: list each
+	/// with its group and "(hidden)" or "(archived)", plus "Create a new
+	/// category". The pick is confirmed, then `reviveKindCategory`.
+	SeveralHidden {
+		categories: Vec<HiddenCategoryMatch>,
+	},
+}
+
+/// v12. A category of the kind that isn't visible (CLS-4.1): hidden, in a
+/// hidden group, or archived (`archived`, which reads "(archived)" over
+/// "(hidden)"). Reviving it shows the category and its group again.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct HiddenCategoryMatch {
+	pub category_id: String,
+	pub name: String,
+	pub group_id: String,
+	pub group_name: String,
+	pub group_is_hidden: bool,
+	pub archived: bool,
+}
+
+impl From<veritas_engine::category_kinds::HiddenMatch> for HiddenCategoryMatch {
+	fn from(found: veritas_engine::category_kinds::HiddenMatch) -> Self {
+		HiddenCategoryMatch {
+			category_id: found.category.to_string(),
+			name: found.name,
+			group_id: found.group.to_string(),
+			group_name: found.group_name,
+			group_is_hidden: found.group_hidden,
+			archived: found.archived,
+		}
+	}
 }
 
 /// Where `createKindCategory` would put the new category. When
@@ -293,7 +337,8 @@ impl Session {
 	}
 
 	/// v9. CLS-4.1: the visible categories of `kind`, which must be
-	/// `debtPrincipal` or `savings`.
+	/// `debtPrincipal` or `savings`; v12 adds the hidden and archived ones
+	/// when none is visible.
 	pub fn kind_target(&self, kind: CategoryKind) -> Result<KindTarget, FfiError> {
 		self.core.call(|session| {
 			Ok(match kinds::kind_target(session.data()?, kind.into())? {
@@ -303,6 +348,15 @@ impl Session {
 				},
 				CoreKindTarget::Several(ids) => KindTarget::Several {
 					category_ids: ids.iter().map(ToString::to_string).collect(),
+				},
+				CoreKindTarget::OneHidden(found) => KindTarget::OneHidden {
+					category: found.into(),
+				},
+				CoreKindTarget::OneArchived(found) => KindTarget::OneArchived {
+					category: found.into(),
+				},
+				CoreKindTarget::SeveralHidden(all) => KindTarget::SeveralHidden {
+					categories: all.into_iter().map(Into::into).collect(),
 				},
 			})
 		})

@@ -268,6 +268,14 @@ pub enum Command {
 		name: String,
 		unhide_group: bool,
 	},
+	/// v12. CLS-4.1: shows the hidden or archived category of `kind` that
+	/// `kindTarget` offered and the user confirmed, clearing its archive
+	/// date and showing its group too if hidden. `Invalid` while a visible
+	/// category has the kind, or for a category `kindTarget` didn't offer.
+	ReviveKindCategory {
+		kind: crate::money::CategoryKind,
+		category_id: String,
+	},
 	/// v9. R-DEBT-1: replaces the terms; a `nil` field clears it.
 	SetLoanTerms {
 		account_id: String,
@@ -897,6 +905,13 @@ impl Command {
 				*unhide_group,
 			)
 			.map(|(rows, _)| rows),
+			Command::ReviveKindCategory { kind, category_id } => {
+				veritas_session::kinds::revive_kind_category(
+					data,
+					(*kind).into(),
+					&category(category_id),
+				)
+			}
 			Command::SetLoanTerms { account_id, terms } => {
 				crate::money::set_loan_terms(data, account_id, terms)
 			}

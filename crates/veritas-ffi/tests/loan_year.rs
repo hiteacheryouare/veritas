@@ -22,8 +22,8 @@ use serde_json::Value;
 use veritas_ffi::{
 	BudgetMonth, CancelToken, Change, Command, EntityKind, FfiError, LoanPaymentDraft, LoanTerms,
 	Month, NetProfitLine, NewAccount, NewAccountKind, NewBudgetOptions, NumberFormat, NumberStyle,
-	RegisterFilter, RegisterRow, RegisterScope, RegisterSort, RegisterSortKey, ReportDrill, Session,
-	SplitLineDraft, TransactionDraft, TransferPurpose,
+	RegisterFilter, RegisterRow, RegisterScope, RegisterSort, RegisterSortKey, ReportDrill,
+	Session, SplitLineDraft, TransactionDraft, TransferPurpose,
 };
 
 const TODAY: &str = "2026-12-31";
@@ -1595,7 +1595,13 @@ fn the_wizard_funds_the_principal_from_to_budget_on_the_budget_scale_and_actual_
 			CancelToken::new(),
 		))
 		.unwrap();
-		let checking = account(&session, "Checking", NewAccountKind::Checking, 10_000_000, None);
+		let checking = account(
+			&session,
+			"Checking",
+			NewAccountKind::Checking,
+			10_000_000,
+			None,
+		);
 		let loan = account(&session, "Car loan", NewAccountKind::Loan, 9_000_000, None);
 		let veritas_ffi::KindTarget::One {
 			category_id: category,
@@ -1647,7 +1653,10 @@ fn the_wizard_funds_the_principal_from_to_budget_on_the_budget_scale_and_actual_
 		session.undo().unwrap();
 		let undone = month();
 		assert_eq!(envelope_budgeted(&undone, &category), 0, "{currency}");
-		assert!(session.register_row("pay".to_owned()).is_err(), "one undo step");
+		assert!(
+			session.register_row("pay".to_owned()).is_err(),
+			"one undo step"
+		);
 		session.redo().unwrap();
 
 		let zip = scratch.join("funded.zip");
@@ -1673,4 +1682,234 @@ fn the_wizard_funds_the_principal_from_to_budget_on_the_budget_scale_and_actual_
 			"{currency}: To Budget agrees"
 		);
 	}
+}
+
+#[test]
+fn hidden_and_archived_principal_categories_are_offered_back_before_a_new_one() {
+	// CLS-4.1 as landed in PR #70: visible matches win; with none, one
+	// hidden match is shown again and reused after a confirm, one archived
+	// match is restored (its archive date cleared), several are picked from
+	// a list with their groups and states, and "Create a new category"
+	// still works under a free name. Each revive is one undo step.
+	use veritas_ffi::{CategoryKind, HiddenCategoryMatch, KindTarget};
+	const PRINCIPAL: CategoryKind = CategoryKind::DebtPrincipal;
+	let scratch = Scratch::new("cls41-revive");
+	let session = import(&scratch, "small");
+	let target = || session.kind_target(PRINCIPAL).unwrap();
+	let principal_category = |group: &str, name: &str| {
+		let id = new_category(&session, group, name);
+		perform(
+			&session,
+			Command::SetCategoryKind {
+				category_id: id.clone(),
+				kind: PRINCIPAL,
+			},
+		);
+		id
+	};
+	let hide = |id: &str| {
+		perform(
+			&session,
+			Command::SetCategoryHidden {
+				category_id: id.to_owned(),
+				hidden: true,
+			},
+		)
+	};
+	let archive = |id: &str| {
+		perform(
+			&session,
+			Command::ArchiveCategory {
+				category_id: id.to_owned(),
+			},
+		)
+	};
+	let revive = |id: &str| {
+		session.perform(Command::ReviveKindCategory {
+			kind: PRINCIPAL,
+			category_id: id.to_owned(),
+		})
+	};
+	let create = |name: &str| {
+		session.perform(Command::CreateKindCategory {
+			kind: PRINCIPAL,
+			name: name.to_owned(),
+			unhide_group: true,
+		})
+	};
+	let debt = created(
+		&perform(
+			&session,
+			Command::CreateCategoryGroup {
+				name: "Debt".to_owned(),
+			},
+		),
+		EntityKind::CategoryGroup,
+	);
+	let group_name = |id: &str| {
+		session
+			.budget_month(
+				Month {
+					year: 2026,
+					month: 12,
+				},
+				TODAY.to_owned(),
+			)
+			.unwrap()
+			.groups
+			.into_iter()
+			.find(|g| g.envelopes.iter().any(|e| e.id == id))
+			.unwrap()
+			.name
+	};
+
+	let old_car = principal_category(&debt, "Old Car Loan");
+	hide(&old_car);
+	let one_hidden = |group_is_hidden| KindTarget::OneHidden {
+		category: HiddenCategoryMatch {
+			category_id: old_car.clone(),
+			name: "Old Car Loan".to_owned(),
+			group_id: debt.clone(),
+			group_name: "Debt".to_owned(),
+			group_is_hidden,
+			archived: false,
+		},
+	};
+	assert_eq!(target(), one_hidden(false));
+	let visible = principal_category(&debt, "Car Loan");
+	assert_eq!(
+		target(),
+		KindTarget::One {
+			category_id: visible.clone()
+		},
+		"visible matches win, and the hidden one isn't offered"
+	);
+	assert!(
+		matches!(revive(&old_car), Err(FfiError::Invalid { .. })),
+		"no revive while a visible match exists"
+	);
+	session.undo().unwrap();
+	session.undo().unwrap();
+	assert_eq!(target(), one_hidden(false));
+
+	perform(
+		&session,
+		Command::SetCategoryGroupHidden {
+			group_id: debt.clone(),
+			hidden: true,
+		},
+	);
+	assert_eq!(
+		target(),
+		one_hidden(true),
+		"the confirm names the hidden group too"
+	);
+	perform(
+		&session,
+		Command::ReviveKindCategory {
+			kind: PRINCIPAL,
+			category_id: old_car.clone(),
+		},
+	);
+	assert_eq!(
+		target(),
+		KindTarget::One {
+			category_id: old_car.clone()
+		},
+		"the revived category is the one result: nothing new to choose between"
+	);
+	session.undo().unwrap();
+	assert_eq!(target(), one_hidden(true), "one undo hides both again");
+	session.redo().unwrap();
+
+	archive(&old_car);
+	let KindTarget::OneArchived { category } = target() else {
+		panic!("one archived match: {:?}", target());
+	};
+	assert!(category.archived && !category.group_is_hidden);
+	assert!(
+		matches!(create("Old Car Loan"), Err(FfiError::Invalid { .. })),
+		"a replacement under the clashing name is refused, as Actual refuses it"
+	);
+	let fresh = created(&create("Car Loan Principal").unwrap(), EntityKind::Category);
+	assert_eq!(
+		target(),
+		KindTarget::One {
+			category_id: fresh.clone()
+		},
+		"a free name is created even with an archived match"
+	);
+	session.undo().unwrap();
+	perform(
+		&session,
+		Command::ReviveKindCategory {
+			kind: PRINCIPAL,
+			category_id: old_car.clone(),
+		},
+	);
+	assert_eq!(
+		target(),
+		KindTarget::One {
+			category_id: old_car.clone()
+		}
+	);
+	let archived_on_disk = |id: &str| {
+		let conn = rusqlite::Connection::open(scratch.join("budget").join("db.sqlite")).unwrap();
+		veritas_store::load(&conn).unwrap().data.category_meta[&veritas_domain::CategoryId::new(id)]
+			.archived_on
+	};
+	assert_eq!(
+		archived_on_disk(&old_car),
+		None,
+		"restoring clears the archive date"
+	);
+
+	archive(&old_car);
+	let savings_group = created(
+		&perform(
+			&session,
+			Command::CreateCategoryGroup {
+				name: "Loans paid".to_owned(),
+			},
+		),
+		EntityKind::CategoryGroup,
+	);
+	let student = principal_category(&savings_group, "Student Loan Principal");
+	hide(&student);
+	let KindTarget::SeveralHidden { categories } = target() else {
+		panic!("several matches: {:?}", target());
+	};
+	let listed: BTreeSet<(String, String, bool)> = categories
+		.iter()
+		.map(|c| (c.name.clone(), c.group_name.clone(), c.archived))
+		.collect();
+	assert_eq!(
+		listed,
+		BTreeSet::from([
+			("Old Car Loan".to_owned(), "Debt".to_owned(), true),
+			(
+				"Student Loan Principal".to_owned(),
+				"Loans paid".to_owned(),
+				false
+			),
+		])
+	);
+	assert!(
+		matches!(revive(&visible), Err(FfiError::Invalid { .. })),
+		"only an offered category can be revived"
+	);
+	perform(
+		&session,
+		Command::ReviveKindCategory {
+			kind: PRINCIPAL,
+			category_id: student.clone(),
+		},
+	);
+	assert_eq!(
+		target(),
+		KindTarget::One {
+			category_id: student.clone()
+		}
+	);
+	assert_eq!(group_name(&student), "Loans paid");
 }
