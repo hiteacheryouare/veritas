@@ -370,3 +370,8 @@ Every decision behind Veritas, so no question gets asked twice. D1–D24 are PLA
 - **Options:** draw common widgets and send the rest to Actual / draw every widget natively
 - **Decision:** Veritas draws every Actual 26.11 dashboard widget type natively, and filtered custom reports too. No widget says "Open in Actual". The widget types are summary, calendar, formula, crossover, budget analysis, balance forecast, age of money and Monte Carlo, plus the ones already drawn (net worth, cash flow, spending, custom report, markdown, Sankey). Numbers match Actual's own computation for the same widget config. Layout follows Actual's 12-column grid and sizes, so a user's dashboards carry over 1:1. Cards use Veritas's own type and colors. Card and axis labels follow docs/finance/statements.md ST-10.10: a card that uses raw money movement or every non-income category is labeled Money in, Money out or Everything except income categories and never Income, Expenses, Spending or Net Profit (Ryan, 2026-11-14).
 - **Date:** 2026-11-13
+
+### D75. The formula card's functions
+- **Options:** every HyperFormula function / a supported subset, with the rest shown as Actual shows an unknown function
+- **Decision:** The formula card computes arithmetic and comparison, IF, AND, OR, NOT, SUM, AVERAGE, MIN, MAX, ROUND, ABS, CONCATENATE and `&`, LEN, LEFT, RIGHT, UPPER, LOWER, TODAY, DATE, YEAR, MONTH, DAY, EOMONTH, QUERY and BUDGET_QUERY, matching Actual's result for each. Any other function shows as an inline error with Actual's own message (`Formula error: NAME`), as an unknown function does in Actual. A cell reference such as `=A1` makes the card a problem card, since the card has no other cells (Ryan, 2026-11-14).
+- **Date:** 2026-11-14
