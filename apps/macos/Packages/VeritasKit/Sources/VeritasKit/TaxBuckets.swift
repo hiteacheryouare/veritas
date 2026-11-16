@@ -1,5 +1,27 @@
-/// Tax bucket names as docs/finance/tax-buckets.md TAX-1 shows them.
+import VeritasCore
+
+/// Tax bucket names as docs/finance/tax-buckets.md TAX-2 shows them.
 public enum TaxBuckets {
+	/// The bucket's TAX-2 id, as the CSVs and `CategoryHistory.taxBucket` spell it.
+	public static func id(_ bucket: TaxBucket) -> String {
+		switch bucket {
+		case .w2Income: "w2_income"
+		case .interestIncome: "interest_income"
+		case .businessIncome: "business_income"
+		case .businessExpense: "business_expense"
+		case .charitable: "charitable"
+		case .medical: "medical"
+		case .education: "education"
+		case .hsa: "hsa"
+		case .retirementContribution: "retirement_contribution"
+		case .taxesWithheld: "taxes_withheld"
+		}
+	}
+
+	public static func name(_ bucket: TaxBucket) -> String {
+		name(id(bucket))
+	}
+
 	public static func name(_ id: String) -> String {
 		switch id {
 		case "w2_income": "W-2 income"
