@@ -70,3 +70,11 @@ private struct HostedSheet {
 		return view.subviews.lazy.compactMap(amountField(in:)).first
 	}
 }
+
+struct LoanShortfallWordsTests {
+	@Test func aPaymentShortOfItsPartsSaysByHowMuch() {
+		// DEBT-2.2: $50 against $30 interest and $40 escrow is $20 short.
+		let dollars = MoneyFormat(currencySymbol: "$", decimalPlaces: 2)
+		#expect(MoveMoneySheet.shortText(2_000, format: dollars) == "This payment is $20.00 less than its interest, escrow and fees.")
+	}
+}

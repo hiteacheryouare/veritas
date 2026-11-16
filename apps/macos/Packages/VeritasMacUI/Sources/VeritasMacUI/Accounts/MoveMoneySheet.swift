@@ -187,7 +187,7 @@ private struct LoanSplit: View {
 			if let loan = model.loan {
 				switch loan.problem {
 				case .interestAbovePayment(let shortBy)?:
-					Text("The interest is \(model.format.currency(shortBy, on: .register)) more than the payment.")
+					Text(MoveMoneySheet.shortText(shortBy, format: model.format))
 						.foregroundStyle(Color.moneyOverspent)
 						.accessibilityIdentifier("moveMoney.loanProblem")
 				case .paysOff(let credit)?:
@@ -305,6 +305,13 @@ struct TransferPurposeSection: View {
 		purpose.choices.reduce(into: []) { names, choice in
 			if names.last != choice.group { names.append(choice.group) }
 		}
+	}
+}
+
+extension MoveMoneySheet {
+	/// DEBT-2.2: `shortBy` is interest + escrow + fees − total.
+	static func shortText(_ shortBy: Int64, format: MoneyFormat) -> String {
+		"This payment is \(format.currency(shortBy, on: .register)) less than its interest, escrow and fees."
 	}
 }
 
