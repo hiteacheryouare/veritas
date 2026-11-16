@@ -1615,6 +1615,14 @@ fn the_wizard_funds_the_principal_from_to_budget_on_the_budget_scale_and_actual_
 		};
 		let month = || session.budget_month(december, TODAY.to_owned()).unwrap();
 		let before = month();
+		let preview = session
+			.loan_payment_preview(loan.clone(), "2026-12-05".to_owned(), principal, 0, 0, 0)
+			.unwrap();
+		assert_eq!(
+			(preview.principal_funding_asked, preview.principal_funding),
+			(budgeted, budgeted),
+			"{currency}: a whole fund asks for what it funds"
+		);
 		let draft = LoanPaymentDraft {
 			id: Some("pay".to_owned()),
 			from_account_id: checking.clone(),
@@ -2064,6 +2072,33 @@ fn funding_a_principal_is_clamped_to_to_budget_skips_a_zero_and_never_rides_on_a
 		"editing without it works"
 	);
 
+	let (_short_scratch, short, loan, category, short_draft) = budget("fund-yen-short", "JPY", 200);
+	assert_eq!(
+		short
+			.budget_month(december, TODAY.to_owned())
+			.unwrap()
+			.to_budget,
+		200
+	);
+	let preview = short
+		.loan_payment_preview(loan, "2026-12-05".to_owned(), 32_000, 0, 0, 0)
+		.unwrap();
+	assert_eq!(
+		(preview.principal_funding_asked, preview.principal_funding),
+		(320, 200),
+		"320 yen asked, 200 funded: 'Funded \u{a5}200 of \u{a5}320'"
+	);
+	perform(
+		&short,
+		Command::RecordLoanPayment {
+			payment: LoanPaymentDraft {
+				total: 32_000,
+				..short_draft
+			},
+		},
+	);
+	assert_eq!(budgeted(&short, &category), 200);
+
 	let (_yen_scratch, yen, loan, category, draft) = budget("fund-zero", "JPY", 10_000_000);
 	let preview = yen
 		.loan_payment_preview(loan, "2026-12-05".to_owned(), 49, 0, 0, 0)
@@ -2081,4 +2116,103 @@ fn funding_a_principal_is_clamped_to_to_budget_skips_a_zero_and_never_rides_on_a
 		"no budget cell is written: {:?}",
 		change.entities
 	);
+}
+
+#[test]
+fn funding_lands_in_the_principal_line_as_written_even_with_a_matching_rule() {
+	// DEBT-6 A.6: the funded envelope is the category on the principal line
+	// actually written. The wizard writes its split as Actual's
+	// transaction-add does, without running rules on it (only the loan-side
+	// counterpart goes through them, as addTransfer does), so a rule that
+	// would re-categorize rows in the paying account leaves the principal
+	// line, and the funding, where the user put them.
+	use veritas_ffi::{
+		CategoryKind, RuleAction, RuleActionOp, RuleCondition, RuleConditionOp, RuleConditionsOp,
+		RuleDraft, RuleField, RuleStage, RuleValue,
+	};
+	let december = Month {
+		year: 2026,
+		month: 12,
+	};
+	let scratch = Scratch::new("fund-rule");
+	let session = import(&scratch, "small");
+	let checking = account(
+		&session,
+		"Loan payer",
+		NewAccountKind::Checking,
+		1_000_000,
+		None,
+	);
+	let loan = account(&session, "Ruled loan", NewAccountKind::Loan, 900_000, None);
+	let principal = created(
+		&perform(
+			&session,
+			Command::CreateKindCategory {
+				kind: CategoryKind::DebtPrincipal,
+				name: "Loan Principal".to_owned(),
+				unhide_group: false,
+			},
+		),
+		EntityKind::Category,
+	);
+	let elsewhere = new_category(&session, &expense_group(&session), "Elsewhere");
+	perform(
+		&session,
+		Command::CreateRule {
+			draft: RuleDraft {
+				stage: RuleStage::Default,
+				conditions_op: RuleConditionsOp::And,
+				conditions: vec![RuleCondition {
+					field: RuleField::Account,
+					op: RuleConditionOp::Is,
+					value: RuleValue::Id {
+						id: Some(checking.clone()),
+					},
+				}],
+				actions: vec![RuleAction {
+					op: RuleActionOp::Set,
+					field: Some(RuleField::Category),
+					value: RuleValue::Id {
+						id: Some(elsewhere.clone()),
+					},
+					split_index: 0,
+				}],
+			},
+		},
+	);
+	let month = || session.budget_month(december, TODAY.to_owned()).unwrap();
+	let (principal_before, elsewhere_before) = (
+		envelope_budgeted(&month(), &principal),
+		envelope_budgeted(&month(), &elsewhere),
+	);
+	perform(
+		&session,
+		Command::RecordLoanPayment {
+			payment: LoanPaymentDraft {
+				id: Some("ruled".to_owned()),
+				from_account_id: checking,
+				loan_account_id: loan,
+				date: "2026-12-05".to_owned(),
+				total: 25_000,
+				interest: 0,
+				escrow: 0,
+				fees: 0,
+				principal_category_id: principal.clone(),
+				interest_category_id: None,
+				escrow_category_id: None,
+				fees_category_id: None,
+				notes: None,
+				cleared: false,
+				fund_principal: true,
+			},
+		},
+	);
+	let line = &shown(&session, "ruled").lines[0];
+	assert_eq!(line.category_id.as_deref(), Some(principal.as_str()));
+	assert_eq!(
+		envelope_budgeted(&month(), &principal),
+		principal_before + 25_000,
+		"the funding follows the line as written"
+	);
+	assert_eq!(envelope_budgeted(&month(), &elsewhere), elsewhere_before);
 }

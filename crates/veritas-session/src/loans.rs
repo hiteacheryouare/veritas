@@ -202,6 +202,8 @@ pub struct PaymentPreview {
 	pub problem: Option<PaymentProblem>,
 	/// What `fund_principal` would budget for this principal (A.6).
 	pub principal_funding: Money,
+	/// The same before the clamp to To Budget.
+	pub principal_funding_asked: Money,
 }
 
 fn loan_account(data: &BudgetData, loan: &AccountId, date: CivilDate) -> Result<(), CoreError> {
@@ -244,6 +246,7 @@ pub fn payment_preview(
 		rate_bps,
 		problem,
 		principal_funding: principal_funding(data, date, principal)?,
+		principal_funding_asked: principal_funding_asked(data, principal)?,
 	})
 }
 
@@ -583,10 +586,10 @@ pub fn principal_funding(
 	date: CivilDate,
 	principal: Money,
 ) -> Result<Money, CoreError> {
-	if principal <= Money::ZERO {
+	let amount = principal_funding_asked(data, principal)?;
+	if amount == Money::ZERO {
 		return Ok(Money::ZERO);
 	}
-	let amount = principal.register_to_budget_scale(data.format.decimal_places())?;
 	let sheet = EnvelopeSheet::compute(data, date)?;
 	let to_budget = sheet
 		.summary(date.year_month())
@@ -594,8 +597,18 @@ pub fn principal_funding(
 	Ok(amount.min(to_budget).max(Money::ZERO))
 }
 
-/// Budgets the principal line actually written (rules may have moved it to
-/// another category) through `transferAvailable`, which writes no movement
+/// The principal on the budget scale before the clamp: whole units rounded
+/// half up in a 0-place budget, else the principal itself. 0 when there is
+/// no principal.
+pub fn principal_funding_asked(data: &BudgetData, principal: Money) -> Result<Money, CoreError> {
+	if principal <= Money::ZERO {
+		return Ok(Money::ZERO);
+	}
+	principal.register_to_budget_scale(data.format.decimal_places())
+}
+
+/// Budgets the envelope of the principal line actually written, through
+/// its category mapping, with `transferAvailable`, which writes no movement
 /// note. Nothing is written when the amount comes to 0.
 fn fund_principal(
 	data: &BudgetData,

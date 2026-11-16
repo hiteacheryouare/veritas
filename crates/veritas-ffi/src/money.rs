@@ -178,6 +178,10 @@ pub struct LoanPaymentPreview {
 	/// clamped to what To Budget holds, as Actual's `transferAvailable`
 	/// moves it. 0 means nothing would be budgeted.
 	pub principal_funding: i64,
+	/// v12. `principal_funding` before the clamp to To Budget, on the same
+	/// scale. When `principal_funding` is smaller, show "Funded {funded} of
+	/// {asked}" (DEBT-6 A.6).
+	pub principal_funding_asked: i64,
 }
 
 /// DEBT-3's pre-fill. Every field may be empty; fees are never pre-filled.
@@ -433,6 +437,7 @@ impl Session {
 				estimate: preview.estimate.map(Money::minor),
 				rate_bps: preview.rate_bps,
 				principal_funding: preview.principal_funding.minor(),
+				principal_funding_asked: preview.principal_funding_asked.minor(),
 				problem: preview.problem.map(|problem| match problem {
 					loans::PaymentProblem::PaymentTooSmall { short_by } => {
 						LoanPaymentProblem::PaymentTooSmall {
