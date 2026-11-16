@@ -55,7 +55,7 @@ pub use widget_meta::{
 };
 pub use widgets::{
 	AgeOfMoney, AgePoint, BalanceForecastCard, BudgetAnalysis, BudgetAnalysisMonth, CalendarDay,
-	CalendarMonth, CashFlowCard, Crossover, CrossoverPoint, DEFAULT_FORMULA, DefaultFrame,
+	CalendarMonth, CashFlowCard, Crossover, CrossoverPoint, DEFAULT_FORMULA,
 	FORECAST_UNASSIGNED_ACCOUNT, FontSizeMode, Forecast, ForecastBill, ForecastChartPoint,
 	ForecastGranularity, ForecastLowest, ForecastPoint, ForecastRequest, ForecastSource,
 	FormulaCard, FormulaError, FormulaErrorKind, FormulaValue, Granularity, MonteCarloCard,
@@ -64,6 +64,5 @@ pub use widgets::{
 	SpendingDay, SpendingMode, SummaryContent, SummaryData, TimeRange, Trend, age_of_money,
 	balance_forecast_card, budget_analysis, calculate_time_range, calendar, card_forecast,
 	cash_flow_card, crossover, formula_card, generate_forecast, monte_carlo, monte_carlo_card,
-	net_worth_card, sankey_card, sankey_height_limit, spending, spending_months, summary,
-	widget_months,
+	net_worth_card, sankey_card, sankey_height_limit, spending, summary,
 };

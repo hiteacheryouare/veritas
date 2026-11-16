@@ -1133,9 +1133,11 @@ fn budgeted_entries(
 		if sheet.contains(month) && Some(month) != budget_bound {
 			Ok(())
 		} else {
-			Err(CoreError::Invalid(format!(
-				"No budget exists for month: {month}"
-			)))
+			// Actual throws "No budget exists for month: {month}".
+			Err(CoreError::NotFound {
+				entity: "budget month",
+				id: month.to_string(),
+			})
 		}
 	};
 	let mut months = Vec::new();

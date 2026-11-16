@@ -23,8 +23,8 @@ use std::thread::Thread;
 use serde_json::{Value, json};
 use veritas_ffi::{
 	CancelToken, Change, Command, CustomReportSettings, DashboardPage, DashboardWidget, EntityKind,
-	ReportBalanceKind, ReportCondition, ReportGrouping, ReportIntervalUnit, ReportSortOrder,
-	Session, WidgetConfig, WidgetTimeFrame, WidgetView,
+	ReportBalanceKind, ReportGrouping, ReportIntervalUnit, ReportSortOrder, RuleCondition,
+	RuleConditionOp, RuleField, RuleValue, Session, WidgetConfig, WidgetTimeFrame, WidgetView,
 };
 
 const TODAY: &str = "2026-11-13";
@@ -130,13 +130,94 @@ fn blank() -> WidgetConfig {
 	}
 }
 
-fn condition(field: &str, op: &str, value: &str, options: Option<&str>) -> ReportCondition {
-	ReportCondition {
-		field: field.to_owned(),
-		op: op.to_owned(),
-		value: value.to_owned(),
-		options: options.map(str::to_owned),
-	}
+const FIELDS: [(RuleField, &str); 16] = [
+	(RuleField::ImportedPayee, "imported_payee"),
+	(RuleField::Payee, "payee"),
+	(RuleField::PayeeName, "payee_name"),
+	(RuleField::Account, "account"),
+	(RuleField::Category, "category"),
+	(RuleField::CategoryGroup, "category_group"),
+	(RuleField::Notes, "notes"),
+	(RuleField::Amount, "amount"),
+	(RuleField::AmountInflow, "amount"),
+	(RuleField::AmountOutflow, "amount"),
+	(RuleField::Date, "date"),
+	(RuleField::Cleared, "cleared"),
+	(RuleField::Reconciled, "reconciled"),
+	(RuleField::Transfer, "transfer"),
+	(RuleField::Parent, "parent"),
+	(RuleField::Saved, "saved"),
+];
+
+const OPS: [(RuleConditionOp, &str); 17] = [
+	(RuleConditionOp::Is, "is"),
+	(RuleConditionOp::IsNot, "isNot"),
+	(RuleConditionOp::Contains, "contains"),
+	(RuleConditionOp::DoesNotContain, "doesNotContain"),
+	(RuleConditionOp::Matches, "matches"),
+	(RuleConditionOp::OneOf, "oneOf"),
+	(RuleConditionOp::NotOneOf, "notOneOf"),
+	(RuleConditionOp::HasTags, "hasTags"),
+	(RuleConditionOp::HasAnyTag, "hasAnyTag"),
+	(RuleConditionOp::IsApprox, "isapprox"),
+	(RuleConditionOp::IsBetween, "isbetween"),
+	(RuleConditionOp::Gt, "gt"),
+	(RuleConditionOp::Gte, "gte"),
+	(RuleConditionOp::Lt, "lt"),
+	(RuleConditionOp::Lte, "lte"),
+	(RuleConditionOp::OnBudget, "onBudget"),
+	(RuleConditionOp::OffBudget, "offBudget"),
+];
+
+/// A typed filter from Actual's stored parts, for the few the test builds.
+fn condition(field: &str, op: &str, value: &str, options: Option<&str>) -> RuleCondition {
+	let field = match (field, options) {
+		("amount", Some(r#"{"outflow":true}"#)) => RuleField::AmountOutflow,
+		("amount", Some(r#"{"inflow":true}"#)) => RuleField::AmountInflow,
+		(name, _) => FIELDS.iter().find(|(_, n)| *n == name).unwrap().0,
+	};
+	let op = OPS.iter().find(|(_, n)| *n == op).unwrap().0;
+	let value = match serde_json::from_str::<Value>(value).unwrap() {
+		Value::String(text) => RuleValue::Text { text },
+		Value::Number(amount) => RuleValue::Amount {
+			amount: amount.as_i64().unwrap(),
+		},
+		other => panic!("no test value {other}"),
+	};
+	RuleCondition { field, op, value }
+}
+
+/// A typed filter as Actual stores it, without `type`.
+fn stored_condition(condition: &RuleCondition) -> Value {
+	let field = FIELDS
+		.iter()
+		.find(|(f, _)| *f == condition.field)
+		.unwrap()
+		.1;
+	let op = OPS.iter().find(|(o, _)| *o == condition.op).unwrap().1;
+	let value = match &condition.value {
+		RuleValue::Id { id } => json!(id),
+		RuleValue::Ids { ids } => json!(ids),
+		RuleValue::Text { text } => json!(text),
+		RuleValue::Texts { texts } => json!(texts),
+		RuleValue::Amount { amount } => json!(amount),
+		RuleValue::AmountRange { num1, num2 } => json!({"num1": num1, "num2": num2}),
+		RuleValue::Date { date } => json!(date),
+		RuleValue::Month { month } => json!(month),
+		RuleValue::Year { year } => json!(year.to_string()),
+		RuleValue::Bool { value } => json!(value),
+		RuleValue::Raw { json } => serde_json::from_str(json).unwrap(),
+		RuleValue::Nothing => Value::Null,
+		other => panic!("a filter can't hold {other:?}"),
+	};
+	let options = match (&condition.field, &condition.value) {
+		(RuleField::AmountInflow, _) => json!({"inflow": true}),
+		(RuleField::AmountOutflow, _) => json!({"outflow": true}),
+		(RuleField::Date, RuleValue::Month { .. }) => json!({"month": true}),
+		(RuleField::Date, RuleValue::Year { .. }) => json!({"year": true}),
+		_ => Value::Null,
+	};
+	json!({"field": field, "op": op, "value": value, "options": options})
 }
 
 fn oracle() -> Option<PathBuf> {
@@ -248,22 +329,20 @@ fn create_entity(settings: &CustomReportSettings, conditions: &str) -> String {
 	.replace("\"CONDITIONS\"", conditions)
 }
 
-fn same_conditions(theirs: &Value, ours: &[ReportCondition], context: &str) {
+fn same_conditions(theirs: &Value, ours: &[RuleCondition], context: &str) {
 	let theirs = theirs.as_array().unwrap();
 	assert_eq!(theirs.len(), ours.len(), "{context}: condition count");
 	for (theirs, ours) in theirs.iter().zip(ours) {
-		assert_eq!(theirs["field"], ours.field.as_str(), "{context}");
-		assert_eq!(theirs["op"], ours.op.as_str(), "{context}");
-		let value: Value = serde_json::from_str(&ours.value).unwrap();
-		assert_eq!(theirs["value"], value, "{context}");
-		let options = ours.options.as_deref().map_or(Value::Null, |options| {
-			serde_json::from_str(options).unwrap()
+		let ours = stored_condition(ours);
+		let value = match theirs["op"].as_str() {
+			Some("onBudget" | "offBudget") => Value::Null,
+			_ => theirs["value"].clone(),
+		};
+		let theirs = json!({
+			"field": theirs["field"], "op": theirs["op"], "value": value,
+			"options": theirs.get("options").cloned().unwrap_or(Value::Null),
 		});
-		assert_eq!(
-			theirs.get("options").cloned().unwrap_or(Value::Null),
-			options,
-			"{context}"
-		);
+		assert_eq!(theirs, ours, "{context}");
 	}
 }
 

@@ -24,8 +24,8 @@ use std::thread::Thread;
 use serde_json::{Value, json};
 use veritas_ffi::{
 	AgeGranularity, AgeTrend, CancelToken, Change, Command, DashboardPage, DashboardWidget,
-	EntityKind, ReportCondition, Session, SplitLineDraft, TransactionDraft, WidgetConfig,
-	WidgetTimeFrame, WidgetView,
+	EntityKind, FormulaValue, RuleCondition, RuleConditionOp, RuleField, RuleValue, Session,
+	SplitLineDraft, TransactionDraft, WidgetConfig, WidgetTimeFrame, WidgetView,
 };
 
 const MAIN: &str = "48f79e8a-0a29-4f3c-a7a3-9c04110766ad";
@@ -158,13 +158,35 @@ fn blank() -> WidgetConfig {
 	}
 }
 
-fn condition(field: &str, op: &str, value: Value) -> ReportCondition {
-	ReportCondition {
-		field: field.to_owned(),
-		op: op.to_owned(),
-		value: value.to_string(),
-		options: None,
-	}
+/// A filter as the Mac's editor builds one, from Actual's field and op
+/// names.
+fn condition(field: &str, op: &str, value: Value) -> RuleCondition {
+	let field = match field {
+		"notes" => RuleField::Notes,
+		"amount" => RuleField::Amount,
+		"account" => RuleField::Account,
+		"date" => RuleField::Date,
+		other => panic!("no test field {other}"),
+	};
+	let op = match op {
+		"hasTags" => RuleConditionOp::HasTags,
+		"hasAnyTag" => RuleConditionOp::HasAnyTag,
+		"isNot" => RuleConditionOp::IsNot,
+		"lt" => RuleConditionOp::Lt,
+		"gte" => RuleConditionOp::Gte,
+		"lte" => RuleConditionOp::Lte,
+		other => panic!("no test op {other}"),
+	};
+	let value = match (field, value) {
+		(RuleField::Account, Value::String(id)) => RuleValue::Id { id: Some(id) },
+		(RuleField::Date, Value::String(date)) => RuleValue::Date { date },
+		(_, Value::String(text)) => RuleValue::Text { text },
+		(_, Value::Number(amount)) => RuleValue::Amount {
+			amount: amount.as_i64().unwrap(),
+		},
+		(_, other) => panic!("no test value {other}"),
+	};
+	RuleCondition { field, op, value }
 }
 
 fn frame(mode: &str, start: &str, end: &str) -> Option<WidgetTimeFrame> {
@@ -260,10 +282,65 @@ fn month_label(month: &veritas_ffi::Month) -> String {
 		.to_string()
 }
 
-/// What Actual's card code returns, rebuilt from what Veritas shows, for
-/// the five cards D73 draws natively. `None` for any other card.
+fn month_text(month: &veritas_ffi::Month) -> String {
+	format!("{}-{:02}", month.year, month.month)
+}
+
+/// What Actual's card code returns, rebuilt from what Veritas shows. `None`
+/// for the cards whose whole output `tests/widgets.rs` in veritas-reports
+/// compares instead.
 fn as_actual(view: &WidgetView) -> Option<Value> {
 	Some(match view {
+		WidgetView::NetWorth {
+			range,
+			points,
+			net_worth,
+			change,
+			lowest,
+			highest,
+			has_negative,
+			accounts,
+			..
+		} => json!({
+			"start": range.start, "end": range.end,
+			"points": points.iter().map(|point| point.net_worth).collect::<Vec<_>>(),
+			"hasNegative": has_negative, "netWorth": net_worth, "totalChange": change,
+			"lowestNetWorth": lowest, "highestNetWorth": highest, "accounts": accounts,
+		}),
+		WidgetView::CashFlow {
+			range,
+			income,
+			expense,
+			change,
+		} => {
+			assert_eq!(*change, income + expense);
+			json!({"start": range.start, "end": range.end, "income": income, "expense": expense})
+		}
+		WidgetView::Spending {
+			compare,
+			compare_to,
+			difference,
+			..
+		} => json!({
+			"compare": month_text(compare), "compareTo": month_text(compare_to),
+			"difference": difference,
+		}),
+		WidgetView::Formula { value, .. } => match value {
+			FormulaValue::Error { error } => json!({"error": error.message}),
+			FormulaValue::Number { value } => json!({"value": number(*value), "type": "number"}),
+			FormulaValue::Text { text } => json!({"value": text, "type": "string"}),
+			FormulaValue::Boolean { value } => json!({"value": value, "type": "boolean"}),
+			FormulaValue::Empty => json!({"value": null, "type": "null"}),
+		},
+		WidgetView::MonteCarlo {
+			success_percent,
+			start_age,
+			end_age,
+			..
+		} => json!({
+			"successPercent": number(*success_percent),
+			"startAge": number(*start_age), "endAge": number(*end_age),
+		}),
 		WidgetView::Summary {
 			start,
 			end,
@@ -395,6 +472,29 @@ fn theirs_comparable(kind: &str, result: &Value, today: &str) -> Value {
 			})
 		}
 		"calendar-card" => json!({"calendarData": data["calendarData"]}),
+		"net-worth-card" => {
+			let mut shown = data.clone();
+			let fields = shown.as_object_mut().unwrap();
+			fields.remove("startDate");
+			fields.remove("endDate");
+			fields.insert("start".to_owned(), result["start"].clone());
+			fields.insert("end".to_owned(), result["end"].clone());
+			shown
+		}
+		"cash-flow-card" => json!({
+			"start": result["start"], "end": result["end"],
+			"income": result["income"], "expense": result["expense"],
+		}),
+		"spending-card" => json!({
+			"compare": result["compare"], "compareTo": result["compareTo"],
+			"difference": result["difference"],
+		}),
+		"formula-card" if !result["error"].is_null() => json!({"error": result["error"]}),
+		"formula-card" => json!({"value": result["value"], "type": result["type"]}),
+		"monte-carlo-card" => json!({
+			"successPercent": result["successPercent"],
+			"startAge": result["startAge"], "endAge": result["endAge"],
+		}),
 		_ => data.clone(),
 	}
 }
@@ -483,6 +583,21 @@ fn edited_in_actual(oracle: &Path, scratch: &Scratch) -> PathBuf {
 			"timeFrame": {"start": "2025-12", "end": "2026-03", "mode": "static"},
 			"conditions": [{"field": "category", "op": "oneOf", "value": [VACATION, DINING_OUT], "type": "id"}], "conditionsOp": "and"})),
 		card("cw-analysis-quarter", "budget-analysis-card", 12, json!({"timeFrame": {"mode": "previousQuarter"}})),
+		card("cw-net-worth", "net-worth-card", 14, json!({"interval": "Weekly",
+			"conditions": tagged("#trip"), "conditionsOp": "and",
+			"timeFrame": {"start": "2025-12", "end": "2026-03", "mode": "static"}})),
+		card("cw-cash-flow", "cash-flow-card", 15, json!({"timeFrame": {"mode": "lastYear"},
+			"conditions": [{"field": "amount", "op": "gt", "value": -50_000, "type": "number"}], "conditionsOp": "and"})),
+		card("cw-spending-average", "spending-card", 16, json!({"mode": "average",
+			"conditions": [{"field": "account", "op": "isNot", "value": VISA, "type": "id"}], "conditionsOp": "and"})),
+		card("cw-formula", "formula-card", 17, json!({"formula": "=ROUND(QUERY(\"trips\") / 3, 2)",
+			"queries": {"trips": {"conditions": tagged("#trip"), "conditionsOp": "and",
+				"timeFrame": {"start": "2025-12", "end": "2026-03", "mode": "static"}}}})),
+		card("cw-formula-error", "formula-card", 18, json!({"formula": "=1/0"})),
+		card("cw-monte-carlo", "monte-carlo-card", 19, json!({"simulationCount": 1000,
+			"currentAge": 40, "targetAge": 90,
+			"pots": [{"id": "linked", "accountId": BROKERAGE}, {"id": "cash", "startingBalance": 5_000_000}],
+			"spendingPhases": [{"id": "all", "annualWithdrawal": 2_500_000}]})),
 		card("cw-crossover", "crossover-card", 13, json!({"incomeAccountIds": [BROKERAGE, SAVINGS],
 			"expenseCategoryIds": [GROCERIES, DINING_OUT, VACATION], "safeWithdrawalRate": 0.03,
 			"projectionType": "median", "expectedContribution": 25_000,
@@ -508,6 +623,11 @@ fn same_cards_as_actual(oracle: &Path, session: &Session, zip: &Path, today: &st
 			"age-of-money-card",
 			"budget-analysis-card",
 			"crossover-card",
+			"net-worth-card",
+			"cash-flow-card",
+			"spending-card",
+			"formula-card",
+			"monte-carlo-card",
 		];
 		let Some(shown) = as_actual(&widget.view) else {
 			assert!(
@@ -540,7 +660,7 @@ fn same_cards_as_actual(oracle: &Path, session: &Session, zip: &Path, today: &st
 	for (id, kind, meta, shown) in &expected {
 		let result = &theirs[id.as_str()];
 		assert!(
-			result.get("error").is_none(),
+			kind == "formula-card" || result.get("error").is_none(),
 			"Actual's {kind} failed on {meta}: {result}"
 		);
 		assert_eq!(
@@ -601,11 +721,12 @@ fn every_native_card_matches_actuals_card_code_on_a_budget_both_apps_edited() {
 	let mut trips = widget(&dashboards(&session, "2026-11-13"), "cw-trip-sum")
 		.config
 		.clone();
-	trips.conditions.push(condition(
-		"date",
-		"isbetween",
-		json!({"num1": "2025-12-01", "num2": "2026-05-31"}),
-	));
+	trips
+		.conditions
+		.push(condition("date", "gte", json!("2025-12-01")));
+	trips
+		.conditions
+		.push(condition("date", "lte", json!("2026-05-31")));
 	trips.time_frame = frame("static", "2025-11", "2026-06");
 	trips.summary = Some("avgPerMonth".to_owned());
 	perform(

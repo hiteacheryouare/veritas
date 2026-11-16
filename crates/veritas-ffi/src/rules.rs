@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use veritas_domain::{BudgetData, ConditionsOp, CoreError, Row, RuleId, TransactionId};
+use veritas_reports::{self as reports, Json};
 use veritas_rules::{AmountSign, Field, Op};
 use veritas_session::rules::{self as session_rules, ChangedField, Source};
 
@@ -26,6 +27,7 @@ pub enum RuleConditionsOp {
 
 /// A transaction field. `AmountInflow` and `AmountOutflow` are conditions
 /// only: Actual stores them as `amount` with an inflow or outflow option.
+/// `Saved` is a report or dashboard filter only: a saved filter, by id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum RuleField {
 	ImportedPayee,
@@ -43,6 +45,7 @@ pub enum RuleField {
 	Reconciled,
 	Transfer,
 	Parent,
+	Saved,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -271,8 +274,8 @@ fn field(field: Field, sign: AmountSign) -> RuleField {
 	}
 }
 
-fn core_field(field: RuleField) -> (Field, AmountSign) {
-	match field {
+fn core_field(field: RuleField) -> Result<(Field, AmountSign), CoreError> {
+	Ok(match field {
 		RuleField::AmountInflow => (Field::Amount, AmountSign::Inflow),
 		RuleField::AmountOutflow => (Field::Amount, AmountSign::Outflow),
 		RuleField::ImportedPayee => (Field::ImportedPayee, AmountSign::Any),
@@ -288,7 +291,12 @@ fn core_field(field: RuleField) -> (Field, AmountSign) {
 		RuleField::Reconciled => (Field::Reconciled, AmountSign::Any),
 		RuleField::Transfer => (Field::Transfer, AmountSign::Any),
 		RuleField::Parent => (Field::Parent, AmountSign::Any),
-	}
+		RuleField::Saved => {
+			return Err(CoreError::Invalid(
+				"A rule can't use a saved filter.".to_owned(),
+			));
+		}
+	})
 }
 
 macro_rules! same_variants {
@@ -405,7 +413,7 @@ pub(crate) fn draft(draft: &RuleDraft) -> Result<veritas_rules::Draft, CoreError
 		.conditions
 		.iter()
 		.map(|condition| {
-			let (field, sign) = core_field(condition.field);
+			let (field, sign) = core_field(condition.field)?;
 			Ok(veritas_rules::SentenceCondition {
 				field,
 				op: core_condition_op(condition.op),
@@ -418,7 +426,7 @@ pub(crate) fn draft(draft: &RuleDraft) -> Result<veritas_rules::Draft, CoreError
 		.actions
 		.iter()
 		.map(|action| {
-			let field = match action.field.map(core_field) {
+			let field = match action.field.map(core_field).transpose()? {
 				Some((_, AmountSign::Inflow | AmountSign::Outflow)) => {
 					return Err(CoreError::Invalid(
 						"An action sets the amount, not an inflow or outflow.".to_owned(),
@@ -443,6 +451,127 @@ pub(crate) fn draft(draft: &RuleDraft) -> Result<veritas_rules::Draft, CoreError
 		conditions,
 		actions,
 	})
+}
+
+/// Actual's name for a filter's field (`FIELD_INFO`, shared/rules.ts:62-88).
+fn filter_field(field: RuleField) -> &'static str {
+	match field {
+		RuleField::ImportedPayee => "imported_payee",
+		RuleField::Payee => "payee",
+		RuleField::PayeeName => "payee_name",
+		RuleField::Account => "account",
+		RuleField::Category => "category",
+		RuleField::CategoryGroup => "category_group",
+		RuleField::Notes => "notes",
+		RuleField::Amount | RuleField::AmountInflow | RuleField::AmountOutflow => "amount",
+		RuleField::Date => "date",
+		RuleField::Cleared => "cleared",
+		RuleField::Reconciled => "reconciled",
+		RuleField::Transfer => "transfer",
+		RuleField::Parent => "parent",
+		RuleField::Saved => "saved",
+	}
+}
+
+fn serde(stored: &Json) -> Option<serde_json::Value> {
+	serde_json::from_str(&stored.stringify()).ok()
+}
+
+/// A stored report or dashboard filter, typed. `None` when Actual defines
+/// no such field or op.
+pub(crate) fn filter_condition(budget: &BudgetData, stored: &Json) -> Option<RuleCondition> {
+	if stored.get("field").and_then(Json::as_str) == Some("saved") {
+		let op = Op::from_stored(stored.get("op")?.as_str()?)?;
+		return Some(RuleCondition {
+			field: RuleField::Saved,
+			op: condition_op(op),
+			value: match stored.get("value") {
+				Some(Json::String(id)) => RuleValue::Id {
+					id: Some(id.clone()),
+				},
+				other => RuleValue::Raw {
+					json: other.unwrap_or(&Json::Null).stringify(),
+				},
+			},
+		});
+	}
+	let condition = veritas_rules::filter_condition(budget, &serde(stored)?)?;
+	Some(RuleCondition {
+		field: field(condition.field, condition.sign),
+		op: condition_op(condition.op),
+		value: value(condition.value),
+	})
+}
+
+pub(crate) fn filter_conditions(budget: &BudgetData, stored: &[Json]) -> Vec<RuleCondition> {
+	stored
+		.iter()
+		.filter_map(|condition| filter_condition(budget, condition))
+		.collect()
+}
+
+/// A new filter as Actual's filter editor saves it: inflow and outflow as
+/// `amount` with an option, and a month or year date with `month` or `year`
+/// (`subfieldToOptions.ts`).
+fn new_filter(condition: &RuleCondition) -> Result<Json, CoreError> {
+	let value = match &condition.value {
+		RuleValue::Raw { .. } => {
+			return Err(CoreError::Invalid(
+				"That filter can only be changed in Actual.".to_owned(),
+			));
+		}
+		RuleValue::Id { id } if condition.field == RuleField::Saved => id.as_deref().map_or_else(
+			|| "null".to_owned(),
+			|id| Json::String(id.to_owned()).stringify(),
+		),
+		other => veritas_rules::stored_value(&core_value(other)?),
+	};
+	let option = match (&condition.field, &condition.value) {
+		(RuleField::AmountInflow, _) => Some("inflow"),
+		(RuleField::AmountOutflow, _) => Some("outflow"),
+		(RuleField::Date, RuleValue::Month { .. }) => Some("month"),
+		(RuleField::Date, RuleValue::Year { .. }) => Some("year"),
+		_ => None,
+	};
+	let parse = |text: &str| {
+		Json::parse(text).map_err(|reason| CoreError::Invalid(format!("a filter: {reason}")))
+	};
+	reports::condition(
+		filter_field(condition.field),
+		core_condition_op(condition.op).stored(),
+		parse(&value)?,
+		option
+			.map(|option| parse(&format!(r#"{{"{option}":true}}"#)))
+			.transpose()?,
+	)
+}
+
+/// The filters to store. One equal to a stored filter keeps its JSON
+/// exactly, and a stored filter Veritas can't type stays where it was.
+pub(crate) fn stored_filters(
+	budget: &BudgetData,
+	conditions: &[RuleCondition],
+	stored: &[Json],
+) -> Result<Vec<Json>, CoreError> {
+	let typed: Vec<Option<RuleCondition>> = stored
+		.iter()
+		.map(|old| filter_condition(budget, old))
+		.collect();
+	let mut written = conditions
+		.iter()
+		.map(
+			|condition| match typed.iter().position(|old| old.as_ref() == Some(condition)) {
+				Some(index) => Ok(stored[index].clone()),
+				None => new_filter(condition),
+			},
+		)
+		.collect::<Result<Vec<_>, CoreError>>()?;
+	for (index, old) in typed.iter().enumerate() {
+		if old.is_none() {
+			written.insert(index.min(written.len()), stored[index].clone());
+		}
+	}
+	Ok(written)
 }
 
 /// Runs `with` on the source as the session reads it.

@@ -40,8 +40,8 @@ pub use schedule::{
 	status, upcoming_days, validate_schedule_date,
 };
 pub use sentence::{
-	Access, ActionOp, Draft, Sentence, SentenceAction, SentenceCondition, Value, sentence,
-	sentences, written,
+	Access, ActionOp, Draft, Sentence, SentenceAction, SentenceCondition, Value, filter_condition,
+	sentence, sentences, stored_value, written,
 };
 pub use trigger::{
 	ManualEntry, TransferLeg, Transfers, added_transaction, counterpart, manual_entry,

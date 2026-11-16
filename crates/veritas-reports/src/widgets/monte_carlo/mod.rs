@@ -40,6 +40,8 @@ pub struct MonteCarloCard {
 	pub result: MonteCarloResult,
 	/// `Math.round(successRate * 1000) / 10`: the headline, to one decimal.
 	pub success_percent: f64,
+	/// The configured current age, where the chart starts.
+	pub start_age: f64,
 	/// The age the success rate runs to.
 	pub end_age: f64,
 	/// The fan chart, one point per year from the start.
@@ -143,6 +145,7 @@ pub fn monte_carlo_card(
 		.collect::<Result<_, CoreError>>()?;
 	Ok(MonteCarloCard {
 		success_percent: js_round(result.success_rate * 1000.0) / 10.0,
+		start_age: current_age,
 		end_age: current_age + result.horizon_years as f64,
 		chart,
 		result,

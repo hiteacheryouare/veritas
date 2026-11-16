@@ -35,12 +35,16 @@ pub use commands::Command;
 pub use custom_reports::{
 	CustomReportBalances, CustomReportCell, CustomReportData, CustomReportGroup,
 	CustomReportInterval, CustomReportItem, CustomReportSettings, CustomReportView,
-	ReportBalanceKind, ReportCondition, ReportGrouping, ReportIntervalUnit, ReportSortOrder,
-	StackedAmount, UncategorizedKind,
+	ReportBalanceKind, ReportGrouping, ReportIntervalUnit, ReportSortOrder, StackedAmount,
+	UncategorizedKind,
 };
 pub use dashboards::{
 	AgeGranularity, AgePoint, AgeTrend, BudgetAnalysisPoint, CalendarCardMonth, CalendarDayCell,
-	CrossoverCardPoint, DashboardPage, DashboardWidget, WidgetConfig, WidgetTimeFrame, WidgetView,
+	CrossoverCardPoint, DashboardPage, DashboardWidget, ForecastCardGranularity, ForecastCardPoint,
+	ForecastCardSource, FormulaError, FormulaErrorKind, FormulaFontSize, FormulaValue,
+	MonteCarloCardPoint, NetWorthCardInterval, NetWorthCardPoint, SankeyCardColor, SankeyCardLink,
+	SankeyCardMode, SankeyCardNode, SankeyFolded, SankeyLabel, SpendingCardDay, SpendingCardMode,
+	WidgetConfig, WidgetRange, WidgetTimeFrame, WidgetView,
 };
 pub use goals::{GoalClosePreview, GoalPace, GoalState, GoalSummary, MonthAmount};
 pub use money::{
