@@ -1228,6 +1228,123 @@ fn every_new_card_matches_actual_in_a_yen_budget_with_transfers_and_months_past_
 	);
 }
 
+#[test]
+fn every_new_card_matches_actual_on_a_brand_new_empty_budget() {
+	// A budget made in Veritas a moment ago: no accounts, no transactions,
+	// no budget cells. Each new card is added once in Veritas with nothing
+	// set, and again in Actual with the settings a long-time user has
+	// (filters and pots that name accounts and categories this budget
+	// doesn't have). Then one account and one expense arrive, still with no
+	// budget.
+	let scratch = Scratch::new("empty");
+	let Some(oracle) = oracle() else {
+		return;
+	};
+	let session = block_on(Session::create_budget(
+		"Fresh start".to_owned(),
+		text(&scratch.join("fresh")),
+		veritas_ffi::NumberFormat {
+			currency: None,
+			style: veritas_ffi::NumberStyle::CommaDot,
+			hide_decimals: false,
+			symbol_first: None,
+			symbol_space: None,
+		},
+		veritas_ffi::NewBudgetOptions {
+			retirement_401k: false,
+			hsa: false,
+			accounts: Vec::new(),
+		},
+		CancelToken::new(),
+	))
+	.unwrap();
+	let mut pages = dashboards(&session, "2026-11-13");
+	if pages.is_empty() {
+		perform(
+			&session,
+			Command::CreateDashboard {
+				name: "Main".to_owned(),
+			},
+		);
+		pages = dashboards(&session, "2026-11-13");
+	}
+	let page = pages[0].id.clone();
+	for (n, kind) in [
+		"net-worth-card",
+		"cash-flow-card",
+		"spending-card",
+		"sankey-card",
+		"balance-forecast-card",
+		"formula-card",
+		"monte-carlo-card",
+	]
+	.into_iter()
+	.enumerate()
+	{
+		perform(
+			&session,
+			Command::AddWidget {
+				page_id: page.clone(),
+				kind: kind.to_owned(),
+				x: 4,
+				y: 3 * i64::try_from(n).unwrap(),
+				width: 4,
+				height: 3,
+				config: blank(),
+			},
+		);
+	}
+	let made_here = scratch.join("made-in-veritas.zip");
+	export(&session, &made_here);
+	session.close().unwrap();
+
+	let actual_made = scratch.join("edited-in-actual.zip");
+	apply(
+		&oracle,
+		&made_here,
+		Value::Array(every_new_kind("empty", &page, 40)),
+		&actual_made,
+		11,
+	);
+	let session = import(&actual_made, &scratch.join("veritas"));
+	let zip = scratch.join("veritas.zip");
+	export(&session, &zip);
+	let mut compared = 0;
+	for today in ["2026-11-13", "2026-12-01", "2027-02-28"] {
+		compared += same_cards_as_actual(&oracle, &session, &zip, today);
+	}
+	assert!(compared >= 3 * (7 + 24), "{compared}");
+
+	let checking = created(
+		&perform(
+			&session,
+			Command::CreateAccount {
+				account: veritas_ffi::NewAccount {
+					name: "Checking".to_owned(),
+					kind: veritas_ffi::NewAccountKind::Checking,
+					starting_balance: 0,
+					loan: None,
+				},
+			},
+		),
+		EntityKind::Account,
+	);
+	let mut coffee = entry("first-coffee", &checking, "2026-11-10", -450);
+	coffee.payee_name = Some("Corner cafe".to_owned());
+	perform(
+		&session,
+		Command::AddTransaction {
+			transaction: coffee,
+		},
+	);
+	let zip = scratch.join("first-expense.zip");
+	export(&session, &zip);
+	for today in ["2026-11-13", "2026-12-01"] {
+		compared += same_cards_as_actual(&oracle, &session, &zip, today);
+	}
+	assert!(compared >= 5 * (7 + 24), "{compared}");
+}
+
 /// Everything the dashboard editor shows, as text: `WidgetView` holds
 /// floats, so it compares through `Debug`.
 fn editor(session: &Session) -> String {
