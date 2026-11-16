@@ -268,6 +268,26 @@ public final class WorkspaceModel {
 		}
 	}
 
+	/// A command from a sheet that shows the core's `Invalid` message beside
+	/// its own fields. Every other error is shown as `perform` shows it.
+	@discardableResult
+	public func perform(_ command: Command, inline: (String) -> Void) async -> Bool {
+		guard let session else { return false }
+		do {
+			try await session.perform(command)
+			changeCount += 1
+			await refresh()
+			return true
+		} catch {
+			if case .inline(let message) = ErrorPresentation(error) {
+				inline(message)
+			} else {
+				present(error)
+			}
+			return false
+		}
+	}
+
 	/// The local civil date (PLAN §9 #14): time zones never shift it.
 	public nonisolated static func today(_ now: Date = .now, calendar: Calendar = .current) -> String {
 		let parts = calendar.dateComponents([.year, .month, .day], from: now)
@@ -373,6 +393,9 @@ public final class WorkspaceModel {
 		retry = nil
 		await action?()
 	}
+
+	/// A bill another screen asked the Bills screen to open, such as a bill's rule on the Rules page.
+	public var pendingBillID: String?
 
 	public func go(to destination: Destination) {
 		self.destination = destination

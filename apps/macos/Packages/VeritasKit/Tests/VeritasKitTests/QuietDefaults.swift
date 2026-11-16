@@ -43,6 +43,14 @@ extension BudgetSession {
 	func previewReport(_ draft: ReportDraft, today: String) async throws -> CustomReportView { try await previewCustomReport(draft.settings, today: today) }
 	func saveReport(_ draft: ReportDraft) async throws { try await perform(.saveCustomReport(settings: draft.settings)) }
 	func createReport(_ draft: ReportDraft) async throws -> String { "" }
+	func bills(today: String) async throws -> [BillSummary] { [] }
+	func bill(_ id: String, today: String) async throws -> BillDetail { throw FfiError.NotFound(entity: "schedule", id: id) }
+	func upcoming(days: UInt32, today: String) async throws -> [UpcomingBill] { [] }
+	func rules() async throws -> [RuleSentence] { [] }
+	func rulePreview(_ source: RuleSource) async throws -> [RuleMatch] { [] }
+	func payees() async throws -> [PayeeDetail] { [] }
+	func accounts() async throws -> AccountList { AccountList(accounts: [], groups: []) }
+	func registerRow(_ id: String) async throws -> RegisterRow { throw FfiError.NotFound(entity: "transaction", id: id) }
 }
 
 extension BudgetLibrary {

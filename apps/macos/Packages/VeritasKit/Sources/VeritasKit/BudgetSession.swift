@@ -44,6 +44,10 @@ public struct BudgetOverview: Hashable, Sendable {
 	public let format: MoneyFormat?
 	/// How amount fields read what's typed: the budget's separators.
 	public let numberStyle: NumberStyle
+	/// Why the last daily bill run failed, until one works.
+	public let scheduleProblem: String?
+	/// Why the last snapshot failed.
+	public let snapshotProblem: String?
 
 	public init(
 		name: String?,
@@ -54,7 +58,9 @@ public struct BudgetOverview: Hashable, Sendable {
 		isChecking: Bool = false,
 		accountGroups: [SidebarGroup],
 		format: MoneyFormat? = nil,
-		numberStyle: NumberStyle = .commaDot
+		numberStyle: NumberStyle = .commaDot,
+		scheduleProblem: String? = nil,
+		snapshotProblem: String? = nil
 	) {
 		self.name = name
 		self.directory = directory
@@ -65,6 +71,8 @@ public struct BudgetOverview: Hashable, Sendable {
 		self.accountGroups = accountGroups
 		self.format = format
 		self.numberStyle = numberStyle
+		self.scheduleProblem = scheduleProblem
+		self.snapshotProblem = snapshotProblem
 	}
 
 	public var accounts: [SidebarAccount] {
@@ -153,6 +161,20 @@ public protocol BudgetSession: AnyObject, Sendable {
 	/// Returns the new report's id.
 	@discardableResult
 	func createReport(_ draft: ReportDraft) async throws -> String
+	/// Active bills by next date, then paused and ended ones (R-BILL-1).
+	func bills(today: String) async throws -> [BillSummary]
+	/// One bill for the editor, with its next dates.
+	func bill(_ id: String, today: String) async throws -> BillDetail
+	/// Unpaid occurrences of active bills through `today + days`, oldest first (R-BILL-3).
+	func upcoming(days: UInt32, today: String) async throws -> [UpcomingBill]
+	/// Live rules in the order Actual runs them (R-RULE-2).
+	func rules() async throws -> [RuleSentence]
+	/// The rows "Apply to existing" would change, newest first.
+	func rulePreview(_ source: RuleSource) async throws -> [RuleMatch]
+	/// Every live payee by name.
+	func payees() async throws -> [PayeeDetail]
+	func accounts() async throws -> AccountList
+	func registerRow(_ id: String) async throws -> RegisterRow
 }
 
 /// The budgets in the app's budgets folder: new ones, Actual imports and reopened ones.

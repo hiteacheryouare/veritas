@@ -28,7 +28,9 @@ final class CoreBudgetSession: BudgetSession {
 				})
 			},
 			format: overview.numberFormat.map { MoneyFormat($0, currency: currency) },
-			numberStyle: overview.numberFormat?.style ?? .commaDot
+			numberStyle: overview.numberFormat?.style ?? .commaDot,
+			scheduleProblem: state.scheduleProblem,
+			snapshotProblem: state.snapshotProblem
 		)
 	}
 
@@ -236,6 +238,46 @@ final class CoreBudgetSession: BudgetSession {
 
 	func saveReport(_ draft: ReportDraft) async throws {
 		try await perform(.saveCustomReport(settings: draft.settings))
+	}
+
+	func bills(today: String) async throws -> [BillSummary] {
+		let session = session
+		return try await Core.run { try session.bills(today: today) }
+	}
+
+	func bill(_ id: String, today: String) async throws -> BillDetail {
+		let session = session
+		return try await Core.run { try session.bill(billId: id, today: today) }
+	}
+
+	func upcoming(days: UInt32, today: String) async throws -> [UpcomingBill] {
+		let session = session
+		return try await Core.run { try session.upcoming(days: days, today: today) }
+	}
+
+	func rules() async throws -> [RuleSentence] {
+		let session = session
+		return try await Core.run { try session.rules() }
+	}
+
+	func rulePreview(_ source: RuleSource) async throws -> [RuleMatch] {
+		let session = session
+		return try await Core.cancellable { try await session.rulePreview(source: source, cancel: $0) }
+	}
+
+	func payees() async throws -> [PayeeDetail] {
+		let session = session
+		return try await Core.run { try session.payees() }
+	}
+
+	func accounts() async throws -> AccountList {
+		let session = session
+		return try await Core.run { try session.accounts() }
+	}
+
+	func registerRow(_ id: String) async throws -> RegisterRow {
+		let session = session
+		return try await Core.run { try session.registerRow(transactionId: id) }
 	}
 
 	/// Runs a command that makes one row and returns that row's id.
