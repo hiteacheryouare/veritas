@@ -84,6 +84,7 @@ final class RulesJourneyTests: XCTestCase {
 		XCTAssertEqual(sheet.checkBoxes["applyRule.row.tx-1.tick"].value as? Int, 1)
 		XCTAssertTrue(sheet.descendants(matching: .any)["applyRule.row.tx-reconciled.locked"].exists)
 		XCTAssertTrue(sheet.staticTexts["applyRule.row.tx-reconciled.reconciledWarning"].exists)
+		XCTAssertTrue(sheet.staticTexts["No category"].exists, "an uncategorized row reads No category, not nothing")
 		let apply = sheet.buttons["applyRule.apply"]
 		XCTAssertEqual(apply.label, "Apply to 2")
 		attachScreenshot(of: app, named: "apply-to-existing")
