@@ -330,10 +330,19 @@ impl Bill {
 		let raw: Value = serde_json::from_str(&self.date.to_json())
 			.map_err(|error| invalid(error.to_string()))?;
 		validate_schedule_date(&raw).map_err(invalid)?;
-		if let BillAmount::Between(low, high) = self.amount
-			&& low == high
-		{
-			return Err(invalid("A range needs two different amounts"));
+		// Actual's editor keeps a range's ends as typed
+		// (`BetweenAmountInput`, `dc/components/util/AmountInput.tsx:246-273`)
+		// and only orders them when it matches (`sortNumbers`,
+		// `lc/server/rules/condition.ts:326-330`); it never swaps or refuses
+		// them. Veritas asks for the lower end first so the two fields read
+		// the same way every time.
+		if let BillAmount::Between(low, high) = self.amount {
+			if low == high {
+				return Err(invalid("A range needs two different amounts"));
+			}
+			if low > high {
+				return Err(invalid("Put the lower amount first"));
+			}
 		}
 		if let BillDate::Repeat(repeat) = &self.date {
 			if repeat.frequency != Frequency::Monthly && !repeat.patterns.is_empty() {
@@ -719,10 +728,13 @@ pub fn read_bill(
 			.ok_or(NotABill::UnsupportedAmount)
 	};
 	let amount = match conditions[amount_slot]["op"].as_str() {
-		Some("isbetween") => BillAmount::Between(
-			cents(amount_value.get("num1"))?,
-			cents(amount_value.get("num2"))?,
-		),
+		// A range Actual saved high end first reads low end first, as Actual
+		// orders it when it matches (`condition.ts:326-330`), so it stays editable.
+		Some("isbetween") => {
+			let num1 = cents(amount_value.get("num1"))?;
+			let num2 = cents(amount_value.get("num2"))?;
+			BillAmount::Between(num1.min(num2), num1.max(num2))
+		}
 		Some("isapprox") => BillAmount::About(cents(Some(amount_value))?),
 		_ => BillAmount::Exact(cents(Some(amount_value))?),
 	};
@@ -997,6 +1009,17 @@ mod tests {
 			bill.validate(today)
 		};
 		assert!(with(&|r| r.interval = 0).is_err());
+		let range = |low: i64, high: i64| {
+			let mut bill = rent();
+			bill.amount = BillAmount::Between(Money::from_minor(low), Money::from_minor(high));
+			bill.validate(today)
+		};
+		assert!(range(-6_000, -4_000).is_ok());
+		assert!(matches!(
+			range(-4_000, -6_000),
+			Err(CoreError::Invalid(message)) if message == "Put the lower amount first"
+		));
+		assert!(range(-4_000, -4_000).is_err());
 		assert!(with(&|r| r.end = RepeatEnd::AfterOccurrences(0)).is_err());
 		assert!(with(&|r| r.patterns = vec![RepeatPattern::Day(32)]).is_err());
 		assert!(with(&|r| r.patterns = vec![RepeatPattern::Weekday(Weekday::Mon, 6)]).is_err());
