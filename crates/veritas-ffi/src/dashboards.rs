@@ -1039,6 +1039,20 @@ fn widget_view(
 	})
 }
 
+/// Roughly how long a card takes on a large budget, so the slow ones start
+/// first and the page ends with the quick ones.
+fn cost(widget: &reports::DashboardWidget) -> u8 {
+	match &widget.content {
+		WidgetContent::Card { kind, .. } => match kind {
+			WidgetType::Sankey | WidgetType::AgeOfMoney | WidgetType::NetWorth => 3,
+			WidgetType::BalanceForecast | WidgetType::Crossover | WidgetType::MonteCarlo => 2,
+			_ => 1,
+		},
+		WidgetContent::CustomReport(_) => 2,
+		_ => 0,
+	}
+}
+
 /// Every widget's view, in order. Cards read the budget only, so they run
 /// on all cores: on perf-100k the page is several times faster than one
 /// card after another (R-PERF-4).
@@ -1055,6 +1069,8 @@ fn widget_views(
 			.map(|(widget, known)| widget_view(inputs, widget, *known))
 			.collect();
 	}
+	let mut order: Vec<usize> = (0..widgets.len()).collect();
+	order.sort_by_key(|&index| std::cmp::Reverse(cost(widgets[index].0)));
 	let next = AtomicUsize::new(0);
 	let mut done: Vec<(usize, Result<WidgetView, CoreError>)> = std::thread::scope(|scope| {
 		let workers: Vec<_> = (0..threads)
@@ -1062,11 +1078,11 @@ fn widget_views(
 				scope.spawn(|| {
 					let mut views = Vec::new();
 					loop {
-						let index = next.fetch_add(1, Ordering::Relaxed);
-						let Some((widget, known)) = widgets.get(index) else {
+						let Some(&index) = order.get(next.fetch_add(1, Ordering::Relaxed)) else {
 							return views;
 						};
-						views.push((index, widget_view(inputs, widget, *known)));
+						let (widget, known) = widgets[index];
+						views.push((index, widget_view(inputs, widget, known)));
 					}
 				})
 			})

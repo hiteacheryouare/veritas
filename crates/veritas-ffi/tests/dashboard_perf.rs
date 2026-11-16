@@ -54,7 +54,7 @@ impl Drop for Scratch {
 const TYPICAL: Duration = Duration::from_millis(100);
 
 fn fastest(mut before: impl FnMut(), mut run: impl FnMut()) -> Duration {
-	(0..5)
+	(0..10)
 		.map(|_| {
 			before();
 			let started = Instant::now();
