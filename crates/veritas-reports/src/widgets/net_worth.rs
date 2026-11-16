@@ -300,13 +300,17 @@ pub fn net_worth_card(
 	}
 	.align(&mut accounts, &legs)?;
 
+	// Actual's inclusive ranges (`months.ts` `_dayRange`, `_weekRange`,
+	// `_range`) always yield the first period, even when today's clamp puts
+	// the end before it.
 	let mut periods_list = Vec::new();
 	let mut period = period_of(start, interval, first_day_of_week);
 	let last = period_of(end, interval, first_day_of_week);
-	while period <= last {
+	while period < last {
 		periods_list.push(period);
 		period = next_period(period, interval).ok_or(CoreError::Overflow)?;
 	}
+	periods_list.push(period);
 
 	let mut running: Vec<Money> = listed
 		.iter()
