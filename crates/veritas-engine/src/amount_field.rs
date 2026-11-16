@@ -35,6 +35,14 @@ pub fn edit_text(amount: Money, format: NumberFormat, hide_fraction: bool) -> St
 	edit_text_at(amount, format, hide_fraction, 2)
 }
 
+/// The register's edit text (`serializeTransaction` with
+/// `integerToCurrencyWithDecimal`): when the budget hides fractions, only a
+/// whole amount drops them. Cents that aren't zero always show, so opening
+/// and committing a field never rounds the stored amount.
+pub fn register_edit_text(amount: Money, format: NumberFormat, hide_fraction: bool) -> String {
+	edit_text(amount, format, hide_fraction && amount.minor() % 100 == 0)
+}
+
 /// `forEdit` at the currency's `places`, as budget cells show amounts
 /// (`useFormat`, CLS-12, D63).
 pub fn edit_text_at(
@@ -173,6 +181,23 @@ mod tests {
 			text(123_456, false, 2),
 			edit_text(Money::from_minor(123_456), NumberFormat::CommaDot, false)
 		);
+	}
+
+	#[test]
+	fn the_register_hides_only_a_zero_fraction() {
+		let text = |minor, hide| {
+			register_edit_text(Money::from_minor(minor), NumberFormat::CommaDot, hide)
+		};
+		assert_eq!(text(10_000, true), "100");
+		assert_eq!(text(-123_400, true), "-1,234");
+		assert_eq!(text(0, true), "0");
+		assert_eq!(
+			text(10_040, true),
+			"100.40",
+			"cents stay, as Actual's register keeps them"
+		);
+		assert_eq!(text(-5, true), "-0.05");
+		assert_eq!(text(10_000, false), "100.00");
 	}
 
 	#[test]

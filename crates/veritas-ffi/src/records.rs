@@ -316,6 +316,15 @@ pub struct NumberFormat {
 	pub currency: Option<String>,
 	pub style: NumberStyle,
 	pub hide_decimals: bool,
+	/// The symbol goes before the amount. Always set by `overview()`, from
+	/// the budget's preferences (before when unset, as Actual). `None` in
+	/// `createBudget` seeds the preference from the currency table.
+	#[uniffi(default = None)]
+	pub symbol_first: Option<bool>,
+	/// A narrow no-break space (U+202F) between amount and symbol. Set and
+	/// defaulted like `symbol_first`.
+	#[uniffi(default = None)]
+	pub symbol_space: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -358,10 +367,14 @@ impl From<CoreNumberStyle> for NumberStyle {
 
 impl From<&NumberFormat> for CoreNumberFormat {
 	fn from(format: &NumberFormat) -> Self {
+		let (table_first, table_space) =
+			CoreNumberFormat::currency_symbol_placement(format.currency.as_deref());
 		CoreNumberFormat {
 			currency: format.currency.clone(),
 			style: format.style.into(),
 			hide_decimals: format.hide_decimals,
+			symbol_first: format.symbol_first.unwrap_or(table_first),
+			symbol_space: format.symbol_space.unwrap_or(table_space),
 		}
 	}
 }
@@ -372,6 +385,8 @@ impl From<&CoreNumberFormat> for NumberFormat {
 			currency: format.currency.clone(),
 			style: format.style.into(),
 			hide_decimals: format.hide_decimals,
+			symbol_first: Some(format.symbol_first),
+			symbol_space: Some(format.symbol_space),
 		}
 	}
 }

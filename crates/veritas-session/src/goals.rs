@@ -4,10 +4,11 @@
 
 use veritas_domain::{
 	BudgetData, CategoryGroupId, CategoryId, CivilDate, CoreError, Goal, GoalId, GoalStatus, Money,
-	Row, YearMonth,
+	Row, TransactionKind, YearMonth,
 };
 use veritas_engine::goals::{self as engine, Suggestion};
 use veritas_engine::{BudgetEditor, BudgetWrites, Envelope, EnvelopeSheet, NumberFormat};
+use veritas_reports::Classification;
 
 use crate::categories;
 use crate::writes::{applied, rows};
@@ -46,8 +47,14 @@ pub struct GoalView {
 	pub state: GoalState,
 	/// The envelope's available balance this month.
 	pub available: Money,
-	/// The category's net spending over every month, at least zero (DEBT-8).
+	/// DEBT-8's Spending to date: CLS-6 `expense_total` for the category
+	/// through today. Refunds lower it, and it can be negative (ST-1.2).
 	pub spent: Money,
+	/// 0 to 100 for the ring and its label. 100 only once reached.
+	pub progress_percent: u8,
+	/// The "X of target" figure: `available`, except that a reached goal
+	/// that was spent from still reads as its target (design/mockups/goals.html).
+	pub progress_amount: Money,
 	/// Active and reached goals with a target date only.
 	pub suggestion: Option<Suggestion>,
 	/// Active goals with a target date only.
@@ -71,7 +78,11 @@ pub struct ClosePreview {
 }
 
 /// Every goal whose category still exists, in budget order.
-pub fn goals(data: &BudgetData, sheet: &EnvelopeSheet) -> Result<Vec<GoalView>, CoreError> {
+pub fn goals(
+	data: &BudgetData,
+	sheet: &EnvelopeSheet,
+	classification: &Classification,
+) -> Result<Vec<GoalView>, CoreError> {
 	let month = sheet.today().year_month();
 	let mut views = Vec::new();
 	for goal in data.goals.values() {
@@ -79,7 +90,7 @@ pub fn goals(data: &BudgetData, sheet: &EnvelopeSheet) -> Result<Vec<GoalView>, 
 			continue;
 		};
 		let available = available(sheet, &goal.category, month);
-		let spent = spent(sheet, &goal.category)?;
+		let spent = spending_to_date(classification, &goal.category, sheet.today())?;
 		let state = match goal.status {
 			GoalStatus::Active => GoalState::Active,
 			GoalStatus::Reached if available < goal.target => GoalState::ReachedSpent,
@@ -115,6 +126,11 @@ pub fn goals(data: &BudgetData, sheet: &EnvelopeSheet) -> Result<Vec<GoalView>, 
 				state,
 				available,
 				spent,
+				progress_percent: progress_percent(state, available, goal.target),
+				progress_amount: match state {
+					GoalState::ReachedSpent => goal.target,
+					GoalState::Active | GoalState::Reached | GoalState::Closed => available,
+				},
 				suggestion,
 				pace,
 				later_budget,
@@ -415,14 +431,37 @@ fn available(sheet: &EnvelopeSheet, category: &CategoryId, month: YearMonth) -> 
 		.map_or(Money::ZERO, |cell| cell.balance)
 }
 
-fn spent(sheet: &EnvelopeSheet, category: &CategoryId) -> Result<Money, CoreError> {
-	let mut activity = Money::ZERO;
-	for month in sheet.months() {
-		if let Some(cell) = sheet.category(*month, category) {
-			activity = activity.checked_add(cell.spent)?;
+/// CLS-6 `expense_total` for one category, every row through `today`, read
+/// from the classification every report uses so the figures agree (DEBT-8).
+/// Never clamped: a refund bigger than the spending makes it negative.
+pub fn spending_to_date(
+	classification: &Classification,
+	category: &CategoryId,
+	today: CivilDate,
+) -> Result<Money, CoreError> {
+	let mut total = Money::ZERO;
+	for row in classification.through(today) {
+		if row.is_primary()
+			&& row.kind() == TransactionKind::Expense
+			&& row.category.as_ref() == Some(category)
+		{
+			total = total.checked_sub(row.amount)?;
 		}
 	}
-	Ok(Money::from_minor(activity.checked_neg()?.minor().max(0)))
+	Ok(total)
+}
+
+/// Rounds down, and stops at 99 until the goal is reached, so the ring never
+/// reads full before it is.
+fn progress_percent(state: GoalState, available: Money, target: Money) -> u8 {
+	if matches!(state, GoalState::Reached | GoalState::ReachedSpent) {
+		return 100;
+	}
+	let (available, target) = (i128::from(available.minor()), i128::from(target.minor()));
+	if available <= 0 || target <= 0 {
+		return 0;
+	}
+	u8::try_from((available * 100 / target).min(99)).unwrap_or(99)
 }
 
 /// Non-zero budget amounts in the months after `after` that the sheet covers.
@@ -521,4 +560,33 @@ pub fn dismiss_goal_activity(
 		},
 		..goal.clone()
 	})])
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn percent(state: GoalState, available: i64, target: i64) -> u8 {
+		progress_percent(
+			state,
+			Money::from_minor(available),
+			Money::from_minor(target),
+		)
+	}
+
+	#[test]
+	fn progress_rounds_down_and_is_full_only_once_reached() {
+		assert_eq!(percent(GoalState::Active, 112_000, 150_000), 74);
+		assert_eq!(percent(GoalState::Active, 149_999, 150_000), 99);
+		assert_eq!(
+			percent(GoalState::Active, 160_000, 150_000),
+			99,
+			"an active goal over its target still waits for the reached check"
+		);
+		assert_eq!(percent(GoalState::Active, -2_000, 150_000), 0);
+		assert_eq!(percent(GoalState::Closed, 0, 150_000), 0);
+		assert_eq!(percent(GoalState::Reached, 150_000, 150_000), 100);
+		assert_eq!(percent(GoalState::ReachedSpent, -2_000, 150_000), 100);
+		assert_eq!(percent(GoalState::Active, i64::MAX, 1), 99);
+	}
 }

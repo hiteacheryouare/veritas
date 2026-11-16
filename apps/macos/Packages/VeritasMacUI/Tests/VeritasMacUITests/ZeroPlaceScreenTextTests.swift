@@ -17,11 +17,20 @@ struct ZeroPlaceScreenTextTests {
 	}
 
 	@Test func goalAmountsAreWholeYenAndSpendingIsOnTheRegisterScale() {
-		let bike = StubBudget.goal("bike", "Bike", target: 150_000, available: -20_000, date: nil, state: .reachedSpent, spent: 50_000)
+		// CLS-12.14: the core keeps the mixed figure neutral, and it reads only as "Available".
+		let bike = StubBudget.goal("bike", "Bike", target: 150_000, available: -20_000, date: nil, state: .reachedSpent, spent: 50_000, zeroPlaces: true)
 		let words = GoalWords(bike, format: yen)
-		#expect(words.note == "Reached → Spent, overspent")
-		#expect(words.tone == .overspent)
-		#expect(words.detail == "¥500 spent, \u{2212}¥20,000 over")
+		#expect(words.note == "Reached → Spent")
+		#expect(words.tone == .neutral)
+		#expect(words.detail == "¥500 spent, Available \u{2212}¥20,000")
+	}
+
+	@Test func aSpentGoalWithMoneyStillInItReadsAvailableNotLeft() {
+		// CLS-12.14: ¥100,000 budgeted and a ¥500 purchase leave a mixed 50,000,
+		// which is never "left" (the real position is ¥99,500).
+		let bike = StubBudget.goal("bike", "Bike", target: 100_000, available: 50_000, date: nil, state: .reachedSpent, spent: 50_000, zeroPlaces: true)
+		let words = GoalWords(bike, format: yen)
+		#expect(words.detail == "¥500 spent, Available ¥50,000")
 	}
 
 	@Test func aSuggestionIsAlreadyWholeYen() {
