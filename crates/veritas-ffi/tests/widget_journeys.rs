@@ -300,12 +300,20 @@ fn as_actual(view: &WidgetView) -> Option<Value> {
 			highest,
 			has_negative,
 			accounts,
+			series,
 			..
 		} => json!({
 			"start": range.start, "end": range.end,
 			"points": points.iter().map(|point| point.net_worth).collect::<Vec<_>>(),
 			"hasNegative": has_negative, "netWorth": net_worth, "totalChange": change,
 			"lowestNetWorth": lowest, "highestNetWorth": highest, "accounts": accounts,
+			"details": points.iter().map(|point| json!({
+				"assets": point.assets, "debt": point.debt, "change": point.change,
+			})).collect::<Vec<_>>(),
+			"stacked": series.iter().map(|stack| json!({
+				"id": stack.account_id, "name": stack.name, "points": stack.points,
+				"color": format!("var(--color-chartQual{})", stack.color + 1),
+			})).collect::<Vec<_>>(),
 		}),
 		WidgetView::CashFlow {
 			range,
@@ -583,6 +591,8 @@ fn edited_in_actual(oracle: &Path, scratch: &Scratch) -> PathBuf {
 			"timeFrame": {"start": "2025-12", "end": "2026-03", "mode": "static"},
 			"conditions": [{"field": "category", "op": "oneOf", "value": [VACATION, DINING_OUT], "type": "id"}], "conditionsOp": "and"})),
 		card("cw-analysis-quarter", "budget-analysis-card", 12, json!({"timeFrame": {"mode": "previousQuarter"}})),
+		card("cw-net-worth-stacked", "net-worth-card", 20, json!({"mode": "stacked",
+			"timeFrame": {"mode": "yearToDate"}})),
 		card("cw-net-worth", "net-worth-card", 14, json!({"interval": "Weekly",
 			"conditions": tagged("#trip"), "conditionsOp": "and",
 			"timeFrame": {"start": "2025-12", "end": "2026-03", "mode": "static"}})),

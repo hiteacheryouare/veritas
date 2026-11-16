@@ -42,9 +42,9 @@ pub use dashboards::{
 	AgeGranularity, AgePoint, AgeTrend, BudgetAnalysisPoint, CalendarCardMonth, CalendarDayCell,
 	CrossoverCardPoint, DashboardPage, DashboardWidget, ForecastCardGranularity, ForecastCardPoint,
 	ForecastCardSource, FormulaError, FormulaErrorKind, FormulaFontSize, FormulaValue,
-	MonteCarloCardPoint, NetWorthCardInterval, NetWorthCardPoint, SankeyCardColor, SankeyCardLink,
-	SankeyCardMode, SankeyCardNode, SankeyFolded, SankeyLabel, SpendingCardDay, SpendingCardMode,
-	WidgetConfig, WidgetRange, WidgetTimeFrame, WidgetView,
+	MonteCarloCardPoint, NetWorthCardInterval, NetWorthCardPoint, NetWorthCardSeries,
+	SankeyCardColor, SankeyCardLink, SankeyCardMode, SankeyCardNode, SankeyFolded, SankeyLabel,
+	SpendingCardDay, SpendingCardMode, WidgetConfig, WidgetRange, WidgetTimeFrame, WidgetView,
 };
 pub use goals::{GoalClosePreview, GoalPace, GoalState, GoalSummary, MonthAmount};
 pub use money::{

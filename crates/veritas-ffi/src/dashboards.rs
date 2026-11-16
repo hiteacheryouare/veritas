@@ -138,6 +138,22 @@ pub struct NetWorthCardPoint {
 	/// The period's first day (a week's first day when weekly).
 	pub start: String,
 	pub net_worth: i64,
+	/// Positive balances, and negative ones as a magnitude.
+	pub assets: i64,
+	pub debt: i64,
+	/// Against the point before, or the balance before the first point.
+	pub change: i64,
+}
+
+/// One account's area in the stacked mode.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct NetWorthCardSeries {
+	pub account_id: String,
+	pub name: String,
+	/// The account's balance at each of the view's `points`.
+	pub points: Vec<i64>,
+	/// `chartQual1` to `chartQual9`, as 0 to 8.
+	pub color: u8,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -319,7 +335,8 @@ pub struct MonteCarloCardPoint {
 pub enum WidgetView {
 	/// `change` is the headline: the last period's balance less the first's.
 	/// `accounts` are the ids with a balance in some period, in Actual's
-	/// order.
+	/// order; `series` are the same accounts in the stacked mode's order,
+	/// first at the bottom.
 	NetWorth {
 		range: WidgetRange,
 		interval: NetWorthCardInterval,
@@ -330,6 +347,7 @@ pub enum WidgetView {
 		highest: Option<i64>,
 		has_negative: bool,
 		accounts: Vec<String>,
+		series: Vec<NetWorthCardSeries>,
 	},
 	/// `income` is money in and `expense` money out (negative), and
 	/// `change` is `income + expense`, the headline.
@@ -566,6 +584,9 @@ fn net_worth_view(card: reports::NetWorthCard) -> WidgetView {
 			.map(|period| NetWorthCardPoint {
 				start: day(period.start),
 				net_worth: period.net_worth.minor(),
+				assets: period.assets.minor(),
+				debt: period.debt.minor(),
+				change: period.change.minor(),
 			})
 			.collect(),
 		net_worth: card.net_worth.minor(),
@@ -574,6 +595,16 @@ fn net_worth_view(card: reports::NetWorthCard) -> WidgetView {
 		highest: card.highest.map(Money::minor),
 		has_negative: card.has_negative,
 		accounts: card.accounts.iter().map(ToString::to_string).collect(),
+		series: card
+			.stacked
+			.into_iter()
+			.map(|stack| NetWorthCardSeries {
+				account_id: stack.account.to_string(),
+				name: stack.name,
+				points: stack.balances.into_iter().map(Money::minor).collect(),
+				color: stack.color,
+			})
+			.collect(),
 	}
 }
 
@@ -1266,6 +1297,7 @@ mod tests {
 			points,
 			net_worth: total,
 			change,
+			series,
 			..
 		} = &net_worth.view
 		else {
@@ -1277,6 +1309,14 @@ mod tests {
 			points.last().unwrap().net_worth - points[0].net_worth
 		);
 		assert_eq!(*total, points.last().unwrap().net_worth);
+		for (index, point) in points.iter().enumerate() {
+			let stacked: i64 = series.iter().map(|stack| stack.points[index]).sum();
+			assert_eq!(
+				stacked, point.net_worth,
+				"the stack adds up to the net worth"
+			);
+			assert_eq!(point.assets - point.debt, point.net_worth);
+		}
 		assert_eq!(net_worth.min_width, 3);
 
 		let view = |id: &str| widget(&pages, id).view.clone();
