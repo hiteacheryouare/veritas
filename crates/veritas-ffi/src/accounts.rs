@@ -122,6 +122,11 @@ pub struct RegisterRow {
 	pub schedule_id: Option<String>,
 	pub needs_actual: Option<String>,
 	pub running_balance: Option<i64>,
+	/// v12. An About or Between bill's row that still holds the estimate
+	/// Actual posts for it (not cleared or reconciled, amount unchanged):
+	/// show the "estimate" marker until the user edits or clears it.
+	#[uniffi(default = false)]
+	pub is_unconfirmed_estimate: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -339,6 +344,7 @@ impl From<register::RegisterRow> for RegisterRow {
 			schedule_id: text(&row.schedule),
 			needs_actual: row.needs_actual,
 			running_balance: row.running_balance.map(Money::minor),
+			is_unconfirmed_estimate: row.is_unconfirmed_estimate,
 		}
 	}
 }

@@ -2070,3 +2070,146 @@ fn an_older_budget_opened_read_only_shows_its_goals_and_bills_and_stays_as_it_wa
 		"lastScheduleRun isn't touched either"
 	);
 }
+
+fn scheduled_rows(session: &Session, schedule: &str) -> Vec<veritas_ffi::RegisterRow> {
+	session
+		.register(
+			veritas_ffi::RegisterScope::Account {
+				account_id: CHECKING.to_owned(),
+			},
+			veritas_ffi::RegisterFilter::default(),
+			veritas_ffi::RegisterSort {
+				key: veritas_ffi::RegisterSortKey::Date,
+				ascending: false,
+			},
+			0,
+			500,
+		)
+		.unwrap()
+		.rows
+		.into_iter()
+		.filter(|row| row.schedule_id.as_deref() == Some(schedule))
+		.collect()
+}
+
+#[test]
+fn an_auto_posted_about_or_between_bill_reads_as_an_estimate_until_edited_or_cleared() {
+	// Ryan's ruling for v12: an About or Between bill posts as Actual does,
+	// and its row carries the estimate marker while it still holds the
+	// amount Actual's schedule service posts (getScheduledAmount: the
+	// number, or Math.round of the range's middle) and isn't cleared. An
+	// exact bill never does. Rows Actual posted count the same.
+	let scratch = Scratch::new("estimate");
+	let setup = import(&scratch, &small_zip(), "setup");
+	see(&setup, "2026-10-31");
+	let water = bill(
+		"Water",
+		CITY_POWER,
+		BillAmount::Between {
+			low: -6_001,
+			high: -9_000,
+		},
+		monthly("2026-11-03", None),
+		Some(UTILITIES),
+		true,
+	);
+	let power = bill(
+		"Power",
+		CITY_POWER,
+		BillAmount::About { amount: -9_000 },
+		monthly("2026-11-03", None),
+		Some(UTILITIES),
+		true,
+	);
+	let rent = bill(
+		"Rent",
+		LANDLORD,
+		BillAmount::Exact { amount: -150_000 },
+		monthly("2026-11-03", None),
+		Some(RENT),
+		true,
+	);
+	create(&setup, "water", water);
+	create(&setup, "power", power);
+	create(&setup, "rent", rent);
+	let base = scratch.join("base.zip");
+	export(&setup, &base);
+	setup.close().unwrap();
+
+	let check = |session: &Session, who: &str| {
+		let mut water = scheduled_rows(session, "water");
+		let mut power = scheduled_rows(session, "power");
+		let rent = scheduled_rows(session, "rent");
+		assert_eq!(
+			(water.len(), power.len(), rent.len()),
+			(1, 1, 1),
+			"{who} posts each bill once"
+		);
+		assert_eq!(water[0].amount, -7_500, "{who}: Math.round(-7500.5)");
+		assert_eq!(power[0].amount, -9_000, "{who}");
+		assert!(water[0].is_unconfirmed_estimate, "{who}: Between");
+		assert!(power[0].is_unconfirmed_estimate, "{who}: About");
+		assert!(
+			!rent[0].is_unconfirmed_estimate,
+			"{who}: an exact bill never is"
+		);
+		(water.remove(0), power.remove(0))
+	};
+
+	let session = import(&scratch, &base, "veritas");
+	see(&session, "2026-11-03");
+	session.maintain("2026-11-03".to_owned()).unwrap();
+	let (water_row, power_row) = check(&session, "Veritas");
+
+	perform(
+		&session,
+		Command::EditTransaction {
+			transaction_id: water_row.id.clone(),
+			transaction: TransactionDraft {
+				id: Some(water_row.id.clone()),
+				account_id: water_row.account_id.clone(),
+				date: water_row.date.clone(),
+				amount: -7_312,
+				payee_id: water_row.payee_id.clone(),
+				payee_name: None,
+				category_id: water_row.category_id.clone(),
+				notes: water_row.notes.clone(),
+				cleared: false,
+				splits: Vec::new(),
+			},
+		},
+	);
+	assert!(
+		!scheduled_rows(&session, "water")[0].is_unconfirmed_estimate,
+		"the real amount replaces the estimate"
+	);
+	perform(
+		&session,
+		Command::SetCleared {
+			transaction_ids: vec![power_row.id.clone()],
+			cleared: true,
+		},
+	);
+	assert!(
+		!scheduled_rows(&session, "power")[0].is_unconfirmed_estimate,
+		"clearing it confirms the amount"
+	);
+	session.undo().unwrap();
+	assert!(scheduled_rows(&session, "power")[0].is_unconfirmed_estimate);
+	session.close().unwrap();
+
+	let Some(oracle) = oracle() else { return };
+	let theirs = scratch.join("actual-posted.zip");
+	actual_apply(
+		&oracle,
+		&base,
+		json!([{"op": "openBudgetSchedules"}]),
+		&theirs,
+		"2026-11-03",
+		7,
+	);
+	let opened = import(&scratch, &theirs, "actual");
+	see(&opened, "2026-11-03");
+	check(&opened, "Actual");
+	opened.close().unwrap();
+}
