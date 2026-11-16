@@ -974,6 +974,260 @@ fn every_native_card_matches_actuals_card_code_in_a_zero_place_currency() {
 	);
 }
 
+const BROKERAGE_ID: &str = BROKERAGE;
+const CAR_LOAN: &str = "87979271-7007-41a8-a77e-7bce6f3e2da1";
+const RENT: &str = "63f26a17-4832-430e-b385-2a693a684509";
+
+/// One card of each kind D73 newly draws, as Actual's editors save them,
+/// with budget lines, transfers and ranges that run past the budget.
+fn every_new_kind(prefix: &str, page: &str, y: i64) -> Vec<Value> {
+	let food = json!({"conditions": [{"field": "category", "op": "oneOf", "value": [GROCERIES, DINING_OUT], "type": "id"}],
+		"conditionsOp": "and", "timeFrame": {"start": "2026-09", "end": "2026-11", "mode": "static"}});
+	let budget_query = |dimension: &str, start: &str, end: &str| {
+		format!(
+			"BUDGET_QUERY(\"{dimension}\", QUERY_EXTRACT_CATEGORIES(\"food\"), \"{start}\", \"{end}\")"
+		)
+	};
+	let cards = [
+		(
+			"net-worth-daily",
+			"net-worth-card",
+			json!({"interval": "Daily",
+			"timeFrame": {"start": "2026-03", "end": "2026-11", "mode": "static"}}),
+		),
+		(
+			"net-worth-yearly",
+			"net-worth-card",
+			json!({"interval": "Yearly",
+			"timeFrame": {"start": "2025-01", "end": "2027-12", "mode": "full"}}),
+		),
+		(
+			"net-worth-transfers",
+			"net-worth-card",
+			json!({"conditions": [{"field": "transfer", "op": "is", "value": true, "type": "boolean"}],
+			"conditionsOp": "and"}),
+		),
+		("cash-flow", "cash-flow-card", Value::Null),
+		(
+			"cash-flow-year",
+			"cash-flow-card",
+			json!({"timeFrame": {"mode": "lastYear"}}),
+		),
+		(
+			"cash-flow-checking",
+			"cash-flow-card",
+			json!({"conditions": [{"field": "account", "op": "is", "value": CHECKING, "type": "id"}],
+			"conditionsOp": "and", "timeFrame": {"start": "2026-09", "end": "2027-12", "mode": "static"}}),
+		),
+		(
+			"spending-budget",
+			"spending-card",
+			json!({"mode": "budget"}),
+		),
+		(
+			"spending-budget-food",
+			"spending-card",
+			json!({"mode": "budget",
+			"conditions": [{"field": "category", "op": "oneOf", "value": [GROCERIES, DINING_OUT], "type": "id"}], "conditionsOp": "and"}),
+		),
+		(
+			"spending-average",
+			"spending-card",
+			json!({"mode": "average"}),
+		),
+		(
+			"sankey-transfers",
+			"sankey-card",
+			json!({"mode": "spent", "showTransfers": true, "groupAccounts": true,
+			"timeFrame": {"start": "2026-09", "end": "2026-11", "mode": "static"}}),
+		),
+		(
+			"sankey-accounts",
+			"sankey-card",
+			json!({"mode": "spent", "showTransfers": true, "layerFrom": "account", "layerTo": "category",
+			"timeFrame": {"start": "2026-10", "end": "2026-11", "mode": "static"}}),
+		),
+		(
+			"sankey-budgeted",
+			"sankey-card",
+			json!({"mode": "budgeted",
+			"timeFrame": {"start": "2026-09", "end": "2026-11", "mode": "static"}}),
+		),
+		(
+			"sankey-budgeted-ahead",
+			"sankey-card",
+			json!({"mode": "budgeted",
+			"timeFrame": {"start": "2027-08", "end": "2027-10", "mode": "static"}}),
+		),
+		(
+			"sankey-budgeted-full",
+			"sankey-card",
+			json!({"mode": "budgeted",
+			"timeFrame": {"start": "2025-01", "end": "2027-12", "mode": "full"}}),
+		),
+		("forecast", "balance-forecast-card", Value::Null),
+		(
+			"forecast-daily",
+			"balance-forecast-card",
+			json!({"granularity": "Daily",
+			"timeFrame": {"start": "2026-11", "end": "2027-01", "mode": "static"}}),
+		),
+		(
+			"forecast-checking",
+			"balance-forecast-card",
+			json!({"accounts": [CHECKING],
+			"conditions": [{"field": "amount", "op": "lt", "value": 0, "type": "number"}], "conditionsOp": "and"}),
+		),
+		(
+			"formula-budget",
+			"formula-card",
+			json!({"formula": format!("={}", budget_query("budgeted", "2026-09", "2026-11")),
+			"queries": {"food": food}}),
+		),
+		(
+			"formula-mixed",
+			"formula-card",
+			json!({"formula": format!("=QUERY(\"food\") + {}", budget_query("budgeted", "2026-09", "2026-11")),
+			"queries": {"food": food}}),
+		),
+		(
+			"formula-unbudgeted",
+			"formula-card",
+			json!({"formula": format!("=ROUND({}, 2)", budget_query("balance_end", "2029-01", "2029-03")),
+			"queries": {"food": food}}),
+		),
+		(
+			"formula-missing-query",
+			"formula-card",
+			json!({"formula": "=QUERY(\"travel\")", "queries": {"food": food}}),
+		),
+		(
+			"formula-bad-dimension",
+			"formula-card",
+			json!({"formula": format!("={}", budget_query("carryover", "2026-09", "2026-11")),
+			"queries": {"food": food}}),
+		),
+		(
+			"monte-carlo",
+			"monte-carlo-card",
+			json!({"simulationCount": 500, "currentAge": 35, "targetAge": 85,
+			"pots": [{"id": "brokerage", "accountId": BROKERAGE_ID}, {"id": "checking", "accountId": CHECKING}],
+			"spendingPhases": [{"id": "all", "annualWithdrawal": 300_000_000}]}),
+		),
+		(
+			"budget-analysis",
+			"budget-analysis-card",
+			json!({"timeFrame": {"start": "2026-08", "end": "2026-12", "mode": "static"}}),
+		),
+	];
+	cards
+		.into_iter()
+		.enumerate()
+		.map(|(n, (id, kind, meta))| {
+			json!({"op": "addDashboardWidget", "id": format!("{prefix}-{id}"), "page": page, "type": kind,
+				"x": 0, "y": y + 3 * i64::try_from(n).unwrap(), "width": 4, "height": 3, "meta": meta})
+		})
+		.collect()
+}
+
+#[test]
+fn every_new_card_matches_actual_in_a_yen_budget_with_transfers_and_months_past_the_budget() {
+	// A household that keeps its books in yen (0 places: register rows are
+	// stored ×100, budget cells as whole yen, and Actual adds them as
+	// stored), moves money between on- and off-budget accounts, and has
+	// one bill entered a year ahead, so some budgeted ranges reach months
+	// Actual has no budget for.
+	let scratch = Scratch::new("yen");
+	let Some(oracle) = oracle() else {
+		return;
+	};
+	let budgeted = |month: &str, category: &str, amount: i64| json!({"op": "setBudgetAmount", "month": month, "category": category, "amount": amount});
+	let mut ops = vec![
+		json!({"op": "setPreference", "id": "defaultCurrencyCode", "value": "JPY"}),
+		json!({"op": "setPreference", "id": "hideFraction", "value": "true"}),
+		budgeted("2026-09", GROCERIES, 30_000),
+		budgeted("2026-10", GROCERIES, 30_000),
+		budgeted("2026-11", GROCERIES, 32_000),
+		budgeted("2026-11", DINING_OUT, 15_000),
+		budgeted("2026-11", VACATION, 50_000),
+		budgeted("2026-10", RENT, 120_000),
+		json!({"op": "addTransactions", "account": CHECKING, "transactions": [
+			{"date": "2026-10-15", "amount": -3_000_000, "payee": {"transferTo": CAR_LOAN}, "notes": "loan payment"},
+			{"date": "2026-10-28", "amount": -10_000_000, "payee": {"transferTo": BROKERAGE_ID}, "notes": "invest"},
+			{"date": "2026-11-03", "amount": -2_500_000, "payee": {"transferTo": SAVINGS}, "notes": "save"},
+			{"date": "2026-11-05", "amount": -4_200_000, "payee": {"transferTo": VISA}, "notes": "card payment"},
+			{"date": "2026-11-06", "amount": -480_000, "payee": TRATTORIA, "category": DINING_OUT, "notes": "ramen"},
+			{"date": "2026-11-01", "amount": -1_250_000, "category": GROCERIES, "notes": "market"},
+			{"date": "2027-10-01", "amount": -1_200_000, "category": HOUSEHOLD, "notes": "registration"},
+		]}),
+	];
+	ops.extend(every_new_kind("yen", DEEP_DIVE, 80));
+	let actual_made = scratch.join("yen.zip");
+	apply(&oracle, &all_features(), Value::Array(ops), &actual_made, 9);
+	let session = import(&actual_made, &scratch.join("veritas"));
+	assert_eq!(
+		session
+			.overview()
+			.unwrap()
+			.number_format
+			.unwrap()
+			.currency
+			.as_deref(),
+		Some("JPY")
+	);
+
+	perform(
+		&session,
+		Command::SetBudget {
+			month: veritas_ffi::Month {
+				year: 2026,
+				month: 11,
+			},
+			category_id: HOUSEHOLD.to_owned(),
+			amount: veritas_ffi::evaluate_budget_amount(
+				"20000".to_owned(),
+				veritas_ffi::NumberStyle::CommaDot,
+				0,
+			)
+			.unwrap(),
+		},
+	);
+	let mut ramen = entry("yen-ramen", VISA, "2026-11-12", -150_000);
+	ramen.category_id = Some(DINING_OUT.to_owned());
+	perform(&session, Command::AddTransaction { transaction: ramen });
+
+	let zip = scratch.join("veritas.zip");
+	export(&session, &zip);
+	let new_cards = || {
+		dashboards(&session, "2026-11-13")
+			.iter()
+			.flat_map(|page| &page.widgets)
+			.filter(|widget| widget.id.starts_with("yen-"))
+			.count()
+	};
+	assert_eq!(new_cards(), 24);
+	let mut compared = 0;
+	for today in ["2026-11-13", "2026-12-01", "2027-01-31", "2026-04-01"] {
+		compared += same_cards_as_actual(&oracle, &session, &zip, today);
+	}
+	assert!(compared >= 4 * 24, "{compared}");
+	let problems: Vec<String> = dashboards(&session, "2026-11-13")
+		.iter()
+		.flat_map(|page| &page.widgets)
+		.filter_map(|widget| match &widget.view {
+			WidgetView::Problem { message } => Some(format!("{}: {message}", widget.id)),
+			_ => None,
+		})
+		.collect();
+	assert!(
+		problems
+			.iter()
+			.any(|problem| problem
+				== "yen-sankey-budgeted-ahead: There's no budget for November 2027."),
+		"a budgeted range reaching past the budget says so: {problems:?}"
+	);
+}
+
 /// Everything the dashboard editor shows, as text: `WidgetView` holds
 /// floats, so it compares through `Debug`.
 fn editor(session: &Session) -> String {
