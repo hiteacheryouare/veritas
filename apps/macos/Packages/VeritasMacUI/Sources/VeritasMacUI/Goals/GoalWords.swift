@@ -41,11 +41,14 @@ struct GoalWords {
 			detail = nil
 		case .reachedSpent:
 			let available = format.currency(goal.available, on: .budget)
-			let position = switch goal.tone {
-			case .overspent: "\(available) over"
-			// CLS-12.14: a 0-place budget's mixed figure is only ever "Available".
-			case .neutral: "Available \(available)"
-			default: "\(available) left"
+			// CLS-12.14: in a 0-place budget the figure mixes scales, so it is only
+			// ever "Available", whatever its sign.
+			let position = if format.decimalPlaces == 0 {
+				"Available \(available)"
+			} else if goal.tone == .overspent {
+				"\(available) over"
+			} else {
+				"\(available) left"
 			}
 			note = goal.tone == .overspent ? "Reached → Spent, overspent" : "Reached → Spent"
 			detail = "\(format.currency(goal.spent, on: .register)) spent, \(position)"
