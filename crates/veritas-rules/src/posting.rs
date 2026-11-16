@@ -503,7 +503,7 @@ pub fn skip(budget: &BudgetData, id: &ScheduleId) -> Result<SchedulePlan, CoreEr
 /// (`dc/components/schedules/SchedulesTable.tsx:189-194`), but
 /// `skipNextDate` (`lc/server/schedules/app.ts:505-507`) writes only when
 /// `getNextDateAfter` (`lc/shared/schedules.ts:320-338`) finds a different
-/// date (`app.ts:254-262`): never for a one-time date, a schedule without a
+/// date (`app.ts:253-281`): never for a one-time date, a schedule without a
 /// next date, or the last occurrence of one that ends.
 pub fn can_skip(budget: &BudgetData, id: &ScheduleId) -> Result<bool, CoreError> {
 	let facts = schedule_facts(budget, id)?;

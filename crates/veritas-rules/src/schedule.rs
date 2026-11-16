@@ -139,7 +139,7 @@ pub fn schedule_dates(
 	Ok(dates)
 }
 
-/// The schedule editor's preview of a date (`dc/hooks/useScheduleEdit.ts:302-333`).
+/// The schedule editor's preview of a date (`dc/hooks/useScheduleEdit.ts:305-332`).
 /// A one-time day is shown when it is `today` or later. A recurrence is
 /// `getUpcomingDates` (`server/schedules/app.ts:513-532`): its first `count`
 /// occurrences from `today`, each then moved off the weekend, so unlike

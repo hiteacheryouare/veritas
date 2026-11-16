@@ -117,7 +117,7 @@ pub struct BillDraft {
 }
 
 /// How a bill's amount matches a payment (`ScheduleAmountCell`,
-/// `dc/components/schedules/SchedulesTable.tsx:98-146`).
+/// `dc/components/schedules/SchedulesTable.tsx:66-147`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum BillAmountKind {
 	Exact,

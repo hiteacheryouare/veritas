@@ -117,7 +117,7 @@ pub enum NotABill {
 }
 
 /// How the bill's amount condition matches, as `_amountOp` in `v_schedules`
-/// (`ScheduleAmountCell`, `dc/components/schedules/SchedulesTable.tsx:98-146`).
+/// (`ScheduleAmountCell`, `dc/components/schedules/SchedulesTable.tsx:66-147`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AmountKind {
 	Exact,
@@ -388,7 +388,7 @@ impl Bill {
 	}
 
 	/// The dates the schedule editor previews for this date, up to `count`
-	/// (`dc/hooks/useScheduleEdit.ts:302-333`): a one-time date when it is
+	/// (`dc/hooks/useScheduleEdit.ts:305-332`): a one-time date when it is
 	/// today or later, else nothing; a recurrence through
 	/// `schedule/get-upcoming-dates` (`lc/server/schedules/app.ts:513-532`).
 	/// `Invalid` where Actual shows "Invalid rule"
