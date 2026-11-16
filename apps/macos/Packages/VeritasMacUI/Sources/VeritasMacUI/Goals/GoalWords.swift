@@ -45,10 +45,18 @@ struct GoalWords {
 			note = "Reached → Spent"
 			detail = "Spending to date \(format.currency(goal.spent, on: .register))"
 		case .reachedSpent:
-			let over = goal.tone == .overspent
-			note = over ? "Reached → Spent, overspent" : "Reached → Spent"
-			let left = over ? "\(format.currency(goal.available, on: .budget)) over" : "\(format.currency(goal.available, on: .budget)) left"
-			detail = "\(format.currency(goal.spent, on: .register)) spent, \(left)"
+			let available = format.currency(goal.available, on: .budget)
+			// CLS-12.14: in a 0-place budget the figure mixes scales, so it is only
+			// ever "Available", whatever its sign.
+			let position = if format.decimalPlaces == 0 {
+				"Available \(available)"
+			} else if goal.tone == .overspent {
+				"\(available) over"
+			} else {
+				"\(available) left"
+			}
+			note = goal.tone == .overspent ? "Reached → Spent, overspent" : "Reached → Spent"
+			detail = "\(format.currency(goal.spent, on: .register)) spent, \(position)"
 		case .closed:
 			note = goal.closedMonth.map { "Closed \(GoalWords.monthYear($0))" } ?? "Closed"
 			detail = "\(format.amount(goal.spent, on: .register)) spent"

@@ -30,8 +30,8 @@ public enum WidgetKind: String, CaseIterable, Hashable, Sendable {
 		case .summary: "Summary"
 		case .calendar: "Calendar"
 		case .formula: "Formula"
-		case .sankey: "Sankey"
-		case .balanceForecast: "Balance forecast"
+		case .sankey: "Money flow by category"
+		case .balanceForecast: "Balance with scheduled transactions"
 		case .ageOfMoney: "Age of money"
 		case .monteCarlo: "Monte Carlo"
 		}
@@ -77,7 +77,7 @@ public enum WidgetKind: String, CaseIterable, Hashable, Sendable {
 		switch self {
 		case .netWorth: [("trend", "Trend"), ("stacked", "By account")]
 		case .spending: [("single-month", "Compare two months"), ("average", "Against the average"), ("budget", "Against the budget")]
-		case .sankey: [("spent", "Spent"), ("budgeted", "Budgeted")]
+		case .sankey: [("spent", "Categorized"), ("budgeted", "Budgeted")]
 		default: []
 		}
 	}
@@ -243,7 +243,7 @@ public enum CardContent: Hashable, Sendable {
 	case summary(CardFigure)
 	case calendar(month: Month, days: [CalendarDay], income: Int64, expenses: Int64)
 	case formula(CardFigure)
-	case crossover(months: [Month], expenses: [Double], income: [Double], crossover: Month?)
+	case crossover(months: [Month], expenses: [Double], income: [Double], crossover: Month?, years: Double?)
 	case budgetAnalysis(months: [Month], budgeted: [Int64], spent: [Int64])
 	case balanceForecast([ForecastPoint])
 	case ageOfMoney(days: Int?, trend: AgeTrend, series: [Int], insufficientData: Bool)
@@ -307,6 +307,7 @@ public struct DashboardCard: Identifiable, Hashable, Sendable {
 		if let name = config.name, !name.isEmpty { return name }
 		if case .customReport(let report) = content, !report.settings.name.isEmpty { return report.settings.name }
 		if kind == .markdown { return nil }
+		if kind == .netWorth, !config.conditions.isEmpty { return "Balance of matching rows" }
 		return kind?.title ?? rawKind
 	}
 }
@@ -389,8 +390,8 @@ extension DashboardCard {
 		case .budgetAnalysis(let start, let end, let months, _, _, _, _):
 			content = .budgetAnalysis(months: months.map(\.month), budgeted: months.map(\.budgeted), spent: months.map(\.spent))
 			range = period(start, end)
-		case .crossover(let start, let end, let points, let crossover, _, _, _, _, _, _, _):
-			content = .crossover(months: points.map(\.month), expenses: points.map(\.expenses), income: points.map(\.investmentIncome), crossover: crossover)
+		case .crossover(let start, let end, let points, let crossover, _, _, _, _, let years, _, _):
+			content = .crossover(months: points.map(\.month), expenses: points.map(\.expenses), income: points.map(\.investmentIncome), crossover: crossover, years: years)
 			range = ReportPeriod(first: start, last: end)
 		case .pending:
 			content = .pending

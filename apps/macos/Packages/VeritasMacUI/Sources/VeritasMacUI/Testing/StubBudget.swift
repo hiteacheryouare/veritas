@@ -94,8 +94,9 @@ final class StubBudget: @unchecked Sendable {
 			let budgeted = groups.filter { !$0.isIncome }.flatMap(\.envelopes).reduce(0) { $0 + $1.budgeted }
 			return BudgetMonth(
 				month: Self.clamped(month), firstMonth: Month(year: 2026, month: 1), lastMonth: Month(year: 2026, month: 12),
-				toBudget: income - budgeted - held, income: income, fromLastMonth: 0, overspentLastMonth: 0,
-				budgeted: budgeted, forNextMonth: held, spent: 0, available: 0, groups: rows
+				toBudget: income - budgeted - held, toBudgetTone: Self.toBudgetTone(income - budgeted - held),
+				income: income, fromLastMonth: 0, overspentLastMonth: 0,
+				budgeted: budgeted, forNextMonth: held, spent: 0, available: 0, groups: rows, mixedScaleNote: nil
 			)
 		}
 	}
@@ -195,17 +196,46 @@ final class StubBudget: @unchecked Sendable {
 		}
 	}
 
-	static func goal(_ id: String, _ name: String, target: Int64, available: Int64, date: String?, state: GoalState, monthly: Int64? = nil, spent: Int64 = 0, closed: Month? = nil, pace: GoalPace? = nil) -> GoalSummary {
-		GoalSummary(
+	/// `zeroPlaces` stands for a 0-place budget, where the core keeps a
+	/// negative, mixed-scale goal neutral (CLS-12.14).
+	static func goal(_ id: String, _ name: String, target: Int64, available: Int64, date: String?, state: GoalState, monthly: Int64? = nil, spent: Int64 = 0, closed: Month? = nil, pace: GoalPace? = nil, zeroPlaces: Bool = false) -> GoalSummary {
+		withCoreFields(GoalSummary(
 			id: id, categoryId: id, name: name, target: target, targetDate: date, icon: nil, color: nil, state: state,
-			available: available, spent: spent, suggestedMonthly: monthly, monthsLeft: monthly == nil ? nil : 5,
+			available: available, spent: spent, tone: .neutral, progressPercent: 0, progressAmount: 0,
+			suggestedMonthly: monthly, monthsLeft: monthly == nil ? nil : 5,
 			pace: pace, reachedMonth: nil, closedMonth: closed, laterBudget: [], newActivity: false
-		)
+		), zeroPlaces: zeroPlaces)
+	}
+
+	/// The core's rules for the fields it derives (veritas-ffi goals.rs and
+	/// budget.rs), so the stub answers as a real budget would.
+	static func withCoreFields(_ goal: GoalSummary, zeroPlaces: Bool = false) -> GoalSummary {
+		var goal = goal
+		let reached = goal.state == .reached || goal.state == .reachedSpent
+		goal.progressPercent = reached ? 100 : goal.available <= 0 || goal.target <= 0 ? 0 : UInt8(min(goal.available * 100 / goal.target, 99))
+		goal.progressAmount = goal.state == .reachedSpent ? goal.target : goal.available
+		goal.tone = switch goal.state {
+		case .active where goal.available < 0, .reachedSpent where goal.available < 0: zeroPlaces ? .neutral : .overspent
+		case .active:
+			switch goal.pace {
+			case nil, .onTrack: .available
+			case .behind, .notAdding: .low
+			case .noHistory: .neutral
+			}
+		case .reached, .reachedSpent: .available
+		case .closed: .neutral
+		}
+		return goal
+	}
+
+	static func toBudgetTone(_ toBudget: Int64) -> VeritasCore.MoneyTone {
+		toBudget < 0 ? .overspent : toBudget == 0 ? .neutral : .income
 	}
 
 	private func updateGoal(_ id: String, _ change: (inout GoalSummary) -> Void) throws {
 		guard let index = goalList.firstIndex(where: { $0.id == id }) else { throw FfiError.NotFound(entity: "goal", id: id) }
 		change(&goalList[index])
+		goalList[index] = Self.withCoreFields(goalList[index])
 	}
 
 	private func remove(_ id: String) throws -> Envelope {

@@ -11,19 +11,22 @@ public protocol AmountReader: Sendable {
 }
 
 /// The register's amounts are always two places; budget cells and goal
-/// amounts use the currency's own places (D63).
+/// amounts use the currency's own places (D63). With Actual's hide-fraction
+/// preference the core drops the fraction from the text a field opens on.
 public struct CoreAmountReader: AmountReader {
 	public let budgetDecimalPlaces: UInt8?
+	public let hideDecimals: Bool
 
-	public init(budgetDecimalPlaces: UInt8? = nil) {
+	public init(budgetDecimalPlaces: UInt8? = nil, hideDecimals: Bool = false) {
 		self.budgetDecimalPlaces = budgetDecimalPlaces
+		self.hideDecimals = hideDecimals
 	}
 
 	public func editText(_ amount: Int64, style: NumberStyle) -> String {
 		if let places = budgetDecimalPlaces {
-			return (try? budgetAmountEditText(amount: amount, style: style, decimalPlaces: places)) ?? ""
+			return (try? budgetAmountEditText(amount: amount, style: style, decimalPlaces: places, hideDecimals: hideDecimals)) ?? ""
 		}
-		return (try? amountEditText(amount: amount, style: style)) ?? ""
+		return (try? amountEditText(amount: amount, style: style, hideDecimals: hideDecimals)) ?? ""
 	}
 
 	public func fieldText(original: String, typed: String) -> String {

@@ -362,7 +362,7 @@ private struct WidgetHeader: View {
 					.foregroundStyle(Color.moneyAvailable)
 					.accessibilityLabel("Money in \(format.amount(income, on: .register))")
 				Label(format.amount(expenses, on: .register), systemImage: "arrow.down")
-					.foregroundStyle(Color.moneyOverspent)
+					.foregroundStyle(Color.moneyNeutral)
 					.accessibilityLabel("Money out \(format.amount(expenses, on: .register))")
 			}
 			.font(.figures(.caption, weight: .semibold))
@@ -376,8 +376,15 @@ private struct WidgetHeader: View {
 						.foregroundStyle(.textSecondary)
 				}
 			}
-		case .crossover(_, _, _, let month):
-			if let month { Text(ReportPeriod.monthYear(month)).font(.text(.body, weight: .semibold)) }
+		case .crossover(_, _, _, _, let years):
+			VStack(alignment: .trailing, spacing: 2) {
+				Text(years.map { $0.formatted(.number.precision(.fractionLength(0...1))) } ?? "N/A")
+					.font(.figures(.heading, weight: .semibold))
+				Text("Years to crossover")
+					.font(.text(.caption))
+					.foregroundStyle(.textSecondary)
+			}
+			.accessibilityElement(children: .combine)
 		case .monteCarlo(_, let rate, let age):
 			if let rate {
 				VStack(alignment: .trailing, spacing: 2) {
@@ -420,9 +427,9 @@ private struct WidgetBody: View {
 			BigFigure(figure: figure, format: format)
 		case .netWorth(let points, _):
 			Chart(points, id: \.month) { point in
-				AreaMark(x: .value("Month", ReportPeriod.shortMonth(point.month)), y: .value("Net worth", Double(point.netWorth) / 100))
+				AreaMark(x: .value("Month", ReportPeriod.shortMonth(point.month)), y: .value("Net worth", format.chartValue(point.netWorth, on: .register)))
 					.foregroundStyle(Color.moneyIncomeFill.opacity(0.16))
-				LineMark(x: .value("Month", ReportPeriod.shortMonth(point.month)), y: .value("Net worth", Double(point.netWorth) / 100))
+				LineMark(x: .value("Month", ReportPeriod.shortMonth(point.month)), y: .value("Net worth", format.chartValue(point.netWorth, on: .register)))
 					.foregroundStyle(Color.moneyIncomeFill)
 			}
 			.chartYAxis(.hidden)
@@ -444,12 +451,12 @@ private struct WidgetBody: View {
 			ScrollView { MarkdownText(text: text) }
 		case .calendar(let month, let days, _, _):
 			CalendarGrid(month: month, days: days, format: format)
-		case .crossover(let months, let expenses, let income, let crossover):
+		case .crossover(let months, let expenses, let income, let crossover, _):
 			Chart {
 				ForEach(Array(months.enumerated()), id: \.offset) { index, month in
-					LineMark(x: .value("Month", index), y: .value("Amount", expenses[index] / 100), series: .value("Line", card.config.conditions.isEmpty ? "All non-income categories" : "Selected categories"))
+					LineMark(x: .value("Month", index), y: .value("Amount", format.chartValue(expenses[index], on: .register)), series: .value("Line", card.config.conditions.isEmpty ? "All non-income categories" : "Selected categories"))
 						.foregroundStyle(Color.chartExpense)
-					LineMark(x: .value("Month", index), y: .value("Amount", income[index] / 100), series: .value("Line", "Investment income"))
+					LineMark(x: .value("Month", index), y: .value("Amount", format.chartValue(income[index], on: .register)), series: .value("Line", "Investment income"))
 						.foregroundStyle(Color.chartSavings)
 				}
 			}
@@ -459,20 +466,29 @@ private struct WidgetBody: View {
 		case .budgetAnalysis(let months, let budgeted, let spent):
 			Chart {
 				ForEach(Array(months.enumerated()), id: \.offset) { index, month in
-					BarMark(x: .value("Month", ReportPeriod.shortMonth(month)), y: .value("Amount", Double(budgeted[index]) / 100))
+					BarMark(x: .value("Month", ReportPeriod.shortMonth(month)), y: .value("Amount", format.chartValue(budgeted[index], on: .budget)))
 						.position(by: .value("Series", "Budgeted"))
 						.foregroundStyle(Color.moneyIncomeFill)
-					BarMark(x: .value("Month", ReportPeriod.shortMonth(month)), y: .value("Amount", Double(spent[index]) / 100))
+					BarMark(x: .value("Month", ReportPeriod.shortMonth(month)), y: .value("Amount", format.chartValue(spent[index], on: .budget)))
 						.position(by: .value("Series", "Spent"))
 						.foregroundStyle(Color.chartExpense)
 				}
 			}
 			.chartYAxis(.hidden)
-		case .balanceForecast(let points), .monteCarlo(let points, _, _):
+		case .balanceForecast(let points):
 			Chart(points, id: \.month) { point in
-				AreaMark(x: .value("Month", point.month.firstDay), yStart: .value("Low", Double(point.low) / 100), yEnd: .value("High", Double(point.high) / 100))
+				AreaMark(x: .value("Month", point.month.firstDay), yStart: .value("Lowest balance", format.chartValue(point.low, on: .register)), yEnd: .value("Highest balance", format.chartValue(point.high, on: .register)))
 					.foregroundStyle(Color.chartBand)
-				LineMark(x: .value("Month", point.month.firstDay), y: .value("Expected", Double(point.middle) / 100))
+				LineMark(x: .value("Month", point.month.firstDay), y: .value("Balance", format.chartValue(point.middle, on: .register)))
+					.foregroundStyle(Color.moneyIncomeFill)
+			}
+			.chartXAxis(.hidden)
+			.chartYAxis(.hidden)
+		case .monteCarlo(let points, _, _):
+			Chart(points, id: \.month) { point in
+				AreaMark(x: .value("Month", point.month.firstDay), yStart: .value("Lower range", format.chartValue(point.low, on: .register)), yEnd: .value("Upper range", format.chartValue(point.high, on: .register)))
+					.foregroundStyle(Color.chartBand)
+				LineMark(x: .value("Month", point.month.firstDay), y: .value("Median", format.chartValue(point.middle, on: .register)))
 					.foregroundStyle(Color.moneyIncomeFill)
 			}
 			.chartXAxis(.hidden)

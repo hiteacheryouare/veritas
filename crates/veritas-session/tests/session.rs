@@ -647,6 +647,54 @@ fn a_failed_full_check_turns_the_budget_read_only_after_it_opens() {
 }
 
 #[test]
+fn closing_waits_for_the_open_check_and_its_snapshot() {
+	// The contract's close() "releases the connection now". The open check and
+	// its snapshot hold connections of their own, so close waits for them:
+	// afterwards a write with no busy timeout gets the file, and deleting the
+	// folder isn't undone by a late snapshot recreating `snapshots`.
+	let (_root, dir) = imported("session-close-waits");
+	let release = hold_background_check(&dir, false);
+	let shared = Arc::new(SharedSession::new(
+		TestSession::open(&dir, TestClock::new().options()).unwrap(),
+	));
+	let (closed, heard) = channel();
+	let closer = {
+		let shared = shared.clone();
+		std::thread::spawn(move || {
+			shared.close().unwrap();
+			closed.send(()).unwrap();
+		})
+	};
+	assert!(
+		heard.recv_timeout(Duration::from_millis(300)).is_err(),
+		"close returned while the open check was still running"
+	);
+
+	release.send(()).unwrap();
+	heard.recv_timeout(Duration::from_secs(60)).unwrap();
+	closer.join().unwrap();
+	let snapshots = std::fs::read_dir(dir.join("snapshots")).unwrap().count();
+	assert_eq!(
+		snapshots, 1,
+		"the open snapshot finished before close returned"
+	);
+
+	let writer = Connection::open(dir.join("db.sqlite")).unwrap();
+	writer.busy_timeout(Duration::ZERO).unwrap();
+	writer
+		.execute_batch("BEGIN IMMEDIATE; UPDATE accounts SET name = name; COMMIT;")
+		.unwrap();
+	drop(writer);
+	std::fs::remove_dir_all(&dir).unwrap();
+	std::thread::sleep(Duration::from_millis(100));
+	assert!(!dir.exists());
+	assert!(matches!(
+		shared.with(|session| session.data().cloned()),
+		Err(CoreError::Invalid(_))
+	));
+}
+
+#[test]
 fn a_damaged_file_outranks_another_window_having_it_open() {
 	let (_root, dir) = imported("session-background-rank");
 	let mut first = TestSession::open(&dir, TestClock::new().options()).unwrap();
@@ -892,6 +940,8 @@ fn new_budget(name: &str) -> veritas_domain::NewBudget {
 			currency: Some("USD".to_owned()),
 			style: veritas_domain::NumberStyle::CommaDot,
 			hide_decimals: false,
+			symbol_first: true,
+			symbol_space: false,
 		},
 		retirement_401k: true,
 		hsa: false,

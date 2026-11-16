@@ -26,14 +26,15 @@ final class TransferFakeSession: BudgetSession, @unchecked Sendable {
 		PayeeDetail(id: "to-\($0)", name: $0, transferAccountId: $0, favorite: false, learnCategories: false, transactions: 0)
 	}
 	let month = BudgetMonth(
-		month: Month(year: 2026, month: 11), firstMonth: Month(year: 2026, month: 1), lastMonth: Month(year: 2026, month: 12), toBudget: 0, income: 0,
+		month: Month(year: 2026, month: 11), firstMonth: Month(year: 2026, month: 1), lastMonth: Month(year: 2026, month: 12), toBudget: 0, toBudgetTone: .neutral, income: 0,
 		fromLastMonth: 0, overspentLastMonth: 0, budgeted: 0, forNextMonth: 0, spent: 0, available: 0,
 		groups: [
 			EnvelopeGroup(id: "g", name: "Savings and Debt", isIncome: false, hidden: false, budgeted: 0, spent: 0, available: 0, envelopes: [
 				TransferFakeSession.envelope("savings-a", "Savings"), TransferFakeSession.envelope("savings-b", "Investments"),
 				TransferFakeSession.envelope("carloan-cat", "Car Loan"), TransferFakeSession.envelope("interest", "Loan interest")
 			])
-		]
+		],
+		mixedScaleNote: nil
 	)
 
 	static func envelope(_ id: String, _ name: String) -> EnvelopeRow {

@@ -210,12 +210,7 @@ pub fn target_writes(
 			"A goal's target has to be more than zero.".to_owned(),
 		));
 	}
-	let places = budget
-		.format
-		.currency_code
-		.as_deref()
-		.and_then(veritas_domain::currency)
-		.map_or(2, |currency| currency.decimal_places);
+	let places = budget.format.decimal_places();
 	let line = format!("#goal {}", major_units(target, places));
 	let existing = budget
 		.notes

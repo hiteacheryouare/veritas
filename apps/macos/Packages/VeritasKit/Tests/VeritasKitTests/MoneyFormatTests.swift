@@ -22,6 +22,15 @@ struct MoneyFormatTests {
 		#expect(format.amount(minorUnits, on: .budget) == expected, "a 2-place currency has one scale")
 	}
 
+	@Test func chartsScaleEachAmountByItsOwnPlaces() {
+		let yen = MoneyFormat(NumberFormat(currency: "JPY", style: .commaDot, hideDecimals: false), currency: Currency(code: "JPY", name: "Yen", symbol: "¥", decimalPlaces: 0, numberFormat: .commaDot, symbolFirst: true))
+		#expect(yen.chartValue(Int64(12_000), on: .budget) == 12_000, "a 0-place budget amount is already whole yen")
+		#expect(yen.chartValue(Int64(12_000), on: .register) == 120, "register amounts always carry 2 places")
+		#expect(yen.axisLabel(12_000) == "¥12k")
+		#expect(yen.axisLabel(-800) == "\u{2212}¥800")
+		#expect(format.chartValue(Int64(123_456), on: .register) == 1_234.56)
+	}
+
 	@Test func currencyPutsTheMinusBeforeTheSymbol() {
 		#expect(format.currency(31_240, on: .budget) == "$312.40")
 		#expect(format.currency(-3_475, on: .budget) == "\u{2212}$34.75")
@@ -93,23 +102,49 @@ struct BudgetMoneyFormatTests {
 		#expect(format.decimalPlaces == 2)
 	}
 
-	@Test func theSymbolGoesWhereTheCurrencyTableSays() {
+	@Test func theSymbolGoesWhereTheBudgetsPreferencesSay() {
+		let euro = MoneyFormat(
+			NumberFormat(currency: "EUR", style: .dotComma, hideDecimals: false, symbolFirst: false, symbolSpace: true),
+			currency: Currency(code: "EUR", name: "Euro", symbol: "€", decimalPlaces: 2, numberFormat: .dotComma, symbolFirst: false)
+		)
+		#expect(euro.currency(-123_456, on: .budget) == "\u{2212}1.234,56\u{202F}€")
+		let tight = MoneyFormat(
+			NumberFormat(currency: "EUR", style: .dotComma, hideDecimals: false, symbolFirst: true, symbolSpace: false),
+			currency: Currency(code: "EUR", name: "Euro", symbol: "€", decimalPlaces: 2, numberFormat: .dotComma, symbolFirst: false)
+		)
+		#expect(tight.currency(-123_456, on: .budget) == "\u{2212}€1.234,56", "the preference wins over the table")
+	}
+
+	@Test func aSymbolBeforeTheAmountCanBeSpaced() {
+		let franc = MoneyFormat(
+			NumberFormat(currency: "CHF", style: .apostropheDot, hideDecimals: false, symbolFirst: true, symbolSpace: true),
+			currency: Currency(code: "CHF", name: "Swiss Franc", symbol: "CHF", decimalPlaces: 2, numberFormat: .apostropheDot, symbolFirst: true)
+		)
+		#expect(franc.currency(123_456, on: .budget) == "CHF\u{202F}1'234.56")
+	}
+
+	@Test func unsetPreferencesReadAsActualsDefault() {
 		let euro = MoneyFormat(
 			NumberFormat(currency: "EUR", style: .dotComma, hideDecimals: false),
 			currency: Currency(code: "EUR", name: "Euro", symbol: "€", decimalPlaces: 2, numberFormat: .dotComma, symbolFirst: false)
 		)
-		#expect(euro.currency(-123_456, on: .budget) == "\u{2212}1.234,56€")
+		#expect(euro.currency(123_456, on: .budget) == "€1.234,56")
+	}
+
+	@Test func noSymbolMeansNoSpace() {
+		let none = MoneyFormat(NumberFormat(currency: nil, style: .commaDot, hideDecimals: false, symbolFirst: false, symbolSpace: true), currency: nil)
+		#expect(none.currency(31_240, on: .budget) == "312.40")
 	}
 
 	@Test func hiddenDecimalsShowNone() {
-		let hidden = MoneyFormat(NumberFormat(currency: "USD", style: .commaDot, hideDecimals: true), currency: .dollar)
+		let hidden = MoneyFormat(NumberFormat(currency: "USD", style: .commaDot, hideDecimals: true, symbolFirst: true, symbolSpace: false), currency: .dollar)
 		#expect(hidden.currency(41_250, on: .budget) == "$413")
 		#expect(hidden.amount(-41_249, on: .register) == "\u{2212}412")
 		#expect(hidden.decimalPlaces == 2, "amount fields still read the currency's places")
 	}
 
 	@Test func theCurrencyRowSetsThePlaces() {
-		let yen = MoneyFormat(NumberFormat(currency: "JPY", style: .commaDot, hideDecimals: false), currency: .yen)
+		let yen = MoneyFormat(NumberFormat(currency: "JPY", style: .commaDot, hideDecimals: false, symbolFirst: true, symbolSpace: false), currency: .yen)
 		#expect(yen == MoneyFormat.yen)
 	}
 }

@@ -165,6 +165,9 @@ private final class Recorder: ChangeListener, @unchecked Sendable {
 	#expect(credit.accounts.map(\.balance) == [-45_000])
 	let investments = try #require(overview.groups.first { $0.group == .investments })
 	#expect(investments.accounts.map(\.name) == ["401(k)"])
+	let shown = try #require(overview.numberFormat)
+	#expect(shown.symbolFirst == true)
+	#expect(shown.symbolSpace == false)
 }
 
 @Test func setupListsActualsCurrenciesAndAmountFieldsDoArithmetic() throws {
@@ -203,7 +206,14 @@ private final class Recorder: ChangeListener, @unchecked Sendable {
 
 	_ = try session.perform(
 		command: .setBudget(month: november, categoryId: goal.categoryId, amount: 100_000))
-	#expect(try session.goals(today: today).first { $0.id == goalId }?.state == .reached)
+	let reached = try #require(try session.goals(today: today).first { $0.id == goalId })
+	#expect(reached.state == .reached)
+	#expect(reached.progressPercent == 100)
+	#expect(reached.progressAmount == 100_000)
+	#expect(reached.tone == .available)
+	#expect(reached.spent == 0)
+	let month = try session.budgetMonth(month: november, today: today)
+	#expect(month.mixedScaleNote == nil)
 
 	let preview = try session.goalClosePreview(
 		goalId: goalId, releaseToCategoryId: nil, today: today)
@@ -227,6 +237,10 @@ private final class Recorder: ChangeListener, @unchecked Sendable {
 	let yen = try budgetAmountEditText(amount: 5_000, style: .commaDot, decimalPlaces: 0)
 	#expect(yen == "5,000")
 	#expect(try evaluateBudgetAmount(text: yen, style: .commaDot, decimalPlaces: 0) == 5_000)
+	#expect(
+		try budgetAmountEditText(amount: 123_450, style: .commaDot, decimalPlaces: 2, hideDecimals: true)
+			== "1,235")
+	#expect(try amountEditText(amount: 123_400, style: .commaDot, hideDecimals: true) == "1,234")
 }
 
 @Test func accountsAndTheRegisterAreEditedThroughCommands() async throws {

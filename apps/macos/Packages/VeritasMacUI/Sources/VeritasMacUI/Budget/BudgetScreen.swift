@@ -58,7 +58,7 @@ struct BudgetScreen: View {
 						}
 					}
 					.accessibilityIdentifier("budget.newGroup")
-					if let note = workspace.mixedScaleNote {
+					if let note = sheet.mixedScaleNote {
 						MixedScaleNote(text: note)
 							.padding(.top, Spacing.s4)
 					}
