@@ -57,14 +57,16 @@ pub struct MonteCarloChartPoint {
 	pub year: usize,
 	/// The current age plus `year`; ages needn't be whole.
 	pub age: f64,
-	pub p5: Money,
-	pub p10: Money,
-	pub p25: Money,
-	pub p30: Money,
-	pub p50: Money,
-	pub p70: Money,
-	pub p75: Money,
-	pub p90: Money,
+	/// Whole minor units, or NaN or infinite when a run's balance is, which
+	/// Actual draws as it is.
+	pub p5: f64,
+	pub p10: f64,
+	pub p25: f64,
+	pub p30: f64,
+	pub p50: f64,
+	pub p70: f64,
+	pub p75: f64,
+	pub p90: f64,
 }
 
 /// `accountBalance` (`desktop-client/src/spreadsheet/bindings.ts:23-31`), the
@@ -92,14 +94,10 @@ fn account_balance(budget: &BudgetData, account: &str) -> Result<Money, CoreErro
 	)
 }
 
-fn money(value: f64) -> Result<Money, CoreError> {
-	if value.is_finite() {
-		Ok(Money::from_minor(value as i64))
-	} else {
-		Err(CoreError::Invalid(format!(
-			"a Monte Carlo balance of {value}"
-		)))
-	}
+/// The card's headline: `Math.round(successRate * 1000) / 10`, a percent
+/// to one decimal (`MonteCarloCard.tsx:61`).
+pub fn success_percent(success_rate: f64) -> f64 {
+	js_round(success_rate * 1000.0) / 10.0
 }
 
 /// The Monte Carlo card for its meta. A pot linked to an account starts at
@@ -128,23 +126,21 @@ pub fn monte_carlo_card(
 	let chart = result
 		.percentile_bands
 		.iter()
-		.map(|band| {
-			Ok(MonteCarloChartPoint {
-				year: band.year,
-				age: current_age + band.year as f64,
-				p5: money(band.p5)?,
-				p10: money(band.p10)?,
-				p25: money(band.p25)?,
-				p30: money(band.p30)?,
-				p50: money(band.p50)?,
-				p70: money(band.p70)?,
-				p75: money(band.p75)?,
-				p90: money(band.p90)?,
-			})
+		.map(|band| MonteCarloChartPoint {
+			year: band.year,
+			age: current_age + band.year as f64,
+			p5: band.p5,
+			p10: band.p10,
+			p25: band.p25,
+			p30: band.p30,
+			p50: band.p50,
+			p70: band.p70,
+			p75: band.p75,
+			p90: band.p90,
 		})
-		.collect::<Result<_, CoreError>>()?;
+		.collect();
 	Ok(MonteCarloCard {
-		success_percent: js_round(result.success_rate * 1000.0) / 10.0,
+		success_percent: success_percent(result.success_rate),
 		start_age: current_age,
 		end_age: current_age + result.horizon_years as f64,
 		chart,

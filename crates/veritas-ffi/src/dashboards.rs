@@ -321,11 +321,13 @@ pub struct MonteCarloCardPoint {
 	pub year: u32,
 	/// The current age plus `year`; ages needn't be whole.
 	pub age: f64,
-	pub p10: i64,
-	pub p25: i64,
-	pub p50: i64,
-	pub p75: i64,
-	pub p90: i64,
+	/// Whole minor units, or NaN or infinite when a run's balance is, as
+	/// Actual draws it.
+	pub p10: f64,
+	pub p25: f64,
+	pub p50: f64,
+	pub p75: f64,
+	pub p90: f64,
 }
 
 /// What a widget draws: data only, worded by the Mac (ST-10.10). Money is
@@ -817,11 +819,11 @@ fn monte_carlo_view(card: reports::MonteCarloCard) -> WidgetView {
 			.map(|point| MonteCarloCardPoint {
 				year: count(point.year),
 				age: point.age,
-				p10: point.p10.minor(),
-				p25: point.p25.minor(),
-				p50: point.p50.minor(),
-				p75: point.p75.minor(),
-				p90: point.p90.minor(),
+				p10: point.p10,
+				p25: point.p25,
+				p50: point.p50,
+				p75: point.p75,
+				p90: point.p90,
 			})
 			.collect(),
 	}

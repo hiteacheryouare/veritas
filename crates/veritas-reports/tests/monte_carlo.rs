@@ -296,10 +296,10 @@ fn check_exact(label: &str, card: &MonteCarloCard, ours: &Value, theirs: &Value)
 			("p90", point.p90),
 		];
 		for (key, value) in shown {
-			assert_eq!(
-				band[key].as_i64(),
-				Some(value.minor()),
-				"{label} year {} {key}",
+			let theirs = number(&band[key]).unwrap();
+			assert!(
+				theirs == value || (theirs.is_nan() && value.is_nan()),
+				"{label} year {} {key}: {theirs} against {value}",
 				point.year
 			);
 		}
