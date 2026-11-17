@@ -129,9 +129,9 @@ public protocol BudgetSession: AnyObject, Sendable {
 	func netProfit(first: Month, last: Month) async throws -> NetProfitReport
 	/// Assets, liabilities and net worth at each month's end (R-REP-5).
 	func netWorth(first: Month, last: Month) async throws -> [NetWorthMonth]
-	/// One Cash Flow Statement per month (R-REP-5).
+	/// One cash flow statement per month (R-REP-5).
 	func cashFlow(first: Month, last: Month) async throws -> [CashFlowColumn]
-	/// One Cash Flow Statement for an inclusive date range (R-REP-7).
+	/// One cash flow statement for an inclusive date range (R-REP-7).
 	func cashFlowStatement(first: String, last: String) async throws -> CashFlowColumn
 	/// Inclusive `YYYY-MM-DD` dates (R-REP-6).
 	func sankey(first: String, last: String) async throws -> SankeyReport
