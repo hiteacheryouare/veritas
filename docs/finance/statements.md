@@ -35,7 +35,7 @@ Rules:
 
 ## ST-3 The four statements (R-REP-7)
 
-Header on every statement: configurable entity name, statement title, period or as-of date, currency. "Unaudited. Obviously." sits beside the entity name in the header, as the mockup draws it (`design/mockups/statement.html:49`; the mockup wins on copy, ST-10). Amounts shown in dollars and cents from cents. Liabilities and expenses are displayed as positive numbers under their own heading. A negative amount is shown in parentheses, for example `(36.00)`. Statement titles are in Veritas's sentence case (Architect ruling, 2026-11-16): proper terms such as Net Profit keep their capitals.
+Header on every statement: configurable entity name, statement title, period or as-of date, currency. "Unaudited. Obviously." sits beside the entity name in the header, as the mockup draws it (`design/mockups/statement.html:49`; the mockup wins on copy, ST-10, except for the titles below). Amounts shown in dollars and cents from cents. Liabilities and expenses are displayed as positive numbers under their own heading. A negative amount is shown in parentheses, for example `(36.00)`. Statement titles are in Veritas's sentence case (Architect ruling, 2026-11-16, which supersedes the mockup's Title Case at `statement.html:50-51`): proper terms such as Net Profit keep their capitals.
 
 | Statement | Date basis | Layout |
 |---|---|---|
