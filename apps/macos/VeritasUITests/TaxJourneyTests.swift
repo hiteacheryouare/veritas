@@ -14,6 +14,7 @@ final class TaxJourneyTests: XCTestCase {
 		XCTAssertTrue(app.buttons["tax.bucket.charitable"].label.hasPrefix("Charitable giving, 130.00"), app.buttons["tax.bucket.charitable"].label)
 		let business = app.buttons["tax.bucket.business_expense"]
 		XCTAssertTrue(business.label.hasPrefix("Business expenses, \u{2212}15.00"), "a negative total stays negative: \(business.label)")
+		XCTAssertTrue(business.label.contains("Refunds or reversals exceed what was counted."), "TAX-4's note: \(business.label)")
 		let conflicts = app.descendants(matching: .any)["tax.conflicts"]
 		XCTAssertTrue(conflicts.exists)
 		XCTAssertTrue(app.staticTexts["Needs a decision"].exists)

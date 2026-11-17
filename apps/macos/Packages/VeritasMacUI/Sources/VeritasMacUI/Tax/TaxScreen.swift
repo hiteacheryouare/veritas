@@ -128,33 +128,46 @@ private struct TaxBucketTable: View {
 }
 
 private struct BucketRow: View {
+	static let negativeNote = "Refunds or reversals exceed what was counted."
+
 	let total: TaxBucketTotal
 	let isExpanded: Bool
 	let format: MoneyFormat
 	let toggle: () -> Void
 
+	/// TAX-4: a negative total stays negative, with a neutral note under it.
+	private var note: String? { total.total < 0 ? Self.negativeNote : nil }
+
 	var body: some View {
 		let name = TaxBuckets.name(total.bucket)
 		Button(action: toggle) {
-			HStack(spacing: 5) {
-				Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-					.font(.system(size: 10, weight: .semibold))
-					.foregroundStyle(.textTertiary)
-					.frame(width: 12)
-				Text(name)
-					.font(.text(.body, weight: .medium))
-					.foregroundStyle(.textPrimary)
-					.lineLimit(1)
-				Spacer(minLength: Spacing.s4)
-				ReportAmount(amount: total.total, format: format, weight: .semibold)
+			VStack(alignment: .trailing, spacing: 2) {
+				HStack(spacing: 5) {
+					Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+						.font(.system(size: 10, weight: .semibold))
+						.foregroundStyle(.textTertiary)
+						.frame(width: 12)
+					Text(name)
+						.font(.text(.body, weight: .medium))
+						.foregroundStyle(.textPrimary)
+						.lineLimit(1)
+					Spacer(minLength: Spacing.s4)
+					ReportAmount(amount: total.total, format: format, weight: .semibold)
+				}
+				if let note {
+					Text(note)
+						.font(.text(.caption))
+						.foregroundStyle(.textSecondary)
+				}
 			}
 			.padding(.horizontal, Spacing.s4)
+			.padding(.vertical, note == nil ? 0 : Spacing.s2)
 			.frame(minHeight: 38)
 			.contentShape(.rect)
 		}
 		.buttonStyle(.plain)
 		.help(ReportWords.showTransactions(total.count) ?? "")
-		.accessibilityLabel("\(name), \(format.amount(total.total, on: .register))")
+		.accessibilityLabel(["\(name), \(format.amount(total.total, on: .register))", note].compactMap { $0 }.joined(separator: ". "))
 		.accessibilityHint(ReportWords.showTransactions(total.count) ?? "")
 		.accessibilityValue(isExpanded ? "expanded" : "collapsed")
 		.accessibilityIdentifier("tax.bucket.\(TaxBuckets.id(total.bucket))")
