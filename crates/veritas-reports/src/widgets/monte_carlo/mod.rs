@@ -94,6 +94,35 @@ fn account_balance(budget: &BudgetData, account: &str) -> Result<Money, CoreErro
 	)
 }
 
+/// The settings' amounts, which Actual's editor saves at the currency's
+/// places, moved to the register's scale so they add up with a linked
+/// account's balance (D74). Rates, ages and counts don't change.
+fn to_register_scale(config: &mut MonteCarloConfig, factor: f64) {
+	if factor == 1.0 {
+		return;
+	}
+	for pot in &mut config.pots {
+		pot.starting_balance *= factor;
+		pot.investment.annual_fee_fixed *= factor;
+		for phase in &mut pot.investment_phases {
+			phase.investment.annual_fee_fixed *= factor;
+		}
+	}
+	config.minimum_spending *= factor;
+	for phase in &mut config.spending_phases {
+		phase.annual_withdrawal *= factor;
+	}
+	for contribution in &mut config.contributions {
+		contribution.annual_amount *= factor;
+	}
+	for stream in &mut config.income_streams {
+		stream.annual_amount *= factor;
+	}
+	for band in &mut config.tax_bands {
+		band.from *= factor;
+	}
+}
+
 /// The card's headline: `Math.round(successRate * 1000) / 10`, a percent
 /// to one decimal (`MonteCarloCard.tsx:61`).
 pub fn success_percent(success_rate: f64) -> f64 {
@@ -109,6 +138,7 @@ pub fn monte_carlo_card(
 	meta: Option<&Json>,
 ) -> Result<MonteCarloCard, CoreError> {
 	let mut config = monte_carlo_config_from_meta(meta)?;
+	to_register_scale(&mut config, super::register_factor(budget));
 	for pot in &mut config.pots {
 		if let Some(account) = &pot.account_id {
 			pot.starting_balance = js_max(0.0, account_balance(budget, account)?.minor() as f64);

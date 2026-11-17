@@ -66,3 +66,4 @@ pub use widgets::{
 	card_forecast, cash_flow_card, crossover, formula_card, generate_forecast, monte_carlo,
 	monte_carlo_card, net_worth_card, sankey_card, sankey_height_limit, spending, summary,
 };
+pub use widgets::{register_factor, register_scale};
