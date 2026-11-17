@@ -29,6 +29,7 @@ public final class WorkspaceModel {
 	public var newBudgetSetup: NewBudgetSetup?
 	public var isPaletteShown = false
 	public var isFindShown = false
+	public var isAssistantShown = false
 	public var isDense = false
 	public var showsHiddenEnvelopes = false
 	/// The budget's own format once the core reports it, else the Mac's.

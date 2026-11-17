@@ -4,6 +4,7 @@ import VeritasKit
 
 struct WorkspaceToolbar: ToolbarContent {
 	@Bindable var model: WorkspaceModel
+	var offersAssistant = false
 
 	var body: some ToolbarContent {
 		if model.destination == .screen(.budget) {
@@ -19,6 +20,16 @@ struct WorkspaceToolbar: ToolbarContent {
 		}
 		ToolbarItem(placement: .primaryAction) {
 			GoToAnythingButton { model.isPaletteShown = true }
+		}
+		if offersAssistant {
+			ToolbarItem(placement: .primaryAction) {
+				Toggle(isOn: $model.isAssistantShown) {
+					Label("Ask", systemImage: "text.bubble")
+				}
+				.toggleStyle(.button)
+				.help("Ask about this budget")
+				.accessibilityIdentifier("toolbar.assistant")
+			}
 		}
 	}
 }
