@@ -11,7 +11,7 @@ enum TaxExportPanel {
 		panel.canCreateDirectories = true
 		panel.nameFieldStringValue = model.fileName(export)
 		panel.prompt = "Export"
-		guard await panel.begin() == .OK, let url = panel.url else { return }
+		guard await panel.beginOnKeyWindow() == .OK, let url = panel.url else { return }
 		model.export(export, to: url)
 	}
 }

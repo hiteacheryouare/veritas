@@ -97,17 +97,17 @@ final class TaxJourneyTests: XCTestCase {
 		choice.click()
 	}
 
-	/// The panel shows the TAX-5 file name; Escape closes it without writing.
+	/// The panel opens as a sheet on the window, as Statements' does, with the
+	/// TAX-5 file name. Cancel closes it without writing.
 	@MainActor
 	private func assertSavePanel(named name: String, in app: XCUIApplication) {
-		let dialog = app.dialogs.firstMatch
-		let panel = dialog.waitForExistence(timeout: 5) ? dialog : app.sheets.firstMatch
-		XCTAssertTrue(panel.waitForExistence(timeout: 5), "a save panel opened")
-		let field = panel.textFields.firstMatch
+		let panel = app.sheets.firstMatch
+		XCTAssertTrue(panel.waitForExistence(timeout: 10), "the save panel opens on the window")
+		let field = panel.textFields["saveAsNameTextField"]
 		XCTAssertTrue(field.waitForExistence(timeout: 5))
 		XCTAssertEqual(field.value as? String, name)
-		attachScreenshot(of: app, named: name, wholeScreen: true)
-		panel.typeKey(.escape, modifierFlags: [])
+		attachScreenshot(of: app, named: name)
+		panel.buttons["Cancel"].click()
 		XCTAssertTrue(panel.waitForDisappearance())
 	}
 }
