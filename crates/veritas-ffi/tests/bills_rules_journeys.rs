@@ -2106,8 +2106,8 @@ fn an_auto_posted_about_or_between_bill_reads_as_an_estimate_until_edited_or_cle
 		"Water",
 		CITY_POWER,
 		BillAmount::Between {
-			low: -9_000,
-			high: -6_001,
+			low: -6_001,
+			high: -9_000,
 		},
 		monthly("2026-11-03", None),
 		Some(UTILITIES),
@@ -2133,8 +2133,8 @@ fn an_auto_posted_about_or_between_bill_reads_as_an_estimate_until_edited_or_cle
 		"Sewer",
 		CITY_POWER,
 		BillAmount::Between {
-			low: -1_001,
-			high: -1_000,
+			low: -1_000,
+			high: -1_001,
 		},
 		monthly("2026-11-03", None),
 		Some(UTILITIES),
@@ -2555,8 +2555,8 @@ fn upcoming_bills_carry_their_amount_kind_account_and_category() {
 			"Water",
 			CITY_POWER,
 			BillAmount::Between {
-				low: -6_000,
-				high: -4_000,
+				low: -4_000,
+				high: -6_000,
 			},
 			monthly("2026-11-18", None),
 			Some(UTILITIES),
@@ -3335,11 +3335,12 @@ fn amount_inflow_and_outflow_conditions_use_actuals_signs() {
 }
 
 #[test]
-fn a_range_bill_takes_its_lower_amount_first_and_reads_actuals_either_way() {
+fn a_range_bill_takes_its_smaller_amount_first_and_reads_actuals_either_way() {
 	// v13: Actual's editor keeps a range's ends as typed and orders them only
-	// when it matches (condition.ts:326-330). Veritas refuses a draft whose
-	// first amount is the higher one, and reads a range Actual saved high end
-	// first low end first, so that bill stays editable and posts the same.
+	// when it matches (condition.ts:326-330). Veritas orders a range by size,
+	// not sign: it refuses a draft whose first amount is the larger one, and
+	// reads a range Actual saved larger amount first smaller first, so that
+	// bill stays editable, posts the same and reads "$40 and $60" in Actual.
 	let scratch = Scratch::new("range-order");
 	let session = import(&scratch, &small_zip(), "veritas");
 	see(&session, "2026-11-01");
@@ -3355,7 +3356,7 @@ fn a_range_bill_takes_its_lower_amount_first_and_reads_actuals_either_way() {
 	};
 	let refused = session.perform(Command::CreateBill {
 		bill_id: Some("water".to_owned()),
-		bill: water(-4_000, -6_000),
+		bill: water(-6_000, -4_000),
 	});
 	assert!(
 		matches!(&refused, Err(FfiError::Invalid { message }) if message == "Put the lower amount first"),
@@ -3372,7 +3373,7 @@ fn a_range_bill_takes_its_lower_amount_first_and_reads_actuals_either_way() {
 		&ours,
 		json!([{"op": "createSchedule", "id": "water", "name": "Water", "postsTransaction": true,
 			"payee": CITY_POWER, "account": CHECKING, "amountOp": "isbetween",
-			"amount": {"num1": -4_000, "num2": -6_000},
+			"amount": {"num1": -6_000, "num2": -4_000},
 			"date": {"start": "2026-11-18", "interval": 1, "frequency": "monthly", "patterns": [],
 				"skipWeekend": false, "weekendSolveMode": "before", "endMode": "never",
 				"endOccurrences": 1, "endDate": "2026-11-18"}}]),
@@ -3386,8 +3387,8 @@ fn a_range_bill_takes_its_lower_amount_first_and_reads_actuals_either_way() {
 	assert_eq!(
 		read.draft.as_ref().unwrap().amount,
 		BillAmount::Between {
-			low: -6_000,
-			high: -4_000
+			low: -4_000,
+			high: -6_000
 		}
 	);
 	assert_eq!(read.scheduled_amount, Some(-5_000));
@@ -3419,5 +3420,5 @@ fn a_range_bill_takes_its_lower_amount_first_and_reads_actuals_either_way() {
 		.iter()
 		.find(|c| c["field"] == "amount")
 		.unwrap();
-	assert_eq!(amount["value"], json!({"num1": -6_000, "num2": -4_000}));
+	assert_eq!(amount["value"], json!({"num1": -4_000, "num2": -6_000}));
 }

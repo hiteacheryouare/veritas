@@ -334,13 +334,14 @@ impl Bill {
 		// (`BetweenAmountInput`, `dc/components/util/AmountInput.tsx:246-273`)
 		// and only orders them when it matches (`sortNumbers`,
 		// `lc/server/rules/condition.ts:326-330`); it never swaps or refuses
-		// them. Veritas asks for the lower end first so the two fields read
-		// the same way every time.
+		// them. Veritas orders a range by size, not sign, so a bill's range
+		// reads as Actual's schedule list shows it, "$40 and $45" for
+		// (-4000, -4500) (`SchedulesTable.tsx:79-88`).
 		if let BillAmount::Between(low, high) = self.amount {
 			if low == high {
 				return Err(invalid("A range needs two different amounts"));
 			}
-			if low > high {
+			if low.minor().unsigned_abs() >= high.minor().unsigned_abs() {
 				return Err(invalid("Put the lower amount first"));
 			}
 		}
@@ -728,12 +729,16 @@ pub fn read_bill(
 			.ok_or(NotABill::UnsupportedAmount)
 	};
 	let amount = match conditions[amount_slot]["op"].as_str() {
-		// A range Actual saved high end first reads low end first, as Actual
-		// orders it when it matches (`condition.ts:326-330`), so it stays editable.
+		// A range Actual saved larger amount first reads smaller first, so it
+		// stays editable; Actual matches either order (`condition.ts:326-330`).
 		Some("isbetween") => {
 			let num1 = cents(amount_value.get("num1"))?;
 			let num2 = cents(amount_value.get("num2"))?;
-			BillAmount::Between(num1.min(num2), num1.max(num2))
+			if num1.minor().unsigned_abs() > num2.minor().unsigned_abs() {
+				BillAmount::Between(num2, num1)
+			} else {
+				BillAmount::Between(num1, num2)
+			}
 		}
 		Some("isapprox") => BillAmount::About(cents(Some(amount_value))?),
 		_ => BillAmount::Exact(cents(Some(amount_value))?),
@@ -905,7 +910,7 @@ mod tests {
 		});
 		bills.push(paycheck);
 		let mut gym = rent();
-		gym.amount = BillAmount::Between(Money::from_minor(-5000), Money::from_minor(-4000));
+		gym.amount = BillAmount::Between(Money::from_minor(-4000), Money::from_minor(-5000));
 		gym.date = BillDate::Once(day("2026-12-05"));
 		bills.push(gym);
 		for bill in bills {
@@ -1014,9 +1019,11 @@ mod tests {
 			bill.amount = BillAmount::Between(Money::from_minor(low), Money::from_minor(high));
 			bill.validate(today)
 		};
-		assert!(range(-6_000, -4_000).is_ok());
+		assert!(range(-4_000, -6_000).is_ok(), "by size, not sign");
+		assert!(range(1_000, 2_000).is_ok());
+		assert!(range(-100, 100).is_err(), "neither is smaller");
 		assert!(matches!(
-			range(-4_000, -6_000),
+			range(-6_000, -4_000),
 			Err(CoreError::Invalid(message)) if message == "Put the lower amount first"
 		));
 		assert!(range(-4_000, -4_000).is_err());
