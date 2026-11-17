@@ -25,7 +25,8 @@ pub enum RuleConditionsOp {
 }
 
 /// A transaction field. `AmountInflow` and `AmountOutflow` are conditions
-/// only: Actual stores them as `amount` with an inflow or outflow option.
+/// only: Actual stores them as `amount` with an inflow or outflow option
+/// (`deserializeField`, `lc/shared/rules.ts:120-128`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum RuleField {
 	ImportedPayee,
@@ -35,8 +36,19 @@ pub enum RuleField {
 	Category,
 	CategoryGroup,
 	Notes,
+	/// Actual's signed amount in minor units: negative is money out, positive
+	/// money in. "amount is -5000" matches a 50.00 payment.
 	Amount,
+	/// Money in only. The value is positive and compared with the amount as
+	/// it is; a negative amount never matches. When rules run, an amount of 0
+	/// passes the sign check (`lc/server/rules/condition.ts:262-266`); the
+	/// preview's search wants more than 0 (`transaction-rules.ts:557-561`).
 	AmountInflow,
+	/// Money out only. The value is positive and compared with the amount's
+	/// absolute value, so "outflow is 5000" matches -5000; a positive amount
+	/// never matches. When rules run, 0 passes the sign check
+	/// (`condition.ts:256-261`); the preview's search wants less than 0
+	/// (`transaction-rules.ts:550-556`).
 	AmountOutflow,
 	Date,
 	Cleared,
@@ -171,6 +183,11 @@ pub struct RuleSentence {
 	/// Veritas evaluates and applies all of it. When false, transactions it
 	/// would touch get "may need Actual".
 	pub runs_in_veritas: bool,
+	/// v13. For a bill's rule, the bill's name (`nil` when it has none).
+	/// Actual's rules page describes the link as the payee and next date
+	/// instead (`describeSchedule`, `dc/util/schedule.ts:210-219`).
+	#[uniffi(default = None)]
+	pub bill_name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
@@ -225,6 +242,80 @@ pub struct RuleMatch {
 	pub changes: Vec<RuleFieldChange>,
 	/// The lines a split rule would give it, in order.
 	pub split_lines: Vec<RuleSplitLine>,
+	/// v13. The row is reconciled, so the register shows it locked.
+	#[uniffi(default = false)]
+	pub reconciled: bool,
+	/// v13. The row carries "may need Actual": a rule couldn't run on it here.
+	#[uniffi(default = false)]
+	pub may_need_actual: bool,
+}
+
+/// The kind of value a condition op or an action field takes in a draft.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum RuleValueKind {
+	/// `.id`.
+	Id,
+	/// `.ids`, at least one.
+	Ids,
+	/// `.text`.
+	Text,
+	/// `.texts`, at least one, none blank.
+	Texts,
+	/// `.amount`, in the sign its field states.
+	Amount,
+	/// `.amountRange`.
+	AmountRange,
+	/// `.date`.
+	Date,
+	/// `.date`, `.month` or `.year`.
+	DateMonthOrYear,
+	/// `.bool`.
+	Bool,
+	/// `.percent`.
+	Percent,
+	/// `.nothing`.
+	Nothing,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct RuleOpChoice {
+	pub op: RuleConditionOp,
+	pub value: RuleValueKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct RuleConditionChoice {
+	pub field: RuleField,
+	/// In the order Actual's op menu lists them.
+	pub ops: Vec<RuleOpChoice>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct RuleActionOpChoice {
+	pub op: RuleActionOp,
+	/// `nil` for `set`, whose value follows its field.
+	pub value: Option<RuleValueKind>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct RuleActionFieldChoice {
+	pub field: RuleField,
+	pub value: RuleValueKind,
+}
+
+/// What the sentence editor's pickers offer, from Actual's own tables.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct RuleChoices {
+	/// The condition fields in the order of Actual's field menu.
+	pub condition_fields: Vec<RuleConditionChoice>,
+	/// The ops on the transaction itself.
+	pub action_ops: Vec<RuleActionOpChoice>,
+	/// The fields `set` offers on the transaction itself.
+	pub action_fields: Vec<RuleActionFieldChoice>,
+	/// The fields `set` offers on a split line.
+	pub split_line_fields: Vec<RuleActionFieldChoice>,
+	/// A split line's amount: `amount` (fixed), `percent`, `nothing` (remainder).
+	pub split_amounts: Vec<RuleValueKind>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -362,8 +453,16 @@ fn core_value(value: &RuleValue) -> Result<veritas_rules::Value, CoreError> {
 	})
 }
 
-fn sentence(sentence: veritas_rules::Sentence) -> RuleSentence {
+fn sentence(budget: &BudgetData, sentence: veritas_rules::Sentence) -> RuleSentence {
+	let bill_name = match &sentence.access {
+		veritas_rules::Access::Bill(schedule) => budget
+			.schedules
+			.get(schedule)
+			.and_then(|schedule| schedule.name.clone()),
+		_ => None,
+	};
 	RuleSentence {
+		bill_name,
 		id: sentence.id.to_string(),
 		stage: stage(sentence.stage),
 		conditions_op: match sentence.conditions_op {
@@ -463,6 +562,11 @@ fn preview(budget: &BudgetData, source: &RuleSource) -> Result<Vec<RuleMatch>, C
 		.map(|found| {
 			let row = found.transaction;
 			RuleMatch {
+				reconciled: row.reconciled,
+				may_need_actual: budget
+					.transaction_meta
+					.get(&row.id)
+					.is_some_and(|meta| meta.needs_actual.is_some()),
 				transaction_id: row.id.to_string(),
 				parent_id: match row.split {
 					veritas_domain::SplitRole::Child { parent } => Some(parent.to_string()),
@@ -496,6 +600,81 @@ fn preview(budget: &BudgetData, source: &RuleSource) -> Result<Vec<RuleMatch>, C
 			}
 		})
 		.collect())
+}
+
+fn value_kind(kind: veritas_rules::ValueKind) -> RuleValueKind {
+	use veritas_rules::ValueKind as K;
+	match kind {
+		K::Id => RuleValueKind::Id,
+		K::Ids => RuleValueKind::Ids,
+		K::Text => RuleValueKind::Text,
+		K::Texts => RuleValueKind::Texts,
+		K::Amount => RuleValueKind::Amount,
+		K::AmountRange => RuleValueKind::AmountRange,
+		K::Date => RuleValueKind::Date,
+		K::DateMonthOrYear => RuleValueKind::DateMonthOrYear,
+		K::Bool => RuleValueKind::Bool,
+		K::Percent => RuleValueKind::Percent,
+		K::Nothing => RuleValueKind::Nothing,
+	}
+}
+
+fn choices() -> RuleChoices {
+	let core = veritas_rules::choices();
+	let fields = |fields: Vec<(Field, veritas_rules::ValueKind)>| {
+		fields
+			.into_iter()
+			.map(|(f, kind)| RuleActionFieldChoice {
+				field: field(f, AmountSign::Any),
+				value: value_kind(kind),
+			})
+			.collect()
+	};
+	RuleChoices {
+		condition_fields: core
+			.conditions
+			.into_iter()
+			.map(|choice| RuleConditionChoice {
+				field: field(choice.field, choice.sign),
+				ops: choice
+					.ops
+					.into_iter()
+					.map(|(op, kind)| RuleOpChoice {
+						op: condition_op(op),
+						value: value_kind(kind),
+					})
+					.collect(),
+			})
+			.collect(),
+		action_ops: core
+			.action_ops
+			.into_iter()
+			.map(|(op, kind)| RuleActionOpChoice {
+				op: action_op(op),
+				value: kind.map(value_kind),
+			})
+			.collect(),
+		action_fields: fields(core.action_fields),
+		split_line_fields: fields(core.split_fields),
+		split_amounts: core.split_amounts.into_iter().map(value_kind).collect(),
+	}
+}
+
+/// What Actual's rule editor offers, with its feature flags off, so the
+/// sentence editor's pickers needn't keep a copy: the condition fields in
+/// its menu order (`dc/components/rules/RuleEditor.tsx:1004-1019`), each
+/// with `getValidOps` (`lc/shared/rules.ts:6-51`, `110-118`) and the value
+/// each op takes (inflow and outflow without `isBetween`,
+/// `RuleEditor.tsx:965-976`); the action ops (`RuleEditor.tsx:519-521`);
+/// the action fields (`getActionFields` without `payee_name`, which the
+/// editor hides, `RuleEditor.tsx:443-453`, `508-513`); the split-line fields
+/// (`getSplitActionFields`, `RuleEditor.tsx:455-460`); and the split amount
+/// methods (`dc/util/rule.ts:26-33`). Drafts also accept a few things the
+/// editor doesn't offer, such as conditions on `payeeName` or actions
+/// setting `importedPayee`, `payeeName` or `reconciled`.
+#[uniffi::export]
+pub fn rule_choices() -> Result<RuleChoices, FfiError> {
+	crate::guard(|| Ok(choices()))
 }
 
 /// `Command::CreateRule`, `EditRule`, `DeleteRule` and `ApplyRule`.
@@ -536,7 +715,7 @@ impl Session {
 			session.data().map(|budget| {
 				veritas_rules::sentences(budget)
 					.into_iter()
-					.map(sentence)
+					.map(|found| sentence(budget, found))
 					.collect()
 			})
 		})

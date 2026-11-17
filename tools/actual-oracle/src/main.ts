@@ -13,6 +13,7 @@ import { loadArithmetic } from './reference.ts';
 import { reportRows } from './reportRows.ts';
 import { widgetData } from './widgets.ts';
 import { dashboardReadback } from './dashboards.ts';
+import { billFacts, ruleChoices } from './bills.ts';
 import { fixtureSpecs } from './specs/index.ts';
 
 const USAGE = `Usage:
@@ -26,8 +27,10 @@ const USAGE = `Usage:
   node src/main.ts widgets <zip> <requests.json> [--out <file>]
   node src/main.ts rule-matches <zip> <rule-ids.json> [--out <file>]
   node src/main.ts dashboards <zip> [--out <file>]
+  node src/main.ts bill-facts <zip> <request.json> [--out <file>]
+  node src/main.ts rule-choices [--out <file>]
 
-eval, arithmetic-vectors and widgets run Actual's own code from the pinned source in
+eval, arithmetic-vectors, widgets and rule-choices run Actual's own code from the pinned source in
 reference/actual (or ACTUAL_REFERENCE_DIR), because the bundle doesn't ship it.
 
 Shared options:
@@ -246,6 +249,15 @@ const main = async () => {
 			return ruleMatches(session, ruleIds);
 		});
 		writeCanonicalTo(matches, values.out);
+	} else if (command === 'bill-facts' && args.length === 2) {
+		const request = JSON.parse(readFileSync(args[1], 'utf8'));
+		const facts = await withActual(determinism, async session => {
+			await session.api.importBudget(readFileSync(args[0]));
+			return billFacts(session, request);
+		});
+		writeCanonicalTo(facts, values.out);
+	} else if (command === 'rule-choices' && args.length === 0) {
+		writeCanonicalTo(await ruleChoices(), values.out);
 	} else if (command === 'dashboards' && args.length === 1) {
 		const data = await withActual(determinism, async session => {
 			await session.api.importBudget(readFileSync(args[0]));
