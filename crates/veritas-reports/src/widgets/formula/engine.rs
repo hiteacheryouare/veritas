@@ -112,6 +112,8 @@ mod tests {
 		assert_eq!(number("=ROUND(1.005,2)"), 1.0);
 		assert_eq!(number("=-2^2"), 4.0);
 		assert_eq!(number("=2^3^2"), 64.0);
+		assert_eq!(number("=7^26"), 9.387480337600001e21);
+		assert_eq!(number("=1e300"), 9.999999999999999e299);
 	}
 
 	#[test]

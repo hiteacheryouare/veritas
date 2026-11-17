@@ -1381,9 +1381,16 @@ const QUERY_EDGES: &[&str] = &[
 ];
 
 /// Laziness, error order, collation, and very large or small results.
-/// Results such as `=1e300` are left out: Actual exports 9.999999999999999e299,
-/// but serde_json reads that JSON number back an ulp off.
 const MIXED_EDGES: &[&str] = &[
+	"=1e300",
+	"=ROUND(1e300,0)",
+	"=ROUND(1e300,1)",
+	"=ROUND(1e300,2)",
+	"=ROUND(1e300,3)",
+	"=1e300*1",
+	"=1.2345678901234e200",
+	"=2^100",
+	"=7^26",
 	"=IF(TRUE(),1,FOO(1))",
 	"=IF(TRUE(),1,foo)",
 	"=IF(TRUE(),1,SQRT(-1))",
@@ -2082,5 +2089,32 @@ fn d75_excluded_functions_actual_computes_show_name_in_veritas() {
 	let mut cases = cases;
 	cases.push(formula("=IF(TRUE(), 1, MOD(5,2))", Expect::Same));
 	cases.push(formula("=IF(FALSE(), MOD(5,2), \"kept\")", Expect::Same));
+	compare(&budget, &cases);
+}
+
+/// Results from 10^15 to 10^25, where the 11-digit export's floating-point
+/// division shows in the last bit (`=7^26` exports 9.387480337600001e21).
+#[test]
+fn d75_formula_engine_exports_large_results_as_actual_does() {
+	let budget = fixture("all-features");
+	let mut generator = Generator { state: 26 };
+	let mut cases = Vec::new();
+	for base in 2..=40u64 {
+		for exponent in [13, 17, 19, 23, 26, 31] {
+			let power = (base as f64).powi(exponent);
+			if (1e15..1e25).contains(&power) {
+				cases.push(formula(&format!("={base}^{exponent}"), Expect::Same));
+			}
+		}
+	}
+	for _ in 0..400 {
+		let digits = 1_000_000 + generator.below(9_000_000);
+		let scale = 9 + generator.below(10);
+		let factor = 1 + generator.below(999_999);
+		cases.push(formula(
+			&format!("={digits}e{scale}*{factor}"),
+			Expect::Same,
+		));
+	}
 	compare(&budget, &cases);
 }
