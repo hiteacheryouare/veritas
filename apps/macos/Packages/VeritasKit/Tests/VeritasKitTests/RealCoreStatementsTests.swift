@@ -64,7 +64,12 @@ struct RealCoreStatementsTests {
 				#expect(amounts[id] == (line.total == 0 ? nil : line.total), "\(id)")
 			}
 			#expect(equity.unexplained == 0, "ST-4 closes on the fixture")
-			#expect(amounts["unexplained"] == nil, "unexplained is hidden at zero")
+			#expect(document.unexplained == nil && document.notice(format: model.format) == nil, "no notice when it closes")
+			#expect(!document.lines.contains { $0.id == "unexplained" }, "never a line in the column")
+			let before = try #require(await budget.workspace.report { try await $0.balanceSheet(asOf: "2024-12-31") })
+			let after = try #require(await budget.workspace.report { try await $0.balanceSheet(asOf: "2025-12-31") })
+			#expect(equity.opening == before.netWorth, "opening is net worth the day before the period")
+			#expect(equity.closing == after.netWorth, "closing is net worth on the period's last day")
 			#expect(document.lines.map(\.title).first == "Opening equity")
 			#expect(document.lines.map(\.title).last == "Closing equity")
 		}
