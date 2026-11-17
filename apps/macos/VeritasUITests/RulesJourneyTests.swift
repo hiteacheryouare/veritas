@@ -137,6 +137,8 @@ final class RulesJourneyTests: XCTestCase {
 	private func openRules() -> XCUIApplication {
 		let app = XCUIApplication.veritas(stub: "open")
 		XCTAssertTrue(app.buttons["envelope.groceries.budgeted"].waitForExistence(timeout: 10))
+		app.sidebar("bills").click()
+		XCTAssertTrue(app.sidebar("rules").waitForExistence(timeout: 5), "Rules shows under Bills once Bills is open")
 		app.sidebar("rules").click()
 		XCTAssertTrue(app.screen("rules").waitForExistence(timeout: 5))
 		XCTAssertTrue(app.descendants(matching: .any)["rule.amazon"].waitForExistence(timeout: 5))

@@ -41,7 +41,7 @@ final class BillsJourneyTests: XCTestCase {
 		let app = openBills()
 		let music = element(app, "upcoming.music")
 		XCTAssertTrue(music.waitForExistence(timeout: 5))
-		app.buttons["upcoming.music.more"].click()
+		app.menuButtons["upcoming.music.more"].click()
 		app.menuItems["Skip"].click()
 		XCTAssertTrue(music.waitForDisappearance(), "skipped to its next date, past the tray's week")
 	}
@@ -114,7 +114,7 @@ final class BillsJourneyTests: XCTestCase {
 	@MainActor
 	func testTheTrayMenuPostsForTheOccurrenceDateOrToday() {
 		let app = openBills()
-		app.buttons["upcoming.car.more"].click()
+		app.menuButtons["upcoming.car.more"].click()
 		XCTAssertNotNil(contextItem(app, "Post for Nov 12"))
 		XCTAssertNotNil(contextItem(app, "Post today"))
 		XCTAssertNil(contextItem(app, "Post Now"))

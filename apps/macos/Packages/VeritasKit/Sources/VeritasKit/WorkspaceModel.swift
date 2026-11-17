@@ -458,6 +458,8 @@ public final class WorkspaceModel {
 			} catch {
 				present(error)
 			}
+			// maintain() may have changed state(): a failed schedule run or snapshot shows its banner now.
+			await refresh()
 			startMaintenance(of: opened)
 			await settings.connectBackupFolder()
 			await settings.backUpIfDue()
