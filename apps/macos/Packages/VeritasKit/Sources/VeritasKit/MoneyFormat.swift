@@ -108,6 +108,12 @@ public struct MoneyFormat: Hashable, Sendable {
 		return sign(minorUnits, magnitude) + withSymbol(digits(magnitude, places: shown))
 	}
 
+	/// `$34.75` for both 3475 and -3475: prose that names the direction in words.
+	public func currencyMagnitude(_ minorUnits: Int64, on scale: Scale) -> String {
+		let shown = shownPlaces
+		return withSymbol(digits(Self.rounded(minorUnits.magnitude, from: impliedPlaces(scale), to: shown), places: shown))
+	}
+
 	/// `$1,120`: goal cards, rounded half away from zero to the whole unit (CLS-12.4).
 	public func wholeCurrency(_ minorUnits: Int64, on scale: Scale) -> String {
 		let magnitude = Self.rounded(minorUnits.magnitude, from: impliedPlaces(scale), to: 0)

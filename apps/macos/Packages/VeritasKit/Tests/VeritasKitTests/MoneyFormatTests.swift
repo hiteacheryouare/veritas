@@ -43,6 +43,13 @@ struct MoneyFormatTests {
 		#expect(format.currency(-3_475, on: .budget) == "\u{2212}$34.75")
 	}
 
+	@Test func aMagnitudeDropsTheSign() {
+		#expect(format.currencyMagnitude(-3_475, on: .register) == "$34.75")
+		#expect(format.currencyMagnitude(3_475, on: .register) == "$34.75")
+		#expect(MoneyFormat.yen.currencyMagnitude(-50_050, on: .register) == "¥501")
+		#expect(format.currencyMagnitude(.min, on: .register) == "$92,233,720,368,547,758.08")
+	}
+
 	@Test func theExtremesOfTheRangeDontTrap() {
 		#expect(format.amount(.min, on: .register) == "\u{2212}92,233,720,368,547,758.08")
 		#expect(format.amount(.max, on: .register) == "92,233,720,368,547,758.07")
