@@ -150,27 +150,32 @@ struct ConditionsEditor: View {
 		}
 		ForEach(Array(conditions.indices), id: \.self) { index in
 			let condition = $conditions[index]
-			HStack(spacing: Spacing.s2) {
-				Picker("Field", selection: condition.field) {
-					ForEach(ReportCondition.fields, id: \.id) { Text($0.title).tag($0.id) }
+			// The value gets its own full-width line: beside two pickers it had no room in the 340pt report editor.
+			VStack(alignment: .leading, spacing: Spacing.s1) {
+				HStack(spacing: Spacing.s2) {
+					Picker("Field", selection: condition.field) {
+						ForEach(ReportCondition.fields, id: \.id) { Text($0.title).tag($0.id) }
+					}
+					.labelsHidden()
+					.frame(width: 110)
+					Picker("Operator", selection: condition.op) {
+						ForEach(ReportCondition.operators(for: condition.wrappedValue.field), id: \.id) { Text($0.title).tag($0.id) }
+					}
+					.labelsHidden()
+					.frame(width: 130)
+					Spacer(minLength: 0)
+					Button {
+						conditions.remove(at: index)
+					} label: {
+						Image(systemName: "minus.circle")
+					}
+					.buttonStyle(.borderless)
+					.accessibilityLabel("Remove filter")
 				}
-				.labelsHidden()
-				.frame(width: 110)
-				Picker("Operator", selection: condition.op) {
-					ForEach(ReportCondition.operators(for: condition.wrappedValue.field), id: \.id) { Text($0.title).tag($0.id) }
-				}
-				.labelsHidden()
-				.frame(width: 130)
 				TextField("Value", text: condition.text, prompt: Text("Value"))
 					.labelsHidden()
+					.frame(maxWidth: .infinity)
 					.accessibilityIdentifier("filters.value")
-				Button {
-					conditions.remove(at: index)
-				} label: {
-					Image(systemName: "minus.circle")
-				}
-				.buttonStyle(.borderless)
-				.accessibilityLabel("Remove filter")
 			}
 			.onChange(of: condition.wrappedValue.field) {
 				if !ReportCondition.operators(for: condition.wrappedValue.field).contains(where: { $0.id == condition.wrappedValue.op }) { condition.wrappedValue.op = "is" }
