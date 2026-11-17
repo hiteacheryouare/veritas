@@ -1876,3 +1876,211 @@ fn d75_formula_engine_fetches_queries_from_every_branch() {
 	.collect();
 	compare(&budget, &cases);
 }
+
+/// A small random formula over D75's functions, built from pieces Actual's
+/// card accepts and Veritas promises to match: no cell references or arrays,
+/// ASCII text only, and date functions only over real calendar dates.
+struct Generator {
+	state: u64,
+}
+
+impl Generator {
+	fn below(&mut self, n: u64) -> u64 {
+		self.state = self
+			.state
+			.wrapping_mul(6_364_136_223_846_793_005)
+			.wrapping_add(1_442_695_040_888_963_407);
+		(self.state >> 33) % n
+	}
+
+	fn pick<'a>(&mut self, items: &[&'a str]) -> &'a str {
+		items[usize::try_from(self.below(items.len() as u64)).unwrap()]
+	}
+
+	fn date(&mut self) -> String {
+		format!(
+			"DATE({}, {}, {})",
+			2000 + self.below(31),
+			self.below(14),
+			self.below(33)
+		)
+	}
+
+	fn query(&mut self) -> String {
+		let name = self.pick(&[
+			"all",
+			"static",
+			"groceries",
+			"everyday",
+			"lastYear",
+			"yearToDate",
+			"diningOrRent",
+			"missing",
+		]);
+		match self.below(3) {
+			0 => format!("QUERY(\"{name}\")"),
+			1 => format!(
+				"BUDGET_QUERY(\"{}\", QUERY_EXTRACT_CATEGORIES(\"{name}\"), QUERY_EXTRACT_TIMEFRAME_START(\"{name}\"), QUERY_EXTRACT_TIMEFRAME_END(\"{name}\"))",
+				self.pick(&["budgeted", "spent", "balance_start", "balance_end", "goal"])
+			),
+			_ => format!("QUERY_EXTRACT_TIMEFRAME_START(\"{name}\")"),
+		}
+	}
+
+	fn leaf(&mut self) -> String {
+		match self.below(8) {
+			0 => self
+				.pick(&[
+					"0",
+					"1",
+					"2",
+					"-3",
+					"7",
+					"100",
+					"12.5",
+					"0.1",
+					"1e3",
+					"50%",
+					"-0.25",
+					"1234567.891",
+				])
+				.to_owned(),
+			1 => self
+				.pick(&[
+					"\"abc\"",
+					"\"5\"",
+					"\"\"",
+					"\" 12 \"",
+					"\"2026-01-15\"",
+					"\"TRUE\"",
+					"\"a b\"",
+					"\"-4.5\"",
+				])
+				.to_owned(),
+			2 => self.pick(&["TRUE()", "FALSE()", "TODAY()"]).to_owned(),
+			3 => self.date(),
+			4 => self.query(),
+			5 => self.pick(&["1/0", "#N/A", "\"x\"+1"]).to_owned(),
+			_ => format!("{}", self.below(50)),
+		}
+	}
+
+	fn expr(&mut self, depth: u32) -> String {
+		if depth == 0 || self.below(4) == 0 {
+			return self.leaf();
+		}
+		let a = self.expr(depth - 1);
+		let b = self.expr(depth - 1);
+		match self.below(14) {
+			0 | 1 => format!(
+				"({a}{}{b})",
+				self.pick(&[
+					"+", "-", "*", "/", "^", "&", "=", "<>", "<", ">", "<=", ">="
+				])
+			),
+			2 => format!("-{a}"),
+			3 => {
+				let c = self.expr(depth - 1);
+				format!("IF({a}, {b}, {c})")
+			}
+			4 => format!(
+				"{}({a}, {b})",
+				self.pick(&["AND", "OR", "SUM", "AVERAGE", "MIN", "MAX", "CONCATENATE"])
+			),
+			5 => format!(
+				"{}({a})",
+				self.pick(&["NOT", "ABS", "LEN", "UPPER", "LOWER", "SUM", "ROUND"])
+			),
+			6 => format!("ROUND({a}, {})", self.below(5)),
+			7 => format!("{}({a}, {})", self.pick(&["LEFT", "RIGHT"]), self.below(6)),
+			8 => format!("{}({})", self.pick(&["YEAR", "MONTH", "DAY"]), self.date()),
+			9 => format!(
+				"EOMONTH({}, {})",
+				self.date(),
+				i64::try_from(self.below(25)).unwrap() - 12
+			),
+			10 => format!(
+				"{}({})",
+				self.pick(&["YEAR", "MONTH", "DAY"]),
+				self.below(80_000)
+			),
+			11 => format!("({a}{}{b})", self.pick(&["+", "*", "&"])),
+			_ => format!("IF({a}, {b})"),
+		}
+	}
+}
+
+/// An independent random sweep of D75's grammar against Actual's card:
+/// 1,500 formulas over the all-features budget, each the same value or the
+/// same error message as Actual, with nothing refused.
+#[test]
+fn d75_random_formulas_over_the_subset_match_actual() {
+	let budget = fixture("all-features");
+	let queries = queries(&budget);
+	let mut generator = Generator {
+		state: 0x0005_eed0_fd75_u64,
+	};
+	let cases: Vec<Case> = (0..1_500)
+		.map(|_| {
+			let depth = u32::try_from(generator.below(4)).unwrap() + 1;
+			with_queries(&format!("={}", generator.expr(depth)), &queries)
+		})
+		.collect();
+	let sheet = EnvelopeSheet::compute(&budget, CivilDate::from(today())).unwrap();
+	let mut kinds = [0_usize; 5];
+	for case in &cases {
+		let card = formula_card(&budget, &sheet, meta(&case.meta).as_ref(), today()).unwrap();
+		kinds[match card.value {
+			FormulaValue::Number(_) => 0,
+			FormulaValue::Text(_) => 1,
+			FormulaValue::Boolean(_) => 2,
+			FormulaValue::Error(_) => 3,
+			FormulaValue::Empty => 4,
+		}] += 1;
+	}
+	assert!(
+		kinds[..4].iter().all(|&count| count >= 100),
+		"the sweep reaches numbers, text, booleans and errors alike: {kinds:?}"
+	);
+	compare(&budget, &cases);
+}
+
+/// D75's exclusions beyond the list above: functions HyperFormula has that
+/// Actual's card computes, which Veritas must show as an unknown function
+/// (`Formula error: NAME`), never as a value of its own, in any letter case.
+/// In a branch IF doesn't take, it changes nothing, in either app.
+#[test]
+fn d75_excluded_functions_actual_computes_show_name_in_veritas() {
+	let budget = fixture("all-features");
+	let cases: Vec<Case> = [
+		"=PI()",
+		"=MOD(5,2)",
+		"=TRIM(\" a \")",
+		"=SUBSTITUTE(\"aa\",\"a\",\"b\")",
+		"=FIND(\"b\",\"abc\")",
+		"=REPT(\"a\",3)",
+		"=CEILING(2.5,1)",
+		"=FLOOR(2.5,1)",
+		"=WEEKDAY(46037)",
+		"=TRUNC(2.7)",
+		"=SIGN(-2)",
+		"=PRODUCT(2,3)",
+		"=MEDIAN(1,2,3)",
+		"=EXACT(\"a\",\"a\")",
+		"=CHAR(65)",
+		"=CODE(\"A\")",
+		"=ISNUMBER(1)",
+		"=COUNTA(1,2)",
+		"=PROPER(\"ab\")",
+		"=sqrt(4)",
+		"=Power(2,3)",
+		"=SUM(1, SQRT(4))",
+	]
+	.iter()
+	.map(|text| formula(text, Expect::OutOfScope))
+	.collect();
+	let mut cases = cases;
+	cases.push(formula("=IF(TRUE(), 1, MOD(5,2))", Expect::Same));
+	cases.push(formula("=IF(FALSE(), MOD(5,2), \"kept\")", Expect::Same));
+	compare(&budget, &cases);
+}
