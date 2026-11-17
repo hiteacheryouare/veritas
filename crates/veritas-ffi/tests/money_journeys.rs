@@ -1425,3 +1425,234 @@ fn what_is_this_saves_the_envelope_and_the_move_in_one_step() {
 	);
 	assert_ne!(other, principal);
 }
+
+fn reimported(zip: &Path, label: &str) -> (Scratch, Arc<Session>) {
+	let scratch = Scratch::new(label);
+	let session = block_on(Session::import_actual_zip(
+		text(zip),
+		text(&scratch.join("budget")),
+		CancelToken::new(),
+	))
+	.unwrap();
+	(scratch, session)
+}
+
+#[test]
+fn a_mapped_line_fixed_in_actual_prefills_its_new_amount_and_envelope_and_the_mapping_survives() {
+	// D76 through a real round trip: the wizard records a payment, Ryan
+	// opens the budget in Actual and corrects the interest line's amount and
+	// envelope in place, and Actual saves the file. The mapping rows come
+	// back untouched, and the next pre-fill reads the corrected line.
+	let setup = loan_setup("parts-fixed", 980_000);
+	let session = &setup.session;
+	let mut first = payment(&setup, "fix", "2026-11-20", 44_000, 8_000);
+	first.escrow = 4_000;
+	first.escrow_category_id = Some(setup.escrow.clone());
+	perform(session, Command::RecordLoanPayment { payment: first });
+	let zip = setup._scratch.join("before.zip");
+	block_on(session.export_actual_zip(text(&zip), CancelToken::new())).unwrap();
+	let Some(oracle) = oracle() else {
+		return;
+	};
+	let mapping = |zip: &Path| -> Vec<(String, String, String, i64)> {
+		let dump = actual_reads(&oracle, zip);
+		let mut rows: Vec<_> = dump["tables"]["veritas_loan_payment_part"]["rows"]
+			.as_array()
+			.unwrap_or_else(|| {
+				panic!(
+					"Actual's file has no veritas_loan_payment_part: {}",
+					dump["tables"]
+						.as_object()
+						.unwrap()
+						.keys()
+						.cloned()
+						.collect::<Vec<_>>()
+						.join(", ")
+				)
+			})
+			.iter()
+			.map(|row| {
+				(
+					row["payment"].as_str().unwrap().to_owned(),
+					row["line"].as_str().unwrap().to_owned(),
+					row["part"].as_str().unwrap().to_owned(),
+					row["tombstone"].as_i64().unwrap(),
+				)
+			})
+			.collect();
+		rows.sort();
+		rows
+	};
+	let before = mapping(&zip);
+	assert_eq!(before.len(), 2, "interest and escrow: {before:?}");
+	let dining = category(session, "Dining Out");
+	let lines: Vec<Value> = shown(session, "fix")
+		.lines
+		.iter()
+		.map(|line| {
+			let (amount, envelope) = if line.amount == -8_000 {
+				(-9_250, Some(dining.clone()))
+			} else {
+				(line.amount, line.category_id.clone())
+			};
+			serde_json::json!({"id": line.id, "amount": amount, "category": envelope, "payee": line.payee_id})
+		})
+		.collect();
+	let fixed = setup._scratch.join("fixed-in-actual.zip");
+	actual_apply(
+		&oracle,
+		&zip,
+		serde_json::json!([{"op": "updateTransaction", "id": "fix", "fields": {"amount": -45_250, "subtransactions": lines}}]),
+		&fixed,
+		21,
+	);
+	assert_eq!(
+		mapping(&fixed),
+		before,
+		"Actual's save keeps every mapping row as written"
+	);
+	let (_kept, reopened) = reimported(&fixed, "parts-fixed-reopened");
+	let next = reopened
+		.loan_payment_defaults(setup.loan.clone(), "2026-12-01".to_owned())
+		.unwrap();
+	assert_eq!(
+		(next.total, next.interest, next.escrow),
+		(Some(32_000 + 9_250 + 4_000), Some(9_250), Some(4_000)),
+		"the corrected interest line, read through the mapping"
+	);
+	assert_eq!(next.interest_category_id.as_deref(), Some(dining.as_str()));
+	assert_eq!(
+		next.escrow_category_id.as_deref(),
+		Some(setup.escrow.as_str())
+	);
+	reopened.close().unwrap();
+}
+
+#[test]
+fn undoing_or_deleting_the_newest_payment_prefills_from_the_one_before() {
+	// The mapping is written in the payment's own undo step, so undoing a
+	// payment, redoing it, or deleting it leaves the pre-fill reading the
+	// payment that is then the last one.
+	let setup = loan_setup("parts-undo", 980_000);
+	let session = &setup.session;
+	let defaults = || {
+		session
+			.loan_payment_defaults(setup.loan.clone(), "2027-01-01".to_owned())
+			.unwrap()
+	};
+	let mut november = payment(&setup, "nov", "2026-11-20", 41_000, 8_000);
+	november.escrow = 1_000;
+	november.escrow_category_id = Some(setup.escrow.clone());
+	perform(session, Command::RecordLoanPayment { payment: november });
+	let after_november = defaults();
+	assert_eq!(
+		(after_november.interest, after_november.escrow),
+		(Some(8_000), Some(1_000))
+	);
+	let mut december = payment(&setup, "dec", "2026-12-20", 39_000, 7_500);
+	december.fees = 1_500;
+	december.fees_category_id = Some(setup.escrow.clone());
+	perform(session, Command::RecordLoanPayment { payment: december });
+	let after_december = defaults();
+	assert_eq!(
+		(
+			after_december.interest,
+			after_december.escrow,
+			after_december.escrow_category_id.clone()
+		),
+		(Some(7_500), Some(0), None),
+		"December's own parts: its fee is neither pre-filled nor escrow"
+	);
+	session.undo().unwrap();
+	assert_eq!(
+		defaults(),
+		after_november,
+		"undo takes December and its mapping away together"
+	);
+	session.redo().unwrap();
+	assert_eq!(defaults(), after_december, "redo brings both back");
+	perform(
+		session,
+		Command::DeleteTransaction {
+			transaction_id: "dec".to_owned(),
+		},
+	);
+	assert_eq!(
+		defaults(),
+		after_november,
+		"a deleted payment's parts are never read"
+	);
+}
+
+#[test]
+fn a_payment_with_no_interest_never_prefills_its_escrow_as_interest() {
+	// The core side of RealCoreAccountsTests'
+	// afterAPaymentWithNoInterestTheNextPaymentPrefillsNoInterest known
+	// issue, on all-features' Car Loan: $300 with no interest, $40 escrow and
+	// $5 fees used to pre-fill the escrow as interest and the fee as escrow.
+	use veritas_ffi::CategoryKind;
+	const CAR_LOAN: &str = "87979271-7007-41a8-a77e-7bce6f3e2da1";
+	const CHECKING: &str = "0a1c000f-c328-42b8-8966-a4be59a2504b";
+	const HOUSEHOLD: &str = "e2dcc389-9fe5-4b1f-93d6-0099cd592c17";
+	const FUN_MONEY: &str = "b07b454d-836a-4659-877c-e69391584e6b";
+	let scratch = Scratch::new("car-no-interest");
+	let session = block_on(Session::import_actual_zip(
+		text(
+			&Path::new(env!("CARGO_MANIFEST_DIR"))
+				.join("../../fixtures/synthetic/all-features.zip"),
+		),
+		text(&scratch.join("budget")),
+		CancelToken::new(),
+	))
+	.unwrap();
+	session.budget_month(NOVEMBER, TODAY.to_owned()).unwrap();
+	let principal = created(
+		&perform(
+			&session,
+			Command::CreateKindCategory {
+				kind: CategoryKind::DebtPrincipal,
+				name: "Car principal".to_owned(),
+				unhide_group: false,
+			},
+		),
+		EntityKind::Category,
+	);
+	perform(
+		&session,
+		Command::RecordLoanPayment {
+			payment: veritas_ffi::LoanPaymentDraft {
+				id: Some("car".to_owned()),
+				from_account_id: CHECKING.to_owned(),
+				loan_account_id: CAR_LOAN.to_owned(),
+				date: TODAY.to_owned(),
+				total: 30_000,
+				interest: 0,
+				escrow: 4_000,
+				fees: 500,
+				principal_category_id: principal,
+				interest_category_id: None,
+				escrow_category_id: Some(HOUSEHOLD.to_owned()),
+				fees_category_id: Some(FUN_MONEY.to_owned()),
+				notes: None,
+				cleared: true,
+				fund_principal: false,
+			},
+		},
+	);
+	let next = session
+		.loan_payment_defaults(CAR_LOAN.to_owned(), TODAY.to_owned())
+		.unwrap();
+	assert_eq!(next.total, Some(29_500), "the last payment less its fee");
+	assert_eq!(
+		next.interest, None,
+		"no interest line, so interest is blank (DEBT-3, v13)"
+	);
+	assert_eq!(next.escrow, Some(4_000));
+	assert_eq!(next.escrow_category_id.as_deref(), Some(HOUSEHOLD));
+	assert_ne!(
+		next.interest_category_id.as_deref(),
+		Some(HOUSEHOLD),
+		"escrow's envelope isn't interest's"
+	);
+	session.close().unwrap();
+}
