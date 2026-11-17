@@ -13,6 +13,7 @@ mod formula;
 pub mod monte_carlo;
 mod net_worth;
 mod sankey;
+mod scale;
 mod spending;
 mod summary;
 mod time_frame;
@@ -42,6 +43,7 @@ pub use sankey::{
 	SankeyCard, SankeyColor, SankeyLabel, SankeyLayer, SankeyLink, SankeyMode, SankeyNode,
 	SankeySort, sankey_card, sankey_height_limit,
 };
+pub use scale::{register_factor, register_scale};
 pub use spending::{Spending, SpendingDay, SpendingMode, spending};
 pub use summary::{SummaryContent, SummaryData, summary};
 pub use time_frame::{TimeRange, calculate_time_range};

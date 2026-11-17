@@ -1118,6 +1118,41 @@ fn widget_views(
 	done.into_iter().map(|(_, view)| view).collect()
 }
 
+/// The session's dashboards as of `today`. In a currency without 2 places,
+/// every card is computed on the budget moved to the register's scale
+/// (`register_scale`, D74), with its own envelope sheet.
+fn session_dashboards<B: veritas_session::Backend>(
+	session: &mut veritas_session::Session<B>,
+	today: CivilDate,
+	cancel: Option<&veritas_session::CancelToken>,
+) -> Result<Vec<DashboardPage>, CoreError> {
+	let sheet = needs_sheet(session.data()?);
+	session.with_sheet_if(
+		today,
+		sheet,
+		|budget, sheet| match reports::register_scale(budget)? {
+			Some(scaled) => {
+				let sheet = EnvelopeSheet::compute(&scaled, today)?;
+				dashboards(&Inputs {
+					budget: &scaled,
+					sheet: Some(&sheet),
+					today,
+					cancel,
+				})
+			}
+			None => dashboards(&Inputs {
+				budget,
+				sheet,
+				today,
+				cancel,
+			}),
+		},
+	)
+}
+
+/// Every page as of `inputs.today`. In a currency without 2 places, the
+/// caller passes the budget on the register's scale (`register_scale`, D74),
+/// so every card's money figures come out register-scale.
 fn dashboards(inputs: &Inputs) -> Result<Vec<DashboardPage>, CoreError> {
 	let budget = inputs.budget;
 	let pages = reports::dashboards(budget)?;
@@ -1243,17 +1278,7 @@ impl Session {
 				return Err(FfiError::Cancelled);
 			}
 			let today = civil_date(&today)?;
-			core.call(|session| {
-				let sheet = needs_sheet(session.data()?);
-				session.with_sheet_if(today, sheet, |budget, sheet| {
-					dashboards(&Inputs {
-						budget,
-						sheet,
-						today,
-						cancel: Some(cancel),
-					})
-				})
-			})
+			core.call(|session| session_dashboards(session, today, Some(cancel)))
 		})
 		.await
 	}
@@ -1278,18 +1303,8 @@ mod tests {
 	}
 
 	fn pages(core: &Core<veritas_store::Store>) -> Vec<DashboardPage> {
-		core.call(|session| {
-			let sheet = needs_sheet(session.data()?);
-			session.with_sheet_if(today(), sheet, |budget, sheet| {
-				dashboards(&Inputs {
-					budget,
-					sheet,
-					today: today(),
-					cancel: None,
-				})
-			})
-		})
-		.unwrap()
+		core.call(|session| session_dashboards(session, today(), None))
+			.unwrap()
 	}
 
 	fn widget<'a>(pages: &'a [DashboardPage], id: &str) -> &'a DashboardWidget {

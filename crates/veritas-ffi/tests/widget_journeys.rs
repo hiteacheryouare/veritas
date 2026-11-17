@@ -705,9 +705,76 @@ fn edited_in_actual(oracle: &Path, scratch: &Scratch) -> PathBuf {
 	out
 }
 
-/// Which cards a journey compares with Actual. Formula cards wait for the
-/// clean-room formula engine (D75), so their comparisons run only in the
-/// ignored `_formula_cards` tests, the engine's acceptance suite.
+/// D74: in a 0-place budget Veritas shows each card on the register's scale,
+/// where Actual's cards add 0-place budget cells to 2-place transactions.
+/// The figure Veritas must show is what Actual's card code computes once
+/// the budget's cells and holds are moved to the register's scale, so the
+/// Actual side runs on that copy of the zip (made once per zip).
+fn register_scale_for_actual(oracle: &Path, zip: &Path, dump: &Value) -> PathBuf {
+	let scaled = zip.with_extension("register-scale.zip");
+	if scaled.exists() {
+		return scaled;
+	}
+	let month = |row: &Value| {
+		let month = row["month"].as_i64().unwrap();
+		format!("{}-{:02}", month / 100, month % 100)
+	};
+	let mut ops: Vec<Value> = table(dump, "zero_budgets")
+		.values()
+		.filter(|row| row["amount"].as_i64().unwrap_or(0) != 0)
+		.map(|row| {
+			json!({"op": "setBudgetAmount", "month": month(row), "category": row["category"],
+				"amount": row["amount"].as_i64().unwrap() * 100})
+		})
+		.collect();
+	ops.extend(
+		table(dump, "zero_budget_months")
+			.values()
+			.filter(|row| row["buffered"].as_i64().unwrap_or(0) != 0)
+			.map(|row| {
+				let id = row["id"].as_str().unwrap();
+				json!({"op": "holdForNextMonth", "month": id,
+					"amount": row["buffered"].as_i64().unwrap() * 100})
+			}),
+	);
+	apply(oracle, zip, Value::Array(ops), &scaled, 15);
+	scaled
+}
+
+/// The Monte Carlo settings' amounts, which Actual's editor saves at the
+/// currency's places, on the register's scale (D74).
+fn register_scale_monte_carlo(meta: &mut Value, in_tax_bands: bool) {
+	match meta {
+		Value::Object(fields) => {
+			for (key, value) in fields.iter_mut() {
+				let money = matches!(
+					key.as_str(),
+					"startingBalance"
+						| "annualWithdrawal"
+						| "annualAmount" | "minimumSpending"
+						| "annualFeeFixed"
+				) || (in_tax_bands && key == "from");
+				if money {
+					if let Some(amount) = value.as_f64() {
+						*value = json!(amount * 100.0);
+					}
+				} else {
+					register_scale_monte_carlo(value, key == "taxBands");
+				}
+			}
+		}
+		Value::Array(items) => {
+			for item in items {
+				register_scale_monte_carlo(item, in_tax_bands);
+			}
+		}
+		_ => {}
+	}
+}
+
+/// Which cards a journey compares with Actual. Formula cards run in their
+/// own `_formula_cards` tests, the clean-room formula engine's acceptance
+/// suite (D75).
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Cards {
 	AllButFormula,
@@ -733,6 +800,18 @@ fn same_cards_as_actual(
 	let ours = dashboards(session, today);
 	let dump = raw_dump(oracle, zip);
 	let rows = table(&dump, "dashboard");
+	let zero_places = session
+		.overview()
+		.unwrap()
+		.number_format
+		.and_then(|format| format.currency)
+		.as_deref()
+		== Some("JPY");
+	let actuals_zip = if zero_places {
+		register_scale_for_actual(oracle, zip, &dump)
+	} else {
+		zip.to_path_buf()
+	};
 	let mut requests = Vec::new();
 	let mut expected = Vec::new();
 	let mut drawn = 0;
@@ -769,6 +848,10 @@ fn same_cards_as_actual(
 		let meta: Value = row["meta"]
 			.as_str()
 			.map_or(Value::Null, |text| serde_json::from_str(text).unwrap());
+		let mut meta = meta;
+		if zero_places && widget.kind == "monte-carlo-card" {
+			register_scale_monte_carlo(&mut meta, false);
+		}
 		let oracle_card = match widget.kind.as_str() {
 			"balance-forecast-card" => "forecast-card",
 			other => other,
@@ -782,7 +865,7 @@ fn same_cards_as_actual(
 	std::fs::write(&file, Value::Array(requests).to_string()).unwrap();
 	let theirs: Value = serde_json::from_slice(&node(
 		oracle,
-		&["widgets", &text(zip), &text(&file)],
+		&["widgets", &text(&actuals_zip), &text(&file)],
 		today,
 		1,
 	))
@@ -1013,9 +1096,9 @@ fn every_native_card_matches_actuals_card_code_in_a_zero_place_currency_comparin
 				WidgetView::Formula {
 					value: FormulaValue::Number { value },
 					..
-				} if value == 333.33
+				} if value == 33_333.0
 			),
-		"BUDGET_QUERY reads the yen budget at 2 places, as Actual does: {:?}",
+		"BUDGET_QUERY reads the yen budget at its true amount (D74), where Actual reads 333.33: {:?}",
 		widget(&pages, "yen-formula").view
 	);
 	let zip = scratch.join("veritas.zip");

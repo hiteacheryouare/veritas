@@ -371,12 +371,10 @@ Every decision behind Veritas, so no question gets asked twice. D1–D24 are PLA
 - **Decision:** Veritas draws every Actual 26.11 dashboard widget type natively, and filtered custom reports too. No widget says "Open in Actual". The widget types are summary, calendar, formula, crossover, budget analysis, balance forecast, age of money and Monte Carlo, plus the ones already drawn (net worth, cash flow, spending, custom report, markdown, Sankey). Numbers match Actual's own computation for the same widget config. Layout follows Actual's 12-column grid and sizes, so a user's dashboards carry over 1:1. Cards use Veritas's own type and colors. Card and axis labels follow docs/finance/statements.md ST-10.10: a card that uses raw money movement or every non-income category is labeled Money in, Money out or Everything except income categories and never Income, Expenses, Spending or Net Profit (Ryan, 2026-11-14).
 - **Date:** 2026-11-13
 
-### D74. How the Mac shows register-scale card figures in a 0-place budget
-- **Status:** Pending Ryan.
-- **Question:** In a 0-place budget (yen, say), the dashboard cards' register-sourced figures cross at the register's ×100 (D63, contracts/ffi.md "Widget views"). Actual's own cards display every figure through `useFormat`, dividing by `10^decimalPlaces`, so Actual shows a register figure 100× (a ¥500 spend reads ¥50,000). How should the Mac show them?
+### D74. Card figures in a currency without 2 places
 - **Options:** parity, showing each figure as Actual's card does, 100× included / rescale register-scale figures so they read at their real size, which no longer matches Actual
-- **Recommendation (Fred):** parity, with CLS-12.10's fixed line on each affected card ("Spending is recorded at 2 places and budgets at 0, so these numbers mix both, as in Actual."), so Veritas matches Actual and says why the numbers look large.
-- **Date:** open
+- **Decision:** Show the correct amount. Every dashboard card computes on the register's scale (D63: the register at 2 places, budget cells at the currency's), so its figures read at their true amount in a 0-place or 3-place currency even where Actual's own dashboard shows them wrong. The core moves budget cells, holds and the Monte Carlo settings' amounts to the register's scale before computing, so the Mac formats every card figure one way. Veritas now differs from Actual in a non-2-place budget on: the spending card's budget line and its Budget-mode difference; the budget analysis card's budgeted, balance and overspending adjustment (and their totals); every node and link of a budgeted Sankey; the balance forecast's tracking-budget source; a formula's `BUDGET_QUERY` figures; and a Monte Carlo pot linked to an account, which Actual sizes 100× against the settings. Why: Ryan's ruling, 2026-11-16. Fred had recommended parity with CLS-12.10's line.
+- **Date:** 2026-11-16
 
 ### D75. The formula card's functions
 - **Options:** every HyperFormula function / a supported subset, with the rest shown as Actual shows an unknown function
