@@ -12,7 +12,7 @@ use veritas_domain::{
 	AccountKind, AccountMeta, ConditionsOp, Rule, RuleId, RuleStage, Schedule, ScheduleId,
 	SplitRole,
 };
-use veritas_forecast::{Certainty, FlowKind, Forecaster, ScheduledFlows};
+use veritas_forecast::{Certainty, ESTIMATED_SPLIT, FlowKind, Forecaster, ScheduledFlows};
 
 const TODAY: &str = "2027-01-15";
 
@@ -550,6 +550,57 @@ fn fc_2_a_loan_bill_with_no_recorded_payment_is_not_forecast() {
 	);
 }
 
+/// The last payment as the wizard writes it: each part's line recorded in
+/// veritas_loan_payment_part (D76), or `None` for a line it didn't record.
+fn mapped_last_payment(
+	book: &mut Book,
+	owed_before: i64,
+	principal: i64,
+	parts: &[(&str, i64, Option<veritas_domain::LoanPart>)],
+	rate: Option<i64>,
+) {
+	let plain: Vec<(&str, i64)> = parts.iter().map(|(c, a, _)| (*c, *a)).collect();
+	last_payment(book, owed_before, principal, &plain);
+	book.budget
+		.account_meta
+		.get_mut(&acct("LOAN"))
+		.unwrap()
+		.loan_rate_bps = rate;
+	let mut lines: Vec<&veritas_domain::Transaction> = book
+		.budget
+		.transactions
+		.values()
+		.filter(|row| {
+			matches!(&row.split, SplitRole::Child { parent } if parent.as_str() == "dec")
+				&& row.transfer.is_none()
+		})
+		.collect();
+	lines.sort_by(|a, b| {
+		b.sort_order
+			.total_cmp(&a.sort_order)
+			.then_with(|| a.id.cmp(&b.id))
+	});
+	let rows: Vec<veritas_domain::LoanPaymentPart> = parts
+		.iter()
+		.map(|(category, amount, part)| (cat(category), -amount, part))
+		.filter_map(|(category, amount, part)| {
+			let line = lines.iter().find(|line| {
+				line.category.as_ref() == Some(&category) && line.amount.minor() == amount
+			})?;
+			Some(veritas_domain::LoanPaymentPart {
+				id: veritas_domain::LoanPaymentPartId::new(format!("part-{}", line.id)),
+				payment: veritas_domain::TransactionId::new("dec"),
+				line: line.id.clone(),
+				part: (*part)?,
+				tombstone: false,
+			})
+		})
+		.collect();
+	for row in rows {
+		book.budget.loan_payment_parts.insert(row.id.clone(), row);
+	}
+}
+
 fn last_payment(book: &mut Book, owed_before: i64, principal: i64, parts: &[(&str, i64)]) {
 	book.opening("CHK", "2026-11-30", 2_000_000);
 	book.opening("LOAN", "2026-11-30", -owed_before);
@@ -706,5 +757,90 @@ fn fc_2_fl_5c_a_lone_fee_is_taken_as_escrow_and_shown() {
 	assert_eq!(
 		result.escrow_sources[0].text(&book.budget),
 		"Escrow taken from Loan interest $35.00, the same category as the interest"
+	);
+	assert_eq!(
+		result.estimated_splits,
+		[acct("LOAN")],
+		"FL-5c is made in Actual, with no mapping: {ESTIMATED_SPLIT}"
+	);
+	assert!(
+		of(&result, "LOAN")
+			.iter()
+			.all(|flow| flow.certainty == Certainty::Estimate),
+		"an unmapped split is estimated, not known"
+	);
+}
+
+#[test]
+fn fc_2_fl_5d_a_mapped_fee_is_never_taken_as_escrow() {
+	// FC-2 case 1, FL-5d: written by the wizard, interest 150100 and a late
+	// fee 3500 in the same category, no escrow line, both recorded.
+	use veritas_domain::LoanPart::{Fees, Interest};
+	let mut book = Book::household();
+	mapped_last_payment(
+		&mut book,
+		30_020_000,
+		20000,
+		&[
+			("Loan interest", 150100, Some(Interest)),
+			("Loan interest", 3500, Some(Fees)),
+		],
+		Some(600),
+	);
+	let result = flows(&book);
+	let february = february(&result);
+	assert!(
+		february.iter().all(|(amount, _)| *amount != -3500),
+		"escrow is 0, so the fee is never repeated: {february:?}"
+	);
+	assert_eq!(
+		february.len(),
+		2,
+		"interest and principal only: {february:?}"
+	);
+	assert_eq!(
+		result
+			.not_repeated
+			.iter()
+			.map(|part| (part.category.clone(), part.amount.minor()))
+			.collect::<Vec<_>>(),
+		[(Some(cat("Loan interest")), 3500)],
+		"listed as Not repeated: Loan interest 3500"
+	);
+	assert!(result.escrow_sources.is_empty() && result.estimated_splits.is_empty());
+	assert!(
+		of(&result, "LOAN")
+			.iter()
+			.all(|flow| flow.certainty == Certainty::Exact),
+		"a mapped split is known"
+	);
+}
+
+#[test]
+fn fc_2_fl_5e_a_mapped_payment_with_no_rate_is_forecast() {
+	// FC-2 case 1, FL-5e: interest 150100 and escrow 50000 recorded, no
+	// rate. The interest line is identified, so the loan isn't "not
+	// forecast", and its amount is the interest.
+	use veritas_domain::LoanPart::{Escrow, Interest};
+	let mut book = Book::household();
+	mapped_last_payment(
+		&mut book,
+		30_020_000,
+		20000,
+		&[
+			("Loan interest", 150100, Some(Interest)),
+			("Electric", 50000, Some(Escrow)),
+		],
+		None,
+	);
+	let result = flows(&book);
+	assert!(result.unforecast.is_empty(), "{:?}", result.unforecast);
+	let february = february(&result);
+	assert_eq!(
+		&february[..2],
+		[
+			(-150100, Some(cat("Loan interest"))),
+			(-50000, Some(cat("Electric"))),
+		]
 	);
 }

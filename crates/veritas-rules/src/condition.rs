@@ -193,7 +193,7 @@ impl Op {
 
 	/// `isValidOp` (`shared/rules.ts:99-108`): the type's ops, minus the
 	/// field's disallowed ones, plus its internal ones.
-	pub(crate) fn valid_for(self, field: Field) -> bool {
+	pub fn valid_for(self, field: Field) -> bool {
 		use Op::*;
 		let by_kind = match field.kind() {
 			FieldKind::Date => matches!(self, Is | IsApprox | Gt | Gte | Lt | Lte),
@@ -226,6 +226,45 @@ impl Op {
 		};
 		let internal = matches!(field, Field::Category | Field::CategoryGroup) && self == And;
 		(by_kind && !disallowed) || internal
+	}
+
+	/// `getValidOps` (`shared/rules.ts:110-118`): the field's type's ops in
+	/// `TYPE_INFO` order (`shared/rules.ts:6-51`), minus its disallowed
+	/// ones. Internal ops such as `and` are never offered.
+	pub fn valid_ops(field: Field) -> Vec<Op> {
+		use Op::*;
+		let by_kind: &[Op] = match field.kind() {
+			FieldKind::Date => &[Is, IsApprox, Gt, Gte, Lt, Lte],
+			FieldKind::Id => &[
+				Is,
+				Contains,
+				Matches,
+				OneOf,
+				IsNot,
+				DoesNotContain,
+				NotOneOf,
+				OnBudget,
+				OffBudget,
+			],
+			FieldKind::Text => &[
+				Is,
+				Contains,
+				Matches,
+				OneOf,
+				IsNot,
+				DoesNotContain,
+				NotOneOf,
+				HasTags,
+				HasAnyTag,
+			],
+			FieldKind::Number => &[Is, IsApprox, IsBetween, Gt, Gte, Lt, Lte],
+			FieldKind::Boolean => &[Is],
+		};
+		by_kind
+			.iter()
+			.copied()
+			.filter(|op| op.valid_for(field))
+			.collect()
 	}
 }
 

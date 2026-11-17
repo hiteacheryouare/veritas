@@ -57,6 +57,18 @@ CREATE TABLE IF NOT EXISTS veritas_transaction_meta (
 	needs_actual TEXT
 );
 
+-- D76, docs/finance/debt.md DEBT-3: which expense line of a loan payment the
+-- wizard wrote as interest, escrow or fees. payment is the split's id, line
+-- the expense child's; part is interest, escrow or fees, and a reader skips any
+-- other value. Principal isn't stored: it is the transfer line.
+CREATE TABLE IF NOT EXISTS veritas_loan_payment_part (
+	id TEXT PRIMARY KEY,
+	payment TEXT NOT NULL,
+	line TEXT NOT NULL,
+	part TEXT NOT NULL,
+	tombstone INTEGER NOT NULL DEFAULT 0 CHECK (tombstone IN (0, 1))
+);
+
 -- R-BILL-3: Pause and End are both Actual's Complete (completed = 1). paused only
 -- picks the label the bill screen shows for a completed bill; it never changes what posts.
 CREATE TABLE IF NOT EXISTS veritas_schedule_meta (

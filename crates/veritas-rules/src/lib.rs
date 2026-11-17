@@ -2,6 +2,7 @@
 
 mod action;
 mod bill;
+mod choices;
 mod condition;
 mod existing;
 mod js;
@@ -17,10 +18,11 @@ mod trigger;
 
 pub use action::{Action, RuleTransaction, SetField, SplitLine, SplitMethod};
 pub use bill::{
-	Bill, BillAmount, BillDate, BillView, EditedRule, JsonPaths, Repeat, RepeatEnd, RepeatPattern,
-	ScheduleRule, WeekendMove, bill_from_schedule, estimated_amount, json_paths, schedule_name,
-	scheduled_amount,
+	AmountKind, Bill, BillAmount, BillDate, BillView, EditedRule, JsonPaths, NotABill, Repeat,
+	RepeatEnd, RepeatPattern, ScheduleRule, WeekendMove, amount_kind, bill_from_schedule,
+	estimated_amount, json_paths, read_bill, schedule_name, scheduled_amount,
 };
+pub use choices::{Choices, ConditionChoice, ValueKind, choices, condition_value};
 pub use condition::{
 	AmountSign, Condition, ConditionValue, DateValue, EvalError, Field, FieldKind, FieldValue, Gap,
 	Op, parse_date_value,
@@ -28,15 +30,15 @@ pub use condition::{
 pub use existing::{RuleActions, matching};
 pub use posting::{
 	LeftBill, LeftBy, NextDateWrite, Posting, SchedulePlan, ScheduleWrite, advance_schedules,
-	bill_dates, bill_status, complete, counts_as_paid, pay, post_now, restart, schedule_parts,
-	skip,
+	bill_dates, bill_status, can_skip, complete, counts_as_paid, last_paid, pay, post_now, restart,
+	schedule_parts, skip,
 };
 pub use recur::{Frequency, RecurError, Recurrence, WeekendSolveMode};
 pub use rule::{Item, ParsedRule, RuleSupport};
 pub use run::{BudgetPayees, PayeeDirectory, RuleBook, RunOutcome};
 pub use schedule::{
 	ScheduleStatus, next_date, next_date_after, next_date_from, paid_window_start, schedule_dates,
-	status, upcoming_days, validate_schedule_date,
+	status, upcoming_dates, upcoming_days, validate_schedule_date,
 };
 pub use sentence::{
 	Access, ActionOp, Draft, Sentence, SentenceAction, SentenceCondition, Value, sentence,

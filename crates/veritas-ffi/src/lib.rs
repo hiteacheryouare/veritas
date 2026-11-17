@@ -26,12 +26,13 @@ pub use accounts::{
 	RegisterSort, RegisterSortKey, SplitLineDraft, TransactionDraft,
 };
 pub use bills::{
-	BillAmount, BillDate, BillDetail, BillDraft, BillFrequency, BillRepeat, BillRepeatEnd,
-	BillRepeatPattern, BillState, BillStatus, BillSummary, BillWeekday, BillWeekend, UpcomingBill,
+	BillAmount, BillAmountKind, BillCustomPart, BillDate, BillDetail, BillDraft, BillFrequency,
+	BillReadOnlyReason, BillRepeat, BillRepeatEnd, BillRepeatPattern, BillState, BillStatus,
+	BillSummary, BillWeekday, BillWeekend, UpcomingBill, preview_bill_dates,
 };
 pub use blocking::CancelToken;
 pub use budget::{BudgetMonth, EnvelopeGroup, EnvelopeRow, MoneyTone};
-pub use commands::Command;
+pub use commands::{Command, EnvelopeChange};
 pub use custom_reports::{
 	CustomReportBalances, CustomReportCell, CustomReportData, CustomReportGroup,
 	CustomReportInterval, CustomReportItem, CustomReportSettings, CustomReportView,
@@ -61,9 +62,10 @@ pub use reports::{
 	SankeyReport, SheetAccount, SheetSection, TaxBucket, TaxBucketTotal, TaxDetailRow, TaxSummary,
 };
 pub use rules::{
-	RuleAccess, RuleAction, RuleActionOp, RuleChangedField, RuleCondition, RuleConditionOp,
-	RuleConditionsOp, RuleDraft, RuleField, RuleFieldChange, RuleMatch, RuleSentence, RuleSource,
-	RuleSplitLine, RuleStage, RuleValue,
+	RuleAccess, RuleAction, RuleActionFieldChoice, RuleActionOp, RuleActionOpChoice,
+	RuleChangedField, RuleChoices, RuleCondition, RuleConditionChoice, RuleConditionOp,
+	RuleConditionsOp, RuleDraft, RuleField, RuleFieldChange, RuleMatch, RuleOpChoice, RuleSentence,
+	RuleSource, RuleSplitLine, RuleStage, RuleValue, RuleValueKind, rule_choices,
 };
 pub use session::{ChangeListener, Session};
 
