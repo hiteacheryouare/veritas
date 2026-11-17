@@ -711,6 +711,18 @@ const GRAMMAR_EDGES: &[&str] = &[
 	"=\u{a0}",
 	"=1\u{a0}",
 	"=\u{3000} 1",
+	"=#N/A/1",
+	"=#N/A1",
+	"=#NUM!1",
+	"=#N/A_",
+	"=#N/A.5",
+	"=#DIV/0!/1",
+	"=#REF!A1",
+	"=#N/A?",
+	"=#VALUE!!",
+	"=#N/A!",
+	"=#NAME??",
+	"=#N/A/1e3%",
 ];
 
 /// Text read as a number: signs, `$`, `%`, dates and times.
@@ -917,6 +929,25 @@ const TEXT_AS_NUMBER_EDGES: &[&str] = &[
 	"=\"$ \"+0",
 	"=\"5%  \"+0",
 	"=\"  5  %  \"+0",
+	"=\"15 01 2026  10:30\"+0",
+	"=\"15 01 2026\t10:30\"+0",
+	"=\"15/01/2026  10:30\"+0",
+	"=\"15 01  2026 10:30\"+0",
+	"=\"15  01 2026 10:30\"+0",
+	"=\"15 01 2026 10:30  pm\"+0",
+	"=\"15/01/2026  10:30  pm\"+0",
+	"=\"15-01 2026  10:30\"+0",
+	"=\"15  01  2026\"+0",
+	"=\"15   01 2026\"+0",
+	"=\"10:-0\"+0",
+	"=\"10:-5\"+0",
+	"=\"-0:30\"+0",
+	"=\":-0\"+0",
+	"=\"10:30:-0\"+0",
+	"=\"10:-0 pm\"+0",
+	"=\"10:-0.0\"+0",
+	"=\"10:00\u{a0}pm\"+0",
+	"=-\":-0P\"",
 ];
 
 /// Comparisons, empty values, IF, AND, OR, NOT and the aggregates.
@@ -1051,6 +1082,21 @@ const LOGIC_EDGES: &[&str] = &[
 	"=OR(0,0,0)",
 	"=TRUE(,)",
 	"=FALSE()+0",
+	"=\"0:00\"=IF(1,)",
+	"=\"10:30\"<IF(1,)",
+	"=IF(1,)<\"10:30\"",
+	"=\"10:30\"<TRUE()",
+	"=\"10:30\"=\"10:30:00\"",
+	"=\"10:30\">\"5\"",
+	"=\"5\"<\"10:30\"",
+	"=\"2026-01-15\">5",
+	"=5<\"abc\"",
+	"=\"15/01/2026\"<\"abc\"",
+	"=0.2&123456.789>\"10:30\"",
+	"=LOWER(-0.5)<\"15/01/2026\"",
+	"=\"10:30\">\"\"",
+	"=\"10:30\">\"$5\"",
+	"=\"0\">=\"15/01/2026\"",
 ];
 
 /// ROUND, ABS and the text functions.
@@ -1254,6 +1300,23 @@ const DATE_EDGES: &[&str] = &[
 	"=DATE(2026,11,9)=TODAY()",
 	"=EOMONTH(\"x\",0)",
 	"=EOMONTH(1/0,\"x\")",
+	"=DATE(1900,-22800,1)",
+	"=DATE(1900,-22788,1)",
+	"=DATE(-1900,1,1)",
+	"=DATE(-1899,1,1)",
+	"=DATE(-319,1,1)",
+	"=DATE(-318,1,1)",
+	"=DATE(-319,13,1)",
+	"=DATE(-320,13,1)",
+	"=DATE(1900,-3828,1)",
+	"=DATE(0,1,-693594)",
+	"=DATE(-1e10,1,1)",
+	"=DATE(-1,12,31)",
+	"=EOMONTH(-1,\"a b\")",
+	"=DAY(EOMONTH(-2.5,#DIV/0!))",
+	"=EOMONTH(\"7e69\",0)",
+	"=EOMONTH(1e16,-1)",
+	"=EOMONTH(0,-4800)",
 ];
 
 /// Actual's query functions, arrays as categories, arity, and export rounding.
@@ -1774,5 +1837,42 @@ fn d75_formula_engine_edge_cases_match_actual() {
 			.iter()
 			.map(|text| formula(text, Expect::Refused)),
 	);
+	compare(&budget, &cases);
+}
+
+/// HyperFormula evaluates every operand and argument, IF's unused branch
+/// included, so a QUERY anywhere is fetched; SUM, AVERAGE, MIN and MAX stop
+/// at an error, and an unknown function evaluates nothing.
+#[test]
+fn d75_formula_engine_fetches_queries_from_every_branch() {
+	let budget = fixture("all-features");
+	let queries = queries(&budget);
+	let cases: Vec<Case> = [
+		"=IF(QUERY(\"static\")<>0, QUERY(\"all\"), 0)",
+		"=IF(QUERY(\"static\")=0, 0, QUERY(\"all\"))",
+		"=IF(QUERY(\"static\")<>0, QUERY_EXTRACT_TIMEFRAME_START(\"days\"), \"none\")",
+		"=IF(QUERY(\"static\")>0, BUDGET_QUERY(\"spent\", QUERY_EXTRACT_CATEGORIES(\"groceries\"), \"2026-01\", \"2026-06\"), 0)",
+		"=IF(QUERY(\"static\")<>0, BUDGET_QUERY(\"spent\", QUERY_EXTRACT_CATEGORIES(\"groceries\"), QUERY_EXTRACT_TIMEFRAME_START(\"static\"), \"2026-06\"), 2)",
+		"=1/QUERY(\"static\")+QUERY(\"payee\")",
+		"=IF(1/QUERY(\"static\"), QUERY(\"payee\"), 2)",
+		"=AND(1/QUERY(\"static\"), QUERY(\"payee\"))",
+		"=CONCATENATE(1/QUERY(\"static\"), QUERY(\"payee\"))",
+		"=ROUND(1/QUERY(\"static\"), QUERY(\"payee\"))",
+		"=LEFT(1/QUERY(\"static\"), -QUERY(\"payee\"))",
+		"=DATE(1/QUERY(\"static\")+2026, 1, QUERY(\"payee\"))",
+		"=EOMONTH(1/QUERY(\"static\")+46037, QUERY(\"payee\")/21600)",
+		"=BUDGET_QUERY(IF(1/QUERY(\"static\")<>0,\"spent\"), QUERY_EXTRACT_CATEGORIES(\"groceries\"), \"2026-01\", \"2026-06\")",
+		"=BUDGET_QUERY(\"spent\", QUERY_EXTRACT_CATEGORIES(IF(1/QUERY(\"static\")<>0,\"groceries\")), QUERY_EXTRACT_TIMEFRAME_START(\"static\"), \"2026-06\")",
+		"=BUDGET_QUERY(\"spent\", QUERY_EXTRACT_CATEGORIES(\"gro\"&\"ceries\"), \"2026-01\", \"2026-06\")",
+		"=SUM(1/QUERY(\"static\"), QUERY(\"payee\"))",
+		"=MAX(1/QUERY(\"static\"), QUERY(\"payee\"))",
+		"=IF(TRUE(), SUM(1/QUERY(\"static\"), QUERY(\"payee\")), FOO(QUERY(\"payee\")))",
+		"=IF(TRUE(), SUM(1/QUERY(\"static\"), QUERY(\"payee\")), ABS(QUERY(\"payee\"),1))",
+		"=IF(TRUE(), SUM(1/QUERY(\"static\"), QUERY(\"payee\")), SUM(1/0,QUERY(\"payee\")))",
+		"=IF(TRUE(), SUM(1/QUERY(\"static\"), QUERY(\"payee\")), #N/A+QUERY(\"payee\"))",
+	]
+	.iter()
+	.map(|text| with_queries(text, &queries))
+	.collect();
 	compare(&budget, &cases);
 }

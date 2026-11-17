@@ -68,60 +68,50 @@ pub(super) fn today_serial(today: NaiveDate) -> f64 {
 
 /// Text that reads as a date, a time, or a date then a time, as its serial
 /// number; `None` for anything else.
+///
+/// Only the first run of whitespace may be longer than one space, as if it
+/// were collapsed and every later one taken as written: `15  01 2026` is a
+/// date, `15 01  2026` isn't.
 pub(super) fn parse_date_time(text: &str) -> Option<f64> {
 	let text = text.trim_matches(is_js_space);
 	if text.is_empty() {
 		return None;
 	}
-	if let Some(serial) = parse_date(text) {
+	let text = collapse_first_space_run(text);
+	if let Some(serial) = parse_date(&text) {
 		return Some(serial as f64);
 	}
-	if let Some(time) = parse_time(text) {
+	if let Some(time) = parse_time(&text) {
 		return Some(time);
 	}
-	// A date and a time are separated by any whitespace, though the date's
-	// own parts may only be separated by plain spaces.
-	let mut chars = text.char_indices().peekable();
-	while let Some((start, c)) = chars.next() {
-		if !is_js_space(c) {
-			continue;
-		}
-		let mut end = start + c.len_utf8();
-		while let Some(&(next, c)) = chars.peek() {
-			if !is_js_space(c) {
-				break;
-			}
-			end = next + c.len_utf8();
-			chars.next();
-		}
-		if let (Some(date), Some(time)) = (parse_date(&text[..start]), parse_time(&text[end..])) {
-			return Some(date as f64 + time);
-		}
-	}
-	None
+	text.match_indices(' ').find_map(|(at, _)| {
+		let date = parse_date(&text[..at])?;
+		let time = parse_time(&text[at + 1..])?;
+		Some(date as f64 + time)
+	})
 }
 
-/// Three runs of digits split by `/`, `-`, `.` or plain spaces, read day
+fn collapse_first_space_run(text: &str) -> String {
+	let Some(start) = text.find(is_js_space) else {
+		return text.to_owned();
+	};
+	let rest = text[start..].trim_start_matches(is_js_space);
+	format!("{} {rest}", &text[..start])
+}
+
+/// Three runs of digits split by single `/`, `-`, `.` or spaces, read day
 /// first and then year first. An empty year reads as 2000.
 fn parse_date(text: &str) -> Option<i128> {
-	let mut parts = vec![String::new()];
-	let mut chars = text.chars().peekable();
-	while let Some(c) = chars.next() {
-		match c {
-			'0'..='9' => parts.last_mut()?.push(c),
-			'/' | '-' | '.' => parts.push(String::new()),
-			' ' => {
-				while chars.peek() == Some(&' ') {
-					chars.next();
-				}
-				parts.push(String::new());
-			}
-			_ => return None,
-		}
-	}
+	let parts: Vec<&str> = text.split(['/', '-', '.', ' ']).collect();
 	let [first, second, third] = parts.as_slice() else {
 		return None;
 	};
+	if !parts
+		.iter()
+		.all(|part| part.bytes().all(|b| b.is_ascii_digit()))
+	{
+		return None;
+	}
 	date_parts(first, second, third).or_else(|| date_parts(third, second, first))
 }
 
@@ -167,8 +157,18 @@ fn parse_time(text: &str) -> Option<f64> {
 			None
 		}
 	};
+	// A minus sign is allowed before minutes and seconds that are zero.
+	let unsigned = |field: &str| -> Option<(String, bool)> {
+		match field.strip_prefix('-') {
+			Some(rest) if !rest.is_empty() => Some((rest.to_owned(), true)),
+			Some(_) => None,
+			None => Some((field.to_owned(), false)),
+		}
+	};
+	let (minutes, minutes_signed) = unsigned(minutes)?;
+	let (seconds, seconds_signed) = unsigned(seconds)?;
 	let mut hours = whole(hours)?;
-	let minutes = whole(minutes)?;
+	let minutes = whole(&minutes)?;
 	let seconds = match seconds.split_once('.') {
 		Some((int, fraction)) if !(int.is_empty() && fraction.is_empty()) => {
 			whole(int)?;
@@ -176,8 +176,11 @@ fn parse_time(text: &str) -> Option<f64> {
 			format!("0{int}.{fraction}0").parse().ok()?
 		}
 		Some(_) => return None,
-		None => whole(seconds)?,
+		None => whole(&seconds)?,
 	};
+	if (minutes_signed && minutes != 0.0) || (seconds_signed && seconds != 0.0) {
+		return None;
+	}
 	if let Some(pm) = meridiem {
 		if hours > 12.0 {
 			return None;

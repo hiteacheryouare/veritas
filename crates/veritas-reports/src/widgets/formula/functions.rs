@@ -363,10 +363,8 @@ fn end_of_month(arguments: &mut Arguments) -> Outcome<Value> {
 	if !value::approximately_equal(months, months.round()) {
 		return Err(Kind::Num.into());
 	}
-	if start > LARGEST_SERIAL_READ {
-		return Err(unsupported(format!("EOMONTH of the serial {start}")).into());
-	}
-	if months.abs() > 1e15 {
+	// Past these no month count brings the end back before 9999.
+	if start > LARGEST_SERIAL_READ || months.abs() > 1e15 {
 		return Err(Kind::Num.into());
 	}
 	let (year, month, _) = datetime::civil(start.floor() as i128);
