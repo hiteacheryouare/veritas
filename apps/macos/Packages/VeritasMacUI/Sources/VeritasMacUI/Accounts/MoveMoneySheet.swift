@@ -114,6 +114,7 @@ struct MoveMoneySheet: View {
 							Text(model.format.currency(balance.after, on: .register))
 								.font(.figures(.body, weight: .semibold))
 								.foregroundStyle(.textPrimary)
+								.accessibilityIdentifier("\(id).after")
 						}
 					}
 				}
@@ -122,8 +123,9 @@ struct MoveMoneySheet: View {
 				.padding(.vertical, Spacing.s2)
 				.frame(maxWidth: .infinity, alignment: .leading)
 				.background(.surfaceHover, in: .rect(cornerRadius: Radius.control))
-				// A combined label isn't rebuilt when the After row is inserted, so it's spelled out.
-				.accessibilityElement(children: .ignore)
+				// The group's label isn't rebuilt when the After row is inserted, so
+				// the After figure is also its own element that appears with the row.
+				.accessibilityElement(children: .contain)
 				.accessibilityLabel(balanceLabel(balance))
 				.accessibilityIdentifier("\(id).balance")
 			}
