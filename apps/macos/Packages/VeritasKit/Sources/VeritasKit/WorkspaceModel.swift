@@ -232,6 +232,11 @@ public final class WorkspaceModel {
 
 	public var canEditDashboards: Bool { session?.canEditDashboards ?? false }
 
+	/// The open budget's reads for the assistant, with no way to write.
+	public var readOnlyQueries: (any ReadOnlyBudgetQueries)? {
+		session.map(BudgetSessionQueries.init)
+	}
+
 	/// The budget currency's decimal places (D63): budget cells and goal
 	/// amounts use them; the register always uses two. They arrive with the
 	/// overview, so they are never another budget's.
