@@ -56,12 +56,54 @@ struct StatementsScreenshotTests {
 		])
 	}
 
+	/// ST-4: an equity statement that doesn't close, as the core would report it.
+	private func unclosedEquity(_ unexplained: Int64) async throws -> (StatementDocument, MoneyFormat) {
+		let (_, model) = await model(.ownersEquity)
+		let document = try #require(model.document)
+		#expect(document.unexplained == nil, "the stub closes")
+		return (StatementDocument(kind: document.kind, entity: document.entity, basis: document.basis, lines: document.lines, unexplained: unexplained), model.format)
+	}
+
+	@Test func anUnexplainedGapIsANoticeBelowTheStatement() async throws {
+		let (short, format) = try await unclosedEquity(1_000)
+		#expect(short.notice(format: format) == "The lines above are $10.00 short of closing equity. Check the audit.")
+		#expect(!short.lines.contains { $0.id == "unexplained" }, "never a line in the column")
+		try render(
+			StatementPaper(document: short, format: format).padding(Spacing.s5),
+			named: "statement-ownersEquity-unexplained",
+			size: CGSize(width: 900, height: 700)
+		)
+		let pdf = try #require(PDFDocument(data: StatementPDF.data(short, format: format)))
+		let text = try #require(pdf.string)
+		#expect(text.contains("The lines above are $10.00 short of closing equity."))
+		#expect(text.contains("Check the audit."))
+		let (over, _) = try await unclosedEquity(-1_000)
+		#expect(over.notice(format: format) == "The lines above are $10.00 over closing equity. Check the audit.")
+	}
+
+	@Test func theNoticeTakesTheLastLineOntoANewPageWhenItDoesntFit() async throws {
+		let (short, format) = try await unclosedEquity(1_000)
+		let filler = (1...40).map { StatementLine(id: "filler.\($0)", title: "Line \($0)", amount: 100, style: .line) }
+		let lines = Array(short.lines.dropLast()) + filler + [try #require(short.lines.last)]
+		for count in 0...filler.count {
+			let document = StatementDocument(kind: short.kind, entity: short.entity, basis: short.basis, lines: Array(lines.prefix(short.lines.count - 1 + count)) + [lines[lines.count - 1]], unexplained: 1_000)
+			let pages = StatementPDF.paginate(document, format: format)
+			#expect(pages.flatMap { $0 } == document.lines, "every line, once, in order")
+			#expect(pages.allSatisfy { !$0.isEmpty })
+			let pdf = try #require(PDFDocument(data: StatementPDF.data(document, format: format)))
+			let found = try #require(pdf.findString("Check the audit.", withOptions: []).first)
+			let page = try #require(found.pages.first)
+			#expect(pdf.index(for: page) == pdf.pageCount - 1, "the notice is on the last page")
+			#expect(found.bounds(for: page).minY >= PaperMetrics.bottom + StatementPDF.pageNumberSpace - 1, "above the page number with \(count) extra lines")
+		}
+	}
+
 	@Test func thePDFHasTheScreensLabelsAndNumbers() async throws {
 		for kind in StatementKind.allCases {
 			let (_, model) = await model(kind)
 			let document = try #require(model.document)
 			let pdf = try #require(PDFDocument(data: StatementPDF.data(document, format: model.format)))
-			#expect(pdf.pageCount == StatementPDF.paginate(document).count, "\(kind)")
+			#expect(pdf.pageCount == StatementPDF.paginate(document, format: model.format).count, "\(kind)")
 			#expect(pdf.pageCount == (kind == .incomeStatement ? 2 : 1), "\(kind)")
 			let text = try #require(pdf.string)
 			for expected in ["Stub", "Unaudited. Obviously.", document.title, document.basis] {
@@ -84,7 +126,7 @@ struct StatementsScreenshotTests {
 			kind: .balanceSheet, entity: short.entity, basis: short.basis,
 			lines: [StatementLine(id: "assets", title: "Assets", style: .section)] + accounts + Array(short.lines.drop { $0.style != .total })
 		)
-		let pages = StatementPDF.paginate(long)
+		let pages = StatementPDF.paginate(long, format: model.format)
 		#expect(pages.count > 1)
 		#expect(pages.flatMap { $0 } == long.lines, "every line, once, in order")
 		#expect(pages.dropLast().allSatisfy { page in page.last.map { $0.style != .section && $0.style != .group } ?? false }, "no heading ends a page")

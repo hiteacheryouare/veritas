@@ -13,6 +13,7 @@ enum PaperMetrics {
 	static let amountWidth: CGFloat = 120
 	static let headerGap: CGFloat = 24
 	static let rowPadding: CGFloat = 4
+	static let noticeGap: CGFloat = 28
 
 	static let entitySize: CGFloat = 22
 	static let unauditedSize: CGFloat = 16
@@ -71,6 +72,14 @@ struct StatementPaper: View {
 				.padding(.bottom, PaperMetrics.headerGap)
 			ForEach(Array(document.lines.enumerated()), id: \.element.id) { index, line in
 				row(line, after: index > 0 ? document.lines[index - 1].style : nil, hasGroups: hasGroups)
+			}
+			if let notice = document.notice(format: format) {
+				Text(notice)
+					.font(Self.font(PaperMetrics.rowSize))
+					.foregroundStyle(.moneyOverspent)
+					.frame(maxWidth: .infinity, alignment: .leading)
+					.padding(.top, PaperMetrics.noticeGap)
+					.accessibilityIdentifier("statements.notice")
 			}
 		}
 		.padding(.top, PaperMetrics.top)

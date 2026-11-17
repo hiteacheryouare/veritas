@@ -497,3 +497,35 @@ extension WidgetConfig {
 		return config
 	}
 }
+
+/// ST-4: an equity statement that doesn't close shows the core's closing
+/// equity and says how far off the lines are, below the column.
+@MainActor
+struct OwnersEquityLinesTests {
+	static func equity(unexplained: Int64) -> OwnersEquity {
+		let none = ReportLine(total: 0, count: 0)
+		return OwnersEquity(
+			first: "2026-01-01", last: "2026-01-31", opening: 100_000,
+			netIncome: ReportLine(total: 5_000, count: 1), capitalizedTransfers: none, startingBalances: none,
+			reconciliationAdjustments: none, revaluations: none, unpairedTransfers: none, inTransit: none,
+			closing: 106_000, unexplained: unexplained
+		)
+	}
+
+	@Test func theGapIsNeverALineAndClosingIsTheCores() {
+		let lines = StatementsModel.lines(Self.equity(unexplained: 1_000))
+		#expect(lines.map(\.id) == ["opening", "netIncome", "capitalizedTransfers", "closing"])
+		#expect(lines.last?.amount == 106_000)
+	}
+
+	@Test func theNoticeNamesTheDirectionByTheCoresSign() {
+		let format = MoneyFormat()
+		func document(_ unexplained: Int64?) -> StatementDocument {
+			StatementDocument(kind: .ownersEquity, entity: "Home", basis: "January 2026", lines: [], unexplained: unexplained)
+		}
+		#expect(document(1_000).notice(format: format) == "The lines above are $10.00 short of closing equity. Check the audit.")
+		#expect(document(-1_000).notice(format: format) == "The lines above are $10.00 over closing equity. Check the audit.")
+		#expect(document(nil).notice(format: format) == nil)
+		#expect(document(-50_050).notice(format: .yen) == "The lines above are ¥501 over closing equity. Check the audit.")
+	}
+}

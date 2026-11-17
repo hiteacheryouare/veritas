@@ -69,15 +69,28 @@ public struct StatementDocument: Hashable, Sendable {
 	/// "As of November 9, 2026, in USD", "June to November 2026, in USD".
 	public let basis: String
 	public let lines: [StatementLine]
+	/// ST-4's `unexplained`, register scale, when it isn't zero. It is never a
+	/// line in the column, only the notice below the statement.
+	public let unexplained: Int64?
 
-	public init(kind: StatementKind, entity: String, basis: String, lines: [StatementLine]) {
+	public init(kind: StatementKind, entity: String, basis: String, lines: [StatementLine], unexplained: Int64? = nil) {
 		self.kind = kind
 		self.entity = entity
 		self.basis = basis
 		self.lines = lines
+		self.unexplained = unexplained
 	}
 
 	public var title: String { kind.documentTitle }
+
+	/// ST-4's notice: a positive `unexplained` means the lines fall short of
+	/// closing equity, a negative one that they go over it.
+	public func notice(format: MoneyFormat) -> String? {
+		guard let unexplained else { return nil }
+		let amount = format.currencyMagnitude(unexplained, on: .register)
+		let direction = unexplained > 0 ? "short of" : "over"
+		return "The lines above are \(amount) \(direction) closing equity. Check the audit."
+	}
 
 	/// "Household Balance sheet 2026-11-09.pdf".
 	public func fileName(period: String) -> String {
@@ -213,7 +226,8 @@ public final class StatementsModel {
 		case .cashFlow: cashFlow.map(Self.lines)
 		}
 		guard let lines else { return nil }
-		return StatementDocument(kind: kind, entity: workspace.overview?.name ?? "Budget", basis: basis, lines: lines)
+		let unexplained = kind == .ownersEquity ? ownersEquity.flatMap { $0.unexplained == 0 ? nil : $0.unexplained } : nil
+		return StatementDocument(kind: kind, entity: workspace.overview?.name ?? "Budget", basis: basis, lines: lines, unexplained: unexplained)
 	}
 
 	private var basis: String {
@@ -294,8 +308,8 @@ public final class StatementsModel {
 
 	/// ST-4: opening equity, the seven reconciling lines and closing equity.
 	/// Net income and the capitalized transfers line always show; the other
-	/// five only when they aren't zero. `unexplained` shows only when it isn't
-	/// zero, just above closing equity, so the column still adds up on its face.
+	/// five only when they aren't zero. Closing equity is the core's, so when
+	/// `unexplained` isn't zero the column doesn't add up and the notice says so.
 	static func lines(_ equity: OwnersEquity) -> [StatementLine] {
 		let optional: [(String, String, ReportLine)] = [
 			("startingBalances", "Starting balances", equity.startingBalances),
@@ -310,9 +324,6 @@ public final class StatementsModel {
 			StatementLine(id: "capitalizedTransfers", title: "Off-budget assets acquired (expensed above)", amount: equity.capitalizedTransfers.total, style: .line)
 		]
 		lines += optional.filter { $0.2.total != 0 }.map { StatementLine(id: $0.0, title: $0.1, amount: $0.2.total, style: .line) }
-		if equity.unexplained != 0 {
-			lines.append(StatementLine(id: "unexplained", title: "Unexplained difference", amount: equity.unexplained, style: .line))
-		}
 		lines.append(StatementLine(id: "closing", title: "Closing equity", amount: equity.closing, style: .grand))
 		return lines
 	}

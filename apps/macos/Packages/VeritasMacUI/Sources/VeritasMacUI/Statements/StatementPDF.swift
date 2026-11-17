@@ -10,7 +10,8 @@ enum StatementPDF {
 	static let pageNumberSpace: CGFloat = 28
 
 	static func data(_ document: StatementDocument, format: MoneyFormat) -> Data {
-		let pages = paginate(document)
+		let pages = paginate(document, format: format)
+		let notice = document.notice(format: format)
 		let data = NSMutableData()
 		var box = CGRect(x: 0, y: 0, width: PaperMetrics.width, height: PaperMetrics.height)
 		let info: [CFString: Any] = [
@@ -33,6 +34,9 @@ enum StatementPDF {
 				y = draw(line, at: y, after: previous, format: format, hasGroups: hasGroups)
 				previous = line.style
 			}
+			if let notice, index == pages.count - 1 {
+				drawNotice(notice, at: y)
+			}
 			if pages.count > 1 {
 				drawCentered("Page \(index + 1) of \(pages.count)", font: font(PaperMetrics.pageNumberSize), color: secondary, y: PaperMetrics.height - PaperMetrics.bottom + 12)
 			}
@@ -44,8 +48,8 @@ enum StatementPDF {
 	}
 
 	/// The lines on each page. A section or group heading moves to the next
-	/// page with the row under it.
-	static func paginate(_ document: StatementDocument) -> [[StatementLine]] {
+	/// page with the row under it, and ST-4's notice stays with the last line.
+	static func paginate(_ document: StatementDocument, format: MoneyFormat) -> [[StatementLine]] {
 		let top = PaperMetrics.top + headerHeight
 		let limit = PaperMetrics.height - PaperMetrics.bottom - pageNumberSpace
 		var pages: [[StatementLine]] = [[]]
@@ -63,6 +67,14 @@ enum StatementPDF {
 			y += height(line, after: pages.last?.last?.style)
 			pages[pages.count - 1].append(line)
 		}
+		if let notice = document.notice(format: format), y + noticeHeight(notice) > limit, pages[pages.count - 1].count > 1 {
+			var page = pages.removeLast()
+			var carried = [page.removeLast()]
+			while page.count > 1, let heading = page.last, heading.style == .section || heading.style == .group {
+				carried.insert(page.removeLast(), at: 0)
+			}
+			pages += [page, carried]
+		}
 		return pages
 	}
 
@@ -71,6 +83,11 @@ enum StatementPDF {
 		return NSColor(srgbRed: paper.red, green: paper.green, blue: paper.blue, alpha: paper.alpha)
 	}
 	private static var secondary: NSColor { ink.withAlphaComponent(PaperMetrics.secondaryOpacity) }
+	private static var problem: NSColor {
+		let tone = ColorToken.moneyOverspent.light
+		return NSColor(srgbRed: tone.red, green: tone.green, blue: tone.blue, alpha: tone.alpha)
+	}
+	private static var contentWidth: CGFloat { PaperMetrics.width - PaperMetrics.side * 2 }
 
 	private static var headerHeight: CGFloat {
 		lineHeight(font(PaperMetrics.entitySize, .semibold)) + 6
@@ -124,6 +141,18 @@ enum StatementPDF {
 		return rowTop + lineHeight(rowFont) + PaperMetrics.rowPadding * 2
 	}
 
+	private static func noticeText(_ notice: String) -> NSAttributedString {
+		NSAttributedString(string: notice, attributes: [.font: font(PaperMetrics.rowSize), .foregroundColor: problem])
+	}
+
+	private static func noticeHeight(_ notice: String) -> CGFloat {
+		PaperMetrics.noticeGap + ceil(noticeText(notice).boundingRect(with: CGSize(width: contentWidth, height: .greatestFiniteMagnitude), options: .usesLineFragmentOrigin).height)
+	}
+
+	private static func drawNotice(_ notice: String, at top: CGFloat) {
+		noticeText(notice).draw(with: CGRect(x: PaperMetrics.side, y: top + PaperMetrics.noticeGap, width: contentWidth, height: noticeHeight(notice)), options: .usesLineFragmentOrigin)
+	}
+
 	private static func rule(from x1: CGFloat, to x2: CGFloat, y: CGFloat, width: CGFloat, color: NSColor) {
 		let path = NSBezierPath()
 		path.move(to: CGPoint(x: x1, y: y))
@@ -138,7 +167,7 @@ enum StatementPDF {
 	}
 
 	private static func drawCentered(_ text: NSAttributedString, y: CGFloat) {
-		let width = min(text.size().width, PaperMetrics.width - PaperMetrics.side * 2)
+		let width = min(text.size().width, contentWidth)
 		text.draw(with: CGRect(x: (PaperMetrics.width - width) / 2, y: y, width: width, height: text.size().height), options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
 	}
 
