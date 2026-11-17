@@ -164,12 +164,10 @@ struct RealCoreBillsScreenTests {
 		await workspace.reopen(directory: directory)
 		try #require(workspace.phase == .open)
 		#expect(try await BillsOnOpenTests.posts(directory, "storage-today").isEmpty, "the failed run posted nothing")
-		withKnownIssue("open runs maintain() but never refetches state(), so the banner waits for the 5-minute timer") {
-			#expect(
-				workspace.overview?.scheduleProblem != nil,
-				"the run on open failed, so the overview the banner reads says why as soon as open returns"
-			)
-		}
+		#expect(
+			workspace.overview?.scheduleProblem != nil,
+			"the run on open failed, so the overview the banner reads says why as soon as open returns"
+		)
 		await workspace.refresh()
 		#expect(workspace.overview?.scheduleProblem != nil, "the core knew: a refresh shows it")
 		#expect(workspace.alert == nil, "a failed run is a banner, not an alert: \(String(describing: workspace.alert))")
