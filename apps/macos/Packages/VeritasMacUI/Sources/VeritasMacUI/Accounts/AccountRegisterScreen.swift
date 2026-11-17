@@ -109,6 +109,7 @@ struct AccountRegisterScreen: View {
 			await reconcile?.refresh()
 		}
 		.containerIdentifier("screen.register")
+		.accessibilityLabel(account?.name ?? "Account")
 	}
 }
 

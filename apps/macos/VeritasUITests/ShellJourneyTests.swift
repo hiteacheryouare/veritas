@@ -113,8 +113,10 @@ final class ShellJourneyTests: XCTestCase {
 	/// The register is one screen for every account, so the window title says which one opened.
 	@MainActor
 	private func registerOpens(_ account: String, in app: XCUIApplication) -> Bool {
-		guard app.screen("register").waitForExistence(timeout: 5) else { return false }
-		let titled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "title == %@", account), object: app.windows.firstMatch)
+		let register = app.screen("register")
+		guard register.waitForExistence(timeout: 5) else { return false }
+		// The window title isn't the account's name on its own, so the register names itself.
+		let titled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", account), object: register)
 		return XCTWaiter().wait(for: [titled], timeout: 5) == .completed
 	}
 }
