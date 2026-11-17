@@ -61,7 +61,7 @@ Scope (D13): a summary export that helps hand clean numbers to tax software or a
 | inflow | `amount` |
 | outflow | `-amount` |
 
-Positive counted means "adds to this bucket". A refund in an outflow bucket is negative counted and reduces the total. Bucket total = sum of `counted_cents` for the tax year. A total may be negative. It is shown as negative with a note, never clamped to 0.
+Positive counted means "adds to this bucket". A refund in an outflow bucket is negative counted and reduces the total. Bucket total = sum of `counted_cents` for the tax year. A total may be negative. It is shown as negative with a note, never clamped to 0. The note sits under the bucket's total, in a neutral tone (never the overspent tone, ST-10.4), and reads "Refunds or reversals exceed what was counted." It is the same for inflow and outflow buckets. The CSV is unchanged: `total_cents` stays negative. Example, in cents: purchases of -5000 tagged `#medical` count +5000, and a refund of +6500 tagged `#medical` counts -6500, so `medical` reads -1500, shown as `-15.00` with the note.
 
 ## TAX-5 CSV (UTF-8, no BOM, LF line endings, RFC 4180 quoting, header row)
 
