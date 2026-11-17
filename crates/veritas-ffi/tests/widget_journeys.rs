@@ -821,7 +821,6 @@ fn every_native_card_matches_actuals_card_code_on_a_budget_both_apps_edited() {
 }
 
 #[test]
-#[ignore = "clean-room formula engine pending"]
 fn every_native_card_matches_actuals_card_code_on_a_budget_both_apps_edited_formula_cards() {
 	every_native_card_matches_actuals_card_code_on_a_budget_both_apps_edited_comparing(
 		Cards::FormulaOnly,
@@ -954,7 +953,6 @@ fn every_native_card_matches_actuals_card_code_in_a_zero_place_currency() {
 }
 
 #[test]
-#[ignore = "clean-room formula engine pending"]
 fn every_native_card_matches_actuals_card_code_in_a_zero_place_currency_formula_cards() {
 	every_native_card_matches_actuals_card_code_in_a_zero_place_currency_comparing(
 		Cards::FormulaOnly,
@@ -1194,7 +1192,6 @@ fn every_new_card_matches_actual_in_a_yen_budget_with_transfers_and_months_past_
 }
 
 #[test]
-#[ignore = "clean-room formula engine pending"]
 fn every_new_card_matches_actual_in_a_yen_budget_with_transfers_and_months_past_the_budget_formula_cards()
  {
 	every_new_card_matches_actual_in_a_yen_budget_with_transfers_and_months_past_the_budget_comparing(Cards::FormulaOnly);
@@ -1305,7 +1302,6 @@ fn every_new_card_matches_actual_on_a_brand_new_empty_budget() {
 }
 
 #[test]
-#[ignore = "clean-room formula engine pending"]
 fn every_new_card_matches_actual_on_a_brand_new_empty_budget_formula_cards() {
 	every_new_card_matches_actual_on_a_brand_new_empty_budget_comparing(Cards::FormulaOnly);
 }
