@@ -2133,8 +2133,8 @@ fn an_auto_posted_about_or_between_bill_reads_as_an_estimate_until_edited_or_cle
 		"Sewer",
 		CITY_POWER,
 		BillAmount::Between {
-			low: -1_001,
-			high: -1_000,
+			low: -1_000,
+			high: -1_001,
 		},
 		monthly("2026-11-03", None),
 		Some(UTILITIES),
@@ -2231,4 +2231,1194 @@ fn an_auto_posted_about_or_between_bill_reads_as_an_estimate_until_edited_or_cle
 	see(&opened, "2026-11-03");
 	check(&opened, "Actual");
 	opened.close().unwrap();
+}
+
+// Contract v13: what the bill and rule screens show beside the v8 models.
+
+/// What Actual itself says about bills (the oracle's `bill-facts`): linked
+/// transactions in Actual's order, `v_schedules` rows and previewed dates.
+fn bill_facts(oracle: &Path, zip: &Path, request: Value, today: &str, scratch: &Scratch) -> Value {
+	let file = scratch.join("bill-facts.json");
+	std::fs::write(&file, request.to_string()).unwrap();
+	serde_json::from_slice(&node(
+		oracle,
+		&["bill-facts", &text(zip), &text(&file), "--today", today],
+	))
+	.unwrap()
+}
+
+fn actual_schedule<'a>(facts: &'a Value, id: &str) -> &'a Value {
+	facts["schedules"]
+		.as_array()
+		.unwrap()
+		.iter()
+		.find(|row| row["id"] == id)
+		.unwrap()
+}
+
+fn name_of(dump: &Value, table: &str, id: &Value) -> Option<String> {
+	rows(dump, table)
+		.iter()
+		.find(|row| &row["id"] == id)
+		.and_then(|row| row["name"].as_str())
+		.map(str::to_owned)
+}
+
+const HOUSEHOLD: [&str; 5] = ["rent", "power", "paycheck", "savings", "gym"];
+
+#[test]
+fn a_bills_last_payment_is_the_newest_transaction_actual_links_to_it() {
+	// v13 lastPaidAmount and lastPaidDate: after a month of posting, Paid with
+	// an edited amount and a transfer, each bill's last payment is the first
+	// row Actual's own query lists for it in the bill's account.
+	let scratch = Scratch::new("last-paid");
+	let base = household_base(&scratch);
+	let session = import(&scratch, &base, "veritas");
+	see(&session, "2026-10-31");
+	create(
+		&session,
+		"phone",
+		bill(
+			"Phone",
+			ACME,
+			BillAmount::Exact { amount: -4_500 },
+			monthly("2026-12-05", None),
+			None,
+			false,
+		),
+	);
+	for day in [
+		"2026-11-02",
+		"2026-11-06",
+		"2026-11-10",
+		"2026-11-20",
+		"2026-12-01",
+	] {
+		see(&session, day);
+		session.maintain(day.to_owned()).unwrap();
+	}
+	perform(
+		&session,
+		Command::PayBill {
+			bill_id: "power".to_owned(),
+			amount: -8_350,
+			date: "2026-11-13".to_owned(),
+		},
+	);
+	let last = |id: &str| {
+		let bill = bill_on(&session, id, "2026-12-01");
+		(bill.last_paid_date, bill.last_paid_amount)
+	};
+	assert_eq!(last("rent"), (Some("2026-12-01".into()), Some(-150_000)));
+	assert_eq!(last("power"), (Some("2026-11-13".into()), Some(-8_350)));
+	assert_eq!(last("paycheck"), (Some("2026-11-20".into()), Some(250_000)));
+	assert_eq!(
+		last("savings"),
+		(Some("2026-11-20".into()), Some(-20_000)),
+		"the leg in the bill's account, not the other leg"
+	);
+	assert_eq!(last("phone"), (None, None), "never paid");
+	let ours = scratch.join("ours.zip");
+	export(&session, &ours);
+	session.close().unwrap();
+	let Some(oracle) = oracle() else { return };
+
+	let mut ids = HOUSEHOLD.to_vec();
+	ids.push("phone");
+	let facts = bill_facts(
+		&oracle,
+		&ours,
+		json!({"linked": ids}),
+		"2026-12-01",
+		&scratch,
+	);
+	assert!(
+		facts["linked"]["savings"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.any(|row| row["account"] != CHECKING && row["amount"] == 20_000),
+		"Actual links the transfer's other leg to the bill too"
+	);
+	let session = reopen(&scratch, "veritas");
+	for id in ids {
+		let theirs = facts["linked"][id]
+			.as_array()
+			.unwrap()
+			.iter()
+			.find(|row| row["account"] == CHECKING)
+			.map(|row| {
+				(
+					row["date"].as_str().unwrap().to_owned(),
+					row["amount"].as_i64().unwrap(),
+				)
+			});
+		let bill = bill_on(&session, id, "2026-12-01");
+		assert_eq!(
+			bill.last_paid_date.zip(bill.last_paid_amount),
+			theirs,
+			"{id}"
+		);
+	}
+	session.close().unwrap();
+}
+
+#[test]
+fn the_next_dates_preview_matches_actuals_schedule_editor() {
+	// v13 previewBillDates: Actual's schedule editor previews a repeat with
+	// `schedule/get-upcoming-dates`, whose weekend moves can land before today
+	// or twice on one Monday, and a one-time date only when it hasn't passed.
+	let today = "2026-11-15";
+	let draft = |name: &str, date: BillDate| {
+		bill(
+			name,
+			ACME,
+			BillAmount::Exact { amount: -100 },
+			date,
+			None,
+			false,
+		)
+	};
+	let with_patterns = |mut date: BillDate, patterns: Vec<veritas_ffi::BillRepeatPattern>| {
+		if let BillDate::Repeat { repeat } = &mut date {
+			repeat.patterns = patterns;
+		}
+		date
+	};
+	let repeats = [
+		draft(
+			"Friday before",
+			monthly("2026-08-15", Some(BillWeekend::FridayBefore)),
+		),
+		draft(
+			"Daily, Monday after",
+			repeat(
+				"2026-11-01",
+				1,
+				BillFrequency::Daily,
+				Some(BillWeekend::MondayAfter),
+				BillRepeatEnd::Never,
+			),
+		),
+		draft(
+			"Three fortnights",
+			repeat(
+				"2026-11-06",
+				2,
+				BillFrequency::Weekly,
+				None,
+				BillRepeatEnd::AfterOccurrences { count: 3 },
+			),
+		),
+		draft(
+			"Last day and second Friday",
+			with_patterns(
+				repeat(
+					"2026-09-01",
+					1,
+					BillFrequency::Monthly,
+					None,
+					BillRepeatEnd::OnDate {
+						date: "2027-01-31".into(),
+					},
+				),
+				vec![
+					veritas_ffi::BillRepeatPattern::Day { day: -1 },
+					veritas_ffi::BillRepeatPattern::Weekday {
+						weekday: veritas_ffi::BillWeekday::Friday,
+						nth: 2,
+					},
+				],
+			),
+		),
+		draft(
+			"Leap day",
+			repeat(
+				"2024-02-29",
+				1,
+				BillFrequency::Yearly,
+				None,
+				BillRepeatEnd::Never,
+			),
+		),
+	];
+	let count = 4;
+	let ours: Vec<Vec<String>> = repeats
+		.iter()
+		.map(|draft| {
+			veritas_ffi::preview_bill_dates(draft.clone(), today.to_owned(), count).unwrap()
+		})
+		.collect();
+	assert_eq!(
+		ours[0],
+		["2026-11-13", "2026-12-15", "2027-01-15", "2027-02-15"],
+		"15 November is a Sunday, so it shows on the Friday before today"
+	);
+	assert_eq!(
+		ours[1],
+		["2026-11-16", "2026-11-16", "2026-11-17", "2026-11-18"],
+		"today, a Sunday, moves to Monday the 16th along with the 16th itself"
+	);
+	assert_eq!(
+		ours[2],
+		["2026-11-20", "2026-12-04"],
+		"the third is the last"
+	);
+	let once = |date: &str| {
+		veritas_ffi::preview_bill_dates(
+			draft("Once", BillDate::Once { date: date.into() }),
+			today.to_owned(),
+			count,
+		)
+		.unwrap()
+	};
+	assert_eq!(once("2026-11-15"), ["2026-11-15"]);
+	assert_eq!(
+		once("2026-11-14"),
+		Vec::<String>::new(),
+		"a date gone by previews nothing"
+	);
+	let impossible = with_patterns(
+		monthly("2026-11-01", None),
+		vec![veritas_ffi::BillRepeatPattern::Day { day: 32 }],
+	);
+	assert!(matches!(
+		veritas_ffi::preview_bill_dates(draft("Impossible", impossible), today.to_owned(), count),
+		Err(FfiError::Invalid { .. })
+	));
+	assert!(
+		veritas_ffi::preview_bill_dates(repeats[0].clone(), today.to_owned(), 101).is_err(),
+		"at most 100 dates"
+	);
+	let Some(oracle) = oracle() else { return };
+
+	// Actual previews the RecurConfig each draft saves as.
+	let scratch = Scratch::new("preview");
+	let session = import(&scratch, &small_zip(), "veritas");
+	see(&session, today);
+	for (n, draft) in repeats.iter().enumerate() {
+		create(&session, &format!("preview-{n}"), draft.clone());
+	}
+	let saved = scratch.join("saved.zip");
+	export(&session, &saved);
+	session.close().unwrap();
+	let dump = actual_reads(&oracle, &saved, today);
+	let mut upcoming: Vec<Value> = (0..repeats.len())
+		.map(|n| {
+			let conditions = conditions_of(&dump, &format!("preview-{n}"));
+			let date = conditions
+				.as_array()
+				.unwrap()
+				.iter()
+				.find(|c| c["field"] == "date")
+				.unwrap()["value"]
+				.clone();
+			json!({"config": date, "count": count})
+		})
+		.collect();
+	upcoming.push(json!({"config": {
+		"start": "2026-11-01", "interval": 1, "frequency": "monthly",
+		"patterns": [{"value": 32, "type": "day"}], "skipWeekend": false,
+		"weekendSolveMode": "before", "endMode": "never", "endOccurrences": 1,
+		"endDate": "2026-11-01"}, "count": count}));
+	let facts = bill_facts(
+		&oracle,
+		&small_zip(),
+		json!({"upcoming": upcoming}),
+		today,
+		&scratch,
+	);
+	let theirs = facts["upcoming"].as_array().unwrap();
+	for (n, dates) in ours.iter().enumerate() {
+		assert_eq!(
+			&json!(dates),
+			&theirs[n],
+			"{}",
+			repeats[n].name.as_deref().unwrap()
+		);
+	}
+	assert_eq!(theirs[repeats.len()], "Invalid rule");
+}
+
+#[test]
+fn upcoming_bills_carry_their_amount_kind_account_and_category() {
+	// v13 UpcomingBill.amountKind, accountName and categoryName, against
+	// `v_schedules` (`_amountOp`, `_account`) and the rule's category action.
+	let scratch = Scratch::new("upcoming-fields");
+	let base = household_base(&scratch);
+	let session = import(&scratch, &base, "veritas");
+	see(&session, "2026-10-31");
+	create(
+		&session,
+		"water",
+		bill(
+			"Water",
+			CITY_POWER,
+			BillAmount::Between {
+				low: -4_000,
+				high: -6_000,
+			},
+			monthly("2026-11-18", None),
+			Some(UTILITIES),
+			false,
+		),
+	);
+	let upcoming = session.upcoming(30, "2026-11-01".to_owned()).unwrap();
+	let first = |id: &str| {
+		upcoming
+			.iter()
+			.find(|bill| bill.bill_id == id)
+			.unwrap()
+			.clone()
+	};
+	let kinds = |id: &str| {
+		let bill = first(id);
+		(bill.amount_kind, bill.category_name, bill.account_name)
+	};
+	assert_eq!(
+		kinds("rent"),
+		(
+			Some(veritas_ffi::BillAmountKind::Exact),
+			Some("Rent".into()),
+			Some("Checking".into())
+		)
+	);
+	assert_eq!(kinds("power").0, Some(veritas_ffi::BillAmountKind::About));
+	assert_eq!(kinds("water").0, Some(veritas_ffi::BillAmountKind::Between));
+	assert_eq!(kinds("savings").1, None, "a bill without a category");
+	let ours = scratch.join("ours.zip");
+	export(&session, &ours);
+	let Some(oracle) = oracle() else { return };
+
+	let dump = actual_reads(&oracle, &ours, "2026-11-01");
+	let facts = bill_facts(&oracle, &ours, json!({}), "2026-11-01", &scratch);
+	for row in &upcoming {
+		let theirs = actual_schedule(&facts, &row.bill_id);
+		let kind = match theirs["_amountOp"].as_str() {
+			Some("is") => Some(veritas_ffi::BillAmountKind::Exact),
+			Some("isapprox") => Some(veritas_ffi::BillAmountKind::About),
+			Some("isbetween") => Some(veritas_ffi::BillAmountKind::Between),
+			_ => None,
+		};
+		assert_eq!(row.amount_kind, kind, "{}", row.bill_id);
+		assert_eq!(
+			row.account_name,
+			name_of(&dump, "accounts", &theirs["_account"]),
+			"{}",
+			row.bill_id
+		);
+		let category = theirs["_actions"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.find(|action| action["op"] == "set" && action["field"] == "category")
+			.map(|action| action["value"].clone());
+		assert_eq!(
+			row.category_name,
+			category.and_then(|id| name_of(&dump, "categories", &id)),
+			"{}",
+			row.bill_id
+		);
+	}
+	session.close().unwrap();
+}
+
+/// A stored rule's items with Actual's public field names, as its API takes them.
+fn public_items(items: &Value) -> Vec<Value> {
+	items
+		.as_array()
+		.unwrap()
+		.iter()
+		.map(|item| {
+			let mut item = item.clone();
+			let field = match item["field"].as_str() {
+				Some("acct") => Some("account"),
+				Some("description") => Some("payee"),
+				_ => None,
+			};
+			if let Some(field) = field {
+				item["field"] = json!(field);
+			}
+			item
+		})
+		.collect()
+}
+
+#[test]
+fn a_schedule_actual_edited_into_a_shape_bills_cant_show_says_why() {
+	// v13 readOnlyReason and customParts: Actual's own rule editor turns the
+	// household's bills into shapes the bill screen can't show or doesn't
+	// show in full. The read-only ones are still listed, with the reason.
+	let scratch = Scratch::new("read-only");
+	let base = household_base(&scratch);
+	let Some(oracle) = oracle() else { return };
+	let dump = actual_reads(&oracle, &base, "2026-11-01");
+	let rule_of = |schedule: &str| {
+		rows(&dump, "schedules")
+			.iter()
+			.find(|row| row["id"] == schedule)
+			.unwrap()["rule"]
+			.clone()
+	};
+	let actions_of = |schedule: &str| {
+		let rule = rule_of(schedule);
+		let stored = rows(&dump, "rules")
+			.iter()
+			.find(|row| row["id"] == rule)
+			.unwrap();
+		serde_json::from_str::<Value>(stored["actions"].as_str().unwrap()).unwrap()
+	};
+	let edit = |schedule: &str, change: &dyn Fn(&mut Vec<Value>, &mut Vec<Value>)| {
+		let mut conditions = public_items(&conditions_of(&dump, schedule));
+		let mut actions = public_items(&actions_of(schedule));
+		change(&mut conditions, &mut actions);
+		json!({"op": "updateRule", "id": rule_of(schedule), "conditions": conditions, "actions": actions})
+	};
+	let ops = json!([
+		edit("rent", &|c, _| c.retain(|c| c["field"] != "amount")),
+		edit("power", &|c, _| {
+			for c in c.iter_mut().filter(|c| c["field"] == "amount") {
+				c["value"] = json!(-8000.5);
+			}
+		}),
+		edit("paycheck", &|c, _| c.retain(|c| c["field"] != "date")),
+		edit("savings", &|c, _| {
+			for c in c.iter_mut().filter(|c| c["field"] == "date") {
+				*c = json!({"op": "is", "field": "date", "value": "2026-12", "type": "date"});
+			}
+		}),
+		edit("gym", &|c, a| {
+			c.push(json!({"op": "contains", "field": "notes", "value": "gym", "type": "string"}));
+			a.push(
+				json!({"op": "set", "field": "notes", "value": "joining fee", "type": "string"}),
+			);
+		}),
+	]);
+	let edited = scratch.join("edited.zip");
+	actual_apply(&oracle, &base, ops, &edited, "2026-11-01", 3);
+	let session = import(&scratch, &edited, "veritas");
+	let bills = session.bills("2026-11-01".to_owned()).unwrap();
+	let find = |id: &str| bills.iter().find(|bill| bill.id == id).unwrap();
+	use veritas_ffi::{BillCustomPart, BillReadOnlyReason};
+	for (id, reason) in [
+		("rent", BillReadOnlyReason::NoAmount),
+		("power", BillReadOnlyReason::UnsupportedAmount),
+		("paycheck", BillReadOnlyReason::NoDate),
+		("savings", BillReadOnlyReason::UnsupportedDate),
+	] {
+		let bill = find(id);
+		assert_eq!(bill.read_only_reason, Some(reason), "{id}");
+		assert_eq!(bill.draft, None, "{id}");
+		assert!(bill.custom_parts.is_empty(), "{id}");
+	}
+	let gym = find("gym");
+	assert!(gym.draft.is_some() && gym.custom_rule);
+	assert_eq!(gym.read_only_reason, None);
+	assert_eq!(
+		gym.custom_parts,
+		[
+			BillCustomPart::ExtraConditions,
+			BillCustomPart::ExtraActions
+		]
+	);
+	assert_eq!(find("rent").amount_kind, None);
+	assert_eq!(
+		find("power").amount_kind,
+		Some(veritas_ffi::BillAmountKind::About),
+		"its amount still reads as About, though not as whole cents"
+	);
+
+	// Actual still lists every one of them, with no amount op where Veritas has no kind.
+	let facts = bill_facts(&oracle, &edited, json!({}), "2026-11-01", &scratch);
+	for id in HOUSEHOLD {
+		let theirs = actual_schedule(&facts, id);
+		assert_eq!(
+			theirs["_amountOp"].is_null(),
+			find(id).amount_kind.is_none(),
+			"{id}"
+		);
+	}
+	session.close().unwrap();
+}
+
+#[test]
+fn skip_is_offered_exactly_when_actuals_skip_moves_the_bill() {
+	// v13 canSkip: Actual offers Skip on every schedule that isn't completed
+	// (SchedulesTable.tsx:189-194), but it only moves one with a later date
+	// (`getNextDateAfter`). Each bill is skipped in Actual on the same file.
+	let scratch = Scratch::new("can-skip");
+	let session = import(&scratch, &small_zip(), "setup");
+	see(&session, "2026-10-31");
+	household_bills(&session);
+	create(
+		&session,
+		"dentist",
+		bill(
+			"Dentist",
+			ACME,
+			BillAmount::Exact { amount: -12_000 },
+			BillDate::Once {
+				date: "2026-11-25".into(),
+			},
+			None,
+			false,
+		),
+	);
+	create(
+		&session,
+		"course",
+		bill(
+			"Course",
+			ACME,
+			BillAmount::Exact { amount: -3_000 },
+			repeat(
+				"2026-10-10",
+				1,
+				BillFrequency::Monthly,
+				None,
+				BillRepeatEnd::AfterOccurrences { count: 2 },
+			),
+			None,
+			false,
+		),
+	);
+	perform(
+		&session,
+		Command::PauseBill {
+			bill_id: "paycheck".into(),
+		},
+	);
+	let ids = [
+		"rent", "power", "paycheck", "savings", "gym", "dentist", "course",
+	];
+	let can_skip: Vec<bool> = ids
+		.iter()
+		.map(|id| bill_on(&session, id, "2026-10-31").can_skip)
+		.collect();
+	assert_eq!(can_skip, [true, true, false, true, false, false, false]);
+	let base = scratch.join("base.zip");
+	export(&session, &base);
+	for (id, offered) in ids
+		.iter()
+		.zip(&can_skip)
+		.filter(|(id, _)| **id != "paycheck")
+	{
+		let skipped = session.perform(Command::SkipBill {
+			bill_id: (*id).to_owned(),
+		});
+		assert_eq!(skipped.is_ok(), *offered, "{id}");
+	}
+	session.close().unwrap();
+	let Some(oracle) = oracle() else { return };
+
+	let before = schedules(&actual_reads(&oracle, &base, "2026-10-31"));
+	let skips: Vec<Value> = ids
+		.iter()
+		.map(|id| json!({"op": "skipSchedule", "id": id}))
+		.collect();
+	let skipped = scratch.join("skipped.zip");
+	actual_apply(&oracle, &base, json!(skips), &skipped, "2026-10-31", 4);
+	let after = schedules(&actual_reads(&oracle, &skipped, "2026-10-31"));
+	for (id, offered) in ids.iter().zip(can_skip) {
+		let moved = before[*id]["nextDate"] != after[*id]["nextDate"];
+		if before[*id]["completed"] == true {
+			assert!(!offered, "{id}: Actual hides Skip on a completed schedule");
+		} else {
+			assert_eq!(offered, moved, "{id}");
+		}
+	}
+}
+
+fn kind_name(field: RuleField) -> &'static str {
+	match field {
+		RuleField::ImportedPayee => "imported_payee",
+		RuleField::Payee => "payee",
+		RuleField::PayeeName => "payee_name",
+		RuleField::Account => "account",
+		RuleField::Category => "category",
+		RuleField::CategoryGroup => "category_group",
+		RuleField::Notes => "notes",
+		RuleField::Amount => "amount",
+		RuleField::AmountInflow => "amount-inflow",
+		RuleField::AmountOutflow => "amount-outflow",
+		RuleField::Date => "date",
+		RuleField::Cleared => "cleared",
+		RuleField::Reconciled => "reconciled",
+		RuleField::Transfer => "transfer",
+		RuleField::Parent => "parent",
+	}
+}
+
+fn op_name(op: RuleConditionOp) -> &'static str {
+	match op {
+		RuleConditionOp::Is => "is",
+		RuleConditionOp::IsNot => "isNot",
+		RuleConditionOp::Contains => "contains",
+		RuleConditionOp::DoesNotContain => "doesNotContain",
+		RuleConditionOp::Matches => "matches",
+		RuleConditionOp::OneOf => "oneOf",
+		RuleConditionOp::NotOneOf => "notOneOf",
+		RuleConditionOp::HasTags => "hasTags",
+		RuleConditionOp::HasAnyTag => "hasAnyTag",
+		RuleConditionOp::IsApprox => "isapprox",
+		RuleConditionOp::IsBetween => "isbetween",
+		RuleConditionOp::Gt => "gt",
+		RuleConditionOp::Gte => "gte",
+		RuleConditionOp::Lt => "lt",
+		RuleConditionOp::Lte => "lte",
+		RuleConditionOp::OnBudget => "onBudget",
+		RuleConditionOp::OffBudget => "offBudget",
+		RuleConditionOp::And => "and",
+	}
+}
+
+fn action_op_name(op: RuleActionOp) -> &'static str {
+	match op {
+		RuleActionOp::Set => "set",
+		RuleActionOp::PrependNotes => "prepend-notes",
+		RuleActionOp::AppendNotes => "append-notes",
+		RuleActionOp::DeleteTransaction => "delete-transaction",
+		RuleActionOp::SetSplitAmount => "set-split-amount",
+		RuleActionOp::LinkSchedule => "link-schedule",
+	}
+}
+
+fn strings_of(value: &Value) -> Vec<String> {
+	value
+		.as_array()
+		.unwrap()
+		.iter()
+		.map(|item| item.as_str().unwrap().to_owned())
+		.collect()
+}
+
+/// A value of `kind` for `field`, naming entities small.zip has.
+fn sample(kind: veritas_ffi::RuleValueKind, field: RuleField, group: &str) -> RuleValue {
+	use veritas_ffi::RuleValueKind as K;
+	let entity = match field {
+		RuleField::Payee => LANDLORD,
+		RuleField::Account => CHECKING,
+		RuleField::CategoryGroup => group,
+		_ => RENT,
+	};
+	match kind {
+		K::Id => id(entity),
+		K::Ids => RuleValue::Ids {
+			ids: vec![entity.to_owned()],
+		},
+		K::Text => words("rent"),
+		K::Texts => RuleValue::Texts {
+			texts: vec!["rent".to_owned()],
+		},
+		K::Amount => RuleValue::Amount { amount: 5_000 },
+		K::AmountRange => RuleValue::AmountRange {
+			num1: 1_000,
+			num2: 5_000,
+		},
+		K::Date => RuleValue::Date {
+			date: "2026-11-01".to_owned(),
+		},
+		K::DateMonthOrYear => RuleValue::Month {
+			month: "2026-11".to_owned(),
+		},
+		K::Bool => RuleValue::Bool { value: true },
+		K::Percent => RuleValue::Percent { percent: 50.0 },
+		K::Nothing => RuleValue::Nothing,
+	}
+}
+
+#[test]
+fn rule_choices_are_what_actuals_rule_editor_offers_and_every_one_saves() {
+	// v13 ruleChoices: the condition fields and their ops, the action ops and
+	// fields and the split-line fields come from Actual's own tables (run from
+	// its shared/rules.ts and read from RuleEditor.tsx), and a draft built from
+	// each choice saves and loads in Actual.
+	let choices = veritas_ffi::rule_choices().unwrap();
+	let scratch = Scratch::new("choices");
+	let session = import(&scratch, &small_zip(), "veritas");
+	see(&session, "2026-11-05");
+	let group = session
+		.budget_month(
+			veritas_ffi::parse_month("2026-11".to_owned()).unwrap(),
+			"2026-11-05".to_owned(),
+		)
+		.unwrap()
+		.groups
+		.into_iter()
+		.find(|group| !group.is_income)
+		.unwrap()
+		.id;
+	let notes = |text: &str| set(RuleField::Notes, words(text));
+	let any = || {
+		condition(
+			RuleField::ImportedPayee,
+			RuleConditionOp::Contains,
+			words("choice"),
+		)
+	};
+	let mut saved = Vec::new();
+	for choice in &choices.condition_fields {
+		for op in &choice.ops {
+			let value = sample(op.value, choice.field, &group);
+			saved.push(create_rule(
+				&session,
+				draft(
+					RuleConditionsOp::And,
+					vec![condition(choice.field, op.op, value)],
+					vec![notes("condition")],
+				),
+			));
+		}
+	}
+	for field in &choices.action_fields {
+		saved.push(create_rule(
+			&session,
+			draft(
+				RuleConditionsOp::And,
+				vec![any()],
+				vec![set(field.field, sample(field.value, field.field, &group))],
+			),
+		));
+	}
+	for op in &choices.action_ops {
+		let Some(kind) = op.value else { continue };
+		saved.push(create_rule(
+			&session,
+			draft(
+				RuleConditionsOp::And,
+				vec![any()],
+				vec![RuleAction {
+					op: op.op,
+					field: None,
+					value: sample(kind, RuleField::Notes, &group),
+					split_index: 0,
+				}],
+			),
+		));
+	}
+	let mut split = Vec::new();
+	for (n, kind) in choices.split_amounts.iter().enumerate() {
+		let line = n as u32 + 1;
+		split.push(RuleAction {
+			op: RuleActionOp::SetSplitAmount,
+			field: None,
+			value: sample(*kind, RuleField::Amount, &group),
+			split_index: line,
+		});
+		for field in &choices.split_line_fields {
+			split.push(RuleAction {
+				op: RuleActionOp::Set,
+				field: Some(field.field),
+				value: sample(field.value, field.field, &group),
+				split_index: line,
+			});
+		}
+	}
+	saved.push(create_rule(
+		&session,
+		draft(RuleConditionsOp::And, vec![any()], split),
+	));
+	let ours = scratch.join("ours.zip");
+	export(&session, &ours);
+	session.close().unwrap();
+	let Some(oracle) = oracle() else { return };
+
+	let theirs: Value = serde_json::from_slice(&node(&oracle, &["rule-choices"])).unwrap();
+	let fields: Vec<&str> = choices
+		.condition_fields
+		.iter()
+		.map(|choice| kind_name(choice.field))
+		.collect();
+	assert_eq!(json!(fields), theirs["conditionFields"]);
+	assert_eq!(theirs["inflowOutflowDropIsBetween"], true);
+	for choice in &choices.condition_fields {
+		let field = kind_name(choice.field);
+		let signed = field.starts_with("amount-");
+		let mut ops = strings_of(&theirs["validOps"][if signed { "amount" } else { field }]);
+		if signed {
+			ops.retain(|op| op != "isbetween");
+		}
+		let ours: Vec<&str> = choice.ops.iter().map(|op| op_name(op.op)).collect();
+		assert_eq!(ours, ops, "{field}");
+	}
+	let action_ops: Vec<&str> = choices
+		.action_ops
+		.iter()
+		.map(|op| action_op_name(op.op))
+		.collect();
+	assert_eq!(json!(action_ops), theirs["actionOps"]);
+	assert_eq!(theirs["hidesNameFields"], true);
+	let offered: Vec<String> = strings_of(&theirs["actionFields"])
+		.into_iter()
+		.filter(|field| !field.contains("_name"))
+		.collect();
+	let action_fields: Vec<&str> = choices
+		.action_fields
+		.iter()
+		.map(|field| kind_name(field.field))
+		.collect();
+	assert_eq!(action_fields, offered);
+	let parent_only = strings_of(&theirs["parentOnlyFields"]);
+	let split_fields: Vec<&str> = choices
+		.split_line_fields
+		.iter()
+		.map(|field| kind_name(field.field))
+		.collect();
+	let offered_split: Vec<&String> = offered
+		.iter()
+		.filter(|field| !parent_only.contains(field))
+		.collect();
+	assert_eq!(split_fields, offered_split);
+	assert_eq!(
+		theirs["allocationMethods"],
+		json!(["fixed-amount", "fixed-percent", "remainder"])
+	);
+	use veritas_ffi::RuleValueKind as K;
+	assert_eq!(choices.split_amounts, [K::Amount, K::Percent, K::Nothing]);
+
+	// Actual loads every rule those choices made: `rule-get` throws otherwise.
+	let ids: Vec<&str> = saved.iter().map(String::as_str).collect();
+	let matches = actual_matches(&oracle, &ours, &ids, &scratch);
+	assert_eq!(matches.as_object().unwrap().len(), saved.len());
+}
+
+#[test]
+fn a_bills_rule_is_listed_with_the_bills_name() {
+	// v13 RuleSentence.billName: the rules page names the bill a rule belongs
+	// to, the name Actual stores on the schedule.
+	let scratch = Scratch::new("bill-names");
+	let base = household_base(&scratch);
+	let session = import(&scratch, &base, "veritas");
+	see(&session, "2026-11-01");
+	let editable = create_rule(
+		&session,
+		draft(
+			RuleConditionsOp::And,
+			vec![condition(
+				RuleField::Notes,
+				RuleConditionOp::Contains,
+				words("rent"),
+			)],
+			vec![set(RuleField::Category, id(RENT))],
+		),
+	);
+	let rules = session.rules().unwrap();
+	let named: Vec<(String, Option<String>)> = rules
+		.iter()
+		.filter_map(|rule| match &rule.access {
+			RuleAccess::Bill { schedule_id } => Some((schedule_id.clone(), rule.bill_name.clone())),
+			_ => None,
+		})
+		.collect();
+	assert_eq!(named.len(), HOUSEHOLD.len());
+	assert!(named.contains(&("gym".to_owned(), Some("Gym joining fee".to_owned()))));
+	assert_eq!(
+		rules
+			.iter()
+			.find(|rule| rule.id == editable)
+			.unwrap()
+			.bill_name,
+		None
+	);
+	session.close().unwrap();
+	let Some(oracle) = oracle() else { return };
+
+	let dump = actual_reads(&oracle, &base, "2026-11-01");
+	for (schedule, name) in named {
+		assert_eq!(
+			name,
+			name_of(&dump, "schedules", &json!(schedule)),
+			"{schedule}"
+		);
+	}
+}
+
+#[test]
+fn a_preview_flags_reconciled_rows_and_rows_that_may_need_actual() {
+	// v13 RuleMatch.reconciled and mayNeedActual: a row Actual reconciled and
+	// a row saved while a rule only Actual can run applied to it are flagged
+	// in the preview, the way Actual and the register store them.
+	let scratch = Scratch::new("match-flags");
+	let Some(oracle) = oracle() else { return };
+	let base = rules_base(&scratch, &oracle);
+	let reconciled = scratch.join("reconciled.zip");
+	actual_apply(
+		&oracle,
+		&base,
+		json!([
+			{"op": "updateTransaction", "id": "grocer", "fields": {"cleared": true, "reconciled": true}},
+			{"op": "createRule", "id": "actual-lunch", "conditions": [
+				{"field": "notes", "op": "contains", "value": "lunch", "type": "string"}
+			], "actions": [
+				{"op": "set", "field": "notes", "value": "", "type": "string",
+				 "options": {"template": "{{notes}} (work)"}}
+			]}
+		]),
+		&reconciled,
+		"2026-11-05",
+		5,
+	);
+	let session = import(&scratch, &reconciled, "veritas");
+	see(&session, "2026-11-05");
+	// "actual-lunch" has a template action, which only Actual can run.
+	perform(
+		&session,
+		spend(
+			"lunch",
+			"2026-11-01",
+			-1_850,
+			None,
+			Some("Diner"),
+			Some("lunch out"),
+		),
+	);
+	let rule = create_rule(
+		&session,
+		draft(
+			RuleConditionsOp::Or,
+			vec![
+				condition(RuleField::Notes, RuleConditionOp::Contains, words("weekly")),
+				condition(RuleField::Notes, RuleConditionOp::Contains, words("lunch")),
+				condition(
+					RuleField::Amount,
+					RuleConditionOp::Is,
+					RuleValue::Amount { amount: -2_399 },
+				),
+			],
+			vec![set(RuleField::Category, id(DINING_OUT))],
+		),
+	);
+	let matches = preview(&session, &rule);
+	let flags = |id: &str| {
+		let found = matches.iter().find(|m| m.transaction_id == id).unwrap();
+		(found.reconciled, found.may_need_actual)
+	};
+	let register = scheduled_rows_all(&session);
+	let needs = |id: &str| {
+		register
+			.iter()
+			.find(|row| row.id == id)
+			.unwrap()
+			.needs_actual
+			.is_some()
+	};
+	assert_eq!(flags("grocer"), (true, false));
+	assert_eq!(flags("lunch"), (false, needs("lunch")));
+	assert!(
+		needs("lunch"),
+		"the template rule may apply to it in Actual"
+	);
+	assert_eq!(flags("amzn-1"), (false, false));
+	let ours = scratch.join("ours.zip");
+	export(&session, &ours);
+	session.close().unwrap();
+	let dump = actual_reads(&oracle, &ours, "2026-11-05");
+	for found in &matches {
+		let row = rows(&dump, "transactions")
+			.iter()
+			.find(|row| row["id"] == found.transaction_id.as_str())
+			.unwrap();
+		assert_eq!(
+			found.reconciled,
+			row["reconciled"] == 1,
+			"{}",
+			found.transaction_id
+		);
+	}
+}
+
+fn scheduled_rows_all(session: &Session) -> Vec<veritas_ffi::RegisterRow> {
+	session
+		.register(
+			veritas_ffi::RegisterScope::Account {
+				account_id: CHECKING.to_owned(),
+			},
+			veritas_ffi::RegisterFilter::default(),
+			veritas_ffi::RegisterSort {
+				key: veritas_ffi::RegisterSortKey::Date,
+				ascending: false,
+			},
+			0,
+			500,
+		)
+		.unwrap()
+		.rows
+}
+
+#[test]
+fn amount_inflow_and_outflow_conditions_use_actuals_signs() {
+	// v13 sign convention: `amount` compares Actual's signed amount, inflow a
+	// positive amount as it is, outflow a negative amount as its absolute
+	// value. The preview searches as Actual's rule editor does, where 0 is
+	// neither money in nor money out.
+	let scratch = Scratch::new("signs");
+	let Some(oracle) = oracle() else { return };
+	let base = rules_base(&scratch, &oracle);
+	let session = import(&scratch, &base, "veritas");
+	see(&session, "2026-11-05");
+	perform(
+		&session,
+		spend(
+			"refund",
+			"2026-11-04",
+			2_399,
+			None,
+			Some("AMZN refund"),
+			None,
+		),
+	);
+	perform(
+		&session,
+		spend("zero", "2026-11-04", 0, None, Some("Free sample"), None),
+	);
+	let amount = |n: i64| RuleValue::Amount { amount: n };
+	let rule = |field: RuleField, op: RuleConditionOp, value: RuleValue| {
+		create_rule(
+			&session,
+			draft(
+				RuleConditionsOp::And,
+				vec![condition(field, op, value)],
+				vec![set(RuleField::Category, id(GROCERIES))],
+			),
+		)
+	};
+	// small.zip has more rows; these are the ones this test added or knows.
+	let known = ["amzn-1", "amzn-2", "grocer", "costco", "refund", "zero"];
+	let cases = [
+		(
+			rule(RuleField::Amount, RuleConditionOp::Is, amount(-2_399)),
+			vec!["amzn-1"],
+		),
+		(
+			rule(RuleField::AmountOutflow, RuleConditionOp::Is, amount(2_399)),
+			vec!["amzn-1"],
+		),
+		(
+			rule(RuleField::AmountInflow, RuleConditionOp::Is, amount(2_399)),
+			vec!["refund"],
+		),
+		(
+			rule(RuleField::AmountOutflow, RuleConditionOp::Gt, amount(5_000)),
+			vec!["costco", "amzn-2"],
+		),
+		(
+			rule(RuleField::AmountInflow, RuleConditionOp::Lte, amount(0)),
+			vec![],
+		),
+		(
+			rule(RuleField::AmountOutflow, RuleConditionOp::Lte, amount(0)),
+			vec![],
+		),
+		(
+			rule(RuleField::Amount, RuleConditionOp::Is, amount(0)),
+			vec!["zero"],
+		),
+	];
+	let ours = scratch.join("ours.zip");
+	export(&session, &ours);
+	let ids: Vec<&str> = cases.iter().map(|(id, _)| id.as_str()).collect();
+	let theirs = actual_matches(&oracle, &ours, &ids, &scratch);
+	for (rule, expected) in &cases {
+		let found: Vec<String> = preview(&session, rule)
+			.into_iter()
+			.map(|m| m.transaction_id)
+			.collect();
+		assert_eq!(json!(found), theirs[rule.as_str()], "rule {rule}");
+		let ours: Vec<&str> = found
+			.iter()
+			.map(String::as_str)
+			.filter(|id| known.contains(id))
+			.collect();
+		assert_eq!(ours, *expected, "rule {rule}");
+	}
+	session.close().unwrap();
+}
+
+#[test]
+fn a_range_bill_takes_its_smaller_amount_first_and_reads_actuals_either_way() {
+	// v13: Actual's editor keeps a range's ends as typed and orders them only
+	// when it matches (condition.ts:326-330). Veritas orders a range by size,
+	// not sign: it refuses a draft whose first amount is the larger one, and
+	// reads a range Actual saved larger amount first smaller first, so that
+	// bill stays editable, posts the same and reads "$40 and $60" in Actual.
+	let scratch = Scratch::new("range-order");
+	let session = import(&scratch, &small_zip(), "veritas");
+	see(&session, "2026-11-01");
+	let water = |low: i64, high: i64| {
+		bill(
+			"Water",
+			CITY_POWER,
+			BillAmount::Between { low, high },
+			monthly("2026-11-18", None),
+			Some(UTILITIES),
+			true,
+		)
+	};
+	let refused = session.perform(Command::CreateBill {
+		bill_id: Some("water".to_owned()),
+		bill: water(-6_000, -4_000),
+	});
+	assert!(
+		matches!(&refused, Err(FfiError::Invalid { message }) if message == "Put the lower amount first"),
+		"{refused:?}"
+	);
+	let ours = scratch.join("ours.zip");
+	export(&session, &ours);
+	session.close().unwrap();
+	let Some(oracle) = oracle() else { return };
+
+	let theirs = scratch.join("theirs.zip");
+	actual_apply(
+		&oracle,
+		&ours,
+		json!([{"op": "createSchedule", "id": "water", "name": "Water", "postsTransaction": true,
+			"payee": CITY_POWER, "account": CHECKING, "amountOp": "isbetween",
+			"amount": {"num1": -6_000, "num2": -4_000},
+			"date": {"start": "2026-11-18", "interval": 1, "frequency": "monthly", "patterns": [],
+				"skipWeekend": false, "weekendSolveMode": "before", "endMode": "never",
+				"endOccurrences": 1, "endDate": "2026-11-18"}}]),
+		&theirs,
+		"2026-11-01",
+		6,
+	);
+	let session = import(&scratch, &theirs, "edited");
+	see(&session, "2026-11-01");
+	let read = bill_on(&session, "water", "2026-11-01");
+	assert_eq!(
+		read.draft.as_ref().unwrap().amount,
+		BillAmount::Between {
+			low: -4_000,
+			high: -6_000
+		}
+	);
+	assert_eq!(read.scheduled_amount, Some(-5_000));
+	let mut draft = read.draft.unwrap();
+	draft.name = Some("Water and sewer".to_owned());
+	perform(
+		&session,
+		Command::EditBill {
+			bill_id: "water".to_owned(),
+			bill: draft,
+		},
+	);
+	see(&session, "2026-11-18");
+	session.maintain("2026-11-18".to_owned()).unwrap();
+	let after = scratch.join("posted.zip");
+	export(&session, &after);
+	session.close().unwrap();
+	let dump = actual_reads(&oracle, &after, "2026-11-18");
+	let rows: Vec<Value> = posted(&dump)
+		.into_iter()
+		.filter(|row| row["schedule"] == "water")
+		.collect();
+	assert_eq!(rows.len(), 1);
+	assert_eq!(rows[0]["amount"], -5_000, "the middle, as Actual posts it");
+	let conditions = conditions_of(&dump, "water");
+	let amount = conditions
+		.as_array()
+		.unwrap()
+		.iter()
+		.find(|c| c["field"] == "amount")
+		.unwrap();
+	assert_eq!(amount["value"], json!({"num1": -4_000, "num2": -6_000}));
 }
