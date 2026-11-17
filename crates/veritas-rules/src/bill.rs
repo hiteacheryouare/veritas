@@ -550,6 +550,22 @@ pub fn scheduled_amount(value: Option<&Value>) -> Option<i64> {
 	}
 }
 
+/// What Actual's schedule service posts for an `isapprox` or `isbetween`
+/// bill: `postTransactionForSchedule` writes `getScheduledAmount(_amount)`
+/// (`lc/server/schedules/app.ts:588-610`), the number itself for
+/// `isapprox` and `Math.round` of the range's middle for `isbetween`
+/// (`lc/shared/schedules.ts:356-369`). `None` for an exact bill, a missing
+/// rule, or an amount Veritas can't read.
+pub fn estimated_amount(schedule: &Schedule, budget: &BudgetData) -> Option<Money> {
+	let rule = budget.rules.get(&schedule.rule)?;
+	let conditions: Vec<Value> = serde_json::from_str(&rule.conditions_json).ok()?;
+	let condition = &conditions[schedule_slots(&conditions).amount?];
+	match condition["op"].as_str()? {
+		"isapprox" | "isbetween" => scheduled_amount(condition.get("value")).map(Money::from_minor),
+		_ => None,
+	}
+}
+
 fn field_of(condition: &Value) -> Option<Field> {
 	condition
 		.get("field")
