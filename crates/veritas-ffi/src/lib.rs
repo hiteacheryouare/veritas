@@ -42,11 +42,11 @@ pub use dashboards::{
 	AgeGranularity, AgePoint, AgeTrend, BudgetAnalysisPoint, CalendarCardMonth, CalendarDayCell,
 	CrossoverCardPoint, DashboardPage, DashboardWidget, WidgetConfig, WidgetTimeFrame, WidgetView,
 };
-pub use goals::{GoalClosePreview, GoalPace, GoalState, GoalSummary, MonthAmount};
+pub use goals::{GoalClosePreview, GoalList, GoalPace, GoalState, GoalSummary, MonthAmount};
 pub use money::{
-	BalanceAfter, BalanceHistory, BalancePoint, CategoryKind, KindCategoryPlan, KindTarget,
-	LoanPaymentDefaults, LoanPaymentDraft, LoanPaymentPreview, LoanPaymentProblem, LoanTerms,
-	TagSummary, TransferPreview, TransferPurpose, evaluate_rate,
+	BalanceAfter, BalanceHistory, BalancePoint, CategoryKind, HiddenCategoryMatch,
+	KindCategoryPlan, KindTarget, LoanPaymentDefaults, LoanPaymentDraft, LoanPaymentPreview,
+	LoanPaymentProblem, LoanTerms, TagSummary, TransferPreview, TransferPurpose, evaluate_rate,
 };
 pub use records::{
 	AccountGroup, AccountGroupSummary, AccountSummary, AuditCheck, AuditFinding, BackupInfo,

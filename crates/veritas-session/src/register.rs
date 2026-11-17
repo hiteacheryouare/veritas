@@ -120,6 +120,10 @@ pub struct RegisterRow {
 	pub split_difference: Option<Money>,
 	pub starting_balance: bool,
 	pub schedule: Option<ScheduleId>,
+	/// An About or Between bill's posted row that still holds the estimate
+	/// Actual's schedule service posts: not cleared, not reconciled, and its
+	/// amount unchanged. Derived, never stored, so rows Actual posted count.
+	pub is_unconfirmed_estimate: bool,
 	pub needs_actual: Option<String>,
 	/// The account's balance after this row, in a single account's register
 	/// in Actual's order with no filter but a date range.
@@ -224,6 +228,17 @@ fn line(data: &BudgetData, row: &Transaction) -> Line {
 	}
 }
 
+fn unconfirmed_estimate(data: &BudgetData, row: &Transaction) -> bool {
+	!row.cleared
+		&& !row.reconciled
+		&& row
+			.schedule
+			.as_ref()
+			.and_then(|id| data.schedules.get(id))
+			.and_then(|schedule| veritas_rules::estimated_amount(schedule, data))
+			== Some(row.amount)
+}
+
 fn row_model(
 	data: &BudgetData,
 	row: &Transaction,
@@ -272,6 +287,7 @@ fn row_model(
 		split_difference,
 		starting_balance: row.starting_balance,
 		schedule: row.schedule.clone(),
+		is_unconfirmed_estimate: unconfirmed_estimate(data, row),
 		needs_actual: data
 			.transaction_meta
 			.get(&row.id)

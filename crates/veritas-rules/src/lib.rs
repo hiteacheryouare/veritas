@@ -18,7 +18,8 @@ mod trigger;
 pub use action::{Action, RuleTransaction, SetField, SplitLine, SplitMethod};
 pub use bill::{
 	Bill, BillAmount, BillDate, BillView, EditedRule, JsonPaths, Repeat, RepeatEnd, RepeatPattern,
-	ScheduleRule, WeekendMove, bill_from_schedule, json_paths, schedule_name, scheduled_amount,
+	ScheduleRule, WeekendMove, bill_from_schedule, estimated_amount, json_paths, schedule_name,
+	scheduled_amount,
 };
 pub use condition::{
 	AmountSign, Condition, ConditionValue, DateValue, EvalError, Field, FieldKind, FieldValue, Gap,

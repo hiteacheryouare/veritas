@@ -8,7 +8,7 @@ mod common;
 use common::*;
 use veritas_domain::{CoreError, Goal, GoalId, GoalStatus, Money};
 use veritas_engine::goals::{self, Suggestion};
-use veritas_engine::{BudgetEditor, Envelope, NumberFormat};
+use veritas_engine::{BudgetEditor, Envelope};
 
 const M: &str = "2026-11";
 
@@ -167,7 +167,7 @@ fn a_second_reach_keeps_the_first_reached_month() {
 
 fn close(budget: &mut Budget, goal: &Goal, release_to: Envelope) -> goals::GoalClosing {
 	let sheet = budget.sheet(TODAY);
-	let editor = BudgetEditor::new(&budget.0, &sheet, NumberFormat::CommaDot, false);
+	let editor = BudgetEditor::new(&budget.0, &sheet);
 	let closing = goals::close(&editor, &sheet, goal, ym(M), &release_to).unwrap();
 	closing.writes.apply_to(&mut budget.0);
 	closing
@@ -283,7 +283,7 @@ fn an_overspent_goal_released_against_to_budget_is_funded_from_it() {
 fn closing_twice_or_into_the_goal_itself_is_refused() {
 	let budget = with_goal();
 	let sheet = budget.sheet(TODAY);
-	let editor = BudgetEditor::new(&budget.0, &sheet, NumberFormat::CommaDot, false);
+	let editor = BudgetEditor::new(&budget.0, &sheet);
 	let mut closed = goal(1, None);
 	closed.status = GoalStatus::Closed;
 	let into_itself = Envelope::Category(cat("laptop"));

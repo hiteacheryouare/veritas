@@ -7,6 +7,7 @@ use veritas_domain::{
 	AccountId, AccountKind, AccountMeta, AccountMetaRow, BudgetData, CategoryId, CategoryKind,
 	CivilDate, CoreError, LoanTerms, Money, Row, SplitRole, Transaction, TransactionId,
 };
+use veritas_engine::{BudgetEditor, EnvelopeSheet, register_currency_text};
 use veritas_rules::RuleBook;
 
 use crate::accounts::live_account;
@@ -184,8 +185,9 @@ impl Parts {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PaymentProblem {
-	/// DEBT-2.2: the parts besides principal are more than the payment. Blocks saving.
-	InterestAbovePayment { short_by: Money },
+	/// DEBT-2.2: interest, escrow and fees together are more than the
+	/// payment. Blocks saving.
+	PaymentTooSmall { short_by: Money },
 	/// DEBT-2.3: principal is more than what is owed. A warning.
 	PaysOff { credit: Money },
 }
@@ -198,6 +200,10 @@ pub struct PaymentPreview {
 	pub estimate: Option<Money>,
 	pub rate_bps: Option<i64>,
 	pub problem: Option<PaymentProblem>,
+	/// What `fund_principal` would budget for this principal (A.6).
+	pub principal_funding: Money,
+	/// The same before the clamp to To Budget.
+	pub principal_funding_asked: Money,
 }
 
 fn loan_account(data: &BudgetData, loan: &AccountId, date: CivilDate) -> Result<(), CoreError> {
@@ -223,7 +229,7 @@ pub fn payment_preview(
 		.map(|rate| interest_estimate(outstanding, rate))
 		.transpose()?;
 	let problem = if principal.is_negative() {
-		Some(PaymentProblem::InterestAbovePayment {
+		Some(PaymentProblem::PaymentTooSmall {
 			short_by: principal.checked_neg()?,
 		})
 	} else if principal > outstanding {
@@ -239,6 +245,8 @@ pub fn payment_preview(
 		estimate,
 		rate_bps,
 		problem,
+		principal_funding: principal_funding(data, date, principal)?,
+		principal_funding_asked: principal_funding_asked(data, principal)?,
 	})
 }
 
@@ -311,9 +319,10 @@ fn last_payment<'a>(data: &'a BudgetData, loan: &AccountId) -> Option<LastPaymen
 
 /// DEBT-3: from the last payment (principal line, then the first two expense
 /// lines as interest and escrow; the total is their sum, so a fee never
-/// lands in principal), else the loan's payment with DEBT-4's interest,
-/// else nothing. Then principal is capped at what is owed the day before
-/// `today`, shrinking the total by the same amount.
+/// lands in principal), else the loan's payment with interest left blank
+/// (DEBT-4's estimate is only a hint, never a default), else nothing. Then
+/// principal is capped at what is owed the day before `today`, a blank
+/// interest counting as 0, shrinking the total by the same amount.
 pub fn payment_defaults(
 	data: &BudgetData,
 	loan: &AccountId,
@@ -343,14 +352,10 @@ pub fn payment_defaults(
 			}
 		}
 		None => {
-			let meta = data.account_meta.get(loan).cloned().unwrap_or_default();
-			match meta.loan_payment {
+			let payment = data.account_meta.get(loan).and_then(|m| m.loan_payment);
+			match payment {
 				Some(payment) => PaymentDefaults {
 					total: Some(payment),
-					interest: meta
-						.loan_rate_bps
-						.map(|rate| interest_estimate(owed, rate))
-						.transpose()?,
 					escrow: Some(Money::ZERO),
 					..PaymentDefaults::default()
 				},
@@ -370,7 +375,10 @@ pub fn payment_defaults(
 }
 
 /// What the wizard saves (DEBT-6). `id` names the payment to replace when it
-/// is a live split; otherwise it is the new payment's id.
+/// is a live split; otherwise it is the new payment's id. A part's category
+/// is needed only when the part isn't 0. `fund_principal` also budgets the
+/// principal from To Budget into its envelope (A.6, `principal_funding`);
+/// it is refused when the draft replaces a payment.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PaymentDraft {
 	pub id: Option<TransactionId>,
@@ -379,11 +387,12 @@ pub struct PaymentDraft {
 	pub date: CivilDate,
 	pub parts: Parts,
 	pub principal_category: CategoryId,
-	pub interest_category: CategoryId,
+	pub interest_category: Option<CategoryId>,
 	pub escrow_category: Option<CategoryId>,
 	pub fees_category: Option<CategoryId>,
 	pub notes: Option<String>,
 	pub cleared: bool,
+	pub fund_principal: bool,
 }
 
 fn category_of_kind(
@@ -409,6 +418,24 @@ fn category_of_kind(
 	Ok(())
 }
 
+/// The DEBT-2.2 shortfall as copy shows it: when whole units are shown, a
+/// part of a unit rounds up, so the message never names less than is
+/// missing (5050 short reads "$51", never "$50").
+fn shortfall_shown(short_by: Money, data: &BudgetData) -> Result<Money, CoreError> {
+	if !(data.format.hide_fraction || data.format.decimal_places() == 0) {
+		return Ok(short_by);
+	}
+	let whole = short_by
+		.minor()
+		.checked_add(99)
+		.ok_or(CoreError::Overflow)?
+		/ 100;
+	whole
+		.checked_mul(100)
+		.map(Money::from_minor)
+		.ok_or(CoreError::Overflow)
+}
+
 /// DEBT-6's rows: a split from `from` whose payee is the lender, a principal
 /// line that transfers to the loan, and expense lines for interest, escrow
 /// and fees (parts of 0 get no line). A payment smaller than its other parts
@@ -423,8 +450,11 @@ pub fn record_payment(
 	let principal = draft.parts.principal()?;
 	if principal.is_negative() {
 		return Err(CoreError::Invalid(format!(
-			"The payment is {} less than its interest, escrow and fees. Record unpaid interest as an adjustment on the loan instead.",
-			principal.checked_neg()?
+			"This payment is {} less than its interest, escrow and fees. Record unpaid interest as an adjustment on the loan instead.",
+			register_currency_text(
+				shortfall_shown(principal.checked_neg()?, data)?,
+				&data.format
+			)
 		)));
 	}
 	if draft.parts.total == Money::ZERO {
@@ -463,16 +493,8 @@ pub fn record_payment(
 		})?;
 		line(principal, &draft.principal_category, Some(to_loan))?;
 	}
-	if draft.parts.interest != Money::ZERO {
-		category_of_kind(
-			data,
-			&draft.interest_category,
-			CategoryKind::Expense,
-			"interest",
-		)?;
-		line(draft.parts.interest, &draft.interest_category, None)?;
-	}
 	for (amount, category, what) in [
+		(draft.parts.interest, &draft.interest_category, "interest"),
 		(draft.parts.escrow, &draft.escrow_category, "escrow"),
 		(draft.parts.fees, &draft.fees_category, "fees"),
 	] {
@@ -508,6 +530,11 @@ pub fn record_payment(
 				.is_some_and(|row| alive(data, row) && row.split == SplitRole::Parent)
 		})
 		.cloned();
+	if draft.fund_principal && replacing.is_some() {
+		return Err(CoreError::Invalid(
+			"Budget the principal when you record a payment, not when you edit one. Move the budget by hand instead.".to_owned(),
+		));
+	}
 	let split = Draft {
 		id: if replacing.is_some() {
 			None
@@ -542,7 +569,69 @@ pub fn record_payment(
 			id
 		}
 	};
+	if draft.fund_principal {
+		let with_payment = crate::writes::applied(data, &rows);
+		rows.extend(fund_principal(&with_payment, &id, draft.date, principal)?);
+	}
 	Ok((rows, id))
+}
+
+/// DEBT-6 A.6: what funding `principal` budgets from To Budget in the
+/// month of `date`, as Actual's `transferAvailable` moves it
+/// (`budget/actions.ts:578-593`): the principal on the budget scale, whole
+/// units rounded half up in a 0-place budget (CLS-12.11), then clamped to
+/// `max(0, min(amount, to_budget))`.
+pub fn principal_funding(
+	data: &BudgetData,
+	date: CivilDate,
+	principal: Money,
+) -> Result<Money, CoreError> {
+	let amount = principal_funding_asked(data, principal)?;
+	if amount == Money::ZERO {
+		return Ok(Money::ZERO);
+	}
+	let sheet = EnvelopeSheet::compute(data, date)?;
+	let to_budget = sheet
+		.summary(date.year_month())
+		.map_or(Money::ZERO, |month| month.to_budget);
+	Ok(amount.min(to_budget).max(Money::ZERO))
+}
+
+/// The principal on the budget scale before the clamp: whole units rounded
+/// half up in a 0-place budget, else the principal itself. 0 when there is
+/// no principal.
+pub fn principal_funding_asked(data: &BudgetData, principal: Money) -> Result<Money, CoreError> {
+	if principal <= Money::ZERO {
+		return Ok(Money::ZERO);
+	}
+	principal.register_to_budget_scale(data.format.decimal_places())
+}
+
+/// Budgets the envelope of the principal line actually written, through
+/// its category mapping, with `transferAvailable`, which writes no movement
+/// note. Nothing is written when the amount comes to 0.
+fn fund_principal(
+	data: &BudgetData,
+	payment: &TransactionId,
+	date: CivilDate,
+	principal: Money,
+) -> Result<Vec<Row>, CoreError> {
+	let category = children(data, payment)
+		.into_iter()
+		.find(|line| line.transfer.is_some())
+		.and_then(|line| line.category.clone())
+		.and_then(|category| data.resolve_category(&category).cloned());
+	let Some(category) = category else {
+		return Ok(Vec::new());
+	};
+	let amount = principal_funding(data, date, principal)?;
+	if amount == Money::ZERO {
+		return Ok(Vec::new());
+	}
+	let sheet = EnvelopeSheet::compute(data, date)?;
+	let editor = BudgetEditor::new(data, &sheet);
+	let writes = editor.transfer_available(date.year_month(), amount, &category)?;
+	Ok(crate::writes::rows(data, &writes))
 }
 
 #[cfg(test)]
@@ -558,6 +647,26 @@ mod tests {
 		assert_eq!(estimate(60_000, 1), Money::from_minor(1), "0.5 rounds up");
 		assert_eq!(estimate(59_999, 1), Money::ZERO);
 		assert_eq!(estimate(0, 980), Money::ZERO);
+	}
+
+	/// DEBT-2.2: with whole units shown, the named shortfall rounds up, so
+	/// it is never less than what is missing.
+	#[test]
+	fn a_shortfall_shown_in_whole_units_rounds_up() {
+		let mut data = BudgetData::empty(veritas_domain::BudgetType::Envelope);
+		let shown = |data: &BudgetData, minor| {
+			shortfall_shown(Money::from_minor(minor), data)
+				.unwrap()
+				.minor()
+		};
+		assert_eq!(shown(&data, 5_050), 5_050, "cents shown: exact");
+		data.format.hide_fraction = true;
+		assert_eq!(shown(&data, 5_050), 5_100);
+		assert_eq!(shown(&data, 5_001), 5_100);
+		assert_eq!(shown(&data, 5_000), 5_000);
+		data.format.hide_fraction = false;
+		data.format.currency_code = Some("JPY".to_owned());
+		assert_eq!(shown(&data, 2_001), 2_100, "0 places: 21 yen, not 20");
 	}
 
 	/// DEBT-2.1 and DEBT-5 L-1, L-4, L-5, L-9.
