@@ -1656,3 +1656,54 @@ fn a_payment_with_no_interest_never_prefills_its_escrow_as_interest() {
 	);
 	session.close().unwrap();
 }
+
+#[test]
+fn a_principal_only_payment_prefills_its_principal() {
+	// DEBT-3 L-5e: a last payment with no expense lines needs no mapping. Its
+	// principal is the total, interest blank, escrow 0, never the loan's
+	// usual 40000, whether the wizard wrote it or it is a plain transfer.
+	let setup = loan_setup("principal-only", 980_000);
+	let session = &setup.session;
+	let defaults = |date: &str| {
+		session
+			.loan_payment_defaults(setup.loan.clone(), date.to_owned())
+			.unwrap()
+	};
+	let mut only = payment(&setup, "only", "2026-11-20", 32_000, 0);
+	only.interest_category_id = None;
+	perform(session, Command::RecordLoanPayment { payment: only });
+	let next = defaults("2026-12-01");
+	assert_eq!(
+		(next.total, next.interest, next.escrow),
+		(Some(32_000), None, Some(0)),
+		"the wizard's principal-only payment"
+	);
+	assert_eq!(
+		(next.from_account_id, next.principal_category_id),
+		(Some(setup.checking.clone()), Some(setup.principal.clone()))
+	);
+
+	perform(
+		session,
+		Command::AddTransaction {
+			transaction: veritas_ffi::TransactionDraft {
+				id: Some("plain".to_owned()),
+				account_id: setup.checking.clone(),
+				date: "2026-12-05".to_owned(),
+				amount: -27_500,
+				payee_id: Some(transfer_payee(session, &setup.loan)),
+				payee_name: None,
+				category_id: Some(setup.principal.clone()),
+				notes: None,
+				cleared: false,
+				splits: Vec::new(),
+			},
+		},
+	);
+	let next = defaults("2026-12-10");
+	assert_eq!(
+		(next.total, next.interest, next.escrow),
+		(Some(27_500), None, Some(0)),
+		"a plain transfer, as Actual writes one, is a principal-only payment too"
+	);
+}
