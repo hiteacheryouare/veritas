@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 import VeritasCore
 @testable import VeritasKit
@@ -85,4 +86,91 @@ final class ScriptedAnswerer: AssistantAnswering {
 	func reset() {
 		resets += 1
 	}
+}
+
+/// Closing the panel or switching budgets stops a slow answer mid-stream.
+@MainActor
+struct AssistantPanelCancelTests {
+	private func context() -> AssistantContext? {
+		AssistantContext(queries: RecordingQueries(), format: MoneyFormat(), today: "2026-11-18")
+	}
+
+	private func waitUntil(_ condition: () -> Bool) async {
+		for _ in 0..<200 where !condition() {
+			try? await Task.sleep(for: .milliseconds(10))
+		}
+	}
+
+	@Test func closingThePanelStopsTheAnswerAndNoMoreTextLands() async throws {
+		let answerer = SlowAnswerer()
+		let panel = AssistantPanelModel(makeAnswerer: { _ in answerer }, context: context)
+		panel.draft = "What changed?"
+		panel.ask()
+		await waitUntil { panel.exchanges.first?.answer == "Net" }
+		try #require(panel.exchanges.first?.answer == "Net")
+		panel.stop()
+		await panel.settle()
+		await waitUntil { answerer.log.terminated }
+		#expect(answerer.log.terminated, "the model's stream is cancelled")
+		let yielded = answerer.log.yielded
+		try await Task.sleep(for: .milliseconds(150))
+		#expect(answerer.log.yielded == yielded, "nothing more is produced")
+		#expect(panel.exchanges.first?.answer == "Net", "no more text lands")
+		#expect(panel.exchanges.first?.state == .failed(AssistantPanelModel.stopped))
+		#expect(!panel.isAnswering)
+	}
+
+	@Test func switchingBudgetsDropsThePanelAndStopsTheAnswer() async throws {
+		let answerer = SlowAnswerer()
+		var panel: AssistantPanelModel? = AssistantPanelModel(makeAnswerer: { _ in answerer }, context: context)
+		panel?.draft = "What changed?"
+		panel?.ask()
+		await waitUntil { panel?.exchanges.first?.answer == "Net" }
+		try #require(panel?.exchanges.first?.answer == "Net")
+		weak let dropped = panel
+		panel = nil
+		await waitUntil { answerer.log.terminated }
+		#expect(dropped == nil, "the old budget's panel is gone")
+		#expect(answerer.log.terminated, "and its model stream is cancelled")
+		let yielded = answerer.log.yielded
+		try await Task.sleep(for: .milliseconds(150))
+		#expect(answerer.log.yielded == yielded)
+	}
+}
+
+/// Streams one word, then another every 50 ms, recording what it produced and when it was cancelled.
+@MainActor
+final class SlowAnswerer: AssistantAnswering {
+	final class Log: Sendable {
+		private let state = Mutex<(yielded: Int, terminated: Bool)>((0, false))
+		var yielded: Int { state.withLock { $0.yielded } }
+		var terminated: Bool { state.withLock { $0.terminated } }
+		func didYield() { state.withLock { $0.yielded += 1 } }
+		func didTerminate() { state.withLock { $0.terminated = true } }
+	}
+
+	let log = Log()
+
+	func answer(_ question: String) -> AsyncThrowingStream<String, any Error> {
+		let log = log
+		return AsyncThrowingStream { continuation in
+			let producer = Task {
+				var text = ""
+				for word in ["Net", "Profit", "for", "October", "2026", "was", "412.50."] {
+					text = text.isEmpty ? word : "\(text) \(word)"
+					continuation.yield(text)
+					log.didYield()
+					try? await Task.sleep(for: .milliseconds(50))
+					if Task.isCancelled { return }
+				}
+				continuation.finish()
+			}
+			continuation.onTermination = { _ in
+				producer.cancel()
+				log.didTerminate()
+			}
+		}
+	}
+
+	func reset() {}
 }

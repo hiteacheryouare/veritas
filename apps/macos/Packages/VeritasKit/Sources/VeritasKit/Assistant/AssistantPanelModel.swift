@@ -26,6 +26,7 @@ public struct AssistantExchange: Identifiable, Hashable, Sendable {
 @Observable
 public final class AssistantPanelModel {
 	public static let noAnswer = "The model gave no answer."
+	public static let stopped = "Stopped."
 
 	public private(set) var exchanges: [AssistantExchange] = []
 	public var draft = ""
@@ -39,6 +40,11 @@ public final class AssistantPanelModel {
 	public init(makeAnswerer: @escaping @MainActor (AssistantContext) -> any AssistantAnswering, context: @escaping @MainActor () -> AssistantContext?) {
 		self.makeAnswerer = makeAnswerer
 		self.context = context
+	}
+
+	/// A panel dropped with its budget stops the model too.
+	deinit {
+		task?.cancel()
 	}
 
 	public var isAnswering: Bool { exchanges.last?.state == .answering }
@@ -57,10 +63,13 @@ public final class AssistantPanelModel {
 		task = Task { [weak self] in
 			do {
 				for try await partial in answerer.answer(exchange.question) {
+					guard !Task.isCancelled else { return }
 					self?.update(exchange.id) { $0.answer = partial }
 				}
+				guard !Task.isCancelled else { return }
 				self?.update(exchange.id) { $0.state = $0.answer.isEmpty ? .failed(Self.noAnswer) : .answered }
 			} catch {
+				guard !Task.isCancelled else { return }
 				self?.update(exchange.id) { $0.state = .failed(AssistantFailure(error).message) }
 			}
 		}
@@ -69,6 +78,14 @@ public final class AssistantPanelModel {
 	/// Waits for the answer in progress, for tests and screenshots.
 	public func settle() async {
 		await task?.value
+	}
+
+	/// Stops the answer in progress, as when the panel closes. Text already shown stays.
+	public func stop() {
+		task?.cancel()
+		task = nil
+		guard let last = exchanges.last, last.state == .answering else { return }
+		update(last.id) { $0.state = .failed(Self.stopped) }
 	}
 
 	public func clear() {

@@ -43,6 +43,7 @@ struct AssistantPanel: View {
 		}
 		.background(.surfaceWindow)
 		.onAppear { isFieldFocused = true }
+		.onDisappear(perform: model.stop)
 		.containerIdentifier("assistant.panel")
 	}
 }
@@ -59,6 +60,9 @@ private struct AssistantExchangeView: View {
 			case .answering where exchange.answer.isEmpty:
 				ProgressView().controlSize(.small)
 			case .failed(let message):
+				if !exchange.answer.isEmpty {
+					Text(exchange.answer).foregroundStyle(.textPrimary)
+				}
 				Text(message).foregroundStyle(.textSecondary)
 			default:
 				Text(exchange.answer).foregroundStyle(.textPrimary)
