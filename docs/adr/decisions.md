@@ -385,3 +385,8 @@ Every decision behind Veritas, so no question gets asked twice. D1–D24 are PLA
 - **Options:** read a payment's expense lines by position / match parts by category / record each part when the wizard writes the payment / pre-fill nothing
 - **Decision:** When the loan payment wizard writes a payment, it records which expense line is interest, escrow or fees in a Veritas-only table, `veritas_loan_payment_part`, in the same transaction and undo step (DEBT-6 A.7). DEBT-3's pre-fill and FC-2's forecast read parts only through that mapping. A payment without one (made in Actual, imported or older) pre-fills no expense line, and the forecast labels its split as estimated. Nothing is ever inferred from a line's position, category or name for a pre-fill (CLS-3.4). Classification still follows category kinds (CLS-4). Actual ignores the table. Why: reading lines by position filed escrow as interest after a 0-interest payment (Fred and the Architect, 2026-11-16).
 - **Date:** 2026-11-16
+
+### D77. A goal's suggestion in a budget without 2 places
+- **Options:** suggest from the true carry, computing the goal's position on one scale / give no suggestion once the goal has recorded spending
+- **Decision:** In a budget whose currency doesn't have 2 places, an active goal with recorded spending (Spending to date not 0) gets no suggestion, because its `available` mixes the register and budget scales (CLS-12.10, CLS-12.14). Its suggestion line reads "{Goal}: spending recorded, keeping {current budgeted}" in the budget's currency (FC-5, SG-8). A 2-place budget's goals keep their DEBT-8.1 suggestion. Ryan chose Fred's option over computing the true carry (Ryan, 2026-11-18); the exact line is Fred's wording, approved as an Architect copy call.
+- **Date:** 2026-11-18
