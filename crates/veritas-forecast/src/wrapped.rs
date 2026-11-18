@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use veritas_domain::{
-	BudgetData, CategoryGroupId, CategoryId, CivilDate, CoreError, Money, PayeeId, SplitRole,
-	TransactionId, TransactionKind, YearMonth,
+	BudgetData, CategoryGroupId, CategoryId, CivilDate, CoreError, GoalId, Money, PayeeId,
+	SplitRole, TransactionId, TransactionKind, YearMonth,
 };
 use veritas_reports::{
 	CategoryLabels, Classification, ClassifiedRow, Period, net_profit, net_worth,
@@ -53,6 +53,16 @@ pub struct NoSpend {
 	pub current: Option<u32>,
 }
 
+impl NoSpend {
+	/// Days in the evaluated range, the base of the no-spend share.
+	pub fn evaluated_days(&self) -> u32 {
+		self.evaluated.map_or(0, |range| {
+			let days = (range.last().naive() - range.first().naive()).num_days() + 1;
+			u32::try_from(days).unwrap_or(0)
+		})
+	}
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Change {
 	/// Basis points over the prior year's absolute value.
@@ -86,26 +96,75 @@ pub struct Wrapped {
 	/// category, so they are in neither the ranking nor this (FC-8).
 	pub other_categories: Money,
 	pub top_groups: Vec<GroupRank>,
+	/// The other groups with a positive net, for the group shares.
+	pub other_groups: Money,
 	pub top_payees: Vec<PayeeRank>,
 	pub other_payees: Money,
 	pub biggest_month: Option<(YearMonth, Money)>,
 	pub biggest_vs_typical: Option<i64>,
 	pub no_spend: NoSpend,
 	pub goals_completed: usize,
+	/// The goals behind `goals_completed`, by id.
+	pub completed_goals: Vec<GoalId>,
 	pub net_worth_start: Money,
 	pub net_worth_end: Money,
 	pub net_worth_change: Money,
 	pub prior_year: PriorYear,
 }
 
-/// R-WRAP-2: shares in tenths of a percent, never an amount.
+/// R-WRAP-2: shares in tenths of a percent, never an amount. `None` is
+/// "n/a": the base is zero or negative.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Redacted {
 	/// Top categories then `None` for everything else; sums to exactly 1000.
 	pub categories: Vec<(Option<CategoryId>, i64)>,
+	/// The same rule over category groups.
+	pub groups: Vec<(Option<CategoryGroupId>, i64)>,
 	pub payees: Vec<(Option<PayeeId>, i64)>,
 	pub out_vs_in: Option<i64>,
+	/// `1000 - out_vs_in`, so out and net always add up to 1000.
+	pub net: Option<i64>,
+	/// Over total in; either can pass 1000.
+	pub debt_paydown: Option<i64>,
+	pub savings: Option<i64>,
+	/// The biggest month's spending over total out.
+	pub biggest_month: Option<i64>,
 	pub net_worth_change: Option<i64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Measure {
+	TotalIn,
+	TotalOut,
+	Net,
+}
+
+/// A comparison made only from the user's own numbers (FC-8). Each carries
+/// its figures; the shell writes the words.
+#[derive(Clone, Debug, PartialEq)]
+pub enum FunFact {
+	/// Only when last year's figure is non-zero and covers the whole range.
+	PriorYear {
+		measure: Measure,
+		basis_points: i64,
+	},
+	BiggestMonthVsTypical {
+		month: YearMonth,
+		basis_points: i64,
+	},
+	/// The top category's share of categorized spending, not of total out:
+	/// uncategorized rows aren't in the base.
+	TopCategoryShare {
+		category: CategoryId,
+		tenths: i64,
+	},
+	/// No-spend days over the evaluated days. Bills and loan lines don't break
+	/// a no-spend day, so it never means nothing was paid.
+	NoSpendShare {
+		days: u32,
+		evaluated_days: u32,
+		tenths: i64,
+	},
 }
 
 impl Wrapped {
@@ -121,6 +180,13 @@ impl Wrapped {
 				.collect(),
 			self.other_categories,
 		);
+		let groups = shares(
+			self.top_groups
+				.iter()
+				.map(|rank| (Some(rank.group.clone()), rank.total))
+				.collect(),
+			self.other_groups,
+		);
 		let payees = shares(
 			self.top_payees
 				.iter()
@@ -128,22 +194,78 @@ impl Wrapped {
 				.collect(),
 			self.other_payees,
 		);
-		let tenths = |part: Money, whole: Money| {
-			(whole > Money::ZERO).then(|| {
-				let value = round_half_away(
-					i128::from(part.minor()) * i128::from(WHOLE),
-					i128::from(whole.minor()),
-				);
-				i64::try_from(value).unwrap_or(i64::MAX)
-			})
-		};
+		let out_vs_in = tenths(self.total_out, self.total_in);
 		Redacted {
 			categories,
+			groups,
 			payees,
-			out_vs_in: tenths(self.total_out, self.total_in),
+			out_vs_in,
+			net: out_vs_in.map(|out| WHOLE - out),
+			debt_paydown: tenths(self.debt_paydown, self.total_in),
+			savings: tenths(self.savings, self.total_in),
+			biggest_month: self
+				.biggest_month
+				.and_then(|(_, total)| tenths(total, self.total_out)),
 			net_worth_change: tenths(self.net_worth_change, self.net_worth_start),
 		}
 	}
+
+	pub fn fun_facts(&self) -> Vec<FunFact> {
+		let mut facts = Vec::new();
+		if self.prior_year.from.is_none() {
+			for (measure, change) in [
+				(Measure::TotalIn, self.prior_year.total_in),
+				(Measure::TotalOut, self.prior_year.total_out),
+				(Measure::Net, self.prior_year.net),
+			] {
+				if let Change::BasisPoints(basis_points) = change {
+					facts.push(FunFact::PriorYear {
+						measure,
+						basis_points,
+					});
+				}
+			}
+		}
+		if let (Some((month, _)), Some(basis_points)) =
+			(self.biggest_month, self.biggest_vs_typical)
+		{
+			facts.push(FunFact::BiggestMonthVsTypical {
+				month,
+				basis_points,
+			});
+		}
+		let redacted = self.redacted();
+		if let Some((Some(category), tenths)) = redacted.categories.first() {
+			facts.push(FunFact::TopCategoryShare {
+				category: category.clone(),
+				tenths: *tenths,
+			});
+		}
+		let evaluated_days = self.no_spend.evaluated_days();
+		if let Some(tenths) = tenths(
+			Money::from_minor(i64::from(self.no_spend.days)),
+			Money::from_minor(i64::from(evaluated_days)),
+		) {
+			facts.push(FunFact::NoSpendShare {
+				days: self.no_spend.days,
+				evaluated_days,
+				tenths,
+			});
+		}
+		facts
+	}
+}
+
+/// `part` over `whole` in tenths of a percent, `round_half_away` because
+/// `part` can be negative (FC-8). `None` when `whole <= 0`.
+fn tenths(part: Money, whole: Money) -> Option<i64> {
+	(whole > Money::ZERO).then(|| {
+		let value = round_half_away(
+			i128::from(part.minor()) * i128::from(WHOLE),
+			i128::from(whole.minor()),
+		);
+		i64::try_from(value).unwrap_or(i64::MAX)
+	})
 }
 
 fn shares<Id: Clone>(mut set: Vec<(Option<Id>, Money)>, other: Money) -> Vec<(Option<Id>, i64)> {
@@ -296,7 +418,7 @@ pub fn wrapped(
 			total: Money::from_minor(total),
 		})
 		.collect();
-	let (top_groups, _) = rank(groups, |rank| {
+	let (top_groups, other_groups) = rank(groups, |rank| {
 		(rank.total, rank.name.as_str(), rank.group.to_string())
 	})?;
 
@@ -361,6 +483,12 @@ pub fn wrapped(
 	};
 
 	let no_spend = no_spend(budget, classification, period, year == today.year())?;
+	let completed_goals: Vec<GoalId> = budget
+		.goals
+		.values()
+		.filter(|goal| goal.reached_month.is_some_and(|month| month.year() == year))
+		.map(|goal| goal.id.clone())
+		.collect();
 
 	let day_before = first.naive().pred_opt().map_or(first, CivilDate::from);
 	let net_worth_start = net_worth(classification, day_before)?;
@@ -391,16 +519,14 @@ pub fn wrapped(
 		top_categories,
 		other_categories,
 		top_groups,
+		other_groups,
 		top_payees,
 		other_payees,
 		biggest_month: biggest_month.map(|(month, total)| (month, Money::from_minor(total))),
 		biggest_vs_typical,
 		no_spend,
-		goals_completed: budget
-			.goals
-			.values()
-			.filter(|goal| goal.reached_month.is_some_and(|month| month.year() == year))
-			.count(),
+		goals_completed: completed_goals.len(),
+		completed_goals,
 		net_worth_start,
 		net_worth_end,
 		net_worth_change: to_money(
