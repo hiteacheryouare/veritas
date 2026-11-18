@@ -16,7 +16,7 @@ struct AssistantScreenshotTests {
 
 	static let answers = [
 		"What did I spend on groceries last month?": "Groceries spent 412.00 in October 2026, from the October budget. You budgeted 450.00 and 38.00 is still available.",
-		"How is my net worth?": "Net worth was 48,210.55 on October 31, 2026, from the balance sheet: total assets 61,904.12 and total liabilities (13,693.57)."
+		"How is my net worth?": "Net worth was 48,210.55 on October 31, 2026, from the balance sheet: total assets 61,904.12 and total liabilities 13,693.57."
 	]
 
 	private func settings(_ availability: AssistantAvailability, on: Bool = false) -> (AssistantSettings, UserDefaults, String) {

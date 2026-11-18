@@ -5,7 +5,7 @@ import VeritasKit
 /// Settings › AI: the app-wide opt-in, off by default (R-AI-1).
 struct AssistantSettingsView: View {
 	static let toggleTitle = "Answer questions about your budget"
-	static let scope = "Sees reports, budgets, accounts, goals and tax totals. Everything stays on this Mac."
+	static let scope = "Sees reports, budgets, accounts, goals and tax totals."
 
 	@Bindable var settings: AssistantSettings
 
