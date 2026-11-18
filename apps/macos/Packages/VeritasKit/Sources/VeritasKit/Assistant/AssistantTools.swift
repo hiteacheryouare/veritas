@@ -269,7 +269,10 @@ struct TaxSummaryTool: Tool {
 
 	static func text(_ summary: TaxSummary, format: MoneyFormat) -> String {
 		var text = ["Tax summary for \(summary.year)"]
-		text += summary.buckets.map { "\(TaxBuckets.name($0.bucket)): \(format.amount($0.total, on: .register)) from \($0.count) transactions" }
+		text += summary.buckets.map { bucket in
+			let line = "\(TaxBuckets.name(bucket.bucket)): \(format.amount(bucket.total, on: .register)) from \(bucket.count) \(bucket.count == 1 ? "transaction" : "transactions")"
+			return bucket.total < 0 ? "\(line). \(TaxBuckets.negativeNote)" : line
+		}
 		if summary.buckets.isEmpty { text.append("No transactions are in a tax bucket this year.") }
 		if summary.conflicts > 0 { text.append("Transactions whose tags name more than one bucket: \(summary.conflicts)") }
 		return text.joined(separator: "\n")

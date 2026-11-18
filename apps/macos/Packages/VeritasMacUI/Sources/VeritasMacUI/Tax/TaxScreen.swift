@@ -128,15 +128,13 @@ private struct TaxBucketTable: View {
 }
 
 private struct BucketRow: View {
-	static let negativeNote = "Refunds or reversals exceed what was counted."
-
 	let total: TaxBucketTotal
 	let isExpanded: Bool
 	let format: MoneyFormat
 	let toggle: () -> Void
 
 	/// TAX-4: a negative total stays negative, with a neutral note under it.
-	private var note: String? { total.total < 0 ? Self.negativeNote : nil }
+	private var note: String? { total.total < 0 ? TaxBuckets.negativeNote : nil }
 
 	var body: some View {
 		let name = TaxBuckets.name(total.bucket)

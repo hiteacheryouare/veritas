@@ -154,7 +154,7 @@ struct AssistantToolTests {
 			let text = try await TaxSummaryTool(context: context(budget)).call(arguments: .init(year: 2026))
 			#expect(!Self.hasStatementParentheses(text), "\(text)")
 			for bucket in model.buckets {
-				#expect(text.contains("\n\(TaxBuckets.name(bucket.bucket)): \(model.format.amount(bucket.total, on: .register)) from \(bucket.count) transactions"))
+				#expect(text.contains("\n\(TaxBuckets.name(bucket.bucket)): \(model.format.amount(bucket.total, on: .register)) from \(bucket.count) \(bucket.count == 1 ? "transaction" : "transactions")"))
 			}
 		}
 	}
