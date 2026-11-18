@@ -10,8 +10,9 @@ use support::*;
 use veritas_domain::{AccountId, AccountKind, AccountMeta, Money, YearMonth};
 use veritas_reports::Period;
 use veritas_reports::{
-	BalanceSheet, OwnersEquity, Side, account_balances, balance_sheet, cash_flow,
-	cash_flow_by_month, net_profit_by_month, net_worth, net_worth_by_month, owners_equity,
+	BalanceSheet, IncomeStatement, OwnersEquity, Side, account_balances, balance_sheet, cash_flow,
+	cash_flow_by_month, income_statement, net_profit_by_month, net_worth, net_worth_by_month,
+	owners_equity,
 };
 
 fn sheet(book: &Book, on: &str) -> BalanceSheet {
@@ -634,4 +635,130 @@ fn r_rep_5_cash_flow_by_month_chains_one_statement_per_month() {
 		);
 		assert_eq!(flow.unexplained().unwrap(), Money::ZERO);
 	}
+}
+
+fn statement_groups(
+	groups: &[veritas_reports::StatementGroup],
+) -> Vec<(String, i64, Vec<(String, i64)>)> {
+	groups
+		.iter()
+		.map(|group| {
+			(
+				group
+					.group
+					.as_ref()
+					.map_or_else(|| "(uncategorized)".to_owned(), ToString::to_string),
+				group.total.minor(),
+				group
+					.categories
+					.iter()
+					.map(|line| {
+						(
+							line.category
+								.as_ref()
+								.map_or_else(String::new, ToString::to_string),
+							line.total.minor(),
+						)
+					})
+					.collect(),
+			)
+		})
+		.collect()
+}
+
+fn income(book: &Book, period: Period) -> IncomeStatement {
+	let statement = income_statement(&book.budget, &book.classify(), period).unwrap();
+	let net_profit = book.net_profit(period);
+	assert_eq!(
+		statement.net_income.total, net_profit.net_profit.total,
+		"ST-3 check 2"
+	);
+	assert_eq!(
+		statement.total_revenue.total.minor() - statement.total_expenses.total.minor(),
+		statement.net_income.total.minor()
+	);
+	for (groups, total) in [
+		(&statement.revenue, statement.total_revenue.total),
+		(&statement.expenses, statement.total_expenses.total),
+	] {
+		assert_eq!(
+			groups.iter().map(|group| group.total.minor()).sum::<i64>(),
+			total.minor()
+		);
+	}
+	statement
+}
+
+#[test]
+fn st3_income_statement_is_net_profit_by_group_then_category() {
+	let book = master();
+	let january = income(&book, month("2027-01"));
+	assert_eq!(
+		statement_groups(&january.revenue),
+		[(
+			"Income".to_owned(),
+			300_000,
+			named(&[("Paycheck", 300_000)])
+		)]
+	);
+	assert_eq!(
+		statement_groups(&january.expenses),
+		[
+			("Food".to_owned(), 5_000, named(&[("Groceries", 5_000)])),
+			("Shopping".to_owned(), 2_500, named(&[("Clothing", 2_500)])),
+			(
+				"Debt costs".to_owned(),
+				8_000,
+				named(&[("Loan interest", 8_000)])
+			),
+			(
+				"Big purchases".to_owned(),
+				50_000,
+				named(&[("Car purchase", 50_000)])
+			),
+		]
+	);
+	assert_eq!(january.total_revenue.total.minor(), 300_000);
+	assert_eq!(january.total_expenses.total.minor(), 65_500);
+	assert_eq!(january.net_income.total.minor(), 234_500);
+	assert_eq!(january.total_expenses.rows.len(), 5);
+
+	let february = income(&book, month("2027-02"));
+	assert_eq!(february.net_income.total.minor(), 297_500);
+	assert_eq!(february.total_expenses.total.minor(), 2_500);
+}
+
+#[test]
+fn st3_income_statement_lists_uncategorized_spending_last_and_keeps_refunds_negative() {
+	let mut book = master_book();
+	book.row("P", "CHK", "2027-03-01", 100_000)
+		.in_category("Paycheck");
+	book.row("U", "CHK", "2027-03-02", -4_000);
+	book.row("C1", "VISA", "2027-03-03", -2_000)
+		.in_category("Clothing");
+	book.row("C2", "VISA", "2027-03-04", 10_000)
+		.in_category("Clothing");
+	let statement = income(&book, month("2027-03"));
+	assert_eq!(
+		statement_groups(&statement.expenses),
+		[
+			(
+				"Shopping".to_owned(),
+				-8_000,
+				named(&[("Clothing", -8_000)])
+			),
+			("(uncategorized)".to_owned(), 4_000, named(&[("", 4_000)])),
+		]
+	);
+	let last = statement.expenses.last().unwrap();
+	assert!(last.categories[0].labels.needs_review);
+	assert_eq!(statement.net_income.total.minor(), 104_000);
+}
+
+#[test]
+fn st7_s6_income_statement_for_an_empty_period_is_all_zero() {
+	let book = master();
+	let statement = income(&book, month("2027-06"));
+	assert!(statement.revenue.is_empty() && statement.expenses.is_empty());
+	assert_eq!(statement.net_income.total, Money::ZERO);
 }
