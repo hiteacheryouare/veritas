@@ -209,6 +209,7 @@ Each suggestion carries exactly one reason line, built from these templates (dol
 | Bills plus baseline | `{Category} ${amount}: ${bills} scheduled + ${rest} {n}-month median`. Also used when the baseline is seasonal, with no "adjusted" clause: the bills part has no season. `bills` is the month's bills rounded half up to whole dollars, and `rest = amount - bills`, floored at 0, so the two parts always add up to the suggestion even though each would round on its own |
 | Goal | `{Goal} ${amount}: ${remaining} left over {months} months`, with both amounts in dollars and cents because goal suggestions stay in cents (DEBT-8.1) |
 | Goal, no target date | No suggestion. `{Goal}: no target date, keeping ${current budgeted}` |
+| Goal, active with recorded spending, in a budget that isn't 2-place | No suggestion. `{Goal}: spending recorded, keeping ${current budgeted}` (Ryan, 2026-11-18, CLS-12.14). The goal's `available` there adds register-scale spending to budget-scale budgeting (CLS-12.10), so a suggestion built on it could be about 100 times too large. "Spending recorded" means Spending to date (CLS-6 `expense_total` for the goal's category, through today) is not 0. A goal with no recorded spending still gets DEBT-8.1's suggestion, and in a 2-place budget the scales agree, so none of this applies |
 | Goal, reached | No suggestion. `{Goal}: reached, keeping ${current budgeted}` (D66, GOAL-10). The same goal gets a suggestion again after a re-target, which returns it to `active` (DEBT-8.2) |
 | Debt principal | `{Category} ${amount}, principal of the last loan payment`. `amount` is that principal rounded half up to whole dollars |
 | No history, no bill | No suggestion. `{Category}: no history yet, keeping ${current budgeted}` |
@@ -234,6 +235,7 @@ Examples: F-1 gives `Groceries $430, 6-month median`. A median of 42950 gives 43
 | SG-5 Notice, exact cents | Suggestions sum 208000, expected income 200000 | Difference 8000, notice `Suggestions exceed expected income by $80` |
 | SG-6 Notice under a dollar | A goal suggestion of 21429 plus whole-dollar suggestions of 100000 sum to 121429, expected income 121400 | Difference 29 is above 0, so the notice appears. 29 / 100 rounds to 0, floored to **$1**: `Suggestions exceed expected income by $1`. Equal sums give no notice |
 | SG-7 Negative forecast | A category with FC-1 forecast -3000 and no bills | `forecast+` 0, `max(0, 0)` = 0, rounds to 0, `Fun $0, 6-month median` |
+| SG-8 Active goal with spending, yen | Yen budget. Goal "New laptop", target 150000 (budget scale, ¥150,000), target date 2027-06-15, current month budgeted 10000 (¥10,000). A ¥500 purchase in the goal's category is stored as -50000 (register scale), so Spending to date is ¥500 | No suggestion. `New laptop: spending recorded, keeping ¥10,000`. The envelope's `available` would be 10000 + (-50000) = -40000, which is not a real position (CLS-12.10, CLS-12.14), so no monthly amount is built on it. With the purchase removed, Spending to date is 0 and DEBT-8.1 suggests as usual. In a USD budget the same goal with a $5.00 purchase (-500 cents) still gets its suggestion |
 
 ## FC-6 Goal ETA (R-FC-4)
 
@@ -326,7 +328,7 @@ A series where the model loses to naive, or a band that misses its target, is re
 | Net-worth change | `NW(end) - NW(start)` where `start` is the day before the period (ST-2). If the first row is inside the period, `NW(start) = 0`. Optional breakdown: ST-4 lines E1 to E7 |
 | Prior-year change | For each of total in, total out and net: `round_half_away((cur - prev) * 10000 / |prev|)` basis points. `prev` is the same measure over the same date range one year earlier: for a full year the previous full year, for the current year-to-date 01-01 through the same month and day (Feb 29 maps to Feb 28). `prev = 0`: "new this year". If the first row in the budget falls after the start of the prior range, the prior figure covers only the days since that row and is labeled "prior year from {date}" |
 | Biggest month vs typical | `round_half_away((max - median) * 10000 / median)` basis points, median over months with data. `median <= 0`: not shown |
-| Fun comparisons | Computed only from the user's own numbers: vs prior year, vs own median month, share of total. No external benchmark ("average household") appears unless a primary source is cited here |
+| Fun comparisons | Computed only from the user's own numbers: vs prior year, vs own median month, the top category's share and the no-spend share. No external benchmark ("average household") appears unless a primary source is cited here. The top category's share is of categorized spending, the denominator of the redaction shares (uncategorized rows are left out), and is labeled "of categorized spending", never "of total out". The no-spend share is no-spend days over evaluated days, in tenths, and its copy never says the user "spent nothing" on those days, because bills and loan lines do not break a no-spend day. No prior-year comparison is made when `prev = 0` ("new this year") or when the prior range is partial: the label is carried instead |
 
 ### Redaction mode (R-WRAP-2)
 
@@ -334,7 +336,12 @@ No dollar amount appears. Replace amounts with shares, in tenths of a percent:
 
 - "Everything else" is the sum of the positive nets of the categories outside the top 5. Zero and negative nets are in neither the top 5 nor "Everything else". Uncategorized rows are not a category: they are left out of the ranking, of "Everything else" and of the total the shares divide by.
 - Shares across a set (top categories plus "Everything else") sum to exactly 1000 using largest remainder: floor each `amount * 1000 / total`, then give each missing tenth to the largest fractional remainder, ties to the earlier row.
-- "Out vs in": `round_half_up(out * 1000 / in)` tenths. `in <= 0`: "n/a".
+- "Out vs in": `round_half_away(out * 1000 / in)` tenths. `in <= 0`: "n/a". It is `round_half_away`, like every division of a value that can be negative (the `round_half_away` rule above): out is negative when refunds beat spending, and -2.5 tenths must read -3, not -2. For a non-negative `out` it equals half up. Example: out -250, in 100000 gives -2.5 tenths, shown as -3.
+- Top category groups: the same rule as categories, on each group's net `expense` (refunds netted inside the group). Keep positive nets, top 5, ties by group name ascending then id, "Everything else" is the positive nets of the groups outside the top 5, uncategorized rows are left out, and the shares sum to exactly 1000.
+- Net: `1000 - out_share`, so out and net always sum to 1000 and never round apart. `in <= 0`: "n/a". A net share is negative when out is more than in.
+- Debt paydown and Savings: each `round_half_away(amount * 1000 / in)` tenths, `in <= 0`: "n/a". They are not part of "out" and can exceed 1000.
+- Biggest month: `round_half_away(month_expense_total * 1000 / out)` tenths. `out <= 0`: "n/a".
+- Prior-year change and biggest-month-vs-typical are already percentages, in basis points, and are shown as they are, with the "new this year" and "prior year from {date}" labels carried.
 - Net-worth change: change over opening net worth, `round_half_away`, tenths. Opening net worth <= 0: "n/a".
 - Counts (days, streaks, goals) are shown as is. Month names are shown as is.
 
@@ -358,3 +365,5 @@ No dollar amount appears. Replace amounts with shares, in tenths of a percent:
 | W-13 Empty year | No rows in the year | All counts 0, "No data for this year". No division happens |
 | W-14 Everything else and uncategorized | Net by category: Groceries 43000, Dining 30000, Fuel 17000, Fun 10000, Books 6000, Gifts 5000, Pets 4000, Refunds -2000. Uncategorized spending 9000 | Top 5: Groceries, Dining, Fuel, Fun, Books. Everything else = Gifts + Pets = **9000**. Refunds and uncategorized are in neither. Total = 115000. Floors 373, 260, 147, 86, 52, 78 sum 996. Missing 4 go to the largest remainders: Fun, Groceries, Dining, Fuel. Shares **374, 261, 148, 87, 52, 78** (Groceries, Dining, Fuel, Fun, Books, Everything else), sum 1000 |
 | W-15 Out vs in | in 100000, out 50000. Then in 0. Then in -3000 | 500 tenths (50.0%). Then "n/a". Then "n/a" |
+| W-16 Out vs in, refunds beat spending | in 100000, out -250 | -250 * 1000 / 100000 = -2.5, `round_half_away` gives **-3** tenths (not -2). Net share = 1000 - (-3) = **1003** |
+| W-17 Net and out never round apart | in 10000, out 3335 | out share: 3335 * 1000 / 10000 = 333.5, `round_half_away` gives **334**. Rounded on its own, net would be 6665 * 1000 / 10000 = 666.5, which gives 667, and 334 + 667 = 1001. The rule `1000 - out_share` gives net **666**, so the two sum to 1000 |

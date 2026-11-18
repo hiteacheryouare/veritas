@@ -131,3 +131,15 @@ PDF copy: the title is "Tax summary", the footer reads "Organized from your own 
 - A refund counts where it is recorded. A refund of a tagged purchase that carries no tag of its own lands in its category's bucket (or in none), not in the bucket of the purchase. Example: a pharmacy purchase of -3000 tagged `#medical` counts +3000 in `medical`. Its refund of +1000, recorded in Groceries with no tag, counts nothing in `medical`, so `medical` reads 3000 and not 2000. Tag the refund `#medical` to net it (TAX-3.3, TAX-4).
 - A merged category's rows follow the target (CLS-1). When a category with a `tax_bucket` is merged into a category with a different bucket or none, the merged rows count under the target's bucket from then on, in every tax year. The source's bucket is not copied (TAX-3.7). Veritas warns when the user confirms the merge: "{Source} is in tax bucket {bucket}. {Target} has {none or its bucket}. Its rows will count under {Target}." The warning is informational and never blocks the merge or an export. The user may set the target's bucket before confirming.
 - A bucket is a label the user chose. Whether an amount affects a tax return is for the user's tax software or accountant.
+
+## TAX-9 Setting buckets and tags
+
+How the user assigns buckets. Nothing here changes which rows count (TAX-3) or how they are signed (TAX-4).
+
+- **Category bucket.** A category's `tax_bucket` is one TAX-2 bucket id or clear. `none` is never stored on a category: `none` is only ever a tag meaning (TAX-2, TAX-3.3.1), so clearing a category's bucket writes no bucket.
+- **Tag mapping.** A tag maps to one TAX-2 bucket id, to `none` (exclude the row, TAX-3.3.1), or is removed (the tag is then ignored, TAX-1).
+- **Tag text.** The text must be non-empty, contain no whitespace (the `\s` of TAX-1's pattern) and no `#`, and is case-sensitive (TAX-1). One leading `#` the user types is stripped first, so `#medical` is saved as `medical`. `##x` is refused, because `#x` still contains `#`. Example: `Medical` and `medical` are two different tags.
+- **Unknown ids are refused when written.** A bucket id that is not in TAX-2 is `Invalid` on write. TAX-3.6 only governs unknown ids found on read (a file from elsewhere), which are ignored and reported by the audit.
+- **Direction.** A bucket whose direction is opposite the category's kind is allowed, with a plain note shown when it is set, never a refusal. Example: `charitable` (outflow) on an income category reads "Charitable giving counts money out. This category is income, so its rows count as negative." Tax features organize what the user chose and never judge it.
+- **Savings and debt categories.** Every bucket is allowed on a `savings` or `debt_principal` category, because TAX-3.1 makes those rows eligible (an HSA contribution is a `savings` row, T-15). Refuse no combination except an unknown id.
+- **Setup view.** The setup lists every category with its bucket and every tag mapping, so the user can see what each total comes from.
