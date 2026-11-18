@@ -254,7 +254,6 @@ impl Forecaster<'_> {
 				},
 				(CategoryKind::Expense, None) => self.expense_suggestion(
 					id,
-					name,
 					month,
 					&in_month,
 					baselines.get(id).copied(),
@@ -317,13 +316,17 @@ impl Forecaster<'_> {
 	fn expense_suggestion(
 		&self,
 		id: &CategoryId,
-		name: &str,
 		month: YearMonth,
 		in_month: &[&KnownFlow],
 		baseline: Option<&Baseline>,
 		keeping: &dyn Fn(Basis, &str) -> Suggestion,
 		copy: &Copy,
 	) -> Result<Suggestion, CoreError> {
+		let name = self
+			.budget
+			.categories
+			.get(id)
+			.map_or("", |category| category.name.as_str());
 		let bills: Vec<&&KnownFlow> = in_month
 			.iter()
 			.filter(|flow| flow.kind == FlowKind::Expense && flow.category.as_ref() == Some(id))
