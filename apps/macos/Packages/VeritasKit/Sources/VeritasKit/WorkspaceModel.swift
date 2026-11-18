@@ -251,7 +251,7 @@ public final class WorkspaceModel {
 	/// `BudgetMonth.mixedScaleNote`.
 	public var mixedScaleNote: String? {
 		phase == .open && budgetDecimalPlaces == 0
-			? "Spending is recorded at 2 places and budgets at 0, so these numbers mix both, as in Actual."
+			? MoneyFormat.mixedScaleNote
 			: nil
 	}
 

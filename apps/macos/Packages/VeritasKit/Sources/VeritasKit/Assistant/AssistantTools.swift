@@ -112,12 +112,12 @@ struct BudgetMonthTool: Tool {
 	/// The Budget screen with hidden envelopes left out, as it opens.
 	static func text(_ sheet: BudgetMonth, format: MoneyFormat) -> String {
 		func amount(_ value: Int64) -> String { format.amount(value, on: .budget) }
-		var text = [
+		var text = sheet.mixedScaleNote.map { [$0] } ?? []
+		text += [
 			"Budget for \(ReportPeriod.monthYear(sheet.month))",
 			"To Budget: \(format.currency(sheet.toBudget, on: .budget))"
 		]
 		if sheet.forNextMonth != 0 { text.append("Held for next month: \(amount(sheet.forNextMonth))") }
-		if let note = sheet.mixedScaleNote { text.append(note) }
 		for group in sheet.groups where !group.hidden {
 			if group.isIncome {
 				text.append("Income group \(group.name): received \(amount(group.spent))")
@@ -221,15 +221,29 @@ struct GoalsTool: Tool {
 		Self.text(try await context.queries.goals(today: context.today), format: context.format)
 	}
 
+	/// In a 0-place budget (CLS-12.14) the note comes first, a goal's mixed
+	/// figure is labeled only "available", and spending to date has its own line.
 	static func text(_ goals: [GoalSummary], format: MoneyFormat) -> String {
 		guard !goals.isEmpty else { return "This budget has no goals." }
-		return (["Goals"] + goals.map { line($0, format: format) }).joined(separator: "\n")
+		let zeroPlaces = format.decimalPlaces == 0
+		var text = zeroPlaces ? [MoneyFormat.mixedScaleNote, "Goals"] : ["Goals"]
+		for goal in goals {
+			text += lines(goal, format: format, zeroPlaces: zeroPlaces)
+		}
+		return text.joined(separator: "\n")
 	}
 
 	/// The goal card's figures: whole units on the budget scale, spending on the register's.
-	static func line(_ goal: GoalSummary, format: MoneyFormat) -> String {
+	static func lines(_ goal: GoalSummary, format: MoneyFormat, zeroPlaces: Bool) -> [String] {
 		func whole(_ value: Int64) -> String { format.wholeCurrency(value, on: .budget) }
-		var parts = ["\(whole(goal.progressAmount)) of \(whole(goal.target)) (\(goal.progressPercent)%)"]
+		var parts: [String]
+		if zeroPlaces {
+			parts = goal.state == .reachedSpent
+				? ["target \(whole(goal.target))", "available \(format.currency(goal.available, on: .budget))"]
+				: ["available \(whole(goal.progressAmount))", "target \(whole(goal.target))"]
+		} else {
+			parts = ["\(whole(goal.progressAmount)) of \(whole(goal.target)) (\(goal.progressPercent)%)"]
+		}
 		if let date = goal.targetDate { parts.append("target date \(StatementsModel.date(date, style: .wide))") }
 		switch goal.state {
 		case .active:
@@ -243,12 +257,16 @@ struct GoalsTool: Tool {
 		case .reached:
 			parts.append(goal.reachedMonth.map { "reached in \(ReportPeriod.monthYear($0))" } ?? "reached")
 		case .reachedSpent:
-			parts.append("reached, \(format.currency(goal.spent, on: .register)) spent, \(format.currency(goal.available, on: .budget)) available")
+			parts.append("reached, then spent")
+			if !zeroPlaces { parts.append("available \(format.currency(goal.available, on: .budget))") }
 		case .closed:
 			parts.append(goal.closedMonth.map { "closed in \(ReportPeriod.monthYear($0))" } ?? "closed")
-			parts.append("\(format.amount(goal.spent, on: .register)) spent")
 		}
-		return "\(goal.name): \(parts.joined(separator: ", "))"
+		var lines = ["\(goal.name): \(parts.joined(separator: ", "))"]
+		if goal.state == .reachedSpent || goal.state == .closed {
+			lines.append("\(goal.name) spending to date: \(format.currency(goal.spent, on: .register))")
+		}
+		return lines
 	}
 }
 

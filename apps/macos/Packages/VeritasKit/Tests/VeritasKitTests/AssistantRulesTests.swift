@@ -53,3 +53,61 @@ struct CannedQueries: ReadOnlyBudgetQueries {
 	func customReports() async throws -> [CustomReportItem] { throw Missing() }
 	func customReport(_ id: String, today: String) async throws -> CustomReportView { throw Missing() }
 }
+
+/// Goals and the budget month in a 0-place budget through the real core (CLS-12.10, CLS-12.14).
+@MainActor
+struct AssistantZeroPlaceTests {
+	@Test func aYenBudgetPutsTheScaleNoteFirstAndKeepsSpendingApartFromAvailable() async throws {
+		let budgets = URL.temporaryDirectory.appending(path: "veritas-real-\(UUID().uuidString)", directoryHint: .isDirectory)
+		defer { try? FileManager.default.removeItem(at: budgets) }
+		let workspace = WorkspaceModel(library: CoreBudgetLibrary(budgetsDirectory: budgets), format: MoneyFormat())
+		await workspace.createBudget(NewBudget(
+			name: "Yen", currencyCode: "JPY", numberStyle: .commaDot,
+			accounts: [StartingAccount(name: "Wallet", type: .cash, balance: 10_000_000)],
+			hasRetirementPlan: false, hasHealthSavingsAccount: false
+		))
+		try #require(workspace.phase == .open)
+		let wallet = try #require(workspace.overview?.accounts.first { $0.name == "Wallet" }).id
+
+		let goals = GoalsScreenModel(workspace: workspace)
+		await goals.load()
+		#expect(await goals.create(name: "Rice cooker", target: 1_000, date: nil, icon: nil, color: nil))
+		#expect(await goals.create(name: "Trip", target: 50_000, date: nil, icon: nil, color: nil))
+		let cooker = try #require(goals.open.first { $0.name == "Rice cooker" })
+		let screen = BudgetScreenModel(workspace: workspace)
+		await screen.load()
+		screen.beginEditing(cooker.categoryId)
+		screen.editing?.type("1000")
+		await screen.commitEditing()
+		#expect(await workspace.perform(.addTransaction(transaction: TransactionDraft(
+			id: nil, accountId: wallet, date: WorkspaceModel.today(), amount: -120_000, payeeId: nil, payeeName: "Appliance shop",
+			categoryId: cooker.categoryId, notes: nil, cleared: true, splits: []
+		))), "a ¥1,200 purchase is 120000 on the register's scale")
+		await goals.load()
+		let spent = try #require(goals.goals.first { $0.id == cooker.id })
+		#expect(spent.state == .reachedSpent)
+
+		let format = workspace.format
+		#expect(format.decimalPlaces == 0)
+		let context = AssistantContext(queries: try #require(workspace.readOnlyQueries), format: format, today: WorkspaceModel.today())
+		let text = try await GoalsTool(context: context).call(arguments: .init())
+		let lines = text.components(separatedBy: "\n")
+		#expect(lines.first == MoneyFormat.mixedScaleNote)
+		let goalLine = try #require(lines.first { $0.hasPrefix("Rice cooker: ") })
+		#expect(goalLine.contains("target \(format.wholeCurrency(spent.target, on: .budget))"))
+		#expect(goalLine.contains("available \(format.currency(spent.available, on: .budget))"))
+		#expect(goalLine.hasSuffix("reached, then spent"), "the screen's Reached → Spent")
+		#expect(!goalLine.contains(format.currency(spent.spent, on: .register)), "spending to date is never beside available")
+		for word in ["spending", "left", "over", "remaining", " of "] {
+			#expect(!goalLine.contains(word), "\(goalLine)")
+		}
+		#expect(lines.contains("Rice cooker spending to date: \(format.currency(spent.spent, on: .register))"))
+		#expect(lines.contains("Rice cooker spending to date: ¥1,200"))
+		let trip = try #require(lines.first { $0.hasPrefix("Trip: ") })
+		#expect(trip.hasPrefix("Trip: available ¥0, target ¥50,000"))
+
+		let month = try await BudgetMonthTool(context: context).call(arguments: .init(month: String(WorkspaceModel.today().prefix(7))))
+		#expect(month.components(separatedBy: "\n").first == MoneyFormat.mixedScaleNote, "the note comes before the figures it explains")
+		await workspace.closeBudget()
+	}
+}
