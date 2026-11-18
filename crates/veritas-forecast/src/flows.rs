@@ -3,7 +3,7 @@ use veritas_domain::{
 	YearMonth,
 };
 
-use crate::math::{median, round_half_away, round_half_up, to_money};
+use crate::math::{median, round_half_up, to_money};
 
 /// How a known flow moves net worth (FC-2, FC-3).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -70,11 +70,11 @@ impl ScheduleAmount {
 	) -> Result<(Money, Certainty), CoreError> {
 		match self {
 			ScheduleAmount::Is(amount) => Ok((amount, Certainty::Exact)),
+			// Actual's `getScheduledAmount` is `Math.round` of the middle
+			// (`shared/schedules.ts:367-368`), which sends a tie toward +∞:
+			// -1001 to -1000 is -1000.
 			ScheduleAmount::IsBetween(low, high) => Ok((
-				to_money(round_half_away(
-					i128::from(low.minor()) + i128::from(high.minor()),
-					2,
-				))?,
+				to_money((i128::from(low.minor()) + i128::from(high.minor()) + 1).div_euclid(2))?,
 				Certainty::Estimate,
 			)),
 			ScheduleAmount::IsApprox(stated) => {

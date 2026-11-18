@@ -6,9 +6,10 @@ use veritas_domain::{
 	Account, AccountGroup, AccountGroupId, AccountId, AccountKind, AccountMeta, BudgetCell,
 	BudgetData, BudgetType, Category, CategoryGroup, CategoryGroupId, CategoryId, CategoryKind,
 	CategoryMeta, CivilDate, ConditionsOp, CoreError, CustomReportId, CustomReportRow,
-	DashboardPage, DashboardPageId, FormatPrefs, Goal, GoalId, GoalStatus, Money, Payee, PayeeId,
-	Rule, RuleId, RuleStage, Schedule, ScheduleId, ScheduleJsonPaths, ScheduleMeta, SplitRole, Tag,
-	TagId, Transaction, TransactionId, TransactionMeta, Widget, WidgetId,
+	DashboardPage, DashboardPageId, FormatPrefs, Goal, GoalId, GoalStatus, LoanPart,
+	LoanPaymentPart, LoanPaymentPartId, Money, Payee, PayeeId, Rule, RuleId, RuleStage, Schedule,
+	ScheduleId, ScheduleJsonPaths, ScheduleMeta, SplitRole, Tag, TagId, Transaction, TransactionId,
+	TransactionMeta, Widget, WidgetId,
 };
 
 use crate::cells::{
@@ -762,6 +763,30 @@ fn load_veritas_tables(
 					needs_actual: text(at(row, 2)?)?,
 				};
 				data.transaction_meta.insert(transaction, meta);
+				Ok(())
+			},
+		)?;
+	}
+
+	if table_exists(conn, "veritas_loan_payment_part")? {
+		each_row(
+			conn,
+			"veritas_loan_payment_part",
+			"SELECT id, payment, line, part, tombstone FROM veritas_loan_payment_part",
+			skipped,
+			|row| {
+				let part_text = id(row, 3)?;
+				let Some(part) = LoanPart::from_stored(&part_text) else {
+					return Ok(());
+				};
+				let part = LoanPaymentPart {
+					id: LoanPaymentPartId::new(id(row, 0)?),
+					payment: TransactionId::new(id(row, 1)?),
+					line: TransactionId::new(id(row, 2)?),
+					part,
+					tombstone: flag(at(row, 4)?),
+				};
+				data.loan_payment_parts.insert(part.id.clone(), part);
 				Ok(())
 			},
 		)?;

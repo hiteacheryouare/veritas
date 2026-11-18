@@ -262,6 +262,7 @@ fn variant(change: &Change) -> &'static str {
 		Change::CategoryMeta(_) => "CategoryMeta",
 		Change::AccountMeta(_) => "AccountMeta",
 		Change::TransactionMeta(_) => "TransactionMeta",
+		Change::LoanPaymentPart(_) => "LoanPaymentPart",
 		Change::TaxTag(_) => "TaxTag",
 		Change::Goal(_) => "Goal",
 		Change::CustomReport(_) => "CustomReport",
@@ -270,7 +271,7 @@ fn variant(change: &Change) -> &'static str {
 	}
 }
 
-const EVERY_VARIANT: [&str; 25] = [
+const EVERY_VARIANT: [&str; 26] = [
 	"Account",
 	"AccountGroup",
 	"CategoryGroup",
@@ -291,6 +292,7 @@ const EVERY_VARIANT: [&str; 25] = [
 	"CategoryMeta",
 	"AccountMeta",
 	"TransactionMeta",
+	"LoanPaymentPart",
 	"TaxTag",
 	"Goal",
 	"CustomReport",
@@ -423,6 +425,13 @@ fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
 			meta: veritas_domain::ScheduleMeta { paused: true },
 		}),
 		Row::Transaction(transaction.clone()),
+		Row::LoanPaymentPart(veritas_domain::LoanPaymentPart {
+			id: veritas_domain::LoanPaymentPartId::new("v-part"),
+			payment: transaction.id.clone(),
+			line: transaction.id.clone(),
+			part: veritas_domain::LoanPart::Interest,
+			tombstone: false,
+		}),
 		Row::Tag(Tag {
 			id: TagId::new("v-tag"),
 			name: "car".to_owned(),
@@ -582,6 +591,10 @@ fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
 			}
 			Row::ScheduleMeta(row) => Row::ScheduleMeta(veritas_domain::ScheduleMetaRow {
 				meta: veritas_domain::ScheduleMeta { paused: false },
+				..row
+			}),
+			Row::LoanPaymentPart(row) => Row::LoanPaymentPart(veritas_domain::LoanPaymentPart {
+				part: veritas_domain::LoanPart::Escrow,
 				..row
 			}),
 			Row::AccountGroup(row) => Row::AccountGroup(AccountGroup {

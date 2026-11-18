@@ -55,6 +55,46 @@ pub fn kind_target(data: &BudgetData, kind: CategoryKind) -> Result<KindTarget, 
 	category_kinds::kind_target(data, kind)
 }
 
+fn refuse_if_visible(data: &BudgetData, kind: CategoryKind) -> Result<(), CoreError> {
+	if category_kinds::has_visible(data, kind)? {
+		return Err(CoreError::Invalid(
+			"You already have a category for this. Pick it instead.".to_owned(),
+		));
+	}
+	Ok(())
+}
+
+/// CLS-4.1's "show it again and use it" and "restore it and use it": the
+/// hidden or archived category of `kind` the user confirmed is shown again,
+/// its archive date cleared, and its group shown again if hidden. The
+/// group's other categories keep their own hidden flags. Refused while a
+/// visible category of that kind exists, or when `category` isn't one of
+/// `kind_target`'s hidden matches.
+pub fn revive_kind_category(
+	data: &BudgetData,
+	kind: CategoryKind,
+	category: &CategoryId,
+) -> Result<Vec<Row>, CoreError> {
+	refuse_if_visible(data, kind)?;
+	let found = match kind_target(data, kind)? {
+		KindTarget::OneHidden(only) | KindTarget::OneArchived(only) => vec![only],
+		KindTarget::SeveralHidden(all) => all,
+		_ => Vec::new(),
+	}
+	.into_iter()
+	.find(|candidate| &candidate.category == category)
+	.ok_or_else(|| {
+		CoreError::Invalid(
+			"That category isn't a hidden or archived one of this kind. Pick another.".to_owned(),
+		)
+	})?;
+	let mut rows = categories::set_category_hidden(data, category, false)?;
+	if found.group_hidden {
+		rows.extend(categories::set_group_hidden(data, &found.group, false)?);
+	}
+	Ok(rows)
+}
+
 /// Where `create_kind_category` would put a new category: the group's name
 /// as the user sees it, and whether that group exists but is hidden, in
 /// which case the shell confirms unhiding it first.
@@ -131,18 +171,16 @@ pub fn kind_category_plan(
 /// (debt principal or savings) in its home group, which is created when
 /// missing. A hidden home group is unhidden only when `unhide_group` says
 /// the user confirmed it; its other categories keep their own hidden flags.
-/// Refused while a visible category of that kind exists.
+/// Refused while a visible category of that kind exists. Hidden or archived
+/// ones don't block it ("Create a new category"), but a name already used
+/// in the group does, as Actual refuses it.
 pub fn create_kind_category(
 	data: &BudgetData,
 	kind: CategoryKind,
 	name: &str,
 	unhide_group: bool,
 ) -> Result<(Vec<Row>, CategoryId), CoreError> {
-	if kind_target(data, kind)? != KindTarget::None {
-		return Err(CoreError::Invalid(
-			"You already have a category for this. Pick it instead.".to_owned(),
-		));
-	}
+	refuse_if_visible(data, kind)?;
 	let mut rows = Vec::new();
 	let group = match home_group(data, kind)? {
 		Home::Existing(group) if group.hidden && !unhide_group => {

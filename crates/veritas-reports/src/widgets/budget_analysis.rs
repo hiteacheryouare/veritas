@@ -92,14 +92,14 @@ enum Test {
 	Never,
 }
 
-struct CategoryCondition {
+pub(super) struct CategoryCondition {
 	group: bool,
 	test: Test,
 }
 
 /// The card's own reading of category and category-group conditions, which
 /// compares ids and names in memory rather than through a query.
-fn category_condition(condition: &Json) -> Result<CategoryCondition, CoreError> {
+pub(super) fn category_condition(condition: &Json) -> Result<CategoryCondition, CoreError> {
 	let group = condition.get("field").and_then(Json::as_str) == Some("category_group");
 	let value = condition.get("value").unwrap_or(&Json::Null);
 	let id = |value: &Json| value.as_str().map(str::to_owned);
@@ -142,7 +142,7 @@ fn category_condition(condition: &Json) -> Result<CategoryCondition, CoreError> 
 	Ok(CategoryCondition { group, test })
 }
 
-fn category_passes(
+pub(super) fn category_passes(
 	condition: &CategoryCondition,
 	budget: &BudgetData,
 	category: &Category,
