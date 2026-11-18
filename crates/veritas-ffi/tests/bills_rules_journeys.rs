@@ -2586,6 +2586,30 @@ fn upcoming_bills_carry_their_amount_kind_account_and_category() {
 	assert_eq!(kinds("power").0, Some(veritas_ffi::BillAmountKind::About));
 	assert_eq!(kinds("water").0, Some(veritas_ffi::BillAmountKind::Between));
 	assert_eq!(kinds("savings").1, None, "a bill without a category");
+	// v14 paidTodayCounts: the bill editor's answer, on its next occurrence only.
+	let mut seen = std::collections::BTreeSet::new();
+	for row in &upcoming {
+		let editor = session
+			.bill(row.bill_id.clone(), "2026-11-01".to_owned())
+			.unwrap()
+			.paid_today_counts;
+		let first = seen.insert(row.bill_id.clone());
+		assert_eq!(
+			row.paid_today_counts,
+			first && editor,
+			"{} on {}",
+			row.bill_id,
+			row.date
+		);
+	}
+	let near = session.upcoming(30, "2026-11-16".to_owned()).unwrap();
+	let water_rows: Vec<_> = near.iter().filter(|row| row.bill_id == "water").collect();
+	assert_eq!(
+		(water_rows[0].date.as_str(), water_rows[0].paid_today_counts),
+		("2026-11-18", true),
+		"two days out, Paid today pays the next occurrence"
+	);
+	assert!(water_rows[1..].iter().all(|row| !row.paid_today_counts));
 	let ours = scratch.join("ours.zip");
 	export(&session, &ours);
 	let Some(oracle) = oracle() else { return };

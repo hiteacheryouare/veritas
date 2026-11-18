@@ -249,6 +249,12 @@ pub struct UpcomingBill {
 	pub auto_post: bool,
 	/// Due, Missed or Upcoming.
 	pub status: BillStatus,
+	/// v14. Whether Paid dated today counts as paying this occurrence in
+	/// Actual, as `BillDetail.paid_today_counts` says for the bill. Only the
+	/// bill's next occurrence can be: Paid always pays the next one. Lets the
+	/// tray confirm "Post today" on an occurrence days out.
+	#[uniffi(default = false)]
+	pub paid_today_counts: bool,
 }
 
 const UPCOMING_DAYS: i64 = 7;
@@ -588,6 +594,10 @@ pub(crate) fn upcoming(
 			continue;
 		};
 		let bill = summary(data, &schedule.id, today)?;
+		let next_counts = match bill.read_only_reason {
+			Some(BillReadOnlyReason::MissingRule | BillReadOnlyReason::UnreadableRule) => false,
+			_ => veritas_rules::counts_as_paid(data, &schedule.id, today)?,
+		};
 		let dates = bill_dates(data, &schedule.id, next, end).unwrap_or_default();
 		for date in dates {
 			let status = if date == next {
@@ -621,6 +631,7 @@ pub(crate) fn upcoming(
 				is_income: bill.is_income,
 				auto_post: bill.auto_post,
 				status,
+				paid_today_counts: date == next && next_counts,
 			});
 		}
 	}
