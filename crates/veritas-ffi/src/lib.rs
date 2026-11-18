@@ -7,6 +7,7 @@ mod budget;
 mod commands;
 mod custom_reports;
 mod dashboards;
+mod forecast;
 mod goals;
 mod money;
 mod records;
@@ -42,6 +43,13 @@ pub use custom_reports::{
 pub use dashboards::{
 	AgeGranularity, AgePoint, AgeTrend, BudgetAnalysisPoint, CalendarCardMonth, CalendarDayCell,
 	CrossoverCardPoint, DashboardPage, DashboardWidget, WidgetConfig, WidgetTimeFrame, WidgetView,
+};
+pub use forecast::{
+	BudgetSuggestion, FlowCertainty, Forecast, ForecastAccount, ForecastBandMethod,
+	ForecastBaseline, ForecastCategory, ForecastFlow, ForecastFlowKind, ForecastHorizon,
+	ForecastMonth, ForecastProjection, ForecastShortfall, GoalEtaItem, GoalEtaStatus,
+	IncomeChangeAmount, LoanForecast, ScenarioCadence, ScenarioChange, ScenarioEventItem,
+	ScenarioSummary, SuggestionBasis, SuggestionList, UnforecastItem,
 };
 pub use goals::{GoalClosePreview, GoalList, GoalPace, GoalState, GoalSummary, MonthAmount};
 pub use money::{
