@@ -3,6 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::types::Value;
 use rusqlite::{OptionalExtension, Transaction as SqlTransaction, params_from_iter};
+use veritas_domain::SettingKey;
 use veritas_domain::{
 	Account, AccountGroup, AccountId, AccountKind, AccountMeta, BudgetCell, BudgetType, Category,
 	CategoryGroup, CategoryId, CategoryKind, CategoryMeta, CivilDate, CoreError, CustomReportRow,
@@ -1123,6 +1124,23 @@ impl<'conn> Writer<'conn> {
 			before,
 			after,
 			|bucket: &str| vec![("bucket", owned(bucket))],
+		)
+	}
+
+	/// A `veritas_meta` row Veritas lets the user set, never `schema_version`.
+	pub fn put_setting(
+		&mut self,
+		key: SettingKey,
+		before: Option<&str>,
+		after: Option<&str>,
+	) -> Result<(), CoreError> {
+		self.put_veritas(
+			"veritas_meta",
+			"key",
+			key.id(),
+			before,
+			after,
+			|value: &str| vec![("value", owned(value))],
 		)
 	}
 
