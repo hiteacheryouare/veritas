@@ -78,7 +78,10 @@ impl EscrowSource {
 		} else {
 			""
 		};
-		format!("Escrow taken from {name} ${}{shared}", self.amount)
+		format!(
+			"Escrow taken from {name} {}{shared}",
+			veritas_engine::register_currency_text(self.amount, &budget.format)
+		)
 	}
 }
 

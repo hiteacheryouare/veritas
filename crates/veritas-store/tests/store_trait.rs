@@ -12,6 +12,10 @@ use veritas_domain::{
 	PayeeMapping, Row, SplitRole, Store as _, StoreTransaction, Transaction, TransactionId,
 	TransactionMeta, TransactionMetaRow, YearMonth,
 };
+use veritas_domain::{
+	Cadence, IncomeDelta, Scenario, ScenarioChange, ScenarioEvent, ScenarioEventId, ScenarioId,
+	ScenarioRow,
+};
 use veritas_store::{Access, Store};
 
 fn perform(store: &mut Store, data: &mut BudgetData, rows: Vec<Row>) -> Result<(), CoreError> {
@@ -269,10 +273,11 @@ fn variant(change: &Change) -> &'static str {
 		Change::CustomReport(_) => "CustomReport",
 		Change::DashboardPage(_) => "DashboardPage",
 		Change::Widget(_) => "Widget",
+		Change::Scenario(_) => "Scenario",
 	}
 }
 
-const EVERY_VARIANT: [&str; 27] = [
+const EVERY_VARIANT: [&str; 28] = [
 	"Account",
 	"AccountGroup",
 	"CategoryGroup",
@@ -300,7 +305,67 @@ const EVERY_VARIANT: [&str; 27] = [
 	"CustomReport",
 	"DashboardPage",
 	"Widget",
+	"Scenario",
 ];
+
+/// One event of every kind the schema stores (R-FC-2).
+fn every_scenario_event(account: &AccountId, category: &CategoryId) -> Vec<ScenarioEvent> {
+	let month = YearMonth::parse("2027-01").unwrap();
+	let event = |id: &str, change| ScenarioEvent {
+		id: ScenarioEventId::new(id),
+		change,
+	};
+	vec![
+		event(
+			"e1",
+			ScenarioChange::OneTime {
+				date: CivilDate::new(2027, 8, 10).unwrap(),
+				account: account.clone(),
+				category: Some(category.clone()),
+				amount: Money::from_minor(-200_000),
+			},
+		),
+		event(
+			"e2",
+			ScenarioChange::Recurring {
+				start: CivilDate::new(2027, 6, 1).unwrap(),
+				end_month: Some(YearMonth::parse("2027-12").unwrap()),
+				cadence: Cadence::EveryWeeks(2),
+				account: account.clone(),
+				category: None,
+				amount: Money::from_minor(-30_000),
+			},
+		),
+		event(
+			"e3",
+			ScenarioChange::CategoryPercent {
+				category: category.clone(),
+				percent_bp: -1_000,
+				start_month: month,
+				end_month: None,
+			},
+		),
+		event(
+			"e4",
+			ScenarioChange::IncomeChange {
+				account: account.clone(),
+				category: None,
+				change: IncomeDelta::Percent(500),
+				start_month: month,
+				end_month: None,
+			},
+		),
+		event(
+			"e5",
+			ScenarioChange::GoalContribution {
+				goal: GoalId::new("v-goal"),
+				amount: Money::from_minor(25_000),
+				start_month: month,
+				end_month: Some(month),
+			},
+		),
+	]
+}
 
 #[test]
 fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
@@ -543,6 +608,16 @@ fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
 				.unwrap_or_default()
 				+ 1,
 		}),
+		Row::Scenario(ScenarioRow {
+			id: ScenarioId::new("v-scenario"),
+			scenario: Some(Scenario {
+				id: ScenarioId::new("v-scenario"),
+				name: "Vacation".to_owned(),
+				sort_order: 1.0,
+				created_at: 1_790_000_000_000,
+				events: every_scenario_event(&account.id, &category.id),
+			}),
+		}),
 		Row::Widget(Widget {
 			id: WidgetId::new("v-widget"),
 			kind: Some("net-worth-card".to_owned()),
@@ -701,6 +776,33 @@ fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
 				name: Some("Money".to_owned()),
 				..row
 			}),
+			Row::Scenario(row) => {
+				let mut scenario = row.scenario.clone().unwrap();
+				scenario.name = "Vacation, later".to_owned();
+				scenario.events.remove(0);
+				scenario.events[0].change = ScenarioChange::IncomeChange {
+					account: account.id.clone(),
+					category: None,
+					change: IncomeDelta::Amount(Money::from_minor(50_000)),
+					start_month: month,
+					end_month: None,
+				};
+				scenario.events.push(ScenarioEvent {
+					id: ScenarioEventId::new("e6"),
+					change: ScenarioChange::Recurring {
+						start: CivilDate::new(2027, 2, 1).unwrap(),
+						end_month: None,
+						cadence: Cadence::EveryMonths(1),
+						account: account.id.clone(),
+						category: Some(category.id.clone()),
+						amount: Money::from_minor(-9_000),
+					},
+				});
+				Row::Scenario(ScenarioRow {
+					scenario: Some(scenario),
+					..row
+				})
+			}
 			Row::Widget(row) => Row::Widget(Widget {
 				x: Some(6),
 				width: Some(6),
@@ -716,4 +818,50 @@ fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
 		all
 	});
 	assert_eq!(store.load().unwrap().data, data);
+
+	// Deleting the scenario removes its rows from both tables.
+	perform(
+		&mut store,
+		&mut data,
+		vec![Row::Scenario(ScenarioRow {
+			id: ScenarioId::new("v-scenario"),
+			scenario: None,
+		})],
+	)
+	.unwrap();
+	assert!(data.scenarios.is_empty());
+	assert_eq!(store.load().unwrap().data, data);
+}
+
+#[test]
+fn a_scenario_event_the_store_cant_read_is_skipped_and_reported_d50() {
+	let scratch = Scratch::new("trait-scenario-skip");
+	let db = fixture_db("small", &scratch);
+	let mut store = Store::open(&db, Access::ReadWrite).unwrap();
+	store.adopt().unwrap();
+	drop(store);
+	let conn = rusqlite::Connection::open(&db).unwrap();
+	conn.execute_batch(
+		"INSERT INTO veritas_scenario (id, name, created_at) VALUES ('s', 'Raise', 1);
+		 INSERT INTO veritas_scenario_event (id, scenario_id, kind, amount, start_month)
+		 VALUES ('bad', 's', 'one_time', 100, '2027-01');
+		 INSERT INTO veritas_scenario_event (id, scenario_id, kind, goal_id, amount, start_month)
+		 VALUES ('orphan', 'gone', 'goal_contribution', 'g', 100, '2027-01');
+		 INSERT INTO veritas_scenario_event (id, scenario_id, kind, category_id, percent_bp, start_month)
+		 VALUES ('ok', 's', 'category_percent', 'c', 500, '2027-01');",
+	)
+	.unwrap();
+	drop(conn);
+	let loaded = Store::open(&db, Access::ReadWrite).unwrap().load().unwrap();
+	let scenario = &loaded.data.scenarios[&ScenarioId::new("s")];
+	assert_eq!(scenario.events.len(), 1);
+	assert_eq!(scenario.events[0].id, ScenarioEventId::new("ok"));
+	let skipped: Vec<_> = loaded
+		.report
+		.skipped
+		.iter()
+		.filter(|row| row.table == "veritas_scenario_event")
+		.map(|row| row.id.as_deref().unwrap())
+		.collect();
+	assert_eq!(skipped, ["bad", "orphan"]);
 }

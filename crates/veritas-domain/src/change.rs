@@ -5,9 +5,9 @@ use crate::{
 	Account, AccountGroup, AccountGroupId, AccountId, AccountMeta, BudgetCell, BudgetData,
 	Category, CategoryGroup, CategoryGroupId, CategoryId, CategoryMeta, CivilDate, CustomReportId,
 	CustomReportRow, DashboardPage, DashboardPageId, Goal, GoalId, LoanPaymentPart,
-	LoanPaymentPartId, Money, Payee, PayeeId, Rule, RuleId, Schedule, ScheduleId,
-	ScheduleJsonPaths, ScheduleMeta, SettingKey, Tag, TagId, Transaction, TransactionId,
-	TransactionMeta, Widget, WidgetId, YearMonth,
+	LoanPaymentPartId, Money, Payee, PayeeId, Rule, RuleId, Scenario, ScenarioId, Schedule,
+	ScheduleId, ScheduleJsonPaths, ScheduleMeta, SettingKey, Tag, TagId, Transaction,
+	TransactionId, TransactionMeta, Widget, WidgetId, YearMonth,
 };
 
 /// One row a subscriber may need to refetch after a commit.
@@ -37,6 +37,7 @@ pub enum EntityRef {
 	CustomReport(CustomReportId),
 	DashboardPage(DashboardPageId),
 	Widget(WidgetId),
+	Scenario(ScenarioId),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -111,6 +112,15 @@ pub struct ScheduleJsonPathsRow {
 pub struct NextDateReset {
 	pub schedule: ScheduleId,
 	pub date: Option<CivilDate>,
+}
+
+/// A what-if scenario with its events (R-FC-2), as one row: `None` is a
+/// deleted scenario. The store writes `veritas_scenario` and diffs
+/// `veritas_scenario_event` by event id, and touches no other table.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScenarioRow {
+	pub id: ScenarioId,
+	pub scenario: Option<Scenario>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -297,6 +307,7 @@ rows!(
 	CustomReport(CustomReportRow),
 	DashboardPage(DashboardPage),
 	Widget(Widget),
+	Scenario(ScenarioRow),
 );
 
 fn put<K: Ord + Clone, V>(map: &mut BTreeMap<K, V>, key: &K, value: Option<V>) {
@@ -803,5 +814,34 @@ impl Record for Goal {
 
 	fn entity(key: &GoalId) -> EntityRef {
 		EntityRef::Goal(key.clone())
+	}
+}
+
+/// Always read as a row, so creating and deleting are both edits of one
+/// value and undo puts back exactly what was there.
+impl Record for ScenarioRow {
+	type Key = ScenarioId;
+
+	fn key(&self) -> ScenarioId {
+		self.id.clone()
+	}
+
+	fn read(data: &BudgetData, key: &ScenarioId) -> Option<Self> {
+		Some(ScenarioRow {
+			id: key.clone(),
+			scenario: data.scenarios.get(key).cloned(),
+		})
+	}
+
+	fn write(data: &mut BudgetData, key: &ScenarioId, value: Option<Self>) {
+		put(&mut data.scenarios, key, value.and_then(|row| row.scenario));
+	}
+
+	fn retired(_: &Self) -> Retired<Self> {
+		Retired::Removed
+	}
+
+	fn entity(key: &ScenarioId) -> EntityRef {
+		EntityRef::Scenario(key.clone())
 	}
 }

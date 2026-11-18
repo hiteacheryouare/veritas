@@ -107,6 +107,10 @@ impl StoreTransaction for Writer<'_> {
 				self.put_dashboard_page(delta.before.as_ref(), delta.after.as_ref())
 			}
 			Change::Widget(delta) => self.put_widget(delta.before.as_ref(), delta.after.as_ref()),
+			Change::Scenario(delta) => self.put_scenario(
+				delta.before.as_ref().and_then(|row| row.scenario.as_ref()),
+				delta.after.as_ref().and_then(|row| row.scenario.as_ref()),
+			),
 		}
 	}
 

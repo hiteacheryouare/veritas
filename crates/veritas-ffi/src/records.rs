@@ -72,6 +72,8 @@ pub enum EntityKind {
 	CustomReport,
 	DashboardPage,
 	Widget,
+	/// v16. A what-if scenario with its events (R-FC-2).
+	Scenario,
 }
 
 /// One changed row. `id` is the row's id, absent for a month's hold;
@@ -123,6 +125,7 @@ impl From<&CoreEntity> for EntityRef {
 			CoreEntity::CustomReport(id) => row(EntityKind::CustomReport, id),
 			CoreEntity::DashboardPage(id) => row(EntityKind::DashboardPage, id),
 			CoreEntity::Widget(id) => row(EntityKind::Widget, id),
+			CoreEntity::Scenario(id) => row(EntityKind::Scenario, id),
 		}
 	}
 }

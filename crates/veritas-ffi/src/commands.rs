@@ -3,10 +3,14 @@ use veritas_domain::{
 	Note, Row,
 };
 use veritas_domain::{AccountGroupId, PayeeId, ScheduleId, TransactionId};
+use veritas_domain::{ScenarioEventId, ScenarioId};
 use veritas_rules::RuleBook;
 use veritas_session::{
-	SnapshotReason, accounts, bills, categories, goals, payees, transactions, writes,
+	SnapshotReason, accounts, bills, categories, forecast, goals, payees, scenarios, transactions,
+	writes,
 };
+
+use crate::forecast::{ScenarioChange, core_change};
 
 use crate::accounts::TransactionDraft;
 use crate::bills::BillDraft;
@@ -460,6 +464,46 @@ pub enum Command {
 		tag: String,
 		meaning: Option<crate::tax_setup::TaxTagMeaning>,
 	},
+	/// v16. A new, empty what-if (R-FC-2). Its id comes back as the
+	/// `scenario` entity. A blank name, or one another what-if has
+	/// (case-insensitively), is `Invalid`.
+	CreateScenario {
+		name: String,
+	},
+	RenameScenario {
+		scenario_id: String,
+		name: String,
+	},
+	/// Deletes the what-if and its events. Real data is never touched.
+	DeleteScenario {
+		scenario_id: String,
+	},
+	/// A new line in a what-if. A line dated before `today` is `Invalid`
+	/// (D67), and so are unknown or deleted accounts, categories and goals
+	/// (`NotFound`).
+	AddScenarioEvent {
+		scenario_id: String,
+		change: ScenarioChange,
+		today: String,
+	},
+	/// Replaces a line, checked as a new one, so a line "in the past" can be
+	/// re-dated to today or later.
+	EditScenarioEvent {
+		scenario_id: String,
+		event_id: String,
+		change: ScenarioChange,
+		today: String,
+	},
+	RemoveScenarioEvent {
+		scenario_id: String,
+		event_id: String,
+	},
+	/// R-FC-3: sets next month's budget to every amount
+	/// `Session.budgetSuggestions(today:)` suggests, on the budget scale
+	/// (CLS-12.11). One undo step; "keeping" lines write nothing.
+	ApplySuggestions {
+		today: String,
+	},
 }
 
 impl veritas_session::Command for Command {
@@ -511,6 +555,7 @@ impl veritas_session::Command for Command {
 				| Command::ResumeBill { .. }
 				| Command::PayBill { .. }
 				| Command::PostBillNow { .. }
+				| Command::ApplySuggestions { .. }
 		)
 	}
 
@@ -788,6 +833,9 @@ impl veritas_session::Command for Command {
 				dated_today.then(|| sheet.today()),
 				now_ms(),
 			),
+			Command::ApplySuggestions { today } => {
+				forecast::apply_suggestions(data, sheet, civil_date(today)?)
+			}
 			_ => self.plan_plain(data),
 		}
 	}
@@ -1100,6 +1148,49 @@ impl Command {
 			Command::CreateDashboard { name } => dashboards::create_dashboard(data, name),
 			Command::RenameDashboard { page_id, name } => reports::rename_page(data, page_id, name),
 			Command::DeleteDashboard { page_id } => reports::delete_page(data, page_id),
+			Command::CreateScenario { name } => scenarios::create_scenario(
+				data,
+				ScenarioId::new(veritas_store::new_id()),
+				name,
+				now_ms() as i64,
+			),
+			Command::RenameScenario { scenario_id, name } => {
+				scenarios::rename_scenario(data, &ScenarioId::new(scenario_id.as_str()), name)
+			}
+			Command::DeleteScenario { scenario_id } => {
+				scenarios::delete_scenario(data, &ScenarioId::new(scenario_id.as_str()))
+			}
+			Command::AddScenarioEvent {
+				scenario_id,
+				change,
+				today,
+			} => scenarios::add_scenario_event(
+				data,
+				&ScenarioId::new(scenario_id.as_str()),
+				ScenarioEventId::new(veritas_store::new_id()),
+				core_change(change)?,
+				civil_date(today)?,
+			),
+			Command::EditScenarioEvent {
+				scenario_id,
+				event_id,
+				change,
+				today,
+			} => scenarios::edit_scenario_event(
+				data,
+				&ScenarioId::new(scenario_id.as_str()),
+				&ScenarioEventId::new(event_id.as_str()),
+				core_change(change)?,
+				civil_date(today)?,
+			),
+			Command::RemoveScenarioEvent {
+				scenario_id,
+				event_id,
+			} => scenarios::remove_scenario_event(
+				data,
+				&ScenarioId::new(scenario_id.as_str()),
+				&ScenarioEventId::new(event_id.as_str()),
+			),
 			Command::CreateCustomReport { settings } => {
 				Ok(vec![custom_reports::create_custom_report(
 					data,
