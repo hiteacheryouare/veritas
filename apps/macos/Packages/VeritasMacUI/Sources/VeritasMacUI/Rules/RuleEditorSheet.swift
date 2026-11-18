@@ -164,8 +164,14 @@ struct RuleEditorSheet: View {
 		}
 	}
 
-	private func actionRow(_ index: Int, choices: [RuleChoices.ActionKind]) -> some View {
-		let action = editing.draft.actions[index]
+	/// A row can redraw with its old index after Save or Cancel clears the draft.
+	@ViewBuilder private func actionRow(_ index: Int, choices: [RuleChoices.ActionKind]) -> some View {
+		if let action = editing.draft.actions[safe: index] {
+			actionRow(index, action: action, choices: choices)
+		}
+	}
+
+	private func actionRow(_ index: Int, action: RuleAction, choices: [RuleChoices.ActionKind]) -> some View {
 		let kind = RuleChoices.ActionKind(action)
 		return HStack(spacing: Spacing.s2) {
 			Picker("Action", selection: Binding(get: { kind }, set: { kind in if let kind { change { $0.setKind(kind, ofAction: index, today: today) } } })) {
