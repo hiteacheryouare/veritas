@@ -159,11 +159,13 @@ struct AccountsTool: Tool {
 	}
 }
 
-/// Statement lines as the Statements screen lays them out, negatives in parentheses.
+/// Statement lines in the Statements screen's order, with plain register
+/// amounts: parentheses are for the printed statement only (ST-10.6), so a
+/// liability reads as the positive figure it is.
 enum StatementText {
 	static func lines(_ lines: [StatementLine], format: MoneyFormat) -> [String] {
 		lines.map { line in
-			line.amount.map { "\(line.title): \(format.statement($0, on: .register))" } ?? line.title
+			line.amount.map { "\(line.title): \(format.amount($0, on: .register))" } ?? line.title
 		}
 	}
 }
