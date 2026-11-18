@@ -10,6 +10,7 @@ enum TaxExportPanel {
 		panel.allowedContentTypes = [.commaSeparatedText]
 		panel.canCreateDirectories = true
 		panel.nameFieldStringValue = model.fileName(export)
+		panel.isExtensionHidden = false
 		panel.prompt = "Export"
 		guard await panel.beginOnKeyWindow() == .OK, let url = panel.url else { return }
 		model.export(export, to: url)
