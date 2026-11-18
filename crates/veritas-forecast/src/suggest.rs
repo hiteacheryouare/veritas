@@ -62,6 +62,10 @@ pub enum Basis {
 	NoTargetDate,
 	/// GOAL-10: a reached goal gets no refill suggestion.
 	GoalReached,
+	/// CLS-12.14 (Ryan, 2026-11-18): outside a 2-place budget, an active
+	/// goal with recorded spending has a mixed-scale `available`, so it gets
+	/// no suggestion.
+	GoalSpendingRecorded,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -224,6 +228,22 @@ impl Forecaster<'_> {
 			let item = match (self.budget.category_kind(id), goal) {
 				(CategoryKind::Expense, Some(goal)) if goal.status == GoalStatus::Reached => {
 					keeping(Basis::GoalReached, &format!("{name}: reached"))
+				}
+				// CLS-12.14: outside a 2-place budget a goal's available mixes
+				// register spending with budget amounts, so a goal with any
+				// recorded spending would get a suggestion off by about 100x.
+				(CategoryKind::Expense, Some(goal))
+					if goal.status == GoalStatus::Active
+						&& copy.places != 2
+						&& self.spending_to_date(id, today)? != Money::ZERO =>
+				{
+					Suggestion {
+						category: id.clone(),
+						amount: None,
+						register_amount: None,
+						basis: Basis::GoalSpendingRecorded,
+						reason: format!("{name}: keeping {}", copy.budget(current)),
+					}
 				}
 				(CategoryKind::Expense, Some(goal)) => match goal.target_date {
 					None => keeping(Basis::NoTargetDate, &format!("{name}: no target date")),
@@ -401,6 +421,25 @@ impl Forecaster<'_> {
 			basis,
 			reason,
 		})
+	}
+
+	/// CLS-6 `expense_total` for `category` through `today`: the goal's
+	/// Spending to date.
+	fn spending_to_date(
+		&self,
+		category: &CategoryId,
+		today: CivilDate,
+	) -> Result<Money, CoreError> {
+		let mut total = Money::ZERO;
+		for row in self.classification.through(today) {
+			if row.is_primary()
+				&& row.kind() == TransactionKind::Expense
+				&& row.category.as_ref() == Some(category)
+			{
+				total = total.checked_sub(row.amount)?;
+			}
+		}
+		Ok(total)
 	}
 
 	/// DEBT-3 source 1: the latest principal paid from this envelope, capped

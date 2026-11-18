@@ -689,3 +689,37 @@ fn fc_5_a_yen_goal_stays_on_the_budget_scale_and_the_notice_compares_on_the_regi
 		Some("Suggestions exceed expected income by ¥1")
 	);
 }
+
+fn trip_with_spending(book: &mut Book) {
+	book.category("Trip", "Goals");
+	book.goal("trip", "Trip", 150000, Some("2027-08-15"));
+	book.budgeted("2027-02", "Trip", 25000);
+	book.spend("Trip", "2026-12-20", -50000);
+}
+
+#[test]
+fn cls_12_14_a_yen_goal_with_recorded_spending_keeps_its_budget() {
+	// Ryan, 2026-11-18: outside a 2-place budget the goal's available mixes
+	// ¥500 of spending (stored -50000) with ¥ budget amounts, so no
+	// suggestion is made from it.
+	let mut book = Book::household();
+	yen(&mut book);
+	trip_with_spending(&mut book);
+	let suggestions = suggest(&book, "2027-01-15", &[]);
+	let trip = item(&suggestions, "Trip");
+	assert_eq!(trip.amount, None);
+	assert_eq!(trip.register_amount, None);
+	assert_eq!(trip.basis, Basis::GoalSpendingRecorded);
+	assert_eq!(trip.reason, "Trip: keeping ¥25,000");
+	assert_eq!(suggestions.exceeds_income_by, None, "nothing suggested");
+}
+
+#[test]
+fn cls_12_14_a_two_place_goal_with_recorded_spending_still_gets_its_suggestion() {
+	let mut book = Book::household();
+	trip_with_spending(&mut book);
+	let trip = item(&suggest(&book, "2027-01-15", &[]), "Trip").clone();
+	assert_eq!(trip.basis, Basis::Goal);
+	assert_eq!(trip.amount, Some(cents(21429)), "ceil(150000 / 7)");
+	assert_eq!(trip.reason, "Trip $214.29: $1,500.00 left over 7 months");
+}

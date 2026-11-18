@@ -249,6 +249,9 @@ pub enum SuggestionBasis {
 	NoHistory,
 	NoTargetDate,
 	GoalReached,
+	/// CLS-12.14: outside a 2-place budget, an active goal with recorded
+	/// spending keeps its budget, "{Goal}: keeping {current budgeted}".
+	GoalSpendingRecorded,
 }
 
 /// FC-5's suggestion for one envelope, with its one reason line.
@@ -850,6 +853,7 @@ fn suggestion_list(
 					Basis::NoHistory => SuggestionBasis::NoHistory,
 					Basis::NoTargetDate => SuggestionBasis::NoTargetDate,
 					Basis::GoalReached => SuggestionBasis::GoalReached,
+					Basis::GoalSpendingRecorded => SuggestionBasis::GoalSpendingRecorded,
 				},
 				reason: item.reason.clone(),
 			})
