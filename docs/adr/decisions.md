@@ -380,3 +380,8 @@ Every decision behind Veritas, so no question gets asked twice. D1–D24 are PLA
 - **Options:** every HyperFormula function / a supported subset, with the rest shown as Actual shows an unknown function
 - **Decision:** The formula card computes arithmetic and comparison, IF, AND, OR, NOT, SUM, AVERAGE, MIN, MAX, ROUND, ABS, CONCATENATE and `&`, LEN, LEFT, RIGHT, UPPER, LOWER, TODAY, DATE, YEAR, MONTH, DAY, EOMONTH, QUERY and BUDGET_QUERY, matching Actual's result for each. Any other function shows as an inline error with Actual's own message (`Formula error: NAME`), as an unknown function does in Actual. A cell reference such as `=A1` makes the card a problem card, since the card has no other cells (Ryan, 2026-11-14).
 - **Date:** 2026-11-14
+
+### D76. Loan payment parts are recorded, not guessed
+- **Options:** read a payment's expense lines by position / match parts by category / record each part when the wizard writes the payment / pre-fill nothing
+- **Decision:** When the loan payment wizard writes a payment, it records which expense line is interest, escrow or fees in a Veritas-only table, `veritas_loan_payment_part`, in the same transaction and undo step (DEBT-6 A.7). DEBT-3's pre-fill and FC-2's forecast read parts only through that mapping. A payment without one (made in Actual, imported or older) pre-fills no expense line, and the forecast labels its split as estimated. Nothing is ever inferred from a line's position, category or name for a pre-fill (CLS-3.4). Classification still follows category kinds (CLS-4). Actual ignores the table. Why: reading lines by position filed escrow as interest after a 0-interest payment (Fred and the Architect, 2026-11-16).
+- **Date:** 2026-11-16

@@ -72,7 +72,7 @@ final class RealBudget {
 	}
 
 	func goalsFromDisk() async throws -> [GoalSummary] {
-		try await fromDisk { try $0.goals(today: WorkspaceModel.today()) }
+		try await fromDisk { try $0.goals(today: WorkspaceModel.today()).goals }
 	}
 
 	/// Rows from the budget's own Actual database, read with SQLite directly,

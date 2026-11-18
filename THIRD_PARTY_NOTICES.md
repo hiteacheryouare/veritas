@@ -26,36 +26,6 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 | `crates/veritas-engine/src/amount_field.rs` | `amountToInteger` in `packages/loot-core/src/shared/util.ts`; `forEdit` in `packages/desktop-client/src/hooks/useFormat.ts`; the single-operator rule in `InputValue`, `packages/desktop-client/src/components/table.tsx` |
 | `crates/veritas-engine/src/envelope.rs` | `packages/loot-core/src/server/budget/envelope.ts`; `createAllBudgets`, `getBudgetRange` and the `sum-amount` query in `packages/loot-core/src/server/budget/base.ts` |
 | `crates/veritas-engine/tests/arithmetic.rs`, `crates/veritas-engine/tests/fixtures/actual-arithmetic-vectors.json` | `packages/loot-core/src/shared/arithmetic.test.ts` (test vectors), and outputs of the Actual code above |
-| `crates/veritas-reports/src/filter.rs` | `conditionsToAQL` in `packages/loot-core/src/server/transactions/transaction-rules.ts`; the AQL compiler's null rules in `packages/loot-core/src/server/aql/compiler.ts` |
-| `crates/veritas-reports/src/report_query.rs` | `makeQuery` and `getLiveRange` in `packages/desktop-client/src/components/reports` |
-| `crates/veritas-reports/src/report_eval.rs` | `createCustomSpreadsheet`, `recalculate`, `filterHiddenItems`, `filterEmptyRows`, `trimIntervals` and `sortData` in `packages/desktop-client/src/components/reports` |
-| `crates/veritas-reports/src/custom_report.rs`, `crates/veritas-reports/src/dashboard.rs`, `crates/veritas-reports/src/widget_meta.rs` | the custom report and dashboard models and handlers in `packages/loot-core/src/server/reports/app.ts` and `packages/loot-core/src/server/dashboard/app.ts` |
-| `crates/veritas-reports/src/json.rs` | the `JSON.stringify` output Actual's report and widget columns store |
-| `crates/veritas-reports/src/widgets/mod.rs` | the card components and spreadsheets in `packages/desktop-client/src/components/reports` |
-| `crates/veritas-reports/src/widgets/time_frame.rs` | `calculateTimeRange` and `calculateSpendingReportTimeRange` in `packages/desktop-client/src/components/reports/reportRanges.ts` |
-| `crates/veritas-reports/src/widgets/summary.rs` | `packages/desktop-client/src/components/reports/reports/SummaryCard.tsx`, `packages/desktop-client/src/components/reports/spreadsheets/summary-spreadsheet.ts` |
-| `crates/veritas-reports/src/widgets/calendar.rs` | `packages/desktop-client/src/components/reports/reports/CalendarCard.tsx`, `packages/desktop-client/src/components/reports/spreadsheets/calendar-spreadsheet.ts` |
-| `crates/veritas-reports/src/widgets/age_of_money.rs` | `packages/desktop-client/src/components/reports/reports/AgeOfMoneyCard.tsx`, `packages/desktop-client/src/components/reports/spreadsheets/age-of-money-spreadsheet.ts` |
-| `crates/veritas-reports/src/widgets/budget_analysis.rs` | `packages/desktop-client/src/components/reports/reports/BudgetAnalysisCard.tsx`, `packages/desktop-client/src/components/reports/spreadsheets/budget-analysis-spreadsheet.ts` |
-| `crates/veritas-reports/src/widgets/crossover.rs` | `packages/desktop-client/src/components/reports/reports/CrossoverCard.tsx`, `packages/desktop-client/src/components/reports/spreadsheets/crossover-spreadsheet.ts` |
-| `crates/veritas-reports/src/widgets/cash_flow.rs` | `simpleCashFlow` in `packages/desktop-client/src/components/reports/spreadsheets/cash-flow-spreadsheet.tsx` |
-| `crates/veritas-reports/src/widgets/net_worth.rs` | `packages/desktop-client/src/components/reports/reports/NetWorthCard.tsx`, `packages/desktop-client/src/components/reports/spreadsheets/net-worth-spreadsheet.ts`, and the stacked order and colors in `packages/desktop-client/src/components/reports/graphs/NetWorthGraph.tsx` |
-| `crates/veritas-reports/src/widgets/spending.rs` | `packages/desktop-client/src/components/reports/reports/SpendingCard.tsx`, `packages/desktop-client/src/components/reports/spreadsheets/spending-spreadsheet.ts`, `packages/desktop-client/src/components/reports/spendingAverageRange.ts` |
-| `crates/veritas-reports/src/widgets/sankey.rs` | `packages/desktop-client/src/components/reports/reports/SankeyCard.tsx`, `packages/desktop-client/src/components/reports/spreadsheets/sankey-spreadsheet.ts`, `topNNodes` in `packages/desktop-client/src/components/reports/reports/Sankey.tsx` |
-| `crates/veritas-reports/src/widgets/forecast.rs` | the `forecast/generate` handler in `packages/loot-core/src/server/forecast` |
-| `crates/veritas-reports/src/widgets/balance_forecast.rs` | `packages/desktop-client/src/components/reports/reports/BalanceForecastCard.tsx`, `packages/desktop-client/src/components/reports/reports/balanceForecastChartData.ts` |
-| `crates/veritas-reports/src/widgets/monte_carlo/` (`mod.rs`, `config.rs`, `simulation.rs`, `investment.rs`, `detail.rs`, `history.rs`, and `mulberry32` in `js.rs`) | `packages/desktop-client/src/components/reports/reports/monte-carlo/MonteCarloCard.tsx`, `monteCarloSimulation.ts`, `monteCarloHistoricalReturns.ts` and `useResolvedMonteCarloConfig.ts`; `accountBalance` in `packages/desktop-client/src/spreadsheet/bindings.ts` |
-| `crates/veritas-reports/src/widgets/formula/mod.rs`, `crates/veritas-reports/src/widgets/formula/engine.rs` | `packages/desktop-client/src/components/reports/reports/FormulaCard.tsx`, `FormulaResult.tsx`, and the query and budget plumbing of `packages/desktop-client/src/hooks/useFormulaExecution.ts` (not its formula engine, D75) |
-| `crates/veritas-reports/src/widgets/formula/months.rs` | `_parse` in `packages/loot-core/src/shared/months.ts` |
-| `crates/veritas-reports/src/widgets/formula/functions.rs` (QUERY, QUERY_EXTRACT_CATEGORIES, QUERY_EXTRACT_TIMEFRAME_START and _END, BUDGET_QUERY only; the rest of the formula engine is clean-room, D75) | `query`, `queryExtractCategories`, `queryExtractTimeframeStart`, `queryExtractTimeframeEnd`, `budgetQuery`, `categoryRangeToIds` and `createBudgetQueryPrefetchKey` in `packages/loot-core/src/shared/formulas/customFunctions.ts` |
-| `tools/actual-oracle/src/widgets.ts` (test tooling, not shipped) | verbatim copies of `simpleCashFlow`, the non-React flow of `useFormulaExecution.ts`, `topNNodes` and `getDefaultLayerRange` from `Sankey.tsx`, and the stacked order of `NetWorthGraph.tsx` |
-
-## fdlibm
-
-`crates/veritas-reports/src/widgets/monte_carlo/fdlibm.rs` ports `__ieee754_log`, `__kernel_cos`, `__kernel_sin`, `__ieee754_rem_pio2` and `cos` from fdlibm as V8 adapts it in `src/base/ieee754.cc`, so the Monte Carlo card's random draws match Actual's to the bit. fdlibm's notice, as V8 keeps it:
-
-```
-====================================================
 Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
 
 Developed at SunSoft, a Sun Microsystems, Inc. business.
@@ -97,3 +67,35 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
+=======
+| `crates/veritas-rules/src/choices.rs` | `TYPE_INFO`, `FIELD_INFO` and `getValidOps` in `packages/loot-core/src/shared/rules.ts`; `conditionFields`, `getActionFields`, `getSplitActionFields` and the action op list in `packages/desktop-client/src/components/rules/RuleEditor.tsx`; `getAllocationMethods` in `packages/desktop-client/src/util/rule.ts` |
+| `crates/veritas-reports/src/filter.rs` | `conditionsToAQL` in `packages/loot-core/src/server/transactions/transaction-rules.ts`; the AQL compiler's null rules in `packages/loot-core/src/server/aql/compiler.ts` |
+| `crates/veritas-reports/src/report_query.rs` | `makeQuery` and `getLiveRange` in `packages/desktop-client/src/components/reports` |
+| `crates/veritas-reports/src/report_eval.rs` | `createCustomSpreadsheet`, `recalculate`, `filterHiddenItems`, `filterEmptyRows`, `trimIntervals` and `sortData` in `packages/desktop-client/src/components/reports` |
+| `crates/veritas-reports/src/custom_report.rs`, `crates/veritas-reports/src/dashboard.rs`, `crates/veritas-reports/src/widget_meta.rs` | the custom report and dashboard models and handlers in `packages/loot-core/src/server/reports/app.ts` and `packages/loot-core/src/server/dashboard/app.ts` |
+| `crates/veritas-reports/src/json.rs` | the `JSON.stringify` output Actual's report and widget columns store |
+| `crates/veritas-reports/src/widgets/mod.rs` | the card components and spreadsheets in `packages/desktop-client/src/components/reports` |
+| `crates/veritas-reports/src/widgets/time_frame.rs` | `calculateTimeRange` and `calculateSpendingReportTimeRange` in `packages/desktop-client/src/components/reports/reportRanges.ts` |
+| `crates/veritas-reports/src/widgets/summary.rs` | `packages/desktop-client/src/components/reports/reports/SummaryCard.tsx`, `packages/desktop-client/src/components/reports/spreadsheets/summary-spreadsheet.ts` |
+| `crates/veritas-reports/src/widgets/calendar.rs` | `packages/desktop-client/src/components/reports/reports/CalendarCard.tsx`, `packages/desktop-client/src/components/reports/spreadsheets/calendar-spreadsheet.ts` |
+| `crates/veritas-reports/src/widgets/age_of_money.rs` | `packages/desktop-client/src/components/reports/reports/AgeOfMoneyCard.tsx`, `packages/desktop-client/src/components/reports/spreadsheets/age-of-money-spreadsheet.ts` |
+| `crates/veritas-reports/src/widgets/budget_analysis.rs` | `packages/desktop-client/src/components/reports/reports/BudgetAnalysisCard.tsx`, `packages/desktop-client/src/components/reports/spreadsheets/budget-analysis-spreadsheet.ts` |
+| `crates/veritas-reports/src/widgets/crossover.rs` | `packages/desktop-client/src/components/reports/reports/CrossoverCard.tsx`, `packages/desktop-client/src/components/reports/spreadsheets/crossover-spreadsheet.ts` |
+| `crates/veritas-reports/src/widgets/cash_flow.rs` | `simpleCashFlow` in `packages/desktop-client/src/components/reports/spreadsheets/cash-flow-spreadsheet.tsx` |
+| `crates/veritas-reports/src/widgets/net_worth.rs` | `packages/desktop-client/src/components/reports/reports/NetWorthCard.tsx`, `packages/desktop-client/src/components/reports/spreadsheets/net-worth-spreadsheet.ts`, and the stacked order and colors in `packages/desktop-client/src/components/reports/graphs/NetWorthGraph.tsx` |
+| `crates/veritas-reports/src/widgets/spending.rs` | `packages/desktop-client/src/components/reports/reports/SpendingCard.tsx`, `packages/desktop-client/src/components/reports/spreadsheets/spending-spreadsheet.ts`, `packages/desktop-client/src/components/reports/spendingAverageRange.ts` |
+| `crates/veritas-reports/src/widgets/sankey.rs` | `packages/desktop-client/src/components/reports/reports/SankeyCard.tsx`, `packages/desktop-client/src/components/reports/spreadsheets/sankey-spreadsheet.ts`, `topNNodes` in `packages/desktop-client/src/components/reports/reports/Sankey.tsx` |
+| `crates/veritas-reports/src/widgets/forecast.rs` | the `forecast/generate` handler in `packages/loot-core/src/server/forecast` |
+| `crates/veritas-reports/src/widgets/balance_forecast.rs` | `packages/desktop-client/src/components/reports/reports/BalanceForecastCard.tsx`, `packages/desktop-client/src/components/reports/reports/balanceForecastChartData.ts` |
+| `crates/veritas-reports/src/widgets/monte_carlo/` (`mod.rs`, `config.rs`, `simulation.rs`, `investment.rs`, `detail.rs`, `history.rs`, and `mulberry32` in `js.rs`) | `packages/desktop-client/src/components/reports/reports/monte-carlo/MonteCarloCard.tsx`, `monteCarloSimulation.ts`, `monteCarloHistoricalReturns.ts` and `useResolvedMonteCarloConfig.ts`; `accountBalance` in `packages/desktop-client/src/spreadsheet/bindings.ts` |
+| `crates/veritas-reports/src/widgets/formula/mod.rs`, `crates/veritas-reports/src/widgets/formula/engine.rs` | `packages/desktop-client/src/components/reports/reports/FormulaCard.tsx`, `FormulaResult.tsx`, and the query and budget plumbing of `packages/desktop-client/src/hooks/useFormulaExecution.ts` (not its formula engine, D75) |
+| `crates/veritas-reports/src/widgets/formula/months.rs` | `_parse` in `packages/loot-core/src/shared/months.ts` |
+| `crates/veritas-reports/src/widgets/formula/functions.rs` (QUERY, QUERY_EXTRACT_CATEGORIES, QUERY_EXTRACT_TIMEFRAME_START and _END, BUDGET_QUERY only; the rest of the formula engine is clean-room, D75) | `query`, `queryExtractCategories`, `queryExtractTimeframeStart`, `queryExtractTimeframeEnd`, `budgetQuery`, `categoryRangeToIds` and `createBudgetQueryPrefetchKey` in `packages/loot-core/src/shared/formulas/customFunctions.ts` |
+| `tools/actual-oracle/src/widgets.ts` (test tooling, not shipped) | verbatim copies of `simpleCashFlow`, the non-React flow of `useFormulaExecution.ts`, `topNNodes` and `getDefaultLayerRange` from `Sankey.tsx`, and the stacked order of `NetWorthGraph.tsx` |
+
+## fdlibm
+
+`crates/veritas-reports/src/widgets/monte_carlo/fdlibm.rs` ports `__ieee754_log`, `__kernel_cos`, `__kernel_sin`, `__ieee754_rem_pio2` and `cos` from fdlibm as V8 adapts it in `src/base/ieee754.cc`, so the Monte Carlo card's random draws match Actual's to the bit. fdlibm's notice, as V8 keeps it:
+
+```
+=============================================

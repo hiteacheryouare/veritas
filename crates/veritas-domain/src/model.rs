@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 
 use crate::{
 	AccountGroupId, AccountId, AccountKind, BudgetType, CategoryGroupId, CategoryId, CategoryKind,
-	CivilDate, CustomReportId, DashboardPageId, GoalId, GoalStatus, Money, PayeeId, RuleId,
-	Scenario, ScenarioId, ScheduleId, TagId, TransactionId, WidgetId, YearMonth,
+	CivilDate, CustomReportId, DashboardPageId, GoalId, GoalStatus, LoanPaymentPartId, Money,
+	PayeeId, RuleId, Scenario, ScenarioId, ScheduleId, TagId, TransactionId, WidgetId, YearMonth,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -186,6 +186,47 @@ pub struct ScheduleMeta {
 	pub paused: bool,
 }
 
+/// Which part of a loan payment an expense line is (D76, DEBT-3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LoanPart {
+	Interest,
+	Escrow,
+	Fees,
+}
+
+impl LoanPart {
+	/// The value stored in `veritas_loan_payment_part.part`.
+	pub fn stored(self) -> &'static str {
+		match self {
+			LoanPart::Interest => "interest",
+			LoanPart::Escrow => "escrow",
+			LoanPart::Fees => "fees",
+		}
+	}
+
+	pub fn from_stored(text: &str) -> Option<LoanPart> {
+		match text {
+			"interest" => Some(LoanPart::Interest),
+			"escrow" => Some(LoanPart::Escrow),
+			"fees" => Some(LoanPart::Fees),
+			_ => None,
+		}
+	}
+}
+
+/// `veritas_loan_payment_part` (D76): the wizard records which expense
+/// line of a payment (`payment`, the split) is which part, so the next
+/// pre-fill never guesses from position. Principal isn't stored: it is the
+/// transfer line.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LoanPaymentPart {
+	pub id: LoanPaymentPartId,
+	pub payment: TransactionId,
+	pub line: TransactionId,
+	pub part: LoanPart,
+	pub tombstone: bool,
+}
+
 /// docs/finance/classification.md CLS-5: a reconciliation adjustment Veritas made.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct TransactionMeta {
@@ -328,6 +369,8 @@ pub struct BudgetData {
 	pub category_meta: BTreeMap<CategoryId, CategoryMeta>,
 	pub account_meta: BTreeMap<AccountId, AccountMeta>,
 	pub transaction_meta: BTreeMap<TransactionId, TransactionMeta>,
+	/// `veritas_loan_payment_part` (D76).
+	pub loan_payment_parts: BTreeMap<LoanPaymentPartId, LoanPaymentPart>,
 	/// `veritas_tax_tag`: Actual tag name (without `#`) to TAX-2 bucket id.
 	pub tax_tags: BTreeMap<String, String>,
 	/// `schedules_json_paths`: where each schedule condition sits in its rule.
@@ -363,6 +406,7 @@ impl BudgetData {
 			category_meta: BTreeMap::new(),
 			account_meta: BTreeMap::new(),
 			transaction_meta: BTreeMap::new(),
+			loan_payment_parts: BTreeMap::new(),
 			tax_tags: BTreeMap::new(),
 			schedule_json_paths: BTreeMap::new(),
 			schedule_meta: BTreeMap::new(),
@@ -399,6 +443,53 @@ impl BudgetData {
 
 	pub fn resolve_payee(&self, id: &PayeeId) -> Option<&PayeeId> {
 		self.payee_mapping.get(id)
+	}
+
+	/// D76: the recorded parts of loan payment `payment` that can still be
+	/// used, in Actual's split order. A `veritas_loan_payment_part` row
+	/// counts only when it is live, the payment is live, and its line is a
+	/// live child of that payment in a live expense category (through the
+	/// category mapping). The first row for a part wins. DEBT-3's pre-fill
+	/// and FC-2's forecast both read parts only through this.
+	pub fn loan_payment_parts_of(&self, payment: &TransactionId) -> Vec<(LoanPart, &Transaction)> {
+		if self
+			.transactions
+			.get(payment)
+			.is_none_or(|row| row.tombstone)
+		{
+			return Vec::new();
+		}
+		let expense = |line: &Transaction| {
+			line.category
+				.as_ref()
+				.and_then(|category| self.resolve_category(category))
+				.filter(|category| self.categories.get(*category).is_some_and(|c| !c.tombstone))
+				.is_some_and(|category| self.category_kind(category) == CategoryKind::Expense)
+		};
+		let mut found: Vec<(LoanPart, &Transaction)> = Vec::new();
+		for row in self
+			.loan_payment_parts
+			.values()
+			.filter(|row| !row.tombstone && &row.payment == payment)
+		{
+			let Some(line) = self.transactions.get(&row.line) else {
+				continue;
+			};
+			let child = matches!(&line.split, SplitRole::Child { parent } if parent == payment);
+			if line.tombstone || !child || line.transfer.is_some() || !expense(line) {
+				continue;
+			}
+			if found.iter().any(|(part, _)| *part == row.part) {
+				continue;
+			}
+			found.push((row.part, line));
+		}
+		found.sort_by(|(_, a), (_, b)| {
+			b.sort_order
+				.total_cmp(&a.sort_order)
+				.then_with(|| a.id.cmp(&b.id))
+		});
+		found
 	}
 }
 

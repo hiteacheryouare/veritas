@@ -4,9 +4,10 @@ use std::fmt::Debug;
 use crate::{
 	Account, AccountGroup, AccountGroupId, AccountId, AccountMeta, BudgetCell, BudgetData,
 	Category, CategoryGroup, CategoryGroupId, CategoryId, CategoryMeta, CivilDate, CustomReportId,
-	CustomReportRow, DashboardPage, DashboardPageId, Goal, GoalId, Money, Payee, PayeeId, Rule,
-	RuleId, Schedule, ScheduleId, ScheduleJsonPaths, ScheduleMeta, Tag, TagId, Transaction,
-	TransactionId, TransactionMeta, Widget, WidgetId, YearMonth,
+	CustomReportRow, DashboardPage, DashboardPageId, Goal, GoalId, LoanPaymentPart,
+	LoanPaymentPartId, Money, Payee, PayeeId, Rule, RuleId, Schedule, ScheduleId,
+	ScheduleJsonPaths, ScheduleMeta, Tag, TagId, Transaction, TransactionId, TransactionMeta,
+	Widget, WidgetId, YearMonth,
 };
 
 /// One row a subscriber may need to refetch after a commit.
@@ -29,6 +30,7 @@ pub enum EntityRef {
 	CategoryMeta(CategoryId),
 	AccountMeta(AccountId),
 	TransactionMeta(TransactionId),
+	LoanPaymentPart(LoanPaymentPartId),
 	TaxTag(String),
 	Goal(GoalId),
 	CustomReport(CustomReportId),
@@ -279,6 +281,7 @@ rows!(
 	CategoryMeta(CategoryMetaRow),
 	AccountMeta(AccountMetaRow),
 	TransactionMeta(TransactionMetaRow),
+	LoanPaymentPart(LoanPaymentPart),
 	TaxTag(TaxTag),
 	Goal(Goal),
 	CustomReport(CustomReportRow),
@@ -657,6 +660,34 @@ impl Record for ScheduleJsonPathsRow {
 
 	fn entity(key: &ScheduleId) -> EntityRef {
 		EntityRef::Schedule(key.clone())
+	}
+}
+
+/// Tombstoned on undo like Actual's rows; a change shows as its payment's.
+impl Record for LoanPaymentPart {
+	type Key = LoanPaymentPartId;
+
+	fn key(&self) -> LoanPaymentPartId {
+		self.id.clone()
+	}
+
+	fn read(data: &BudgetData, key: &LoanPaymentPartId) -> Option<Self> {
+		data.loan_payment_parts.get(key).cloned()
+	}
+
+	fn write(data: &mut BudgetData, key: &LoanPaymentPartId, value: Option<Self>) {
+		put(&mut data.loan_payment_parts, key, value);
+	}
+
+	fn retired(created: &Self) -> Retired<Self> {
+		Retired::Becomes(LoanPaymentPart {
+			tombstone: true,
+			..created.clone()
+		})
+	}
+
+	fn entity(key: &LoanPaymentPartId) -> EntityRef {
+		EntityRef::LoanPaymentPart(key.clone())
 	}
 }
 

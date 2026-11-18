@@ -1,8 +1,5 @@
 use veritas_domain::{BudgetData, CategoryId, CivilDate, CoreError, Money, Row, YearMonth};
-use veritas_engine::{
-	BudgetEditor, BudgetWrites, CategoryMonth, Envelope, EnvelopeSheet,
-	NumberFormat as EngineFormat,
-};
+use veritas_engine::{BudgetEditor, BudgetWrites, CategoryMonth, Envelope, EnvelopeSheet};
 
 use crate::Month;
 
@@ -231,9 +228,7 @@ pub(crate) fn edit(
 		own = EnvelopeSheet::compute(data, month.first_day())?;
 		&own
 	};
-	let format =
-		EngineFormat::from_preference(data.format.number_format.as_deref().unwrap_or("comma-dot"));
-	let editor = BudgetEditor::new(data, sheet, format, data.format.hide_fraction);
+	let editor = BudgetEditor::new(data, sheet);
 	let writes = write(&editor, month)?;
 	Ok(veritas_session::writes::rows(data, &writes))
 }
