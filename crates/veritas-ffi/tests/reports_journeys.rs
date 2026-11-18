@@ -274,7 +274,7 @@ fn every_report_is_fresh_after_each_kind_of_commit_undo_redo_restore_and_reopen(
 				category_id: GROCERIES.to_owned(),
 				amount: 77_700,
 			},
-			false,
+			true,
 		),
 		(
 			"dining out deleted into household",

@@ -531,13 +531,13 @@ impl<B: Backend> Session<B> {
 		read(data, sheet, self.classification.get(data))
 	}
 
-	/// `with_classification` plus the envelope sheet as of `today`, built
-	/// only when `sheet` asks for it.
-	pub fn with_reports<T>(
+	/// The budget, plus the envelope sheet as of `today` only when `sheet`
+	/// asks for it.
+	pub fn with_sheet_if<T>(
 		&mut self,
 		today: CivilDate,
 		sheet: bool,
-		read: impl FnOnce(&BudgetData, &Classification, Option<&EnvelopeSheet>) -> Result<T, CoreError>,
+		read: impl FnOnce(&BudgetData, Option<&EnvelopeSheet>) -> Result<T, CoreError>,
 	) -> Result<T, CoreError> {
 		let State::Open(bus) = &self.state else {
 			return Err(closed());
@@ -549,7 +549,7 @@ impl<B: Backend> Session<B> {
 		} else {
 			None
 		};
-		read(data, self.classification.get(data), envelopes)
+		read(data, envelopes)
 	}
 
 	fn after_change(&mut self, changed: &ChangeSet) {
