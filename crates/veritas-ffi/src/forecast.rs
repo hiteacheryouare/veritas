@@ -250,7 +250,8 @@ pub enum SuggestionBasis {
 	NoTargetDate,
 	GoalReached,
 	/// CLS-12.14: outside a 2-place budget, an active goal with recorded
-	/// spending keeps its budget, "{Goal}: keeping {current budgeted}".
+	/// spending keeps its budget, "{Goal}: spending recorded, keeping
+	/// {current budgeted}" (FC-5).
 	GoalSpendingRecorded,
 }
 

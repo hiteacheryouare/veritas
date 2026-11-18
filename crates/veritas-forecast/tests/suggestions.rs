@@ -690,36 +690,51 @@ fn fc_5_a_yen_goal_stays_on_the_budget_scale_and_the_notice_compares_on_the_regi
 	);
 }
 
-fn trip_with_spending(book: &mut Book) {
-	book.category("Trip", "Goals");
-	book.goal("trip", "Trip", 150000, Some("2027-08-15"));
-	book.budgeted("2027-02", "Trip", 25000);
-	book.spend("Trip", "2026-12-20", -50000);
+/// SG-8: "New laptop", target 150000 by 2027-06-15, 10000 budgeted, and a
+/// purchase of `spent` in its category.
+fn laptop_with_spending(book: &mut Book, spent: i64) {
+	book.category("New laptop", "Goals");
+	book.goal("laptop", "New laptop", 150000, Some("2027-06-15"));
+	book.budgeted("2027-01", "New laptop", 10000);
+	book.budgeted("2027-02", "New laptop", 10000);
+	book.spend("New laptop", "2027-01-10", -spent);
 }
 
 #[test]
-fn cls_12_14_a_yen_goal_with_recorded_spending_keeps_its_budget() {
-	// Ryan, 2026-11-18: outside a 2-place budget the goal's available mixes
-	// ¥500 of spending (stored -50000) with ¥ budget amounts, so no
-	// suggestion is made from it.
+fn fc_5_sg_8_a_yen_goal_with_recorded_spending_keeps_its_budget_cls_12_14() {
+	// Ryan, 2026-11-18: the envelope's available would be 10000 + (-50000)
+	// = -40000, mixing ¥500 of spending with ¥10,000 of budget, so no
+	// monthly amount is built on it.
 	let mut book = Book::household();
 	yen(&mut book);
-	trip_with_spending(&mut book);
+	laptop_with_spending(&mut book, 50000);
 	let suggestions = suggest(&book, "2027-01-15", &[]);
-	let trip = item(&suggestions, "Trip");
-	assert_eq!(trip.amount, None);
-	assert_eq!(trip.register_amount, None);
-	assert_eq!(trip.basis, Basis::GoalSpendingRecorded);
-	assert_eq!(trip.reason, "Trip: keeping ¥25,000");
+	let laptop = item(&suggestions, "New laptop");
+	assert_eq!(laptop.amount, None);
+	assert_eq!(laptop.register_amount, None);
+	assert_eq!(laptop.basis, Basis::GoalSpendingRecorded);
+	assert_eq!(
+		laptop.reason,
+		"New laptop: spending recorded, keeping ¥10,000"
+	);
 	assert_eq!(suggestions.exceeds_income_by, None, "nothing suggested");
+
+	let mut clean = Book::household();
+	yen(&mut clean);
+	laptop_with_spending(&mut clean, 0);
+	let laptop = item(&suggest(&clean, "2027-01-15", &[]), "New laptop").clone();
+	assert_eq!(laptop.basis, Basis::Goal, "no spending, DEBT-8.1 as usual");
 }
 
 #[test]
-fn cls_12_14_a_two_place_goal_with_recorded_spending_still_gets_its_suggestion() {
+fn fc_5_sg_8_a_usd_goal_with_a_purchase_still_gets_its_suggestion() {
 	let mut book = Book::household();
-	trip_with_spending(&mut book);
-	let trip = item(&suggest(&book, "2027-01-15", &[]), "Trip").clone();
-	assert_eq!(trip.basis, Basis::Goal);
-	assert_eq!(trip.amount, Some(cents(21429)), "ceil(150000 / 7)");
-	assert_eq!(trip.reason, "Trip $214.29: $1,500.00 left over 7 months");
+	laptop_with_spending(&mut book, 500);
+	let laptop = item(&suggest(&book, "2027-01-15", &[]), "New laptop").clone();
+	assert_eq!(laptop.basis, Basis::Goal);
+	assert_eq!(laptop.amount, Some(cents(30000)), "ceil(150000 / 5)");
+	assert_eq!(
+		laptop.reason,
+		"New laptop $300.00: $1,500.00 left over 5 months"
+	);
 }

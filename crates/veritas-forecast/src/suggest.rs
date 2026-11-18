@@ -229,7 +229,7 @@ impl Forecaster<'_> {
 				(CategoryKind::Expense, Some(goal)) if goal.status == GoalStatus::Reached => {
 					keeping(Basis::GoalReached, &format!("{name}: reached"))
 				}
-				// CLS-12.14: outside a 2-place budget a goal's available mixes
+				// FC-5, CLS-12.14: outside a 2-place budget a goal's available mixes
 				// register spending with budget amounts, so a goal with any
 				// recorded spending would get a suggestion off by about 100x.
 				(CategoryKind::Expense, Some(goal))
@@ -242,7 +242,10 @@ impl Forecaster<'_> {
 						amount: None,
 						register_amount: None,
 						basis: Basis::GoalSpendingRecorded,
-						reason: format!("{name}: keeping {}", copy.budget(current)),
+						reason: format!(
+							"{name}: spending recorded, keeping {}",
+							copy.budget(current)
+						),
 					}
 				}
 				(CategoryKind::Expense, Some(goal)) => match goal.target_date {
