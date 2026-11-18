@@ -3359,7 +3359,7 @@ fn a_range_bill_takes_its_smaller_amount_first_and_reads_actuals_either_way() {
 		bill: water(-6_000, -4_000),
 	});
 	assert!(
-		matches!(&refused, Err(FfiError::Invalid { message }) if message == "Put the lower amount first"),
+		matches!(&refused, Err(FfiError::Invalid { message }) if message == "Put the smaller amount first"),
 		"{refused:?}"
 	);
 	let ours = scratch.join("ours.zip");
