@@ -1,14 +1,14 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::types::Value;
 use rusqlite::{OptionalExtension, Transaction as SqlTransaction, params_from_iter};
 use veritas_domain::{
-	Account, AccountGroup, AccountId, AccountKind, AccountMeta, BudgetCell, BudgetType, Category,
-	CategoryGroup, CategoryId, CategoryKind, CategoryMeta, CivilDate, CoreError, CustomReportRow,
-	DashboardPage, Goal, GoalStatus, LoanPaymentPart, Money, Payee, PayeeId, Rule, RuleStage,
-	Schedule, ScheduleId, ScheduleJsonPaths, ScheduleMeta, SplitRole, Tag, Transaction,
-	TransactionId, TransactionMeta, Widget, YearMonth,
+	Account, AccountGroup, AccountId, AccountKind, AccountMeta, BudgetCell, BudgetType, Cadence,
+	Category, CategoryGroup, CategoryId, CategoryKind, CategoryMeta, CivilDate, CoreError,
+	CustomReportRow, DashboardPage, Goal, GoalStatus, IncomeDelta, LoanPaymentPart, Money, Payee,
+	PayeeId, Rule, RuleStage, Scenario, ScenarioChange, Schedule, ScheduleId, ScheduleJsonPaths,
+	ScheduleMeta, SplitRole, Tag, Transaction, TransactionId, TransactionMeta, Widget, YearMonth,
 };
 
 use crate::connection::storage;
@@ -296,6 +296,112 @@ fn goal_columns(row: &Goal) -> Columns {
 			"close_month_dismissed_available",
 			money(row.close_month_dismissed_available),
 		),
+	]
+}
+
+fn scenario_columns(row: &Scenario) -> Columns {
+	vec![
+		("name", owned(&row.name)),
+		("sort_order", Value::Real(row.sort_order)),
+		("created_at", Value::Integer(row.created_at)),
+	]
+}
+
+/// One `veritas_scenario_event` row: its scenario's id and the change. Every
+/// column is written, so an edit that changes the kind clears the old one's.
+fn scenario_event_columns((scenario, change): &(String, ScenarioChange)) -> Columns {
+	let none = || Value::Null;
+	let id = |value: Option<&str>| text(value);
+	let (mut account, mut category, mut goal) = (none(), none(), none());
+	let (mut amount, mut percent, mut on_date) = (none(), none(), none());
+	let (mut start, mut end) = (none(), none());
+	let (mut months, mut weeks) = (none(), none());
+	match change {
+		ScenarioChange::OneTime {
+			date: when,
+			account: on,
+			category: filed,
+			amount: value,
+		} => {
+			account = owned(on.as_str());
+			category = id(filed.as_ref().map(|c| c.as_str()));
+			amount = Value::Integer(value.minor());
+			on_date = date(Some(*when));
+			start = owned(&when.year_month().to_string());
+		}
+		// D50 defers the counterpart column, so the session never plans one.
+		ScenarioChange::OneTimeTransfer { .. } => {}
+		ScenarioChange::Recurring {
+			start: first,
+			end_month,
+			cadence,
+			account: on,
+			category: filed,
+			amount: value,
+		} => {
+			account = owned(on.as_str());
+			category = id(filed.as_ref().map(|c| c.as_str()));
+			amount = Value::Integer(value.minor());
+			on_date = date(Some(*first));
+			start = owned(&first.year_month().to_string());
+			end = text_month(*end_month);
+			match cadence {
+				Cadence::EveryMonths(n) => months = Value::Integer(i64::from(*n)),
+				Cadence::EveryWeeks(n) => weeks = Value::Integer(i64::from(*n)),
+			}
+		}
+		ScenarioChange::CategoryPercent {
+			category: changed,
+			percent_bp,
+			start_month,
+			end_month,
+		} => {
+			category = owned(changed.as_str());
+			percent = Value::Integer(*percent_bp);
+			start = owned(&start_month.to_string());
+			end = text_month(*end_month);
+		}
+		ScenarioChange::IncomeChange {
+			account: on,
+			category: fed,
+			change,
+			start_month,
+			end_month,
+		} => {
+			account = owned(on.as_str());
+			category = id(fed.as_ref().map(|c| c.as_str()));
+			match change {
+				IncomeDelta::Amount(value) => amount = Value::Integer(value.minor()),
+				IncomeDelta::Percent(bp) => percent = Value::Integer(*bp),
+			}
+			start = owned(&start_month.to_string());
+			end = text_month(*end_month);
+		}
+		ScenarioChange::GoalContribution {
+			goal: target,
+			amount: value,
+			start_month,
+			end_month,
+		} => {
+			goal = owned(target.as_str());
+			amount = Value::Integer(value.minor());
+			start = owned(&start_month.to_string());
+			end = text_month(*end_month);
+		}
+	}
+	vec![
+		("scenario_id", owned(scenario)),
+		("kind", owned(change.kind())),
+		("account_id", account),
+		("category_id", category),
+		("goal_id", goal),
+		("amount", amount),
+		("percent_bp", percent),
+		("on_date", on_date),
+		("start_month", start),
+		("end_month", end),
+		("every_months", months),
+		("every_weeks", weeks),
 	]
 }
 
@@ -1148,6 +1254,65 @@ impl<'conn> Writer<'conn> {
 			);
 		}
 		self.put_veritas("veritas_goal", "id", &id, before, after, goal_columns)
+	}
+
+	/// A scenario and its events (R-FC-2). These two tables are the only ones
+	/// a scenario ever writes.
+	pub fn put_scenario(
+		&mut self,
+		before: Option<&Scenario>,
+		after: Option<&Scenario>,
+	) -> Result<(), CoreError> {
+		let Some(id) = before.or(after).map(|row| row.id.as_str().to_owned()) else {
+			return Ok(());
+		};
+		if after.is_some_and(|scenario| {
+			scenario
+				.events
+				.iter()
+				.any(|event| matches!(event.change, ScenarioChange::OneTimeTransfer { .. }))
+		}) {
+			return Err(invalid(
+				"a one-time transfer what-if can't be stored until schema v2 (D50)",
+			));
+		}
+		self.put_veritas(
+			"veritas_scenario",
+			"id",
+			&id,
+			before,
+			after,
+			scenario_columns,
+		)?;
+		let stored = |scenario: Option<&Scenario>| -> BTreeMap<String, (String, ScenarioChange)> {
+			scenario
+				.map(|scenario| {
+					scenario
+						.events
+						.iter()
+						.map(|event| {
+							(
+								event.id.as_str().to_owned(),
+								(id.clone(), event.change.clone()),
+							)
+						})
+						.collect()
+				})
+				.unwrap_or_default()
+		};
+		let (old, new) = (stored(before), stored(after));
+		let events: BTreeSet<&String> = old.keys().chain(new.keys()).collect();
+		for event in events {
+			self.put_veritas(
+				"veritas_scenario_event",
+				"id",
+				event,
+				old.get(event),
+				new.get(event),
+				scenario_event_columns,
+			)?;
+		}
+		Ok(())
 	}
 
 	fn exists(&self, sql: &str, id: &str) -> Result<bool, CoreError> {
