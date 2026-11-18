@@ -637,9 +637,9 @@ fn r_rep_5_cash_flow_by_month_chains_one_statement_per_month() {
 	}
 }
 
-fn statement_groups(
-	groups: &[veritas_reports::StatementGroup],
-) -> Vec<(String, i64, Vec<(String, i64)>)> {
+type GroupLines = (String, i64, Vec<(String, i64)>);
+
+fn statement_groups(groups: &[veritas_reports::StatementGroup]) -> Vec<GroupLines> {
 	groups
 		.iter()
 		.map(|group| {

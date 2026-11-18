@@ -17,6 +17,7 @@ mod statements;
 mod tax_setup;
 #[cfg(test)]
 mod test_support;
+mod wrapped;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -72,6 +73,10 @@ pub use rules::{
 pub use session::{ChangeListener, Session};
 pub use statements::{IncomeStatement, StatementEntity, StatementGroup};
 pub use tax_setup::{TaxCategoryBucket, TaxSetup, TaxTagMapping, TaxTagMeaning};
+pub use wrapped::{
+	WrappedCategory, WrappedFact, WrappedGroup, WrappedMeasure, WrappedMonth, WrappedNoSpend,
+	WrappedPayee, WrappedPriorYear, WrappedReport, WrappedShares, WrappedStreak, YearChange,
+};
 
 uniffi::setup_scaffolding!();
 
