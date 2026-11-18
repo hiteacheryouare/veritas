@@ -2079,3 +2079,59 @@ fn a_locked_row_is_unchecked_only_after_it_is_unlocked() {
 	assert!(!open.reconciled && !open.cleared);
 	assert_eq!(account(&session, &everyday).cleared, 40_000);
 }
+
+#[test]
+fn a_new_accounts_starting_balance_takes_the_shells_local_date() {
+	// In the US evening the UTC date is already tomorrow. The session starts
+	// from the UTC date at open, so every call the shell makes with its local
+	// `today` pins it: maintain, the bill screens and the loan pre-fill as
+	// well as the budget reads. An account created right after only
+	// maintain(today:) is dated that day, never the UTC date.
+	let scratch = Scratch::new("local-today");
+	let session = block_on(Session::import_actual_zip(
+		text(&small_zip()),
+		text(&scratch.join("budget")),
+		CancelToken::new(),
+	))
+	.unwrap();
+	let starting_date = |id: &str| {
+		session
+			.register(
+				RegisterScope::Account {
+					account_id: id.to_owned(),
+				},
+				RegisterFilter::default(),
+				RegisterSort {
+					key: RegisterSortKey::Date,
+					ascending: true,
+				},
+				0,
+				10,
+			)
+			.unwrap()
+			.rows
+			.into_iter()
+			.find(|row| row.starting_balance)
+			.unwrap()
+			.date
+	};
+	for (pin, name, local) in [
+		("maintain", "Evening checking", "2027-03-04"),
+		("bills", "Bills checking", "2027-03-11"),
+		("upcoming", "Tray checking", "2027-03-18"),
+	] {
+		match pin {
+			"maintain" => {
+				session.maintain(local.to_owned()).unwrap();
+			}
+			"bills" => {
+				session.bills(local.to_owned()).unwrap();
+			}
+			_ => {
+				session.upcoming(7, local.to_owned()).unwrap();
+			}
+		}
+		let id = new_account(&session, name, NewAccountKind::Checking, 12_500);
+		assert_eq!(starting_date(&id), local, "{pin} pins the local date");
+	}
+}

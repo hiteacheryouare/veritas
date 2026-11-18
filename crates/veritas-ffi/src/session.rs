@@ -364,6 +364,7 @@ impl<B: Backend> Core<B> {
 	pub(crate) fn maintain(&self, today: &str) -> Result<Change, FfiError> {
 		self.call(|session| {
 			let today = crate::budget::civil_date(today)?;
+			session.set_today(today);
 			let flipped = session.poll();
 			session.snapshot_if_due()?;
 			let posted = session.run_schedules(today).unwrap_or_default();

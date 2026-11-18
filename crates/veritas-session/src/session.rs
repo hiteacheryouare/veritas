@@ -273,6 +273,13 @@ impl<B: Backend> Session<B> {
 		self.today
 	}
 
+	/// Pins the shell's local date, so commands that date rows (a new
+	/// account's starting balance) never use the UTC date the session
+	/// opened with. Every call the shell makes with a local `today` sets it.
+	pub fn set_today(&mut self, today: CivilDate) {
+		self.today = today;
+	}
+
 	pub fn read_only(&self) -> Option<ReadOnlyReason> {
 		match &self.state {
 			State::Open(bus) => bus.read_only(),

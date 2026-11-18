@@ -683,20 +683,29 @@ impl Session {
 	/// Every bill, active ones first by next date, then paused and ended
 	/// ones. `today` is the local date, `YYYY-MM-DD`.
 	pub fn bills(&self, today: String) -> Result<Vec<BillSummary>, FfiError> {
-		self.core
-			.call(|session| bills(session.data()?, civil_date(&today)?))
+		self.core.call(|session| {
+			let today = civil_date(&today)?;
+			session.set_today(today);
+			bills(session.data()?, today)
+		})
 	}
 
 	/// One bill for the editor, with its next few dates.
 	pub fn bill(&self, bill_id: String, today: String) -> Result<BillDetail, FfiError> {
-		self.core
-			.call(|session| bill_detail(session.data()?, &bill_id, civil_date(&today)?))
+		self.core.call(|session| {
+			let today = civil_date(&today)?;
+			session.set_today(today);
+			bill_detail(session.data()?, &bill_id, today)
+		})
 	}
 
 	/// The upcoming tray (Actual shows 7 days) and the timeline: unpaid
 	/// occurrences through `today + days`, oldest first.
 	pub fn upcoming(&self, days: u32, today: String) -> Result<Vec<UpcomingBill>, FfiError> {
-		self.core
-			.call(|session| upcoming(session.data()?, days, civil_date(&today)?))
+		self.core.call(|session| {
+			let today = civil_date(&today)?;
+			session.set_today(today);
+			upcoming(session.data()?, days, today)
+		})
 	}
 }
