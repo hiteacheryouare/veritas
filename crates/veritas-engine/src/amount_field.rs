@@ -80,10 +80,17 @@ pub fn edit_text_at(
 /// symbol placed and spaced by the budget's preferences, unset reading as
 /// Actual's default (before, no space).
 pub fn register_currency_text(amount: Money, prefs: &FormatPrefs) -> String {
-	let format = NumberFormat::from_preference(prefs.number_format.as_deref().unwrap_or(""));
 	let whole = prefs.hide_fraction || prefs.decimal_places() == 0;
+	currency_text_at(amount, prefs, 2, whole)
+}
+
+/// An amount with `places` implied decimals as copy shows it, with the
+/// budget's number style, a true minus and its symbol (CLS-12.3). `whole`
+/// drops the fraction, rounding half away from zero.
+pub fn currency_text_at(amount: Money, prefs: &FormatPrefs, places: u8, whole: bool) -> String {
+	let format = NumberFormat::from_preference(prefs.number_format.as_deref().unwrap_or(""));
 	let magnitude = Money::from_minor(amount.minor().saturating_abs());
-	let digits = edit_text_at(magnitude, format, whole, 2);
+	let digits = edit_text_at(magnitude, format, whole, places);
 	let shown_zero = digits.chars().all(|c| !c.is_ascii_digit() || c == '0');
 	let sign = if amount.is_negative() && !shown_zero {
 		"\u{2212}"

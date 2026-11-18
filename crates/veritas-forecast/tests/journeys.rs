@@ -269,7 +269,7 @@ fn household_suggestions_for_next_month() {
 	assert_eq!(
 		reasons,
 		[
-			("Rent", Some(165000), "Rent $1650, scheduled: Rent"),
+			("Rent", Some(165000), "Rent $1,650, scheduled: Rent"),
 			("Groceries", Some(45000), "Groceries $450, 6-month median"),
 			("Dining", Some(12000), "Dining $120, 6-month median"),
 			(
@@ -969,7 +969,7 @@ fn a_mortgage_with_escrow_funds_interest_and_escrow_envelopes_separately() {
 		suggested(&book, &flows, "Loan interest"),
 		(
 			Some(150000),
-			"Loan interest $1500, scheduled: Mortgage".to_owned()
+			"Loan interest $1,500, scheduled: Mortgage".to_owned()
 		)
 	);
 	assert_eq!(

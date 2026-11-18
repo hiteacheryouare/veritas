@@ -39,10 +39,9 @@ pub struct Book {
 
 impl Book {
 	pub fn new() -> Self {
-		Book {
-			budget: BudgetData::empty(BudgetType::Envelope),
-			next: 0,
-		}
+		let mut budget = BudgetData::empty(BudgetType::Envelope);
+		budget.format.currency_code = Some("USD".to_owned());
+		Book { budget, next: 0 }
 	}
 
 	/// The usual household: checking, a card, off-budget savings and a loan,

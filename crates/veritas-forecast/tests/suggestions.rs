@@ -81,7 +81,7 @@ fn fc_5_bills_only() {
 	let rent = item(&suggestions, "Rent");
 	assert_eq!(rent.amount, Some(cents(165000)));
 	assert_eq!(rent.basis, Basis::Bills);
-	assert_eq!(rent.reason, "Rent $1650, scheduled: Rent");
+	assert_eq!(rent.reason, "Rent $1,650, scheduled: Rent");
 }
 
 #[test]
@@ -219,7 +219,7 @@ fn fc_5_goal_category_uses_the_debt_8_1_suggestion() {
 	assert_eq!(laptop.amount, Some(cents(25000)));
 	assert_eq!(
 		laptop.reason,
-		"New laptop $250.00: $1500.00 left over 6 months"
+		"New laptop $250.00: $1,500.00 left over 6 months"
 	);
 
 	book.goal("laptop", "New laptop", 150000, Some("2027-07-15"));
@@ -247,7 +247,7 @@ fn fc_5_goal_carry_comes_from_the_envelope_sheet() {
 	assert_eq!(laptop.amount, Some(cents(25000)), "G-1b");
 	assert_eq!(
 		laptop.reason,
-		"New laptop $250.00: $1250.00 left over 5 months"
+		"New laptop $250.00: $1,250.00 left over 5 months"
 	);
 
 	let reached = BTreeMap::from([(
@@ -541,7 +541,7 @@ fn debt_8_1_carry_comes_from_actuals_envelope_math() {
 	.clone();
 	assert_eq!(
 		laptop.reason,
-		"New laptop $250.00: $1250.00 left over 5 months"
+		"New laptop $250.00: $1,250.00 left over 5 months"
 	);
 }
 
@@ -602,4 +602,90 @@ fn goal_10_a_re_targeted_goal_suggests_again() {
 	let laptop = item(&suggest(&book, "2027-01-20", &[]), "New laptop").clone();
 	assert_eq!(laptop.basis, Basis::Goal);
 	assert_eq!(laptop.amount, Some(cents(12000)));
+}
+
+fn yen(book: &mut Book) {
+	book.budget.format.currency_code = Some("JPY".to_owned());
+	book.budget.format.hide_fraction = true;
+}
+
+#[test]
+fn fc_5_a_yen_suggestion_is_written_on_the_budget_scale_cls_12_11() {
+	let mut book = Book::household();
+	yen(&mut book);
+	six("Groceries", &mut book, 43000);
+	let rent = known("2027-02-01", "Rent", -165000, FlowKind::Expense);
+	let suggestions = suggest(&book, "2027-01-15", &[rent]);
+	let groceries = item(&suggestions, "Groceries");
+	assert_eq!(
+		groceries.amount,
+		Some(cents(430)),
+		"¥430 on the budget scale"
+	);
+	assert_eq!(groceries.register_amount, Some(cents(43000)));
+	assert_eq!(groceries.reason, "Groceries ¥430, 6-month median");
+	assert_eq!(
+		item(&suggestions, "Rent").reason,
+		"Rent ¥1,650, scheduled: Rent"
+	);
+}
+
+#[test]
+fn fc_5_a_yen_keeping_line_shows_the_cells_own_integer() {
+	let mut book = Book::household();
+	yen(&mut book);
+	book.budgeted("2027-02", "Fun", 7550);
+	let fun = item(&suggest(&book, "2027-01-15", &[]), "Fun").clone();
+	assert_eq!(fun.amount, None);
+	assert_eq!(fun.reason, "Fun: no history yet, keeping ¥7,550");
+}
+
+#[test]
+fn fc_5_a_yen_debt_principal_rounds_then_converts() {
+	let mut book = Book::household();
+	yen(&mut book);
+	book.opening("LOAN", "2026-06-30", -980000);
+	book.row("CHK", "2026-12-10", -40000).split = veritas_domain::SplitRole::Parent;
+	let parent = book
+		.budget
+		.transactions
+		.keys()
+		.last()
+		.unwrap()
+		.as_str()
+		.to_owned();
+	book.transfer("CHK", "LOAN", "2026-12-10", -32050)
+		.in_category("Loan principal")
+		.child_of(&parent);
+	book.spend("Loan interest", "2026-12-10", -7950)
+		.child_of(&parent);
+	let principal = item(&suggest(&book, "2027-01-15", &[]), "Loan principal").clone();
+	assert_eq!(
+		principal.amount,
+		Some(cents(321)),
+		"32050 is ¥321 (Fred, Q4)"
+	);
+	assert_eq!(
+		principal.reason,
+		"Loan principal ¥321, principal of the last loan payment"
+	);
+}
+
+#[test]
+fn fc_5_a_yen_goal_stays_on_the_budget_scale_and_the_notice_compares_on_the_register() {
+	let mut book = Book::household();
+	yen(&mut book);
+	book.category("Trip", "Goals");
+	book.goal("trip", "Trip", 1500, Some("2027-08-15"));
+	let pay = known("2027-02-01", "Paycheck", 21400, FlowKind::Income);
+	let suggestions = suggest(&book, "2027-01-15", &[pay]);
+	let trip = item(&suggestions, "Trip");
+	assert_eq!(trip.amount, Some(cents(215)), "ceil(1500 / 7), whole yen");
+	assert_eq!(trip.register_amount, Some(cents(21500)));
+	assert_eq!(trip.reason, "Trip ¥215: ¥1,500 left over 7 months");
+	assert_eq!(suggestions.exceeds_income_by, Some(cents(100)));
+	assert_eq!(
+		suggestions.notice.as_deref(),
+		Some("Suggestions exceed expected income by ¥1")
+	);
 }

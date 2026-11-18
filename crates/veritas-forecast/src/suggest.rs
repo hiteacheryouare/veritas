@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 
 use veritas_domain::{
-	CategoryId, CategoryKind, CivilDate, CoreError, GoalStatus, Money, TransactionKind, YearMonth,
+	CategoryId, CategoryKind, CivilDate, CoreError, FormatPrefs, GoalStatus, Money,
+	TransactionKind, YearMonth,
 };
-use veritas_engine::EnvelopeSheet;
+use veritas_engine::{EnvelopeSheet, currency_text_at};
 use veritas_reports::Period;
 
 use crate::baseline::Baseline;
@@ -66,8 +67,14 @@ pub enum Basis {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Suggestion {
 	pub category: CategoryId,
-	/// `None` keeps the current budgeted amount.
+	/// What "Apply suggestions" writes, on the budget scale (CLS-12.9): a
+	/// baseline, bill or principal suggestion rounded to whole units on the
+	/// register scale, then converted (CLS-12.11); a goal's as DEBT-8.1 has
+	/// it. `None` keeps the current budgeted amount.
 	pub amount: Option<Money>,
+	/// `amount` on the register scale, which the notice compares with
+	/// expected income (Fred, v16). The same integer at 2 places.
+	pub register_amount: Option<Money>,
 	pub basis: Basis,
 	pub reason: String,
 }
@@ -79,6 +86,8 @@ pub struct Suggestions {
 	pub items: Vec<Suggestion>,
 	/// Known income flows plus income baselines for the month.
 	pub expected_income: Money,
+	/// On the register scale, like `expected_income`: each goal suggestion
+	/// is moved to it before the comparison (Fred, v16).
 	pub exceeds_income_by: Option<Money>,
 	/// "Suggestions exceed expected income by $X", in whole dollars and never
 	/// below $1 (FC-5).
@@ -89,12 +98,53 @@ fn round_dollars(amount: Money) -> Result<Money, CoreError> {
 	to_money(round_half_up(i128::from(amount.minor().max(0)), 100) * 100)
 }
 
-fn dollars(amount: Money) -> String {
-	format!("${}", amount.minor() / 100)
+/// FC-5 copy in the budget's currency, symbol and number style (CLS-12.3,
+/// CLS-12.11).
+struct Copy<'a> {
+	prefs: &'a FormatPrefs,
+	places: u8,
 }
 
-fn cents(amount: Money) -> String {
-	format!("${amount}")
+impl Copy<'_> {
+	/// A register-scale amount already rounded to whole units.
+	fn whole(&self, amount: Money) -> String {
+		currency_text_at(amount, self.prefs, 2, true)
+	}
+
+	/// A budget-scale amount at the currency's places, as goals show it.
+	fn budget(&self, amount: Money) -> String {
+		currency_text_at(amount, self.prefs, self.places, false)
+	}
+
+	/// A budget cell in whole units: rounded half up at 2 places, its own
+	/// integer at 0 places.
+	fn kept(&self, amount: Money) -> String {
+		currency_text_at(amount, self.prefs, self.places, true)
+	}
+
+	fn to_budget(&self, amount: Money) -> Result<Money, CoreError> {
+		amount.register_to_budget_scale(self.places)
+	}
+
+	fn to_register(&self, amount: Money) -> Result<Money, CoreError> {
+		match self.places {
+			0 | 1 => 10_i64
+				.checked_pow(u32::from(2 - self.places))
+				.and_then(|scale| amount.minor().checked_mul(scale))
+				.map(Money::from_minor)
+				.ok_or(CoreError::Overflow),
+			2 => Ok(amount),
+			_ => {
+				let scale = 10_i64
+					.checked_pow(u32::from(self.places - 2))
+					.ok_or(CoreError::Overflow)?;
+				to_money(crate::math::round_half_away(
+					i128::from(amount.minor()),
+					i128::from(scale),
+				))
+			}
+		}
+	}
 }
 
 impl Forecaster<'_> {
@@ -111,6 +161,10 @@ impl Forecaster<'_> {
 			.iter()
 			.filter(|flow| period.contains(flow.date))
 			.collect();
+		let copy = Copy {
+			prefs: &self.budget.format,
+			places: self.budget.format.decimal_places(),
+		};
 		let all_baselines = self.baselines(today, known)?;
 		let baselines: BTreeMap<&CategoryId, &Baseline> = all_baselines
 			.iter()
@@ -150,10 +204,11 @@ impl Forecaster<'_> {
 				.budget_cells
 				.get(&(month, id.clone()))
 				.map_or(Money::ZERO, |cell| cell.budgeted);
-			let kept = dollars(round_dollars(current)?);
+			let kept = copy.kept(current);
 			let keeping = |basis: Basis, text: &str| Suggestion {
 				category: id.clone(),
 				amount: None,
+				register_amount: None,
 				basis,
 				reason: format!("{text}, keeping {kept}"),
 			};
@@ -187,11 +242,12 @@ impl Forecaster<'_> {
 						Suggestion {
 							category: id.clone(),
 							amount: Some(monthly),
+							register_amount: Some(copy.to_register(monthly)?),
 							basis: Basis::Goal,
 							reason: format!(
 								"{name} {}: {} left over {months_left} months",
-								cents(monthly),
-								cents(remaining)
+								copy.budget(monthly),
+								copy.budget(remaining)
 							),
 						}
 					}
@@ -203,6 +259,7 @@ impl Forecaster<'_> {
 					&in_month,
 					baselines.get(id).copied(),
 					&keeping,
+					&copy,
 				)?,
 				(CategoryKind::DebtPrincipal, _) => match self.last_principal(id, today)? {
 					None => keeping(Basis::NoHistory, &format!("{name}: no history yet")),
@@ -210,11 +267,12 @@ impl Forecaster<'_> {
 						let amount = round_dollars(principal)?;
 						Suggestion {
 							category: id.clone(),
-							amount: Some(amount),
+							amount: Some(copy.to_budget(amount)?),
+							register_amount: Some(amount),
 							basis: Basis::LoanPrincipal,
 							reason: format!(
 								"{name} {}, principal of the last loan payment",
-								dollars(amount)
+								copy.whole(amount)
 							),
 						}
 					}
@@ -237,13 +295,13 @@ impl Forecaster<'_> {
 					.ok_or(CoreError::Overflow)?;
 			}
 		}
-		let suggested = Money::checked_sum(items.iter().filter_map(|item| item.amount))?;
+		let suggested = Money::checked_sum(items.iter().filter_map(|item| item.register_amount))?;
 		let excess = suggested.checked_sub(Money::from_minor(expected_income))?;
 		let exceeds_income_by = (excess > Money::ZERO).then_some(excess);
 		let notice = match exceeds_income_by {
 			Some(by) => Some(format!(
 				"Suggestions exceed expected income by {}",
-				dollars(round_dollars(by)?.max(Money::from_minor(100)))
+				copy.whole(round_dollars(by)?.max(Money::from_minor(100)))
 			)),
 			None => None,
 		};
@@ -264,6 +322,7 @@ impl Forecaster<'_> {
 		in_month: &[&KnownFlow],
 		baseline: Option<&Baseline>,
 		keeping: &dyn Fn(Basis, &str) -> Suggestion,
+		copy: &Copy,
 	) -> Result<Suggestion, CoreError> {
 		let bills: Vec<&&KnownFlow> = in_month
 			.iter()
@@ -288,7 +347,7 @@ impl Forecaster<'_> {
 			if index == 10_000 {
 				(
 					Basis::Baseline,
-					format!("{name} {}, {median}", dollars(amount)),
+					format!("{name} {}, {median}", copy.whole(amount)),
 				)
 			} else {
 				let pct = crate::math::round_half_away(i128::from(index) - 10_000, 100);
@@ -299,7 +358,7 @@ impl Forecaster<'_> {
 					Basis::Seasonal,
 					format!(
 						"{name} {}, {median}, adjusted {sign}{}% for {month_only}",
-						dollars(amount),
+						copy.whole(amount),
 						pct.abs()
 					),
 				)
@@ -315,7 +374,7 @@ impl Forecaster<'_> {
 				Basis::Bills,
 				format!(
 					"{name} {}, scheduled: {}",
-					dollars(amount),
+					copy.whole(amount),
 					names.join(", ")
 				),
 			)
@@ -326,15 +385,16 @@ impl Forecaster<'_> {
 				Basis::BillsAndBaseline,
 				format!(
 					"{name} {}: {} scheduled + {} {median}",
-					dollars(amount),
-					dollars(bills_rounded),
-					dollars(rest)
+					copy.whole(amount),
+					copy.whole(bills_rounded),
+					copy.whole(rest)
 				),
 			)
 		};
 		Ok(Suggestion {
 			category: id.clone(),
-			amount: Some(amount),
+			amount: Some(copy.to_budget(amount)?),
+			register_amount: Some(amount),
 			basis,
 			reason,
 		})
