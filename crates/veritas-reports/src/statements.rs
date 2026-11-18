@@ -1,11 +1,15 @@
 use std::collections::BTreeMap;
 
 use veritas_domain::{
-	AccountGroupId, AccountId, BudgetData, CivilDate, CoreError, Money, TransactionKind, YearMonth,
+	AccountGroupId, AccountId, BudgetData, CategoryGroupId, CivilDate, CoreError, Money,
+	TransactionKind, YearMonth,
 };
 
 use crate::balances::{self, AccountBalance, Side};
-use crate::{Classification, ClassifiedRow, Decision, Line, Period, Section, months, net_profit};
+use crate::{
+	CategoryLine, Classification, ClassifiedRow, Decision, Line, Period, Section, months,
+	net_profit,
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SheetLine {
@@ -99,6 +103,70 @@ fn sections(
 		(Some(x), Some(y)) => x.total_cmp(&y).then_with(|| a.group.cmp(&b.group)),
 	});
 	Ok(sections)
+}
+
+/// One category group on the income statement, its categories in budget order.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StatementGroup {
+	/// `None` holds uncategorized spending, listed last.
+	pub group: Option<CategoryGroupId>,
+	pub categories: Vec<CategoryLine>,
+	pub total: Money,
+}
+
+/// Net Profit in accountant format (ST-3): revenue by income category, then
+/// expenses by group and category. Debt paydown and savings aren't income or
+/// expense, so they aren't on it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct IncomeStatement {
+	pub period: Period,
+	pub revenue: Vec<StatementGroup>,
+	pub total_revenue: Line,
+	pub expenses: Vec<StatementGroup>,
+	pub total_expenses: Line,
+	/// Always Net Profit's `net_profit` for the same period (ST-3 check 2).
+	pub net_income: Line,
+}
+
+pub fn income_statement(
+	budget: &BudgetData,
+	classification: &Classification,
+	period: Period,
+) -> Result<IncomeStatement, CoreError> {
+	let report = net_profit(budget, classification, period)?;
+	Ok(IncomeStatement {
+		period,
+		revenue: by_group(budget, &report.income)?,
+		total_revenue: section_line(report.income),
+		expenses: by_group(budget, &report.expenses)?,
+		total_expenses: section_line(report.expenses),
+		net_income: report.net_profit,
+	})
+}
+
+/// A section's categories are already in budget order, so each group's
+/// categories sit next to each other.
+fn by_group(budget: &BudgetData, section: &Section) -> Result<Vec<StatementGroup>, CoreError> {
+	let mut groups: Vec<StatementGroup> = Vec::new();
+	for line in &section.categories {
+		let group = line
+			.category
+			.as_ref()
+			.and_then(|id| budget.categories.get(id))
+			.map(|category| category.group.clone());
+		match groups.last_mut() {
+			Some(last) if last.group == group => {
+				last.total = last.total.checked_add(line.total)?;
+				last.categories.push(line.clone());
+			}
+			_ => groups.push(StatementGroup {
+				group,
+				categories: vec![line.clone()],
+				total: line.total,
+			}),
+		}
+	}
+	Ok(groups)
 }
 
 /// The Statement of Owner's Equity. Its lines are the only reconciling items

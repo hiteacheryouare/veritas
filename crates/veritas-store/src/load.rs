@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OptionalExtension, Row};
+use veritas_domain::SettingKey;
 use veritas_domain::{
 	Account, AccountGroup, AccountGroupId, AccountId, AccountKind, AccountMeta, BudgetCell,
 	BudgetData, BudgetType, Category, CategoryGroup, CategoryGroupId, CategoryId, CategoryKind,
@@ -819,6 +820,23 @@ fn load_veritas_tables(
 				let tag = required_text(at(row, 0)?, "the row has no tag")?;
 				let bucket = required_text(at(row, 1)?, "the tag has no bucket")?;
 				data.tax_tags.insert(tag, bucket);
+				Ok(())
+			},
+		)?;
+	}
+
+	if table_exists(conn, "veritas_meta")? {
+		each_row(
+			conn,
+			"veritas_meta",
+			"SELECT key, value FROM veritas_meta",
+			skipped,
+			|row| {
+				let key = required_text(at(row, 0)?, "the row has no key")?;
+				if let Some(key) = SettingKey::parse(&key) {
+					let value = required_text(at(row, 1)?, "the setting has no value")?;
+					data.settings.insert(key, value);
+				}
 				Ok(())
 			},
 		)?;

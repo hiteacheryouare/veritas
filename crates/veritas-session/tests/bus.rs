@@ -656,7 +656,7 @@ impl NewRows {
 			},
 			tax_tag: TaxTag {
 				tag: "charity".to_owned(),
-				bucket: "charitable".to_owned(),
+				bucket: Some("charitable".to_owned()),
 			},
 			goal: goal("trip"),
 		}
@@ -682,7 +682,7 @@ impl NewRows {
 		rows.category_meta.meta.tax_bucket = Some("schedule-c".to_owned());
 		rows.account_meta.meta.lender = Some("Ally".to_owned());
 		rows.transaction_meta.meta.adjustment = true;
-		rows.tax_tag.bucket = "medical".to_owned();
+		rows.tax_tag.bucket = Some("medical".to_owned());
 		rows.goal.target = Money::from_minor(450_000);
 		rows
 	}

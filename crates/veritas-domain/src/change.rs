@@ -6,8 +6,8 @@ use crate::{
 	Category, CategoryGroup, CategoryGroupId, CategoryId, CategoryMeta, CivilDate, CustomReportId,
 	CustomReportRow, DashboardPage, DashboardPageId, Goal, GoalId, LoanPaymentPart,
 	LoanPaymentPartId, Money, Payee, PayeeId, Rule, RuleId, Schedule, ScheduleId,
-	ScheduleJsonPaths, ScheduleMeta, Tag, TagId, Transaction, TransactionId, TransactionMeta,
-	Widget, WidgetId, YearMonth,
+	ScheduleJsonPaths, ScheduleMeta, SettingKey, Tag, TagId, Transaction, TransactionId,
+	TransactionMeta, Widget, WidgetId, YearMonth,
 };
 
 /// One row a subscriber may need to refetch after a commit.
@@ -32,6 +32,7 @@ pub enum EntityRef {
 	TransactionMeta(TransactionId),
 	LoanPaymentPart(LoanPaymentPartId),
 	TaxTag(String),
+	Setting(SettingKey),
 	Goal(GoalId),
 	CustomReport(CustomReportId),
 	DashboardPage(DashboardPageId),
@@ -75,10 +76,18 @@ pub struct AccountMetaRow {
 }
 
 /// `veritas_tax_tag`: which TAX-2 bucket an Actual tag (without `#`) means.
+/// A row with no bucket takes the mapping away.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TaxTag {
 	pub tag: String,
-	pub bucket: String,
+	pub bucket: Option<String>,
+}
+
+/// A `veritas_meta` row Veritas lets the user set. No value removes the row.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Setting {
+	pub key: SettingKey,
+	pub value: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -283,6 +292,7 @@ rows!(
 	TransactionMeta(TransactionMetaRow),
 	LoanPaymentPart(LoanPaymentPart),
 	TaxTag(TaxTag),
+	Setting(Setting),
 	Goal(Goal),
 	CustomReport(CustomReportRow),
 	DashboardPage(DashboardPage),
@@ -728,12 +738,12 @@ impl Record for TaxTag {
 	fn read(data: &BudgetData, key: &String) -> Option<Self> {
 		data.tax_tags.get(key).map(|bucket| TaxTag {
 			tag: key.clone(),
-			bucket: bucket.clone(),
+			bucket: Some(bucket.clone()),
 		})
 	}
 
 	fn write(data: &mut BudgetData, key: &String, value: Option<Self>) {
-		put(&mut data.tax_tags, key, value.map(|row| row.bucket));
+		put(&mut data.tax_tags, key, value.and_then(|row| row.bucket));
 	}
 
 	fn retired(_: &Self) -> Retired<Self> {
@@ -742,6 +752,33 @@ impl Record for TaxTag {
 
 	fn entity(key: &String) -> EntityRef {
 		EntityRef::TaxTag(key.clone())
+	}
+}
+
+impl Record for Setting {
+	type Key = SettingKey;
+
+	fn key(&self) -> SettingKey {
+		self.key
+	}
+
+	fn read(data: &BudgetData, key: &SettingKey) -> Option<Self> {
+		data.settings.get(key).map(|value| Setting {
+			key: *key,
+			value: Some(value.clone()),
+		})
+	}
+
+	fn write(data: &mut BudgetData, key: &SettingKey, value: Option<Self>) {
+		put(&mut data.settings, key, value.and_then(|row| row.value));
+	}
+
+	fn retired(_: &Self) -> Retired<Self> {
+		Retired::Removed
+	}
+
+	fn entity(key: &SettingKey) -> EntityRef {
+		EntityRef::Setting(*key)
 	}
 }
 

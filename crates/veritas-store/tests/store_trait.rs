@@ -264,6 +264,7 @@ fn variant(change: &Change) -> &'static str {
 		Change::TransactionMeta(_) => "TransactionMeta",
 		Change::LoanPaymentPart(_) => "LoanPaymentPart",
 		Change::TaxTag(_) => "TaxTag",
+		Change::Setting(_) => "Setting",
 		Change::Goal(_) => "Goal",
 		Change::CustomReport(_) => "CustomReport",
 		Change::DashboardPage(_) => "DashboardPage",
@@ -271,7 +272,7 @@ fn variant(change: &Change) -> &'static str {
 	}
 }
 
-const EVERY_VARIANT: [&str; 26] = [
+const EVERY_VARIANT: [&str; 27] = [
 	"Account",
 	"AccountGroup",
 	"CategoryGroup",
@@ -294,6 +295,7 @@ const EVERY_VARIANT: [&str; 26] = [
 	"TransactionMeta",
 	"LoanPaymentPart",
 	"TaxTag",
+	"Setting",
 	"Goal",
 	"CustomReport",
 	"DashboardPage",
@@ -480,7 +482,11 @@ fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
 		}),
 		Row::TaxTag(veritas_domain::TaxTag {
 			tag: "giving".to_owned(),
-			bucket: "charitable".to_owned(),
+			bucket: Some("charitable".to_owned()),
+		}),
+		Row::Setting(veritas_domain::Setting {
+			key: veritas_domain::SettingKey::EntityName,
+			value: Some("The Household".to_owned()),
 		}),
 		Row::Goal(Goal {
 			id: GoalId::new("v-goal"),
@@ -674,7 +680,11 @@ fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
 				..row
 			}),
 			Row::TaxTag(row) => Row::TaxTag(veritas_domain::TaxTag {
-				bucket: "medical".to_owned(),
+				bucket: Some("medical".to_owned()),
+				..row
+			}),
+			Row::Setting(row) => Row::Setting(veritas_domain::Setting {
+				value: Some("Household, LLC".to_owned()),
 				..row
 			}),
 			Row::Goal(row) => Row::Goal(Goal {
