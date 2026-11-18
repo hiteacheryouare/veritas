@@ -49,7 +49,9 @@ final class AccountsJourneyTests: XCTestCase {
 		amount.click()
 		amount.typeKey("a", modifierFlags: .command)
 		amount.typeText("500\t")
-		XCTAssertTrue(waitUntil { self.text(sheet.descendants(matching: .any)["moveMoney.to.after"]).contains("32,300.00") }, "the To account shows its balance after the move")
+		// Each lookup in this sheet takes about two seconds, so five seconds allowed only two tries.
+		let after = sheet.staticTexts["moveMoney.to.after"]
+		XCTAssertTrue(waitUntil(timeout: 15) { "\(after.label) \(after.value as? String ?? "")".contains("32,300.00") }, "the To account shows its balance after the move")
 		XCTAssertFalse(sheet.buttons["moveMoney.save"].isEnabled, "money leaving the budget waits for an answer")
 		sheet.radioButtons["Saving or investing"].click()
 		sheet.popUpButtons["purpose.envelope"].click()
