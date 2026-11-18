@@ -49,6 +49,25 @@ struct RulesScreenshotTests {
 		try render(RuleEditorSheet(model: model), named: "editor-split")
 	}
 
+	/// Save and Cancel clear the draft while the sheet is still on screen.
+	@Test func editorSurvivesItsDraftClosing() async throws {
+		let (_, model) = await model()
+		model.edit(try #require(model.rules.first { $0.id == "costco" }))
+		closeWhileShown(RuleEditorSheet(model: model)) { model.cancelEditing() }
+		#expect(model.editing == nil)
+	}
+
+	private func closeWhileShown(_ view: some View, close: () -> Void) {
+		let host = NSHostingView(rootView: view)
+		host.frame.size = host.fittingSize
+		let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+		window.contentView = host
+		RunLoop.main.run(until: .now.addingTimeInterval(0.4))
+		close()
+		RunLoop.main.run(until: .now.addingTimeInterval(0.4))
+		host.layoutSubtreeIfNeeded()
+	}
+
 	@Test func applyPreviewWithAReconciledRow() async throws {
 		let (_, model) = await model()
 		await model.preview(.saved(ruleId: "amazon"))
