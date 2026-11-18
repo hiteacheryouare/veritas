@@ -284,6 +284,10 @@ pub struct TaxBucketTotal {
 	/// Negative when refunds exceed the year's amounts. Never clamped.
 	pub total: i64,
 	pub count: u64,
+	/// v16. `total < 0`: the PDF shows TAX-4's note under it, in a neutral
+	/// tone.
+	#[uniffi(default = false)]
+	pub negative: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -297,6 +301,22 @@ pub struct TaxDetailRow {
 	pub amount: i64,
 	pub counted: Option<i64>,
 	pub category: Option<String>,
+	/// v16. The detail file's text columns (TAX-5), so the PDF shows what
+	/// the CSV does: the account's name, the payee after mapping (the other
+	/// account's name for a transfer), the category's plain name and labels,
+	/// and the row's notes.
+	#[uniffi(default = "")]
+	pub account_name: String,
+	#[uniffi(default = "")]
+	pub payee: String,
+	#[uniffi(default = None)]
+	pub category_labels: Option<ReportLabels>,
+	#[uniffi(default = "")]
+	pub notes: String,
+	/// v16. For a conflict, the buckets its tags name, by bucket id
+	/// (TAX-3.3.2). Empty otherwise.
+	#[uniffi(default = [])]
+	pub conflicting: Vec<TaxBucket>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -736,20 +756,32 @@ fn tax_summary(
 				inflow: total.bucket.direction() == reports::Direction::Inflow,
 				total: total.total.minor(),
 				count: total.rows.len() as u64,
+				negative: total.total.is_negative(),
 			})
 			.collect(),
 		detail: summary
 			.detail
 			.iter()
-			.map(|row| TaxDetailRow {
-				transaction_id: row.row.to_string(),
-				parent_id: row.parent.as_ref().map(ToString::to_string),
-				date: row.date.to_string(),
-				bucket: row.bucket.map(tax_bucket),
-				from_tag: row.source == reports::Source::Tag,
-				amount: row.amount.minor(),
-				counted: row.counted.map(Money::minor),
-				category: row.category.as_ref().map(|id| category_name(budget, id)),
+			.map(|row| {
+				let text = reports::row_text(budget, row);
+				TaxDetailRow {
+					transaction_id: row.row.to_string(),
+					parent_id: row.parent.as_ref().map(ToString::to_string),
+					date: row.date.to_string(),
+					bucket: row.bucket.map(tax_bucket),
+					from_tag: row.source == reports::Source::Tag,
+					amount: row.amount.minor(),
+					counted: row.counted.map(Money::minor),
+					category: row.category.as_ref().map(|id| category_name(budget, id)),
+					account_name: text.account,
+					payee: text.payee,
+					category_labels: row
+						.category
+						.as_ref()
+						.map(|id| reports::category_labels(budget, id).into()),
+					notes: text.notes,
+					conflicting: row.conflicting.iter().copied().map(tax_bucket).collect(),
+				}
 			})
 			.collect(),
 		conflicts: summary.conflicts().count() as u64,
