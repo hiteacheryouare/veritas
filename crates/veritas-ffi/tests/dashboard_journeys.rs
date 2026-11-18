@@ -23,8 +23,8 @@ use std::thread::Thread;
 use serde_json::{Value, json};
 use veritas_ffi::{
 	CancelToken, Change, Command, CustomReportSettings, DashboardPage, DashboardWidget, EntityKind,
-	ReportBalanceKind, ReportCondition, ReportGrouping, ReportIntervalUnit, ReportSortOrder,
-	Session, WidgetConfig, WidgetTimeFrame, WidgetView,
+	ReportBalanceKind, ReportGrouping, ReportIntervalUnit, ReportSortOrder, RuleCondition,
+	RuleConditionOp, RuleField, RuleValue, Session, WidgetConfig, WidgetTimeFrame, WidgetView,
 };
 
 const TODAY: &str = "2026-11-13";
@@ -130,13 +130,94 @@ fn blank() -> WidgetConfig {
 	}
 }
 
-fn condition(field: &str, op: &str, value: &str, options: Option<&str>) -> ReportCondition {
-	ReportCondition {
-		field: field.to_owned(),
-		op: op.to_owned(),
-		value: value.to_owned(),
-		options: options.map(str::to_owned),
-	}
+const FIELDS: [(RuleField, &str); 16] = [
+	(RuleField::ImportedPayee, "imported_payee"),
+	(RuleField::Payee, "payee"),
+	(RuleField::PayeeName, "payee_name"),
+	(RuleField::Account, "account"),
+	(RuleField::Category, "category"),
+	(RuleField::CategoryGroup, "category_group"),
+	(RuleField::Notes, "notes"),
+	(RuleField::Amount, "amount"),
+	(RuleField::AmountInflow, "amount"),
+	(RuleField::AmountOutflow, "amount"),
+	(RuleField::Date, "date"),
+	(RuleField::Cleared, "cleared"),
+	(RuleField::Reconciled, "reconciled"),
+	(RuleField::Transfer, "transfer"),
+	(RuleField::Parent, "parent"),
+	(RuleField::Saved, "saved"),
+];
+
+const OPS: [(RuleConditionOp, &str); 17] = [
+	(RuleConditionOp::Is, "is"),
+	(RuleConditionOp::IsNot, "isNot"),
+	(RuleConditionOp::Contains, "contains"),
+	(RuleConditionOp::DoesNotContain, "doesNotContain"),
+	(RuleConditionOp::Matches, "matches"),
+	(RuleConditionOp::OneOf, "oneOf"),
+	(RuleConditionOp::NotOneOf, "notOneOf"),
+	(RuleConditionOp::HasTags, "hasTags"),
+	(RuleConditionOp::HasAnyTag, "hasAnyTag"),
+	(RuleConditionOp::IsApprox, "isapprox"),
+	(RuleConditionOp::IsBetween, "isbetween"),
+	(RuleConditionOp::Gt, "gt"),
+	(RuleConditionOp::Gte, "gte"),
+	(RuleConditionOp::Lt, "lt"),
+	(RuleConditionOp::Lte, "lte"),
+	(RuleConditionOp::OnBudget, "onBudget"),
+	(RuleConditionOp::OffBudget, "offBudget"),
+];
+
+/// A typed filter from Actual's stored parts, for the few the test builds.
+fn condition(field: &str, op: &str, value: &str, options: Option<&str>) -> RuleCondition {
+	let field = match (field, options) {
+		("amount", Some(r#"{"outflow":true}"#)) => RuleField::AmountOutflow,
+		("amount", Some(r#"{"inflow":true}"#)) => RuleField::AmountInflow,
+		(name, _) => FIELDS.iter().find(|(_, n)| *n == name).unwrap().0,
+	};
+	let op = OPS.iter().find(|(_, n)| *n == op).unwrap().0;
+	let value = match serde_json::from_str::<Value>(value).unwrap() {
+		Value::String(text) => RuleValue::Text { text },
+		Value::Number(amount) => RuleValue::Amount {
+			amount: amount.as_i64().unwrap(),
+		},
+		other => panic!("no test value {other}"),
+	};
+	RuleCondition { field, op, value }
+}
+
+/// A typed filter as Actual stores it, without `type`.
+fn stored_condition(condition: &RuleCondition) -> Value {
+	let field = FIELDS
+		.iter()
+		.find(|(f, _)| *f == condition.field)
+		.unwrap()
+		.1;
+	let op = OPS.iter().find(|(o, _)| *o == condition.op).unwrap().1;
+	let value = match &condition.value {
+		RuleValue::Id { id } => json!(id),
+		RuleValue::Ids { ids } => json!(ids),
+		RuleValue::Text { text } => json!(text),
+		RuleValue::Texts { texts } => json!(texts),
+		RuleValue::Amount { amount } => json!(amount),
+		RuleValue::AmountRange { num1, num2 } => json!({"num1": num1, "num2": num2}),
+		RuleValue::Date { date } => json!(date),
+		RuleValue::Month { month } => json!(month),
+		RuleValue::Year { year } => json!(year.to_string()),
+		RuleValue::Bool { value } => json!(value),
+		RuleValue::Raw { json } => serde_json::from_str(json).unwrap(),
+		RuleValue::Nothing => Value::Null,
+		other => panic!("a filter can't hold {other:?}"),
+	};
+	let options = match (&condition.field, &condition.value) {
+		(RuleField::AmountInflow, _) => json!({"inflow": true}),
+		(RuleField::AmountOutflow, _) => json!({"outflow": true}),
+		(RuleField::Date, RuleValue::Month { .. }) => json!({"month": true}),
+		(RuleField::Date, RuleValue::Year { .. }) => json!({"year": true}),
+		_ => Value::Null,
+	};
+	json!({"field": field, "op": op, "value": value, "options": options})
 }
 
 fn oracle() -> Option<PathBuf> {
@@ -248,22 +329,20 @@ fn create_entity(settings: &CustomReportSettings, conditions: &str) -> String {
 	.replace("\"CONDITIONS\"", conditions)
 }
 
-fn same_conditions(theirs: &Value, ours: &[ReportCondition], context: &str) {
+fn same_conditions(theirs: &Value, ours: &[RuleCondition], context: &str) {
 	let theirs = theirs.as_array().unwrap();
 	assert_eq!(theirs.len(), ours.len(), "{context}: condition count");
 	for (theirs, ours) in theirs.iter().zip(ours) {
-		assert_eq!(theirs["field"], ours.field.as_str(), "{context}");
-		assert_eq!(theirs["op"], ours.op.as_str(), "{context}");
-		let value: Value = serde_json::from_str(&ours.value).unwrap();
-		assert_eq!(theirs["value"], value, "{context}");
-		let options = ours.options.as_deref().map_or(Value::Null, |options| {
-			serde_json::from_str(options).unwrap()
+		let ours = stored_condition(ours);
+		let value = match theirs["op"].as_str() {
+			Some("onBudget" | "offBudget") => Value::Null,
+			_ => theirs["value"].clone(),
+		};
+		let theirs = json!({
+			"field": theirs["field"], "op": theirs["op"], "value": value,
+			"options": theirs.get("options").cloned().unwrap_or(Value::Null),
 		});
-		assert_eq!(
-			theirs.get("options").cloned().unwrap_or(Value::Null),
-			options,
-			"{context}"
-		);
+		assert_eq!(theirs, ours, "{context}");
 	}
 }
 
@@ -724,4 +803,112 @@ fn a_dashboard_rework_reads_back_in_actual_as_veritas_wrote_it() {
 			);
 		}
 	}
+}
+
+#[test]
+fn an_unsaved_report_previews_what_saving_it_shows_and_previewing_writes_nothing() {
+	// The editor's New report: settings typed before any save, filters
+	// included, previewed as the user changes them. Saving it must show what
+	// the last preview showed, a preview must never write or add an undo
+	// step, and once the save is undone the same draft still previews.
+	let scratch = Scratch::new("preview-new");
+	let session = block_on(Session::import_actual_zip(
+		text(&root().join("fixtures/synthetic/all-features.zip")),
+		text(&scratch.join("veritas")),
+		CancelToken::new(),
+	))
+	.unwrap();
+	let preview = |settings: &CustomReportSettings| {
+		block_on(session.preview_custom_report(
+			settings.clone(),
+			TODAY.to_owned(),
+			CancelToken::new(),
+		))
+		.unwrap()
+	};
+	let main = dashboards(&session)[0].id.clone();
+	perform(
+		&session,
+		Command::RenameDashboard {
+			page_id: main.clone(),
+			name: "Overview".to_owned(),
+		},
+	);
+	let reports_before = session.custom_reports().unwrap();
+	let mut draft = block_on(session.custom_report(
+		SPENDING_REPORT.to_owned(),
+		TODAY.to_owned(),
+		CancelToken::new(),
+	))
+	.unwrap()
+	.settings;
+	draft.id = String::new();
+	draft.name = String::new();
+	draft.conditions = Vec::new();
+	draft.interval = ReportIntervalUnit::Yearly;
+	let unfiltered = preview(&draft);
+	assert_eq!(unfiltered.problem, None);
+	draft.name = "Big outflows".to_owned();
+	draft.conditions = vec![condition(
+		"amount",
+		"gte",
+		"5000",
+		Some(r#"{"outflow":true}"#),
+	)];
+	let filtered = preview(&draft);
+	assert_eq!(filtered.problem, None);
+	assert_eq!(filtered.settings.conditions, draft.conditions);
+	assert_eq!(filtered.settings.interval, ReportIntervalUnit::Yearly);
+	let filtered_total = filtered.data.as_ref().unwrap().total;
+	assert!(
+		filtered_total != 0 && filtered_total.abs() < unfiltered.data.as_ref().unwrap().total.abs(),
+		"the filter narrows the unsaved report: {filtered_total} of {}",
+		unfiltered.data.as_ref().unwrap().total
+	);
+	draft.name = "Spending by category".to_owned();
+	assert_eq!(
+		preview(&draft).data,
+		filtered.data,
+		"a draft named like a saved report still previews as the draft"
+	);
+	draft.name = "Big outflows".to_owned();
+	assert_eq!(
+		session.custom_reports().unwrap(),
+		reports_before,
+		"previewing saves nothing"
+	);
+	session.undo().unwrap();
+	assert_eq!(
+		dashboards(&session)[0].name,
+		"Main",
+		"previewing adds no undo step: undo takes back the rename before it"
+	);
+	session.redo().unwrap();
+
+	let id = created(
+		&perform(
+			&session,
+			Command::CreateCustomReport {
+				settings: draft.clone(),
+			},
+		),
+		EntityKind::CustomReport,
+	);
+	let saved =
+		block_on(session.custom_report(id.clone(), TODAY.to_owned(), CancelToken::new())).unwrap();
+	assert_eq!(
+		saved.data, filtered.data,
+		"saving shows what the preview showed"
+	);
+	assert_eq!(saved.settings.conditions, filtered.settings.conditions);
+	draft.id = id.clone();
+	assert_eq!(preview(&draft).data, filtered.data);
+
+	session.undo().unwrap();
+	assert_eq!(session.custom_reports().unwrap(), reports_before);
+	assert_eq!(
+		preview(&draft).data,
+		filtered.data,
+		"the id of a report whose save was undone previews as a new report"
+	);
 }

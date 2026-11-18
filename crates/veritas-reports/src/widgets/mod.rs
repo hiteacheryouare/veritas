@@ -3,16 +3,48 @@
 //! Every function reads the widget's `meta` as Actual stores it.
 
 mod age_of_money;
+mod balance_forecast;
 mod budget_analysis;
 mod calendar;
+mod cash_flow;
 mod crossover;
+mod forecast;
+mod formula;
+pub mod monte_carlo;
+mod net_worth;
+mod sankey;
+mod scale;
+mod spending;
 mod summary;
 mod time_frame;
 
 pub use age_of_money::{AgeOfMoney, AgePoint, Granularity, Trend, age_of_money};
+pub use balance_forecast::{
+	BalanceForecastCard, ForecastChartPoint, ForecastGranularity, balance_forecast_card,
+	card_forecast,
+};
 pub use budget_analysis::{BudgetAnalysis, BudgetAnalysisMonth, budget_analysis};
 pub use calendar::{CalendarDay, CalendarMonth, calendar};
+pub use cash_flow::{CashFlowCard, cash_flow_card};
 pub use crossover::{Crossover, CrossoverPoint, crossover};
+pub use forecast::{
+	FORECAST_UNASSIGNED_ACCOUNT, Forecast, ForecastBill, ForecastLowest, ForecastPoint,
+	ForecastRequest, ForecastSource, generate_forecast,
+};
+pub use formula::{
+	DEFAULT_FORMULA, FontSizeMode, FormulaCard, FormulaError, FormulaErrorKind, FormulaValue,
+	formula_card,
+};
+pub use monte_carlo::{MonteCarloCard, MonteCarloChartPoint, monte_carlo_card};
+pub use net_worth::{
+	NetWorthCard, NetWorthInterval, NetWorthPeriod, NetWorthStack, net_worth_card,
+};
+pub use sankey::{
+	SankeyCard, SankeyColor, SankeyLabel, SankeyLayer, SankeyLink, SankeyMode, SankeyNode,
+	SankeySort, sankey_card, sankey_height_limit,
+};
+pub use scale::{register_factor, register_scale};
+pub use spending::{Spending, SpendingDay, SpendingMode, spending};
 pub use summary::{SummaryContent, SummaryData, summary};
 pub use time_frame::{TimeRange, calculate_time_range};
 

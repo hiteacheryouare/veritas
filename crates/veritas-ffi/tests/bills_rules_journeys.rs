@@ -2846,6 +2846,7 @@ fn kind_name(field: RuleField) -> &'static str {
 		RuleField::Reconciled => "reconciled",
 		RuleField::Transfer => "transfer",
 		RuleField::Parent => "parent",
+		RuleField::Saved => "saved",
 	}
 }
 

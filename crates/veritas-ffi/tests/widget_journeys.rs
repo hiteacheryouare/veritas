@@ -24,7 +24,8 @@ use std::thread::Thread;
 use serde_json::{Value, json};
 use veritas_ffi::{
 	AgeGranularity, AgeTrend, CancelToken, Change, Command, DashboardPage, DashboardWidget,
-	EntityKind, ReportCondition, Session, SplitLineDraft, TransactionDraft, WidgetConfig,
+	EntityKind, ForecastCardSource, FormulaValue, RuleCondition, RuleConditionOp, RuleField,
+	RuleValue, SankeyCardColor, Session, SplitLineDraft, TransactionDraft, WidgetConfig,
 	WidgetTimeFrame, WidgetView,
 };
 
@@ -158,13 +159,35 @@ fn blank() -> WidgetConfig {
 	}
 }
 
-fn condition(field: &str, op: &str, value: Value) -> ReportCondition {
-	ReportCondition {
-		field: field.to_owned(),
-		op: op.to_owned(),
-		value: value.to_string(),
-		options: None,
-	}
+/// A filter as the Mac's editor builds one, from Actual's field and op
+/// names.
+fn condition(field: &str, op: &str, value: Value) -> RuleCondition {
+	let field = match field {
+		"notes" => RuleField::Notes,
+		"amount" => RuleField::Amount,
+		"account" => RuleField::Account,
+		"date" => RuleField::Date,
+		other => panic!("no test field {other}"),
+	};
+	let op = match op {
+		"hasTags" => RuleConditionOp::HasTags,
+		"hasAnyTag" => RuleConditionOp::HasAnyTag,
+		"isNot" => RuleConditionOp::IsNot,
+		"lt" => RuleConditionOp::Lt,
+		"gte" => RuleConditionOp::Gte,
+		"lte" => RuleConditionOp::Lte,
+		other => panic!("no test op {other}"),
+	};
+	let value = match (field, value) {
+		(RuleField::Account, Value::String(id)) => RuleValue::Id { id: Some(id) },
+		(RuleField::Date, Value::String(date)) => RuleValue::Date { date },
+		(_, Value::String(text)) => RuleValue::Text { text },
+		(_, Value::Number(amount)) => RuleValue::Amount {
+			amount: amount.as_i64().unwrap(),
+		},
+		(_, other) => panic!("no test value {other}"),
+	};
+	RuleCondition { field, op, value }
 }
 
 fn frame(mode: &str, start: &str, end: &str) -> Option<WidgetTimeFrame> {
@@ -260,10 +283,120 @@ fn month_label(month: &veritas_ffi::Month) -> String {
 		.to_string()
 }
 
-/// What Actual's card code returns, rebuilt from what Veritas shows, for
-/// the five cards D73 draws natively. `None` for any other card.
+fn month_text(month: &veritas_ffi::Month) -> String {
+	format!("{}-{:02}", month.year, month.month)
+}
+
+/// What Actual's card code returns, rebuilt from what Veritas shows. `None`
+/// for the cards whose whole output `tests/widgets.rs` in veritas-reports
+/// compares instead.
 fn as_actual(view: &WidgetView) -> Option<Value> {
 	Some(match view {
+		WidgetView::NetWorth {
+			range,
+			points,
+			net_worth,
+			change,
+			lowest,
+			highest,
+			has_negative,
+			accounts,
+			series,
+			..
+		} => json!({
+			"start": range.start, "end": range.end,
+			"points": points.iter().map(|point| point.net_worth).collect::<Vec<_>>(),
+			"hasNegative": has_negative, "netWorth": net_worth, "totalChange": change,
+			"lowestNetWorth": lowest, "highestNetWorth": highest, "accounts": accounts,
+			"details": points.iter().map(|point| json!({
+				"assets": point.assets, "debt": point.debt, "change": point.change,
+			})).collect::<Vec<_>>(),
+			"stacked": series.iter().map(|stack| json!({
+				"id": stack.account_id, "name": stack.name, "points": stack.points,
+				"color": format!("var(--color-chartQual{})", stack.color + 1),
+			})).collect::<Vec<_>>(),
+		}),
+		WidgetView::CashFlow {
+			range,
+			income,
+			expense,
+			change,
+		} => {
+			assert_eq!(*change, income + expense);
+			json!({"start": range.start, "end": range.end, "income": income, "expense": expense})
+		}
+		WidgetView::Spending {
+			compare,
+			compare_to,
+			difference,
+			days,
+			..
+		} => json!({
+			"compare": month_text(compare), "compareTo": month_text(compare_to),
+			"difference": difference,
+			"days": days.iter().map(|day| json!({
+				"day": format!("{:02}", day.day),
+				"compare": day.compare, "compareTo": day.compare_to,
+				"average": day.average, "budget": number(day.budget),
+			})).collect::<Vec<_>>(),
+		}),
+		WidgetView::Sankey {
+			range,
+			first,
+			last,
+			nodes,
+			links,
+			..
+		} => json!({
+			"start": range.start, "end": range.end,
+			"boundedStart": month_text(first), "boundedEnd": month_text(last),
+			"nodes": nodes.iter().map(|node| json!({
+				"key": node.key, "percentageLabel": node.percentage, "color": sankey_color(node.color),
+			})).collect::<Vec<_>>(),
+			"links": links.iter().map(|link| json!({
+				"source": link.source,
+				"target": link.target.map_or(-1, i64::from),
+				"value": link.value,
+				"tooltipInfo": link.folded.iter().map(|folded| json!({"name": folded.name, "value": folded.value})).collect::<Vec<_>>(),
+				"color": link.color.map(sankey_color),
+			})).collect::<Vec<_>>(),
+		}),
+		WidgetView::BalanceForecast {
+			range,
+			source,
+			has_forecast,
+			points,
+			low,
+			scheduled,
+			..
+		} => json!({
+			"start": range.start, "end": range.end,
+			"source": match source {
+				ForecastCardSource::Schedules => "schedules",
+				ForecastCardSource::TrackingBudget => "tracking-budget",
+			},
+			"hasForecast": has_forecast,
+			"points": points.iter().map(|point| json!({"date": point.date, "balance": point.balance})).collect::<Vec<_>>(),
+			"low": low.as_ref().map(|low| json!({"date": low.date, "balance": low.balance})),
+			"scheduled": scheduled,
+		}),
+		WidgetView::Problem { .. } => json!({"error": true}),
+		WidgetView::Formula { value, .. } => match value {
+			FormulaValue::Error { error } => json!({"error": error.message}),
+			FormulaValue::Number { value } => json!({"value": number(*value), "type": "number"}),
+			FormulaValue::Text { text } => json!({"value": text, "type": "string"}),
+			FormulaValue::Boolean { value } => json!({"value": value, "type": "boolean"}),
+			FormulaValue::Empty => json!({"value": null, "type": "null"}),
+		},
+		WidgetView::MonteCarlo {
+			success_percent,
+			start_age,
+			end_age,
+			..
+		} => json!({
+			"successPercent": number(*success_percent),
+			"startAge": number(*start_age), "endAge": number(*end_age),
+		}),
 		WidgetView::Summary {
 			start,
 			end,
@@ -366,6 +499,16 @@ fn as_actual(view: &WidgetView) -> Option<Value> {
 	})
 }
 
+fn sankey_color(color: SankeyCardColor) -> String {
+	match color {
+		SankeyCardColor::Palette { index } => format!("var(--color-chartQual{})", index + 1),
+		SankeyCardColor::ToBudgetPositive => "var(--color-toBudgetPositive)".to_owned(),
+		SankeyCardColor::ToBudgetNegative => "var(--color-toBudgetNegative)".to_owned(),
+		SankeyCardColor::Gray => "var(--color-reportsGray)".to_owned(),
+		SankeyCardColor::Blue => "var(--color-reportsBlue)".to_owned(),
+	}
+}
+
 /// The days `summary-spreadsheet.ts` turns the card's range into: the first
 /// of the start's month, and the end's month end, or today in the current
 /// month.
@@ -386,6 +529,9 @@ fn summary_days(result: &Value, today: &str) -> (String, String) {
 /// The part of Actual's card output that `as_actual` rebuilds.
 fn theirs_comparable(kind: &str, result: &Value, today: &str) -> Value {
 	let data = &result["data"];
+	if result.get("error").is_some() && kind != "formula-card" {
+		return json!({"error": true});
+	}
 	match kind {
 		"summary-card" => {
 			let (start, end) = summary_days(result, today);
@@ -395,6 +541,55 @@ fn theirs_comparable(kind: &str, result: &Value, today: &str) -> Value {
 			})
 		}
 		"calendar-card" => json!({"calendarData": data["calendarData"]}),
+		"net-worth-card" => {
+			let mut shown = data.clone();
+			let fields = shown.as_object_mut().unwrap();
+			fields.remove("startDate");
+			fields.remove("endDate");
+			fields.insert("start".to_owned(), result["start"].clone());
+			fields.insert("end".to_owned(), result["end"].clone());
+			shown
+		}
+		"cash-flow-card" => json!({
+			"start": result["start"], "end": result["end"],
+			"income": result["income"], "expense": result["expense"],
+		}),
+		"spending-card" => json!({
+			"compare": result["compare"], "compareTo": result["compareTo"],
+			"difference": result["difference"],
+			"days": data["intervalData"].as_array().unwrap().iter().map(|day| json!({
+				"day": day["day"], "compare": day["compare"], "compareTo": day["compareTo"],
+				"average": day["average"], "budget": day["budget"],
+			})).collect::<Vec<_>>(),
+		}),
+		"sankey-card" => json!({
+			"start": result["start"], "end": result["end"],
+			"boundedStart": result["boundedStart"], "boundedEnd": result["boundedEnd"],
+			"nodes": data["nodes"].as_array().unwrap().iter().map(|node| json!({
+				"key": node["key"], "percentageLabel": node["percentageLabel"], "color": node["color"],
+			})).collect::<Vec<_>>(),
+			"links": data["links"],
+		}),
+		"balance-forecast-card" => {
+			let points = result["points"].as_array().unwrap();
+			let low = match (&result["lowest"], points.last()) {
+				(Value::Object(_), Some(last)) if result["lowest"]["date"] != last["date"] => {
+					json!({"date": result["lowest"]["date"], "balance": result["lowest"]["balance"]})
+				}
+				_ => Value::Null,
+			};
+			json!({
+				"start": result["start"], "end": result["end"], "source": result["source"],
+				"hasForecast": result["forecast"]["dataPoints"].as_array().is_some_and(|points| !points.is_empty()),
+				"points": points, "low": low, "scheduled": result["scheduled"],
+			})
+		}
+		"formula-card" if !result["error"].is_null() => json!({"error": result["error"]}),
+		"formula-card" => json!({"value": result["value"], "type": result["type"]}),
+		"monte-carlo-card" => json!({
+			"successPercent": result["successPercent"],
+			"startAge": result["startAge"], "endAge": result["endAge"],
+		}),
 		_ => data.clone(),
 	}
 }
@@ -483,6 +678,23 @@ fn edited_in_actual(oracle: &Path, scratch: &Scratch) -> PathBuf {
 			"timeFrame": {"start": "2025-12", "end": "2026-03", "mode": "static"},
 			"conditions": [{"field": "category", "op": "oneOf", "value": [VACATION, DINING_OUT], "type": "id"}], "conditionsOp": "and"})),
 		card("cw-analysis-quarter", "budget-analysis-card", 12, json!({"timeFrame": {"mode": "previousQuarter"}})),
+		card("cw-net-worth-stacked", "net-worth-card", 20, json!({"mode": "stacked",
+			"timeFrame": {"mode": "yearToDate"}})),
+		card("cw-net-worth", "net-worth-card", 14, json!({"interval": "Weekly",
+			"conditions": tagged("#trip"), "conditionsOp": "and",
+			"timeFrame": {"start": "2025-12", "end": "2026-03", "mode": "static"}})),
+		card("cw-cash-flow", "cash-flow-card", 15, json!({"timeFrame": {"mode": "lastYear"},
+			"conditions": [{"field": "amount", "op": "gt", "value": -50_000, "type": "number"}], "conditionsOp": "and"})),
+		card("cw-spending-average", "spending-card", 16, json!({"mode": "average",
+			"conditions": [{"field": "account", "op": "isNot", "value": VISA, "type": "id"}], "conditionsOp": "and"})),
+		card("cw-formula", "formula-card", 17, json!({"formula": "=ROUND(QUERY(\"trips\") / 3, 2)",
+			"queries": {"trips": {"conditions": tagged("#trip"), "conditionsOp": "and",
+				"timeFrame": {"start": "2025-12", "end": "2026-03", "mode": "static"}}}})),
+		card("cw-formula-error", "formula-card", 18, json!({"formula": "=1/0"})),
+		card("cw-monte-carlo", "monte-carlo-card", 19, json!({"simulationCount": 1000,
+			"currentAge": 40, "targetAge": 90,
+			"pots": [{"id": "linked", "accountId": BROKERAGE}, {"id": "cash", "startingBalance": 5_000_000}],
+			"spendingPhases": [{"id": "all", "annualWithdrawal": 2_500_000}]})),
 		card("cw-crossover", "crossover-card", 13, json!({"incomeAccountIds": [BROKERAGE, SAVINGS],
 			"expenseCategoryIds": [GROCERIES, DINING_OUT, VACATION], "safeWithdrawalRate": 0.03,
 			"projectionType": "median", "expectedContribution": 25_000,
@@ -493,14 +705,116 @@ fn edited_in_actual(oracle: &Path, scratch: &Scratch) -> PathBuf {
 	out
 }
 
-/// Every card on Veritas's export, run through Actual's card code with the
-/// meta Veritas wrote, against what Veritas's own dashboard shows.
-fn same_cards_as_actual(oracle: &Path, session: &Session, zip: &Path, today: &str) -> usize {
+/// D74: in a 0-place budget Veritas shows each card on the register's scale,
+/// where Actual's cards add 0-place budget cells to 2-place transactions.
+/// The figure Veritas must show is what Actual's card code computes once
+/// the budget's cells and holds are moved to the register's scale, so the
+/// Actual side runs on that copy of the zip (made once per zip).
+fn register_scale_for_actual(oracle: &Path, zip: &Path, dump: &Value) -> PathBuf {
+	let scaled = zip.with_extension("register-scale.zip");
+	if scaled.exists() {
+		return scaled;
+	}
+	let month = |row: &Value| {
+		let month = row["month"].as_i64().unwrap();
+		format!("{}-{:02}", month / 100, month % 100)
+	};
+	let mut ops: Vec<Value> = table(dump, "zero_budgets")
+		.values()
+		.filter(|row| row["amount"].as_i64().unwrap_or(0) != 0)
+		.map(|row| {
+			json!({"op": "setBudgetAmount", "month": month(row), "category": row["category"],
+				"amount": row["amount"].as_i64().unwrap() * 100})
+		})
+		.collect();
+	ops.extend(
+		table(dump, "zero_budget_months")
+			.values()
+			.filter(|row| row["buffered"].as_i64().unwrap_or(0) != 0)
+			.map(|row| {
+				let id = row["id"].as_str().unwrap();
+				json!({"op": "holdForNextMonth", "month": id,
+					"amount": row["buffered"].as_i64().unwrap() * 100})
+			}),
+	);
+	apply(oracle, zip, Value::Array(ops), &scaled, 15);
+	scaled
+}
+
+/// The Monte Carlo settings' amounts, which Actual's editor saves at the
+/// currency's places, on the register's scale (D74).
+fn register_scale_monte_carlo(meta: &mut Value, in_tax_bands: bool) {
+	match meta {
+		Value::Object(fields) => {
+			for (key, value) in fields.iter_mut() {
+				let money = matches!(
+					key.as_str(),
+					"startingBalance"
+						| "annualWithdrawal"
+						| "annualAmount" | "minimumSpending"
+						| "annualFeeFixed"
+				) || (in_tax_bands && key == "from");
+				if money {
+					if let Some(amount) = value.as_f64() {
+						*value = json!(amount * 100.0);
+					}
+				} else {
+					register_scale_monte_carlo(value, key == "taxBands");
+				}
+			}
+		}
+		Value::Array(items) => {
+			for item in items {
+				register_scale_monte_carlo(item, in_tax_bands);
+			}
+		}
+		_ => {}
+	}
+}
+
+/// Which cards a journey compares with Actual. Formula cards run in their
+/// own `_formula_cards` tests, the clean-room formula engine's acceptance
+/// suite (D75).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Cards {
+	AllButFormula,
+	FormulaOnly,
+}
+
+impl Cards {
+	fn compares(self, kind: &str) -> bool {
+		(kind == "formula-card") == (self == Cards::FormulaOnly)
+	}
+}
+
+/// Every card on Veritas's export that `cards` takes, run through Actual's
+/// card code with the meta Veritas wrote, against what Veritas's own
+/// dashboard shows. Counts every card drawn natively, compared or not.
+fn same_cards_as_actual(
+	oracle: &Path,
+	session: &Session,
+	zip: &Path,
+	today: &str,
+	cards: Cards,
+) -> usize {
 	let ours = dashboards(session, today);
 	let dump = raw_dump(oracle, zip);
 	let rows = table(&dump, "dashboard");
+	let zero_places = session
+		.overview()
+		.unwrap()
+		.number_format
+		.and_then(|format| format.currency)
+		.as_deref()
+		== Some("JPY");
+	let actuals_zip = if zero_places {
+		register_scale_for_actual(oracle, zip, &dump)
+	} else {
+		zip.to_path_buf()
+	};
 	let mut requests = Vec::new();
 	let mut expected = Vec::new();
+	let mut drawn = 0;
 	for widget in ours.iter().flat_map(|p| &p.widgets) {
 		let native = [
 			"summary-card",
@@ -508,6 +822,13 @@ fn same_cards_as_actual(oracle: &Path, session: &Session, zip: &Path, today: &st
 			"age-of-money-card",
 			"budget-analysis-card",
 			"crossover-card",
+			"net-worth-card",
+			"cash-flow-card",
+			"spending-card",
+			"formula-card",
+			"monte-carlo-card",
+			"sankey-card",
+			"balance-forecast-card",
 		];
 		let Some(shown) = as_actual(&widget.view) else {
 			assert!(
@@ -519,12 +840,24 @@ fn same_cards_as_actual(oracle: &Path, session: &Session, zip: &Path, today: &st
 			);
 			continue;
 		};
+		drawn += 1;
+		if !cards.compares(&widget.kind) {
+			continue;
+		}
 		let row = rows[&widget.id];
 		let meta: Value = row["meta"]
 			.as_str()
 			.map_or(Value::Null, |text| serde_json::from_str(text).unwrap());
+		let mut meta = meta;
+		if zero_places && widget.kind == "monte-carlo-card" {
+			register_scale_monte_carlo(&mut meta, false);
+		}
+		let oracle_card = match widget.kind.as_str() {
+			"balance-forecast-card" => "forecast-card",
+			other => other,
+		};
 		requests.push(
-			json!({"id": widget.id, "type": widget.kind, "meta": meta, "firstDayOfWeekIdx": "0"}),
+			json!({"id": widget.id, "type": oracle_card, "meta": meta, "firstDayOfWeekIdx": "0"}),
 		);
 		expected.push((widget.id.clone(), widget.kind.clone(), meta, shown));
 	}
@@ -532,28 +865,54 @@ fn same_cards_as_actual(oracle: &Path, session: &Session, zip: &Path, today: &st
 	std::fs::write(&file, Value::Array(requests).to_string()).unwrap();
 	let theirs: Value = serde_json::from_slice(&node(
 		oracle,
-		&["widgets", &text(zip), &text(&file)],
+		&["widgets", &text(&actuals_zip), &text(&file)],
 		today,
 		1,
 	))
 	.unwrap();
+	let mut failures = Vec::new();
 	for (id, kind, meta, shown) in &expected {
 		let result = &theirs[id.as_str()];
 		assert!(
-			result.get("error").is_none(),
+			kind == "formula-card"
+				|| result.get("error").is_none()
+				|| shown == &json!({"error": true}),
 			"Actual's {kind} failed on {meta}: {result}"
 		);
-		assert_eq!(
-			shown,
-			&theirs_comparable(kind, result, today),
-			"{kind} {id} on {today} with {meta}"
-		);
+		let actuals = theirs_comparable(kind, result, today);
+		if shown != &actuals {
+			failures.push(format!(
+				"{kind} {id} on {today} with {meta}\n ours:   {shown}\n Actual: {actuals}"
+			));
+		}
 	}
-	expected.len()
+	assert!(
+		failures.is_empty(),
+		"{} of {} cards differ from Actual's:\n{}",
+		failures.len(),
+		expected.len(),
+		failures.join("\n\n")
+	);
+	drawn
 }
 
 #[test]
 fn every_native_card_matches_actuals_card_code_on_a_budget_both_apps_edited() {
+	every_native_card_matches_actuals_card_code_on_a_budget_both_apps_edited_comparing(
+		Cards::AllButFormula,
+	);
+}
+
+#[test]
+fn every_native_card_matches_actuals_card_code_on_a_budget_both_apps_edited_formula_cards() {
+	every_native_card_matches_actuals_card_code_on_a_budget_both_apps_edited_comparing(
+		Cards::FormulaOnly,
+	);
+}
+
+fn every_native_card_matches_actuals_card_code_on_a_budget_both_apps_edited_comparing(
+	cards: Cards,
+) {
 	let scratch = Scratch::new("edited");
 	let Some(oracle) = oracle() else {
 		return;
@@ -601,11 +960,12 @@ fn every_native_card_matches_actuals_card_code_on_a_budget_both_apps_edited() {
 	let mut trips = widget(&dashboards(&session, "2026-11-13"), "cw-trip-sum")
 		.config
 		.clone();
-	trips.conditions.push(condition(
-		"date",
-		"isbetween",
-		json!({"num1": "2025-12-01", "num2": "2026-05-31"}),
-	));
+	trips
+		.conditions
+		.push(condition("date", "gte", json!("2025-12-01")));
+	trips
+		.conditions
+		.push(condition("date", "lte", json!("2026-05-31")));
 	trips.time_frame = frame("static", "2025-11", "2026-06");
 	trips.summary = Some("avgPerMonth".to_owned());
 	perform(
@@ -658,12 +1018,711 @@ fn every_native_card_matches_actuals_card_code_on_a_budget_both_apps_edited() {
 	export(&session, &zip);
 	let mut compared = 0;
 	for today in ["2026-01-01", "2026-03-31", "2026-04-01", "2026-11-13"] {
-		compared += same_cards_as_actual(&oracle, &session, &zip, today);
+		compared += same_cards_as_actual(&oracle, &session, &zip, today, cards);
 	}
 	assert!(
 		compared >= 4 * 20,
 		"every native card on both pages, at each today ({compared})"
 	);
+}
+
+/// The same cards in a 0-place currency (D63): Actual's card code reads raw
+/// integers whatever the currency, so Veritas must never rescale a card.
+#[test]
+fn every_native_card_matches_actuals_card_code_in_a_zero_place_currency() {
+	every_native_card_matches_actuals_card_code_in_a_zero_place_currency_comparing(
+		Cards::AllButFormula,
+	);
+}
+
+#[test]
+fn every_native_card_matches_actuals_card_code_in_a_zero_place_currency_formula_cards() {
+	every_native_card_matches_actuals_card_code_in_a_zero_place_currency_comparing(
+		Cards::FormulaOnly,
+	);
+}
+
+fn every_native_card_matches_actuals_card_code_in_a_zero_place_currency_comparing(cards: Cards) {
+	let scratch = Scratch::new("yen");
+	let Some(oracle) = oracle() else {
+		return;
+	};
+	let card = |id: &str, kind: &str, y: i64, meta: Value| {
+		json!({"op": "addDashboardWidget", "id": id, "page": DEEP_DIVE, "type": kind,
+			"x": 0, "y": 60 + 3 * y, "width": 4, "height": 3, "meta": meta})
+	};
+	let spring = json!({"start": "2026-02", "end": "2026-05", "mode": "static"});
+	let ops = json!([
+		{"op": "setPreference", "id": "defaultCurrencyCode", "value": "JPY"},
+		{"op": "addTransactions", "account": CHECKING, "transactions": [
+			{"date": "2026-03-02", "amount": -1_234, "payee": TRATTORIA, "category": DINING_OUT},
+			{"date": "2026-03-15", "amount": -98_765, "payee": SKYAIR, "category": VACATION},
+			{"date": "2026-04-01", "amount": -7, "category": GROCERIES},
+			{"date": "2026-04-30", "amount": -50_001, "payee": {"transferTo": SAVINGS}},
+		]},
+		{"op": "setBudgetAmount", "month": "2026-04", "category": GROCERIES, "amount": 33_333},
+		card("yen-summary", "summary-card", 0, json!({"content": "{\"type\":\"avgPerMonth\"}", "timeFrame": spring})),
+		card("yen-calendar", "calendar-card", 1, json!({"timeFrame": spring})),
+		card("yen-age", "age-of-money-card", 2, json!({"timeFrame": spring})),
+		card("yen-analysis", "budget-analysis-card", 3, json!({"timeFrame": spring})),
+		card("yen-crossover", "crossover-card", 4, json!({"incomeAccountIds": [BROKERAGE],
+			"expenseCategoryIds": [GROCERIES, DINING_OUT], "timeFrame": spring})),
+		card("yen-net-worth", "net-worth-card", 5, json!({"mode": "stacked", "timeFrame": spring})),
+		card("yen-cash-flow", "cash-flow-card", 6, json!({"timeFrame": spring})),
+		card("yen-spending", "spending-card", 7, json!({"mode": "budget"})),
+		card("yen-formula", "formula-card", 8, json!({"formula": "=BUDGET_QUERY(\"budgeted\", {\"fc093a41-2d11-4d98-a211-e5db92205f23\"}, \"2026-04\", \"2026-04\")"})),
+		card("yen-monte-carlo", "monte-carlo-card", 9, json!({"simulationCount": 1000,
+			"currentAge": 50, "targetAge": 80, "pots": [{"id": "linked", "accountId": CHECKING}],
+			"spendingPhases": [{"id": "all", "annualWithdrawal": 1_000_000}]})),
+	]);
+	let actual_made = scratch.join("yen.zip");
+	apply(&oracle, &all_features(), ops, &actual_made, 11);
+	let session = import(&actual_made, &scratch.join("veritas"));
+	assert_eq!(
+		session
+			.overview()
+			.unwrap()
+			.number_format
+			.unwrap()
+			.currency
+			.as_deref(),
+		Some("JPY")
+	);
+	let pages = dashboards(&session, "2026-11-13");
+	assert!(
+		!cards.compares("formula-card")
+			|| matches!(
+				widget(&pages, "yen-formula").view,
+				WidgetView::Formula {
+					value: FormulaValue::Number { value },
+					..
+				} if value == 33_333.0
+			),
+		"BUDGET_QUERY reads the yen budget at its true amount (D74), where Actual reads 333.33: {:?}",
+		widget(&pages, "yen-formula").view
+	);
+	let zip = scratch.join("veritas.zip");
+	export(&session, &zip);
+	let mut compared = 0;
+	for today in ["2026-04-15", "2026-11-13"] {
+		compared += same_cards_as_actual(&oracle, &session, &zip, today, cards);
+	}
+	assert!(
+		compared >= 2 * 10,
+		"every yen card at each today ({compared})"
+	);
+}
+
+const BROKERAGE_ID: &str = BROKERAGE;
+const CAR_LOAN: &str = "87979271-7007-41a8-a77e-7bce6f3e2da1";
+const RENT: &str = "63f26a17-4832-430e-b385-2a693a684509";
+
+/// One card of each kind D73 newly draws, as Actual's editors save them,
+/// with budget lines, transfers and ranges that run past the budget.
+fn every_new_kind(prefix: &str, page: &str, y: i64) -> Vec<Value> {
+	let food = json!({"conditions": [{"field": "category", "op": "oneOf", "value": [GROCERIES, DINING_OUT], "type": "id"}],
+		"conditionsOp": "and", "timeFrame": {"start": "2026-09", "end": "2026-11", "mode": "static"}});
+	let budget_query = |dimension: &str, start: &str, end: &str| {
+		format!(
+			"BUDGET_QUERY(\"{dimension}\", QUERY_EXTRACT_CATEGORIES(\"food\"), \"{start}\", \"{end}\")"
+		)
+	};
+	let cards = [
+		(
+			"net-worth-daily",
+			"net-worth-card",
+			json!({"interval": "Daily",
+			"timeFrame": {"start": "2026-03", "end": "2026-11", "mode": "static"}}),
+		),
+		(
+			"net-worth-yearly",
+			"net-worth-card",
+			json!({"interval": "Yearly",
+			"timeFrame": {"start": "2025-01", "end": "2027-12", "mode": "full"}}),
+		),
+		(
+			"net-worth-transfers",
+			"net-worth-card",
+			json!({"conditions": [{"field": "transfer", "op": "is", "value": true, "type": "boolean"}],
+			"conditionsOp": "and"}),
+		),
+		("cash-flow", "cash-flow-card", Value::Null),
+		(
+			"cash-flow-year",
+			"cash-flow-card",
+			json!({"timeFrame": {"mode": "lastYear"}}),
+		),
+		(
+			"cash-flow-checking",
+			"cash-flow-card",
+			json!({"conditions": [{"field": "account", "op": "is", "value": CHECKING, "type": "id"}],
+			"conditionsOp": "and", "timeFrame": {"start": "2026-09", "end": "2027-12", "mode": "static"}}),
+		),
+		(
+			"spending-budget",
+			"spending-card",
+			json!({"mode": "budget"}),
+		),
+		(
+			"spending-budget-food",
+			"spending-card",
+			json!({"mode": "budget",
+			"conditions": [{"field": "category", "op": "oneOf", "value": [GROCERIES, DINING_OUT], "type": "id"}], "conditionsOp": "and"}),
+		),
+		(
+			"spending-average",
+			"spending-card",
+			json!({"mode": "average"}),
+		),
+		(
+			"sankey-transfers",
+			"sankey-card",
+			json!({"mode": "spent", "showTransfers": true, "groupAccounts": true,
+			"timeFrame": {"start": "2026-09", "end": "2026-11", "mode": "static"}}),
+		),
+		(
+			"sankey-accounts",
+			"sankey-card",
+			json!({"mode": "spent", "showTransfers": true, "layerFrom": "account", "layerTo": "category",
+			"timeFrame": {"start": "2026-10", "end": "2026-11", "mode": "static"}}),
+		),
+		(
+			"sankey-budgeted",
+			"sankey-card",
+			json!({"mode": "budgeted",
+			"timeFrame": {"start": "2026-09", "end": "2026-11", "mode": "static"}}),
+		),
+		(
+			"sankey-budgeted-ahead",
+			"sankey-card",
+			json!({"mode": "budgeted",
+			"timeFrame": {"start": "2027-08", "end": "2027-10", "mode": "static"}}),
+		),
+		(
+			"sankey-budgeted-full",
+			"sankey-card",
+			json!({"mode": "budgeted",
+			"timeFrame": {"start": "2025-01", "end": "2027-12", "mode": "full"}}),
+		),
+		("forecast", "balance-forecast-card", Value::Null),
+		(
+			"forecast-daily",
+			"balance-forecast-card",
+			json!({"granularity": "Daily",
+			"timeFrame": {"start": "2026-11", "end": "2027-01", "mode": "static"}}),
+		),
+		(
+			"forecast-checking",
+			"balance-forecast-card",
+			json!({"accounts": [CHECKING],
+			"conditions": [{"field": "amount", "op": "lt", "value": 0, "type": "number"}], "conditionsOp": "and"}),
+		),
+		(
+			"formula-budget",
+			"formula-card",
+			json!({"formula": format!("={}", budget_query("budgeted", "2026-09", "2026-11")),
+			"queries": {"food": food}}),
+		),
+		(
+			"formula-mixed",
+			"formula-card",
+			json!({"formula": format!("=QUERY(\"food\") + {}", budget_query("budgeted", "2026-09", "2026-11")),
+			"queries": {"food": food}}),
+		),
+		(
+			"formula-unbudgeted",
+			"formula-card",
+			json!({"formula": format!("=ROUND({}, 2)", budget_query("balance_end", "2029-01", "2029-03")),
+			"queries": {"food": food}}),
+		),
+		(
+			"formula-missing-query",
+			"formula-card",
+			json!({"formula": "=QUERY(\"travel\")", "queries": {"food": food}}),
+		),
+		(
+			"formula-bad-dimension",
+			"formula-card",
+			json!({"formula": format!("={}", budget_query("carryover", "2026-09", "2026-11")),
+			"queries": {"food": food}}),
+		),
+		(
+			"monte-carlo",
+			"monte-carlo-card",
+			json!({"simulationCount": 500, "currentAge": 35, "targetAge": 85,
+			"pots": [{"id": "brokerage", "accountId": BROKERAGE_ID}, {"id": "checking", "accountId": CHECKING}],
+			"spendingPhases": [{"id": "all", "annualWithdrawal": 300_000_000}]}),
+		),
+		(
+			"budget-analysis",
+			"budget-analysis-card",
+			json!({"timeFrame": {"start": "2026-08", "end": "2026-12", "mode": "static"}}),
+		),
+	];
+	cards
+		.into_iter()
+		.enumerate()
+		.map(|(n, (id, kind, meta))| {
+			json!({"op": "addDashboardWidget", "id": format!("{prefix}-{id}"), "page": page, "type": kind,
+				"x": 0, "y": y + 3 * i64::try_from(n).unwrap(), "width": 4, "height": 3, "meta": meta})
+		})
+		.collect()
+}
+
+#[test]
+fn every_new_card_matches_actual_in_a_yen_budget_with_transfers_and_months_past_the_budget() {
+	every_new_card_matches_actual_in_a_yen_budget_with_transfers_and_months_past_the_budget_comparing(Cards::AllButFormula);
+}
+
+#[test]
+fn every_new_card_matches_actual_in_a_yen_budget_with_transfers_and_months_past_the_budget_formula_cards()
+ {
+	every_new_card_matches_actual_in_a_yen_budget_with_transfers_and_months_past_the_budget_comparing(Cards::FormulaOnly);
+}
+
+fn every_new_card_matches_actual_in_a_yen_budget_with_transfers_and_months_past_the_budget_comparing(
+	cards: Cards,
+) {
+	// A household that keeps its books in yen (0 places: register rows are
+	// stored ×100, budget cells as whole yen, and Actual adds them as
+	// stored), moves money between on- and off-budget accounts, and has
+	// one bill entered a year ahead, so some budgeted ranges reach months
+	// Actual has no budget for.
+	let scratch = Scratch::new("yen");
+	let Some(oracle) = oracle() else {
+		return;
+	};
+	let budgeted = |month: &str, category: &str, amount: i64| json!({"op": "setBudgetAmount", "month": month, "category": category, "amount": amount});
+	let mut ops = vec![
+		json!({"op": "setPreference", "id": "defaultCurrencyCode", "value": "JPY"}),
+		json!({"op": "setPreference", "id": "hideFraction", "value": "true"}),
+		budgeted("2026-09", GROCERIES, 30_000),
+		budgeted("2026-10", GROCERIES, 30_000),
+		budgeted("2026-11", GROCERIES, 32_000),
+		budgeted("2026-11", DINING_OUT, 15_000),
+		budgeted("2026-11", VACATION, 50_000),
+		budgeted("2026-10", RENT, 120_000),
+		json!({"op": "addTransactions", "account": CHECKING, "transactions": [
+			{"date": "2026-10-15", "amount": -3_000_000, "payee": {"transferTo": CAR_LOAN}, "notes": "loan payment"},
+			{"date": "2026-10-28", "amount": -10_000_000, "payee": {"transferTo": BROKERAGE_ID}, "notes": "invest"},
+			{"date": "2026-11-03", "amount": -2_500_000, "payee": {"transferTo": SAVINGS}, "notes": "save"},
+			{"date": "2026-11-05", "amount": -4_200_000, "payee": {"transferTo": VISA}, "notes": "card payment"},
+			{"date": "2026-11-06", "amount": -480_000, "payee": TRATTORIA, "category": DINING_OUT, "notes": "ramen"},
+			{"date": "2026-11-01", "amount": -1_250_000, "category": GROCERIES, "notes": "market"},
+			{"date": "2027-10-01", "amount": -1_200_000, "category": HOUSEHOLD, "notes": "registration"},
+		]}),
+	];
+	ops.extend(every_new_kind("yen", DEEP_DIVE, 80));
+	let actual_made = scratch.join("yen.zip");
+	apply(&oracle, &all_features(), Value::Array(ops), &actual_made, 9);
+	let session = import(&actual_made, &scratch.join("veritas"));
+	assert_eq!(
+		session
+			.overview()
+			.unwrap()
+			.number_format
+			.unwrap()
+			.currency
+			.as_deref(),
+		Some("JPY")
+	);
+
+	perform(
+		&session,
+		Command::SetBudget {
+			month: veritas_ffi::Month {
+				year: 2026,
+				month: 11,
+			},
+			category_id: HOUSEHOLD.to_owned(),
+			amount: veritas_ffi::evaluate_budget_amount(
+				"20000".to_owned(),
+				veritas_ffi::NumberStyle::CommaDot,
+				0,
+			)
+			.unwrap(),
+		},
+	);
+	let mut ramen = entry("yen-ramen", VISA, "2026-11-12", -150_000);
+	ramen.category_id = Some(DINING_OUT.to_owned());
+	perform(&session, Command::AddTransaction { transaction: ramen });
+
+	let zip = scratch.join("veritas.zip");
+	export(&session, &zip);
+	let new_cards = || {
+		dashboards(&session, "2026-11-13")
+			.iter()
+			.flat_map(|page| &page.widgets)
+			.filter(|widget| widget.id.starts_with("yen-"))
+			.count()
+	};
+	assert_eq!(new_cards(), 24);
+	let mut compared = 0;
+	for today in ["2026-11-13", "2026-12-01", "2027-01-31", "2026-04-01"] {
+		compared += same_cards_as_actual(&oracle, &session, &zip, today, cards);
+	}
+	assert!(compared >= 4 * 24, "{compared}");
+	let problems: Vec<String> = dashboards(&session, "2026-11-13")
+		.iter()
+		.flat_map(|page| &page.widgets)
+		.filter_map(|widget| match &widget.view {
+			WidgetView::Problem { message } => Some(format!("{}: {message}", widget.id)),
+			_ => None,
+		})
+		.collect();
+	assert!(
+		problems
+			.iter()
+			.any(|problem| problem
+				== "yen-sankey-budgeted-ahead: There's no budget for November 2027."),
+		"a budgeted range reaching past the budget says so: {problems:?}"
+	);
+}
+
+#[test]
+fn every_new_card_matches_actual_on_a_brand_new_empty_budget() {
+	every_new_card_matches_actual_on_a_brand_new_empty_budget_comparing(Cards::AllButFormula);
+}
+
+#[test]
+fn every_new_card_matches_actual_on_a_brand_new_empty_budget_formula_cards() {
+	every_new_card_matches_actual_on_a_brand_new_empty_budget_comparing(Cards::FormulaOnly);
+}
+
+fn every_new_card_matches_actual_on_a_brand_new_empty_budget_comparing(cards: Cards) {
+	// A budget made in Veritas a moment ago: no accounts, no transactions,
+	// no budget cells. Each new card is added once in Veritas with nothing
+	// set, and again in Actual with the settings a long-time user has
+	// (filters and pots that name accounts and categories this budget
+	// doesn't have). Then one account and one expense arrive, still with no
+	// budget.
+	let scratch = Scratch::new("empty");
+	let Some(oracle) = oracle() else {
+		return;
+	};
+	let session = block_on(Session::create_budget(
+		"Fresh start".to_owned(),
+		text(&scratch.join("fresh")),
+		veritas_ffi::NumberFormat {
+			currency: None,
+			style: veritas_ffi::NumberStyle::CommaDot,
+			hide_decimals: false,
+			symbol_first: None,
+			symbol_space: None,
+		},
+		veritas_ffi::NewBudgetOptions {
+			retirement_401k: false,
+			hsa: false,
+			accounts: Vec::new(),
+		},
+		CancelToken::new(),
+	))
+	.unwrap();
+	let mut pages = dashboards(&session, "2026-11-13");
+	if pages.is_empty() {
+		perform(
+			&session,
+			Command::CreateDashboard {
+				name: "Main".to_owned(),
+			},
+		);
+		pages = dashboards(&session, "2026-11-13");
+	}
+	let page = pages[0].id.clone();
+	for (n, kind) in [
+		"net-worth-card",
+		"cash-flow-card",
+		"spending-card",
+		"sankey-card",
+		"balance-forecast-card",
+		"formula-card",
+		"monte-carlo-card",
+	]
+	.into_iter()
+	.enumerate()
+	{
+		perform(
+			&session,
+			Command::AddWidget {
+				page_id: page.clone(),
+				kind: kind.to_owned(),
+				x: 4,
+				y: 3 * i64::try_from(n).unwrap(),
+				width: 4,
+				height: 3,
+				config: blank(),
+			},
+		);
+	}
+	let made_here = scratch.join("made-in-veritas.zip");
+	export(&session, &made_here);
+	session.close().unwrap();
+
+	let actual_made = scratch.join("edited-in-actual.zip");
+	apply(
+		&oracle,
+		&made_here,
+		Value::Array(every_new_kind("empty", &page, 40)),
+		&actual_made,
+		11,
+	);
+	let session = import(&actual_made, &scratch.join("veritas"));
+	let zip = scratch.join("veritas.zip");
+	export(&session, &zip);
+	let mut compared = 0;
+	for today in ["2026-11-13", "2026-12-01", "2027-02-28"] {
+		compared += same_cards_as_actual(&oracle, &session, &zip, today, cards);
+	}
+	assert!(compared >= 3 * (7 + 24), "{compared}");
+
+	let checking = created(
+		&perform(
+			&session,
+			Command::CreateAccount {
+				account: veritas_ffi::NewAccount {
+					name: "Checking".to_owned(),
+					kind: veritas_ffi::NewAccountKind::Checking,
+					starting_balance: 0,
+					loan: None,
+				},
+			},
+		),
+		EntityKind::Account,
+	);
+	let mut coffee = entry("first-coffee", &checking, "2026-11-10", -450);
+	coffee.payee_name = Some("Corner cafe".to_owned());
+	perform(
+		&session,
+		Command::AddTransaction {
+			transaction: coffee,
+		},
+	);
+	let zip = scratch.join("first-expense.zip");
+	export(&session, &zip);
+	for today in ["2026-11-13", "2026-12-01"] {
+		compared += same_cards_as_actual(&oracle, &session, &zip, today, cards);
+	}
+	assert!(compared >= 5 * (7 + 24), "{compared}");
+}
+
+#[test]
+fn filters_veritas_cannot_type_or_actual_does_not_define_survive_saves_as_actuals_editor_keeps_them()
+ {
+	// A card and a custom report whose filters came from a newer Actual: a
+	// repeating date (typed as `.raw`), a field and an op Actual 26.11 doesn't
+	// define, a named filter and an outflow range. Veritas renames
+	// both, which must leave every filter's text exactly as stored; then it
+	// drops the first filter and edits another, which must come out as
+	// Actual's editor saves the same edit.
+	let scratch = Scratch::new("filter-text");
+	let Some(oracle) = oracle() else {
+		return;
+	};
+	let plain = r#"{"field":"notes","op":"contains","value":"trip","type":"string"}"#;
+	let repeating_value = r#"{"start":"2026-01-31","frequency":"monthly","interval":1,"patterns":[{"type":"day","value":-1}],"skipWeekend":true,"weekendSolveMode":"before","endMode":"never"}"#;
+	let repeating =
+		format!(r#"{{"field":"date","op":"is","value":{repeating_value},"type":"date"}}"#);
+	let unknown_field =
+		r#"{"field":"mood","op":"is","value":"happy","type":"string","since":"27.1"}"#;
+	let amount = r#"{"field":"amount","op":"gt","value":-50000,"type":"number"}"#;
+	let unknown_op = r#"{"field":"notes","op":"startsWith","value":"Re","type":"string"}"#;
+	let named = format!(
+		r#"{{"field":"category","op":"oneOf","value":["{GROCERIES}","{DINING_OUT}"],"type":"id","customName":"Food"}}"#
+	);
+	let outflow = r#"{"field":"amount","op":"isbetween","value":{"num1":1000,"num2":90000},"type":"number","options":{"outflow":true}}"#;
+	let stored = [
+		plain.to_owned(),
+		repeating.clone(),
+		unknown_field.to_owned(),
+		amount.to_owned(),
+		unknown_op.to_owned(),
+		named.clone(),
+		outflow.to_owned(),
+	];
+	let list = |items: &[&str]| format!("[{}]", items.join(","));
+	let all: Vec<&str> = stored.iter().map(String::as_str).collect();
+	let base = scratch.join("base.zip");
+	apply(
+		&oracle,
+		&all_features(),
+		json!([
+			{"op": "addDashboardWidget", "id": "filter-card", "page": MAIN, "type": "summary-card",
+				"x": 0, "y": 50, "width": 4, "height": 2,
+				"metaText": format!(r#"{{"name":"Filtered","conditions":{},"conditionsOp":"and"}}"#, list(&all))},
+			{"op": "updateCustomReport", "id": SPENDING_REPORT,
+				"setText": format!(r#"{{"conditions":{}}}"#, list(&all))},
+		]),
+		&base,
+		12,
+	);
+	let stored_text = |zip: &Path| -> (String, String) {
+		let dump = raw_dump(&oracle, zip);
+		let meta: Value = serde_json::from_str(
+			table(&dump, "dashboard")["filter-card"]["meta"]
+				.as_str()
+				.unwrap(),
+		)
+		.unwrap();
+		let report = table(&dump, "custom_reports")[SPENDING_REPORT]["conditions"]
+			.as_str()
+			.unwrap()
+			.to_owned();
+		let card_text = table(&dump, "dashboard")["filter-card"]["meta"]
+			.as_str()
+			.unwrap()
+			.to_owned();
+		let start = card_text.find("\"conditions\":").unwrap() + "\"conditions\":".len();
+		let len = serde_json::to_string(&meta["conditions"]).unwrap().len();
+		(card_text[start..start + len].to_owned(), report)
+	};
+	assert_eq!(stored_text(&base), (list(&all), list(&all)));
+
+	let session = import(&base, &scratch.join("veritas"));
+	let config = widget(&dashboards(&session, "2026-11-13"), "filter-card")
+		.config
+		.clone();
+	let report = block_on(session.custom_report(
+		SPENDING_REPORT.to_owned(),
+		"2026-11-13".to_owned(),
+		CancelToken::new(),
+	))
+	.unwrap()
+	.settings;
+	assert_eq!(
+		config.conditions, report.conditions,
+		"the card and the report read the same filters the same way"
+	);
+	assert_eq!(
+		config.conditions.len(),
+		5,
+		"the field and op Actual doesn't define aren't listed: {:?}",
+		config.conditions
+	);
+	assert_eq!(config.conditions[1].field, RuleField::Date);
+	let RuleValue::Raw { json: shown } = &config.conditions[1].value else {
+		panic!("a repeating date is raw: {:?}", config.conditions[1]);
+	};
+	assert_eq!(
+		serde_json::from_str::<Value>(shown).unwrap(),
+		serde_json::from_str::<Value>(repeating_value).unwrap(),
+		"a repeating date comes back with its stored value"
+	);
+	assert_eq!(config.conditions[4].field, RuleField::AmountOutflow);
+
+	let mut renamed = config.clone();
+	renamed.name = Some("Filtered, renamed".to_owned());
+	perform(
+		&session,
+		Command::SetWidgetConfig {
+			widget_id: "filter-card".to_owned(),
+			config: renamed,
+		},
+	);
+	let mut renamed_report = report.clone();
+	renamed_report.name = "Spending, renamed".to_owned();
+	perform(
+		&session,
+		Command::SaveCustomReport {
+			settings: renamed_report,
+		},
+	);
+	let renamed_zip = scratch.join("renamed.zip");
+	export(&session, &renamed_zip);
+	assert_eq!(
+		stored_text(&renamed_zip),
+		(list(&all), list(&all)),
+		"a rename leaves every filter's text as stored"
+	);
+
+	let mut edited = config.clone();
+	edited.conditions.remove(0);
+	let at = edited
+		.conditions
+		.iter()
+		.position(|condition| condition.field == RuleField::Amount)
+		.unwrap();
+	edited.conditions[at].value = RuleValue::Amount { amount: -60_000 };
+	perform(
+		&session,
+		Command::SetWidgetConfig {
+			widget_id: "filter-card".to_owned(),
+			config: edited.clone(),
+		},
+	);
+	let mut edited_report = report;
+	edited_report.conditions = edited.conditions.clone();
+	perform(
+		&session,
+		Command::SaveCustomReport {
+			settings: edited_report,
+		},
+	);
+	let ours = scratch.join("veritas-edit.zip");
+	export(&session, &ours);
+
+	let new_amount = r#"{"field":"amount","op":"gt","value":-60000,"type":"number"}"#;
+	let actuals_edit = list(&[
+		&repeating,
+		unknown_field,
+		new_amount,
+		unknown_op,
+		&named,
+		outflow,
+	]);
+	let theirs = scratch.join("actual-edit.zip");
+	apply(
+		&oracle,
+		&base,
+		json!([
+			{"op": "updateWidgetMeta", "id": "filter-card",
+				"setText": format!(r#"{{"conditions":{actuals_edit}}}"#)},
+			{"op": "updateCustomReport", "id": SPENDING_REPORT,
+				"setText": format!(r#"{{"conditions":{actuals_edit}}}"#)},
+		]),
+		&theirs,
+		13,
+	);
+	assert_eq!(stored_text(&theirs), (actuals_edit.clone(), actuals_edit));
+	assert_eq!(
+		stored_text(&ours),
+		stored_text(&theirs),
+		"Veritas's edit against Actual's"
+	);
+}
+
+#[test]
+fn a_daily_or_weekly_net_worth_card_whose_range_starts_after_today_shows_what_actual_shows() {
+	// A static range that starts after today, as when the clock is behind
+	// the months a card was set to. Actual clamps a daily or weekly range's
+	// end to today and still draws the first period, with the net worth as
+	// of today; Veritas must show the same point and headline, not an empty
+	// card reading 0.
+	let scratch = Scratch::new("net-worth-ahead");
+	let Some(oracle) = oracle() else {
+		return;
+	};
+	let ahead = json!({"start": "2026-10", "end": "2026-11", "mode": "static"});
+	let ops: Vec<Value> = ["Daily", "Weekly", "Monthly"]
+		.into_iter()
+		.enumerate()
+		.map(|(n, interval)| {
+			json!({"op": "addDashboardWidget", "id": format!("ahead-{interval}"), "page": DEEP_DIVE,
+				"type": "net-worth-card", "x": 0, "y": 80 + 2 * i64::try_from(n).unwrap(), "width": 4, "height": 2,
+				"meta": {"interval": interval, "timeFrame": ahead}})
+		})
+		.collect();
+	let actual_made = scratch.join("ahead.zip");
+	apply(
+		&oracle,
+		&all_features(),
+		Value::Array(ops),
+		&actual_made,
+		14,
+	);
+	let session = import(&actual_made, &scratch.join("veritas"));
+	let zip = scratch.join("veritas.zip");
+	export(&session, &zip);
+	same_cards_as_actual(&oracle, &session, &zip, "2026-04-01", Cards::AllButFormula);
 }
 
 /// Everything the dashboard editor shows, as text: `WidgetView` holds

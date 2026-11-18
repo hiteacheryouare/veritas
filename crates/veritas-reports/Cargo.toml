@@ -17,6 +17,9 @@ veritas-rules = { path = "../veritas-rules" }
 criterion.workspace = true
 proptest.workspace = true
 rusqlite.workspace = true
+# The oracle prints large results as JSON numbers; the default parser can
+# read them back an ulp off, which would fail a bit-exact comparison.
+serde_json = { workspace = true, features = ["float_roundtrip"] }
 veritas-interop = { path = "../veritas-interop" }
 veritas-store = { path = "../veritas-store" }
 

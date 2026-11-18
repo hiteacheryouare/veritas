@@ -69,6 +69,12 @@ pub(crate) fn summary_days(
 	Ok((start, end))
 }
 
+/// `get-earliest-transaction`: the oldest date, split parents counted.
+pub(crate) fn earliest_transaction(budget: &BudgetData) -> Option<NaiveDate> {
+	let any = budget.transactions.values().any(|row| !row.tombstone);
+	any.then(|| transaction_date_bounds(budget, NaiveDate::MAX).0)
+}
+
 /// `get-latest-transaction`: the newest date, split parents counted.
 pub(crate) fn latest_transaction(budget: &BudgetData) -> Option<NaiveDate> {
 	let any = budget.transactions.values().any(|row| !row.tombstone);
