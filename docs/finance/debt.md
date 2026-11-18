@@ -41,13 +41,14 @@ Order of sources for the wizard's defaults:
 2. If no earlier payment exists, `payment_cents` from the loan metadata as the total, with interest left blank and escrow 0. If `rate_bps` is set, DEBT-4's estimate is shown beside the interest field as a hint the user can accept, and is never pre-filled.
 3. Otherwise nothing is pre-filled.
 
-**Reading the last payment's parts.** Which expense line is interest, escrow or fees is recorded when the wizard writes the payment, in `veritas_loan_payment_part` (DEBT-6 A.7). It is never inferred from position, category or name (CLS-3.4). A mapping row counts only while its line is live, is an expense child of that payment, and the payment is live. `principal_last` is the `debt_principal` child in both cases below.
+**Reading the last payment's parts.** Which expense line is interest, escrow or fees is recorded when the wizard writes the payment, in `veritas_loan_payment_part` (DEBT-6 A.7). It is never inferred from position, category or name (CLS-3.4). A mapping row counts only while its line is live, is an expense child of that payment, and the payment is live. `principal_last` is the `debt_principal` child in every case below.
 
+- **With no expense lines** (a principal-only payment, however it was made). There is nothing to identify, so there is nothing to misread and no mapping is needed. The payment is read as it is: `total` is `principal_last`, `interest` is blank and `escrow` is 0, and `from` and the principal category come from the last payment. It does not fall back to the loan's `payment_cents`, because the user's last payment is the better suggestion.
 - **With a usable mapping.** `interest` is the mapped interest line's amount, or blank when there is none. `escrow` is the mapped escrow line's amount, or 0. `fees` are never pre-filled. The pre-filled `total` is `principal_last + interest + escrow`, with a blank interest counting as 0, never the last payment's total, so a late fee is never carried into the next payment and principal can only pre-fill as `principal_last`. Each part's category is its mapped line's category.
-- **With no usable mapping** (the payment was made in Actual, imported, or written by an older Veritas, or its mapped lines are gone). No expense line is read. `total` is the loan's `payment_cents`, `interest` is blank and `escrow` is 0. With no `payment_cents`, nothing is pre-filled. `from` and the principal category still come from the last payment.
+- **With expense lines and no usable mapping** (the payment was made in Actual, imported, or written by an older Veritas, or its mapped lines are gone). No expense line is read. `total` is the loan's `payment_cents`, `interest` is blank and `escrow` is 0. With no `payment_cents`, nothing is pre-filled. `from` and the principal category still come from the last payment.
 - **An unmapped expense line is ignored**, whatever its position in the split.
 
-Examples L-5b, L-5c and L-5d below.
+Examples L-5b, L-5c, L-5d and L-5e below.
 
 Then `principal = total - interest - escrow - fees` (DEBT-2.1). If principal exceeds outstanding principal (DEBT-1, as of the day before the payment date shown), principal is capped at outstanding principal and the total is reduced by the same amount (a final, smaller payment). The user can overwrite every field.
 
@@ -77,6 +78,7 @@ Standard payment: $400 = $320 principal + $80 interest. Loan balance -980000, `r
 | L-5b Pre-fill after a fee | last payment is L-5, written by the wizard: children principal 32000, interest 8000, fee 2500 (no escrow), mapped as interest and fees | pre-fill interest 8000, escrow 0, fees blank, total 32000 + 8000 + 0 = 40000, principal 32000. The fee is not carried and the last total 42500 is never used as principal's base |
 | L-5c Pre-fill after escrow and a fee | last payment written by the wizard: children principal 32000, escrow 4000, fee 500, no interest (0 is omitted), mapped as escrow and fees | pre-fill interest blank, escrow 4000, fees blank, total 32000 + 0 + 4000 = 36000, principal 32000 |
 | L-5d Pre-fill after a payment made in Actual | last payment made in Actual: principal 32000 and one expense child 8000, no mapping rows. Loan `payment_cents` 40000 | no expense line is read. Pre-fill total 40000, interest blank, escrow 0. `from` and the principal category come from the last payment. With no `payment_cents`, nothing is pre-filled |
+| L-5e Pre-fill after a principal-only payment | last payment (the wizard's or Actual's): principal 32000 and no expense line. Loan `payment_cents` 40000 | no mapping is needed. Pre-fill total 32000 = `principal_last`, interest blank, escrow 0. The loan's 40000 is not used. `from` and the principal category come from the last payment |
 | L-6 Extra principal | total 50000, interest 8000 | principal 42000. All of it is debt paydown. Expense 8000 |
 | L-7 Final payment | outstanding 20000, pre-fill total 40000, interest 100 | principal capped at 20000, total becomes 20100, loan balance 0 |
 | L-8 Overpay | principal 25000 on outstanding 20000 | warning. Loan balance +5000, moves to assets. Net worth unchanged by the payment |
