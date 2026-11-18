@@ -277,8 +277,6 @@ pub struct ForecastCardPoint {
 pub enum FormulaErrorKind {
 	/// The text doesn't start with `=`.
 	NotAFormula,
-	/// Veritas has no formula engine yet (D75).
-	NotImplemented,
 	Cycle,
 	DivByZero,
 	Error,
@@ -294,12 +292,13 @@ pub enum FormulaErrorKind {
 pub struct FormulaError {
 	pub kind: FormulaErrorKind,
 	/// Actual's exact text, `Formula error: DIV_BY_ZERO` or `Formula must
-	/// start with =`, or Veritas's for `notImplemented`.
+	/// start with =`.
 	pub message: String,
 }
 
-/// The formula's result. A number is already rounded to 10 significant
-/// digits, as Actual exports it, not yet formatted.
+/// The formula's result. A number is already rounded as Actual exports it
+/// (11 significant digits, NaN or infinite where that overflows), not yet
+/// formatted.
 #[derive(Debug, Clone, PartialEq, uniffi::Enum)]
 pub enum FormulaValue {
 	Number { value: f64 },
@@ -780,7 +779,6 @@ fn formula_error(error: reports::FormulaError) -> FormulaError {
 	FormulaError {
 		kind: match error.kind {
 			K::NotAFormula => FormulaErrorKind::NotAFormula,
-			K::NotImplemented => FormulaErrorKind::NotImplemented,
 			K::Cycle => FormulaErrorKind::Cycle,
 			K::DivByZero => FormulaErrorKind::DivByZero,
 			K::Error => FormulaErrorKind::Error,
@@ -1458,22 +1456,6 @@ mod tests {
 	}
 
 	#[test]
-	fn a_formula_card_draws_while_the_engine_is_pending() {
-		let (_scratch, core) = imported("all-features");
-		let WidgetView::Formula {
-			formula,
-			value: FormulaValue::Error { error },
-			..
-		} = add(&core, "formula-card", blank())
-		else {
-			panic!("the formula card should draw");
-		};
-		assert_eq!(formula, "=SUM(1, 2, 3)");
-		assert_eq!(error.kind, FormulaErrorKind::NotImplemented);
-	}
-
-	#[test]
-	#[ignore = "clean-room formula engine pending"]
 	fn the_formula_card_shows_actuals_value_and_error() {
 		let (_scratch, core) = imported("all-features");
 		let formula = add(

@@ -7,8 +7,13 @@
 //! `colorFormula` is left out: its `theme_*` variables are the web app's CSS
 //! colors.
 
+mod datetime;
 mod engine;
+mod evaluator;
+mod functions;
 mod months;
+mod parser;
+mod value;
 
 use std::collections::HashMap;
 
@@ -29,13 +34,11 @@ use crate::report_query::{parse_date, unsupported};
 /// The formula a new card shows (`FormulaCard.tsx:44`).
 pub const DEFAULT_FORMULA: &str = "=SUM(1, 2, 3)";
 
-/// The error types Actual's card names in `Formula error: <type>`, the one
-/// it raises itself for text that isn't a formula, and `NotImplemented`
-/// while Veritas has no formula engine (D75).
+/// The error types Actual's card names in `Formula error: <type>`, and the
+/// one it raises itself for text that isn't a formula.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FormulaErrorKind {
 	NotAFormula,
-	NotImplemented,
 	Cycle,
 	DivByZero,
 	Error,
@@ -48,10 +51,10 @@ pub enum FormulaErrorKind {
 }
 
 impl FormulaErrorKind {
-	/// The type Actual's card names, `None` for the two it doesn't.
+	/// The type Actual's card names, `None` for text that isn't a formula.
 	pub fn error_type(self) -> Option<&'static str> {
 		Some(match self {
-			FormulaErrorKind::NotAFormula | FormulaErrorKind::NotImplemented => return None,
+			FormulaErrorKind::NotAFormula => return None,
 			FormulaErrorKind::Cycle => "CYCLE",
 			FormulaErrorKind::DivByZero => "DIV_BY_ZERO",
 			FormulaErrorKind::Error => "ERROR",
@@ -75,19 +78,17 @@ pub struct FormulaError {
 
 impl FormulaError {
 	fn new(kind: FormulaErrorKind) -> Self {
-		let message = match (kind, kind.error_type()) {
-			(_, Some(name)) => format!("Formula error: {name}"),
-			(FormulaErrorKind::NotImplemented, None) => {
-				"Veritas can't compute formulas yet.".to_owned()
-			}
-			(_, None) => "Formula must start with =".to_owned(),
+		let message = match kind.error_type() {
+			Some(name) => format!("Formula error: {name}"),
+			None => "Formula must start with =".to_owned(),
 		};
 		FormulaError { kind, message }
 	}
 }
 
-/// The formula's value: a number already rounded to 10 significant digits,
-/// as Actual exports it, not yet formatted as money.
+/// The formula's value: a number already rounded as Actual exports it (11
+/// significant digits, NaN or infinite where that overflows), not yet
+/// formatted as money.
 #[derive(Clone, Debug, PartialEq)]
 pub enum FormulaValue {
 	Number(f64),

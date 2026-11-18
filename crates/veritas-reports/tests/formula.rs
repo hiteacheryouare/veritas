@@ -1,7 +1,7 @@
 //! D73: the formula card, compared with Actual's own `useFormulaExecution`
 //! flow, run by the oracle (`widgets`) on the same fixture and meta. These
 //! are black-box comparisons of outputs, and the acceptance suite for the
-//! clean-room formula engine (D75), so they're ignored until it lands.
+//! clean-room formula engine (D75).
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -595,10 +595,934 @@ const OUT_OF_SCOPE: &[&str] = &[
 	"=EDATE(DATE(2026,1,31),1)",
 	"=INT(2.5)",
 	"=IFERROR(QUERY(\"all\"),0)",
+	"=LOG10(100)",
+];
+
+/// Tokens, precedence, whitespace and parse errors.
+const GRAMMAR_EDGES: &[&str] = &[
+	"=R1C1",
+	"=rc",
+	"=R",
+	"=C",
+	"=R1C",
+	"=RR",
+	"=CR",
+	"=TRUE()+FALSE",
+	"=_",
+	"=x_1",
+	"=.x",
+	"=a.b.c",
+	"=\"a\\\\\"&\"z\"",
+	"=\"a\\\"",
+	"=\"a\nb\"",
+	"=\"\"",
+	"=\"a\"\"\"",
+	"=#n/a",
+	"=#N/A2",
+	"=#SPILL!",
+	"=#LIC!",
+	"=#div/0!",
+	"=#NAME",
+	"=#N/A+1",
+	"=1+#N/A",
+	"=SUM(#N/A)",
+	"=1e400",
+	"=1e",
+	"=1e+3",
+	"=1.2.3",
+	"=..5",
+	"=1..2",
+	"=01",
+	"=0x10",
+	"=1 +2",
+	"= 1",
+	"=1\r\n+2",
+	"=SUM(1, ,2)",
+	"=SUM( 1 )",
+	"=SUM(1,)",
+	"=SUM(,)",
+	"=SUM(,1)",
+	"=(1)(2)",
+	"=((1))",
+	"=-(-(1))",
+	"=1--1",
+	"=1+-+-1",
+	"=2*-3",
+	"=2^-3^2",
+	"=-2^-2",
+	"=50%%",
+	"=(50)%",
+	"=-50%^2",
+	"=2^50%",
+	"=1&2+3",
+	"=1+2&3",
+	"=1=1&\"\"",
+	"=1<2=TRUE()",
+	"=1&2=12",
+	"=\"12\"=1&2",
+	"=1<>2<>3",
+	"=1>=1>=1",
+	"=1=<2",
+	"=1=>2",
+	"=1><2",
+	"=1<=>2",
+	"=1==",
+	"=1==1",
+	"=TRUE()+TRUE()",
+	"=TRUE()&1",
+	"=SUM(1;2)",
+	"=sum(1,2)",
+	"=Sum(1,2)",
+	"=SUM(1,2)+",
+	"=SUM(1,2",
+	"=SUM)",
+	"=()",
+	"=(,)",
+	"=IF(1,2,)+1",
+	"=IF(,)",
+	"=IF(,,)",
+	"=+",
+	"=-",
+	"=%",
+	"=1%",
+	"=1 %",
+	"=1% ",
+	"=(1)%",
+	"=TODAY() ",
+	"= TODAY()",
+	"=TODAY( )",
+	"=TODAY(1)",
+	"=TODAY(,)",
+	"=SUM(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31)",
+	"=1E+3",
+	"=2e3e",
+	"=1e3a",
+	"=1a",
+	"=1 a",
+	"=a 1",
+	"=@1",
+	"=!1",
+	"=~1",
+	"=1 ' 2",
+	"='a'",
+	"=[1]",
+	"=1#",
+	"=#",
+	"=\u{a0}",
+	"=1\u{a0}",
+	"=\u{3000} 1",
+	"=#N/A/1",
+	"=#N/A1",
+	"=#NUM!1",
+	"=#N/A_",
+	"=#N/A.5",
+	"=#DIV/0!/1",
+	"=#REF!A1",
+	"=#N/A?",
+	"=#VALUE!!",
+	"=#N/A!",
+	"=#NAME??",
+	"=#N/A/1e3%",
+];
+
+/// Text read as a number: signs, `$`, `%`, dates and times.
+const TEXT_AS_NUMBER_EDGES: &[&str] = &[
+	"=\"5\"+0",
+	"=\"-5\"+0",
+	"=\"+5\"+0",
+	"=\"--5\"+0",
+	"=\" -5\"+0",
+	"=\"- 5\"+0",
+	"=\"5 \"+0",
+	"=\"\t5\"+0",
+	"=\"\n5\"+0",
+	"=\"\u{a0}5\"+0",
+	"=\"5e\"+0",
+	"=\"5E3\"+0",
+	"=\"5e+3\"+0",
+	"=\".\"+0",
+	"=\"5.\"+0",
+	"=\"1.5\"+0",
+	"=\"1,5\"+0",
+	"=\"0x10\"+0",
+	"=\"Infinity\"+0",
+	"=\"NaN\"+0",
+	"=\"1e400\"+0",
+	"=\"5%%\"+0",
+	"=\"%5\"+0",
+	"=\"%\"+0",
+	"=\"$\"+0",
+	"=\"$5%\"+0",
+	"=\"5%$\"+0",
+	"=\"$$5\"+0",
+	"=\"5 $\"+0",
+	"=\"-5$\"+0",
+	"=\"5-$\"+0",
+	"=\"$5.5\"+0",
+	"=\"€5\"+0",
+	"=\"-5%\"+0",
+	"=\"TRUE\"+0",
+	"=\"1/2\"+0",
+	"=\"1/2/2026\"+0",
+	"=\"2026-1-5\"+0",
+	"=\"2026-01-5\"+0",
+	"=\"5/1/2026\"+0",
+	"=\"05/01/26\"+0",
+	"=\"05/01/30\"+0",
+	"=\"05/01/31\"+0",
+	"=\"05/01/2\"+0",
+	"=\"05/01/202\"+0",
+	"=\"05/01/02026\"+0",
+	"=\"15/01\"+0",
+	"=\"01/15\"+0",
+	"=\"15/13\"+0",
+	"=\"15/1/\"+0",
+	"=\"/01/2026\"+0",
+	"=\"15//2026\"+0",
+	"=\"2026-01\"+0",
+	"=\"2026-13\"+0",
+	"=\"2026/01\"+0",
+	"=\"01/2026\"+0",
+	"=\"2026-01-15-\"+0",
+	"=\"2026 01 15\"+0",
+	"=\"15 01 2026\"+0",
+	"=\"15  01 2026\"+0",
+	"=\"15/01-2026\"+0",
+	"=\"2026-01-15T10:00\"+0",
+	"=\"2026-01-15  10:30\"+0",
+	"=\"10:30 2026-01-15\"+0",
+	"=\"0:0\"+0",
+	"=\"24:00\"+0",
+	"=\"25:00\"+0",
+	"=\"10:60\"+0",
+	"=\"10:59:60\"+0",
+	"=\"10:59:59.999\"+0",
+	"=\"100:00\"+0",
+	"=\"10:30am\"+0",
+	"=\"10:30AM\"+0",
+	"=\"10:30 a\"+0",
+	"=\"12:30 am\"+0",
+	"=\"12:30 pm\"+0",
+	"=\"0:30 pm\"+0",
+	"=\"0:30 am\"+0",
+	"=\"10:30 p.m.\"+0",
+	"=\"10\"+0",
+	"=\"10 pm\"+0",
+	"=\":30\"+0",
+	"=\"10:30:\"+0",
+	"=\"10::30\"+0",
+	"=\"10:30:15:20\"+0",
+	"=\"1:2:3\"+0",
+	"=\"10:30.5\"+0",
+	"=\"10.5:30\"+0",
+	"=\"-10:30\"+0",
+	"=\"2026-01-15 25:00\"+0",
+	"=\"2026-02-30\"+0",
+	"=\"2026-00-10\"+0",
+	"=\"2026-01-00\"+0",
+	"=\"0000-01-01\"+0",
+	"=\"0001-01-01\"+0",
+	"=\"1899-12-30\"+0",
+	"=\"1899-12-29\"+0",
+	"=\"1900-02-29\"+0",
+	"=\"1900-03-01\"+0",
+	"=\"9999-12-31\"+0",
+	"=\"10000-01-01\"+0",
+	"=\"1500-01-01\"+0",
+	"=\"0099-01-01\"+0",
+	"=\"99-01-01\"+0",
+	"=\"15/01/0099\"+0",
+	"=\"15/01/1899\"+0",
+	"=\"jan 15 2026\"+0",
+	"=\"15-Jan-2026\"+0",
+	"=\"2026-01-15 10:30 pm\"+0",
+	"=\"2026-01-15 10\"+0",
+	"=\"2026-01-15 abc\"+0",
+	"=\"2026-01-1510:30\"+0",
+	"=\"5 5\"+0",
+	"=\"1 000\"+0",
+	"=\"15/01/0\"+0",
+	"=\"15/01/00\"+0",
+	"=\"15/01/000\"+0",
+	"=\"15/01/1\"+0",
+	"=\"15/01/ \"+0",
+	"=\"15/01/2000\"+0",
+	"=\"15/01/  \"+0",
+	"=\"15/01/ 10:30\"+0",
+	"=\"15/01/.\"+0",
+	"=\"15/01//\"+0",
+	"=\"2026-01-\"+0",
+	"=\"2026/01/\"+0",
+	"=\"-01-15\"+0",
+	"=\"/01/15\"+0",
+	"=\"15/01/1582\"+0",
+	"=\"15/01/1583\"+0",
+	"=\"15/01/1600\"+0",
+	"=\"15/01/1700\"+0",
+	"=\"15/01/1800\"+0",
+	"=\"15/01/1850\"+0",
+	"=\"15/01/1898\"+0",
+	"=\"15/01/1000\"+0",
+	"=\"15/01/999\"+0",
+	"=\"15/01/1001\"+0",
+	"=\"15/01/1100\"+0",
+	"=\"15/01/1200\"+0",
+	"=\"15/01/1300\"+0",
+	"=\"15/01/1400\"+0",
+	"=\"15/01/1499\"+0",
+	"=\"15/01/1501\"+0",
+	"=\"15/01/1550\"+0",
+	"=\"31/12/1499\"+0",
+	"=\"01/01/1500\"+0",
+	"=\"10/11/12\"+0",
+	"=\"1/1/1\"+0",
+	"=\"001/01/2026\"+0",
+	"=\"15/001/2026\"+0",
+	"=\"0015/01/2026\"+0",
+	"=\"2026-001-15\"+0",
+	"=\"+15/01/2026\"+0",
+	"=\"15/+1/2026\"+0",
+	"=\"1.5/01/2026\"+0",
+	"=\"15/01/2026.5\"+0",
+	"=\"15.01.2026\"+0",
+	"=\"15. 01. 2026\"+0",
+	"=\"15 / 01 / 2026\"+0",
+	"=\"2026-01-15 \"+0",
+	"=\"15/01/2026 10:30:15.25 PM\"+0",
+	"=\"15/01/2026 13:00 am\"+0",
+	"=\"15/01/2026 00:00\"+0",
+	"=\"15/01/2026 24:00\"+0",
+	"=\"15/01/2026 10:30 xx\"+0",
+	"=\"15/01/2026 10:30 pmx\"+0",
+	"=\"15/01/2026 10:30 p\"+0",
+	"=\"15/01/2026 10:30 P\"+0",
+	"=\"10:30 P\"+0",
+	"=\"10:30 A M\"+0",
+	"=\"10:30  pm\"+0",
+	"=\"10: 30\"+0",
+	"=\"10 :30\"+0",
+	"=\"1e1:30\"+0",
+	"=\"10:3e1\"+0",
+	"=\"10:30:1.5e1\"+0",
+	"=\"10:30:15.\"+0",
+	"=\"10:30:.5\"+0",
+	"=\"+10:30\"+0",
+	"=\"10:+30\"+0",
+	"=\"57%\"+0",
+	"=57%",
+	"=57%&\"\"",
+	"=(\"57%\"+0)&\"\"",
+	"=(\"0.57\"+0)&\"\"",
+	"=\"57 %\"*1",
+	"=\"1e-400\"+0",
+	"=\"-0\"+0",
+	"=\"00005\"+0",
+	"=\"5.5.5\"+0",
+	"=\"$5$\"+0",
+	"=\"$ -5\"+0",
+	"=\"-5 $\"+0",
+	"=\"- $5\"+0",
+	"=\"$+5\"+0",
+	"=\"$1e3\"+0",
+	"=\"1e3%\"+0",
+	"=\"$.5\"+0",
+	"=\"$ \"+0",
+	"=\"5%  \"+0",
+	"=\"  5  %  \"+0",
+	"=\"15 01 2026  10:30\"+0",
+	"=\"15 01 2026\t10:30\"+0",
+	"=\"15/01/2026  10:30\"+0",
+	"=\"15 01  2026 10:30\"+0",
+	"=\"15  01 2026 10:30\"+0",
+	"=\"15 01 2026 10:30  pm\"+0",
+	"=\"15/01/2026  10:30  pm\"+0",
+	"=\"15-01 2026  10:30\"+0",
+	"=\"15  01  2026\"+0",
+	"=\"15   01 2026\"+0",
+	"=\"10:-0\"+0",
+	"=\"10:-5\"+0",
+	"=\"-0:30\"+0",
+	"=\":-0\"+0",
+	"=\"10:30:-0\"+0",
+	"=\"10:-0 pm\"+0",
+	"=\"10:-0.0\"+0",
+	"=\"10:00\u{a0}pm\"+0",
+	"=-\":-0P\"",
+];
+
+/// Comparisons, empty values, IF, AND, OR, NOT and the aggregates.
+const LOGIC_EDGES: &[&str] = &[
+	"=\"15/01/1581\"+0",
+	"=\"31/12/1581\"+0",
+	"=\"01/01/1582\"+0",
+	"=\"14/10/1582\"+0",
+	"=\"15/10/1582\"+0",
+	"=\":\"+0",
+	"=\"::\"+0",
+	"=\"10:99\"+0",
+	"=\"10:30:99\"+0",
+	"=\"10:30:.\"+0",
+	"=\"10:30:15.5.5\"+0",
+	"=\"0:0 am\"+0",
+	"=\"12:00 am\"+0",
+	"=\"12:00\"+0",
+	"=\"15 01 2026 10:30\"+0",
+	"=\"15/01 10:30\"+0",
+	"=\"\u{a0}15/01/2026\u{a0}\"+0",
+	"=\"15/01/2026\u{a0}10:30\"+0",
+	"=\"15/01/2026\t10:30\"+0",
+	"=\"15\u{a0}01\u{a0}2026\"+0",
+	"=\"5%\"=0.05",
+	"=\"$5\"=5",
+	"=\"10:30\"=0.4375",
+	"=\"2026-01-15\"<46038",
+	"=\"2026-01-15\">\"a\"",
+	"=\"15/01/2026\"<\"2026-01-14\"",
+	"=\"5\"<6",
+	"=\"5\"<\"6\"",
+	"=\"1e3\"=\"1000\"",
+	"=\"\"<\"a\"",
+	"=\"\"=\"\"",
+	"=IF(1,)=IF(1,)",
+	"=IF(1,)<\"a\"",
+	"=IF(1,)<\"\"",
+	"=IF(1,)>-1",
+	"=IF(1,)<TRUE()",
+	"=FALSE()<TRUE()",
+	"=FALSE()=0",
+	"=\"TRUE\"=TRUE()",
+	"=1<1.0000000000001",
+	"=1.0000000000001>1",
+	"=1<=1.0000000000001",
+	"=1<>1.0000000000001",
+	"=0=1e-300",
+	"=-0.0000000000001=0.0000000000001",
+	"=1e-300=2e-300",
+	"=100000000000000=100000000000001",
+	"=\"a\"<\"B\"",
+	"=\"A\"<\"b\"",
+	"=\"a\"=\"A \"",
+	"=\"ab\"<\"abc\"",
+	"=\"Ab\"<\"aB\"",
+	"=\"a\"<>\"A\"",
+	"=\"\t\"<\" \"",
+	"=\"!\"<\"\"\"\"",
+	"=SUM(\"\",1)",
+	"=SUM(\" \",1)",
+	"=SUM(\"2026-01-15\")",
+	"=SUM(\"5%\")",
+	"=SUM(FALSE())",
+	"=SUM(1e308,1e308,-1e308)",
+	"=SUM(0.1,0.2)",
+	"=SUM(1,-1e-14)",
+	"=AVERAGE(TRUE())",
+	"=AVERAGE(\"5\")",
+	"=AVERAGE(,)",
+	"=AVERAGE(IF(1,))",
+	"=SUM(IF(1,))",
+	"=MIN()",
+	"=MAX()",
+	"=MIN(\"x\")",
+	"=MAX(TRUE(),0)",
+	"=MIN(IF(1,),5)",
+	"=MAX(,-5)",
+	"=MIN(1e308*10)",
+	"=AVERAGE(1e308,1e308)",
+	"=AVERAGE(0.1,0.2,0.3)",
+	"=AVERAGE(1,2)",
+	"=MAX(\"abc\")",
+	"=MIN(1,\"x\",1/0)",
+	"=MIN(1/0,\"x\")",
+	"=SUM(\"x\",1/0)",
+	"=1/0+\"x\"",
+	"=\"x\"+1/0",
+	"=\"x\"&1/0",
+	"=1/0&\"x\"",
+	"=#N/A=#VALUE!",
+	"=-#N/A",
+	"=#N/A%",
+	"=IF(1,#N/A)",
+	"=IF(#N/A,1)",
+	"=AND(1,#N/A)",
+	"=AND(0,#N/A)",
+	"=OR(1,#N/A)",
+	"=AND(\"TRUE\")",
+	"=AND(\"true\",\"false\")",
+	"=AND(\"\")",
+	"=OR(\"\")",
+	"=OR(\"\",1)",
+	"=AND(IF(1,))",
+	"=AND(IF(1,),1)",
+	"=AND(,1)",
+	"=OR(,1)",
+	"=OR(,)",
+	"=NOT(\"\")",
+	"=NOT(\"TRUE\")",
+	"=NOT(\"false\")",
+	"=NOT(IF(1,))",
+	"=NOT(2)",
+	"=NOT(-0.5)",
+	"=NOT(\"5\")",
+	"=IF(\"5\",1,2)",
+	"=IF(\"0\",1,2)",
+	"=IF(\" \",1,2)",
+	"=IF(\"FALSE\",1,2)",
+	"=IF(\"True\",1,2)",
+	"=IF(\"2026-01-15\",1,2)",
+	"=IF(0.0000001,1,2)",
+	"=IF(IF(1,),1,2)",
+	"=IF(TRUE(),IF(1,),2)",
+	"=IF(1,\"\")",
+	"=IF(1,2,3,)",
+	"=IF()",
+	"=IF(1,,2)",
+	"=IF(0,,2)",
+	"=IF(1,TRUE())",
+	"=AND(1,2,3,0)",
+	"=OR(0,0,0)",
+	"=TRUE(,)",
+	"=FALSE()+0",
+	"=\"0:00\"=IF(1,)",
+	"=\"10:30\"<IF(1,)",
+	"=IF(1,)<\"10:30\"",
+	"=\"10:30\"<TRUE()",
+	"=\"10:30\"=\"10:30:00\"",
+	"=\"10:30\">\"5\"",
+	"=\"5\"<\"10:30\"",
+	"=\"2026-01-15\">5",
+	"=5<\"abc\"",
+	"=\"15/01/2026\"<\"abc\"",
+	"=0.2&123456.789>\"10:30\"",
+	"=LOWER(-0.5)<\"15/01/2026\"",
+	"=\"10:30\">\"\"",
+	"=\"10:30\">\"$5\"",
+	"=\"0\">=\"15/01/2026\"",
+];
+
+/// ROUND, ABS and the text functions.
+const FUNCTION_EDGES: &[&str] = &[
+	"=ROUND(0.285,2)",
+	"=ROUND(1.255,2)",
+	"=ROUND(8.345,2)",
+	"=ROUND(0.615,2)",
+	"=ROUND(10.235,2)",
+	"=ROUND(4.35,1)",
+	"=ROUND(1.45,1)",
+	"=ROUND(2.345,2)",
+	"=ROUND(5.015,2)",
+	"=ROUND(1.0049999999999,2)",
+	"=ROUND(0.5)",
+	"=ROUND(1.5)",
+	"=ROUND(-0.5)",
+	"=ROUND(0.49999999999999994)",
+	"=ROUND(123.456,-1)",
+	"=ROUND(125,-1)",
+	"=ROUND(-125,-1)",
+	"=ROUND(15,-1)",
+	"=ROUND(1.5,0)",
+	"=ROUND(1.2345678,5)",
+	"=ROUND(1,-400)",
+	"=ROUND(1e-300,2)",
+	"=ROUND(\"2.5\")",
+	"=ROUND(TRUE())",
+	"=ROUND(2.5,TRUE())",
+	"=ROUND(IF(1,),1)",
+	"=ROUND(2.567,IF(1,))",
+	"=ROUND(2.567,)",
+	"=ROUND(,2)",
+	"=ROUND(1/0,\"x\")",
+	"=ROUND(\"x\",1/0)",
+	"=ROUND(1,2,3)",
+	"=ROUND(-1.005,2)",
+	"=ROUND(1234.5678,-2.5)",
+	"=ROUND(2.5,0.5)",
+	"=ROUND(2.5,-0.5)",
+	"=ROUND(1.23456,-1.5)",
+	"=ROUND(0.1+0.2,16)",
+	"=ROUND(0.1+0.2,17)",
+	"=ROUND(1.1,308)",
+	"=ROUND(1.1,309)",
+	"=ROUND(1.1,22)",
+	"=ROUND(1.1,23)",
+	"=ABS(-0)",
+	"=ABS(TRUE())",
+	"=ABS(IF(1,))",
+	"=ABS(\"\")",
+	"=ABS(\"x\")",
+	"=ABS(,)",
+	"=ABS(\"$-5\")",
+	"=ABS(-1e308*10)",
+	"=LEN(TRUE())",
+	"=LEN(IF(1,))",
+	"=LEN(1/3)",
+	"=LEN(1e21)",
+	"=LEN()",
+	"=LEN(\"a\",\"b\")",
+	"=LEN(1/0)",
+	"=LEFT(\"hello\",\"2\")",
+	"=LEFT(\"hello\",\"x\")",
+	"=LEFT(\"hello\",)",
+	"=LEFT(\"hello\",IF(1,))",
+	"=LEFT(\"hello\",TRUE())",
+	"=LEFT(,2)",
+	"=LEFT(TRUE(),2)",
+	"=LEFT(1/3,4)",
+	"=LEFT(\"hello\",1e308*10)",
+	"=LEFT(\"hello\",-0.5)",
+	"=RIGHT(\"hello\",-0.5)",
+	"=RIGHT(\"hello\",1.5)",
+	"=RIGHT(\"hello\",4.9)",
+	"=RIGHT(\"hello\",5.5)",
+	"=RIGHT(\"hello\",)",
+	"=RIGHT(\"hello\",IF(1,))",
+	"=LEFT(\"hello\",1,2)",
+	"=LEFT()",
+	"=RIGHT()",
+	"=RIGHT(\"\",1)",
+	"=UPPER()",
+	"=UPPER(1/3)",
+	"=UPPER(IF(1,))",
+	"=UPPER(\"ǆ\")",
+	"=LOWER(\"ΣΑΣ\")",
+	"=UPPER(\"ﬃ\")",
+	"=LOWER(\"İ\")",
+	"=UPPER(1,2)",
+	"=CONCATENATE(IF(1,),\"a\")",
+	"=CONCATENATE(,\"a\")",
+	"=CONCATENATE(\"a\",)",
+	"=CONCATENATE(1e21)",
+	"=CONCATENATE(-0)",
+	"=CONCATENATE(0.1+0.2)",
+	"=CONCATENATE(123456789012345680000)",
+	"=CONCATENATE(1e-7,1.5e-7,0.000001234)",
+	"=CONCATENATE(2^53+1)",
+	"=CONCATENATE(DATE(2026,1,1))",
+	"=CONCATENATE(TODAY())",
+	"=CONCATENATE(\"x\",\"y\",\"z\",1,2,3)",
+	"=1e300*1e10&\"\"",
+	"=-0&\"\"",
+	"=0.1+0.2&\"\"",
+	"=(0.1+0.2)&\"\"",
+	"=(0.1+0.2-0.3)&\"\"",
+	"=100&\"\"",
+	"=1e20&\"\"",
+	"=123e-20&\"\"",
+	"=\"a\"&IF(1,)&\"b\"",
+	"=IF(1,)&IF(1,)",
+	"=LEN(IF(1,)&IF(1,))",
+];
+
+/// DATE, YEAR, MONTH, DAY and EOMONTH at their limits.
+const DATE_EDGES: &[&str] = &[
+	"=YEAR(1e10)",
+	"=DATE(1900,1,1)",
+	"=DATE(1899,12,30)",
+	"=DATE(0,1,1)",
+	"=DATE(-1,1,1)",
+	"=DATE(99,1,1)",
+	"=DATE(100,1,1)",
+	"=DATE(1899,1,1)",
+	"=DATE(1900,0,1)",
+	"=DATE(1900,1,0)",
+	"=DATE(1900,1,-1)",
+	"=DATE(1899,13,1)",
+	"=DATE(9999,12,31)",
+	"=DATE(9999,12,32)",
+	"=DATE(9999,13,1)",
+	"=DATE(2026,1,100000)",
+	"=DATE(2026,1,10000000)",
+	"=DATE(2026,1,-100000)",
+	"=DATE(2026,-100,1)",
+	"=DATE(2026,1000,1)",
+	"=DATE(\"2026\",\"1\",\"15\")",
+	"=DATE(TRUE(),1,1)",
+	"=DATE(,1,1)",
+	"=DATE(2026,,1)",
+	"=DATE(2026,1,)",
+	"=DATE(2026,1)",
+	"=DATE(2026,1,1,1)",
+	"=DATE(\"x\",1,1)",
+	"=DATE(-0.5,1,1)",
+	"=DATE(2026,-0.5,1)",
+	"=DATE(2026,1,-0.5)",
+	"=DATE(2026,1,0.5)",
+	"=DATE(1e10,1,1)",
+	"=DATE(2026,1e10,1)",
+	"=DATE(2026,1,1e10)",
+	"=DATE(1900,3,1)",
+	"=DATE(1900,2,28)",
+	"=YEAR(0.5)",
+	"=YEAR(-0.5)",
+	"=YEAR(2958465)",
+	"=YEAR(2958466)",
+	"=MONTH(1e15)",
+	"=DAY(1e15)",
+	"=YEAR(\"x\")",
+	"=YEAR(\"\")",
+	"=YEAR()",
+	"=YEAR(,)",
+	"=YEAR(IF(1,))",
+	"=YEAR(TRUE())",
+	"=YEAR(\"10:30\")",
+	"=YEAR(\"5\")",
+	"=DAY(-0.0000001)",
+	"=DAY(\"2026-01-15 23:59\")",
+	"=YEAR(1,2)",
+	"=EOMONTH(46037,0)",
+	"=EOMONTH(46037,\"1\")",
+	"=EOMONTH(\"2026-01-15\",0)",
+	"=EOMONTH(46037.9,0)",
+	"=EOMONTH(0,0)",
+	"=EOMONTH(0,-1)",
+	"=EOMONTH(1,0)",
+	"=EOMONTH(31,-1)",
+	"=EOMONTH(32,-1)",
+	"=EOMONTH(60,0)",
+	"=EOMONTH(46037,)",
+	"=EOMONTH(,0)",
+	"=EOMONTH(46037)",
+	"=EOMONTH(46037,TRUE())",
+	"=EOMONTH(46037,-0.5)",
+	"=EOMONTH(46037,2.0000000000000004)",
+	"=EOMONTH(46037,1e10)",
+	"=EOMONTH(2958465,0)",
+	"=EOMONTH(2958435,0)",
+	"=EOMONTH(2958434,0)",
+	"=EOMONTH(2958466,-1)",
+	"=EOMONTH(1e10,0)",
+	"=EOMONTH(46037,-1500)",
+	"=EOMONTH(46037,-1513)",
+	"=EOMONTH(46037,-1514)",
+	"=EOMONTH(-0.5,0)",
+	"=EOMONTH(0.5,-1)",
+	"=DATE(2026,1,1)+0.5",
+	"=TODAY()-DATE(2026,1,1)",
+	"=DATE(2026,11,9)=TODAY()",
+	"=EOMONTH(\"x\",0)",
+	"=EOMONTH(1/0,\"x\")",
+	"=DATE(1900,-22800,1)",
+	"=DATE(1900,-22788,1)",
+	"=DATE(-1900,1,1)",
+	"=DATE(-1899,1,1)",
+	"=DATE(-319,1,1)",
+	"=DATE(-318,1,1)",
+	"=DATE(-319,13,1)",
+	"=DATE(-320,13,1)",
+	"=DATE(1900,-3828,1)",
+	"=DATE(0,1,-693594)",
+	"=DATE(-1e10,1,1)",
+	"=DATE(-1,12,31)",
+	"=EOMONTH(-1,\"a b\")",
+	"=DAY(EOMONTH(-2.5,#DIV/0!))",
+	"=EOMONTH(\"7e69\",0)",
+	"=EOMONTH(1e16,-1)",
+	"=EOMONTH(0,-4800)",
+];
+
+/// Actual's query functions, arrays as categories, arity, and export rounding.
+const QUERY_EDGES: &[&str] = &[
+	"={,1}",
+	"={1,}",
+	"={}",
+	"=QUERY(1)",
+	"=QUERY(TRUE())",
+	"=QUERY(IF(1,))",
+	"=QUERY(,)",
+	"=QUERY(1/0)",
+	"=QUERY_EXTRACT_TIMEFRAME_START(1/3)",
+	"=QUERY_EXTRACT_TIMEFRAME_START(\"x\")",
+	"=QUERY_EXTRACT_TIMEFRAME_START(\"x\")&\"\"",
+	"=QUERY_EXTRACT_TIMEFRAME_START()",
+	"=BUDGET_QUERY(\"spent\",\"\",\"2026-01\",\"2026-02\")",
+	"=BUDGET_QUERY(\"spent\",,\"2026-01\",\"2026-02\")",
+	"=BUDGET_QUERY(\"spent\",1,\"2026-01\",\"2026-02\")",
+	"=BUDGET_QUERY(\"spent\",\"x\",,)",
+	"=BUDGET_QUERY(,\"x\",\"2026-01\",\"2026-02\")",
+	"=BUDGET_QUERY(\"spent\",\"x\",2026,\"2026-02\")",
+	"=BUDGET_QUERY(\"spent\",\"x\",TRUE(),\"2026-02\")",
+	"=BUDGET_QUERY(\"spent\",{1,2},\"2026-01\",\"2026-02\")",
+	"=BUDGET_QUERY(\"spent\",{1/0},\"2026-01\",\"2026-02\")",
+	"=BUDGET_QUERY(\"spent\",{\"a\",1/0},\"2026-01\",\"2026-02\")",
+	"=BUDGET_QUERY(\"spent\",{\"a\";TRUE()},\"2026-01\",\"2026-02\")",
+	"=BUDGET_QUERY(\"spent\",IF(1,),\"2026-01\",\"2026-02\")",
+	"=BUDGET_QUERY(\"spent\",1+1,\"2026-01\",\"2026-02\")",
+	"=BUDGET_QUERY(\"spent\",\"a\"&\"b\",\"2026-01\",\"2026-02\")",
+	"=BUDGET_QUERY(\"spent\",QUERY_EXTRACT_CATEGORIES(\"x\"),\"2026-01\",\"2026-02\")",
+	"=BUDGET_QUERY(\"spent\",(QUERY_EXTRACT_CATEGORIES(\"x\")),\"2026-01\",\"2026-02\")",
+	"=BUDGET_QUERY(\"spent\",\"x\",\"2026-01\",1/0)",
+	"=BUDGET_QUERY(1/0,1/0,1/0,1/0)",
+	"=BUDGET_QUERY(\"bogus\",1/0,\"x\",\"y\")",
+	"=BUDGET_QUERY(\"bogus\",\"x\",\"2026-01\",\"2026-02\")",
+	"=IF(1/0)",
+	"=ABS(1/0,2)",
+	"=LEFT(1/0,1,2)",
+	"=DATE(1/0,1)",
+	"=1e-300",
+	"=1e-308",
+	"=1e-310",
+	"=1e-320*1",
+	"=-1e-310",
+	"=1e-310&\"\"",
+	"=1.7976931348623157e308",
+	"=-1.7976931348623157e308",
+	"=123456.789e3",
+	"=0.1*0.1",
+	"=9.99999999995",
+	"=9.999999999949",
+	"=0.000099999999999",
+	"=99999999999.5",
+	"=-99999999999.5",
+	"=0.5e-5",
+	"=1/3*-1",
+	"=BUDGET_QUERY(\"spent\",QUERY_EXTRACT_CATEGORIES(),\"2026-01\",\"2026-02\")",
+	"=BUDGET_QUERY(\"spent\",\"x\",\"2026-01\")",
+	"=BUDGET_QUERY(\"spent\",\"x\",\"2026-01\",\"2026-02\",1)",
+	"=BUDGET_QUERY(\"spent\",\"x\",\"2026-01\",\"2026-02\")+1/0",
+];
+
+/// Laziness, error order, collation, and very large or small results.
+const MIXED_EDGES: &[&str] = &[
+	"=1e300",
+	"=ROUND(1e300,0)",
+	"=ROUND(1e300,1)",
+	"=ROUND(1e300,2)",
+	"=ROUND(1e300,3)",
+	"=1e300*1",
+	"=1.2345678901234e200",
+	"=2^100",
+	"=7^26",
+	"=IF(TRUE(),1,FOO(1))",
+	"=IF(TRUE(),1,foo)",
+	"=IF(TRUE(),1,SQRT(-1))",
+	"=IF(1,2,#LIC!)",
+	"=IF(1,2,#FOO!)",
+	"=é",
+	"=SUMé(1)",
+	"=é1",
+	"=SUM(1e308,1e308,#N/A)",
+	"=SUM(1e308,1e308,\"x\")",
+	"=DATE(10000,-12,1)",
+	"=DATE(10000,-11,1)",
+	"=DATE(-1,24,1)",
+	"=+IF(1,)",
+	"=+TRUE()",
+	"=-IF(1,)",
+	"=IF(1,)%",
+	"=IF(1,)+0",
+	"=IF(1,)*1",
+	"=MONTH(123456789012345)",
+	"=DAY(123456789012345)",
+	"=YEAR(123456789012345)",
+	"=MONTH(98765432109)",
+	"=DAY(98765432109)",
+	"=\"a\"<\"_\"",
+	"=\"0\"<\"$\"",
+	"=\"\n\"<\"\t\"",
+	"=\"\r\"<\" \"",
+	"=\"[\"<\"(\"",
+	"=\"@\"<\"*\"",
+	"=\"#\"<\"&\"",
+	"=\"`\"<\"%\"",
+	"=\"9\"<\"a\"",
+	"=\"co-op\"<\"coop\"",
+	"=\"a\"=\"a\"",
+	"=\"aa\"<\"aB\"",
+	"=\"\\\"<\"/\"",
+	"=SUM(\"$1\",\"2%\",\"10:30\")",
+	"=IF(1,2,3)=2",
+	"=SUM(1)(2)",
+	"=1+2=3",
+	"=\"a\"&\"b\"=\"ab\"",
+	"=2*3^2",
+	"=-2*-2",
+	"=10/2/5",
+	"=2^-1",
+	"=1/3*3=1",
+	"=(1/3)*3",
+	"=\"1\"&2+3",
+	"=TRUE()+\"1\"",
+	"=MAX(\"\",1)",
+	"=MIN(\"\")",
+	"=AVERAGE(\"\")",
+	"=AVERAGE(\"\",2)",
+	"=CONCATENATE(\"\")",
+	"=LEN(\" \")",
+	"=IF(\"\",1)",
+	"=1e299",
+	"=1e250",
+	"=1e200",
+	"=1e100",
+	"=1e50",
+	"=1e30",
+	"=1e22",
+	"=3e300",
+	"=7e250",
+	"=1e-200",
+	"=1e-250",
+	"=1e-290",
+	"=1e-298",
+	"=1e-299",
+	"=1e-297",
+	"=123456789012345",
+	"=2^200",
+	"=2^500",
+	"=2^1000",
+	"=-2^1001",
+];
+
+/// What Veritas refuses where Actual answers: references, arrays outside
+/// BUDGET_QUERY, non-ASCII text comparisons and serials past 10^15.
+const REFUSED_EDGES: &[&str] = &[
+	"=RC1",
+	"=foo1",
+	"=a1",
+	"=$A$1",
+	"=A$1",
+	"=XFD1",
+	"=ZZZ1",
+	"=AAAA1",
+	"=A0",
+	"=A40001",
+	"=A40000",
+	"=1:2",
+	"=A:A",
+	"=E3",
+	"=e3",
+	"=\"a\"<\"á\"",
+	"=YEAR(1e300)",
+	"=BUDGET_QUERY(\"spent\",{\"a\"}&\"b\",\"2026-01\",\"2026-02\")",
+	"=BUDGET_QUERY(\"spent\",IF(1,QUERY_EXTRACT_CATEGORIES(\"x\")),\"2026-01\",\"2026-02\")",
+	"={1}",
+	"={\"a\"}",
+	"={1;2}",
+	"={1,2;3,4}",
+	"={-1}",
+	"={1+1}",
+	"={TRUE()}",
+	"={\"a\",1/0}",
+	"=QUERY({\"all\"})",
+	"=SUM(QUERY_EXTRACT_CATEGORIES(\"x\"))",
+	"=QUERY_EXTRACT_CATEGORIES(\"x\")&\"z\"",
+	"=QUERY_EXTRACT_CATEGORIES()",
+	"=QUERY_EXTRACT_CATEGORIES(1/0)",
+	"=LEN(QUERY_EXTRACT_CATEGORIES(\"x\"))",
+	"=QUERY_EXTRACT_CATEGORIES(\"x\",1)",
+	"=SUM({1})",
+	"=-{1}",
+	"={1}+1",
+	"=YEAR(1e16)",
+	"=MONTH(1e16)",
+	"=DAY(1e16)",
+	"=YEAR(1e17)",
+	"=MONTH(1e17)",
+	"=DAY(1e17)",
+	"=YEAR(1e18)",
+	"=MONTH(1e18)",
+	"=DAY(1e18)",
+	"=YEAR(9007199254740993)",
 ];
 
 #[test]
-#[ignore = "clean-room formula engine pending"]
 fn d73_formula_card_matches_actual() {
 	let budget = fixture("all-features");
 	let mut cases: Vec<Case> = [
@@ -677,7 +1601,6 @@ fn queries(budget: &BudgetData) -> Value {
 }
 
 #[test]
-#[ignore = "clean-room formula engine pending"]
 fn d73_formula_card_queries_match_actual() {
 	let budget = fixture("all-features");
 	let queries = queries(&budget);
@@ -713,7 +1636,6 @@ fn d73_formula_card_queries_match_actual() {
 }
 
 #[test]
-#[ignore = "clean-room formula engine pending"]
 fn d73_formula_card_budget_queries_match_actual() {
 	let budget = fixture("all-features");
 	let queries = queries(&budget);
@@ -813,7 +1735,6 @@ fn d73_formula_card_budget_queries_match_actual() {
 /// Budget rows in months the sheet doesn't cover, which Actual still loads
 /// into budget cells (`server/sheet.ts:241-255`).
 #[test]
-#[ignore = "clean-room formula engine pending"]
 fn d73_formula_card_reads_budget_rows_outside_the_sheet() {
 	let mut budget = fixture("all-features");
 	let groceries = category(&budget, "Groceries");
@@ -883,7 +1804,6 @@ fn formula_card_reads_its_display_settings() {
 
 /// The default formula's value, and a result Rust strings can't hold.
 #[test]
-#[ignore = "clean-room formula engine pending"]
 fn formula_card_evaluates_its_default_and_refuses_half_a_character() {
 	let budget = fixture("all-features");
 	let sheet = EnvelopeSheet::compute(&budget, CivilDate::from(today())).unwrap();
@@ -899,4 +1819,302 @@ fn formula_card_evaluates_its_default_and_refuses_half_a_character() {
 		)
 		.is_err()
 	);
+}
+
+/// Black-box probes of the clean-room engine (D75) at the edges HyperFormula's
+/// docs leave open, each compared with Actual's card.
+#[test]
+fn d75_formula_engine_edge_cases_match_actual() {
+	let budget = fixture("all-features");
+	let mut cases: Vec<Case> = [
+		GRAMMAR_EDGES,
+		TEXT_AS_NUMBER_EDGES,
+		LOGIC_EDGES,
+		FUNCTION_EDGES,
+		DATE_EDGES,
+		QUERY_EDGES,
+		MIXED_EDGES,
+	]
+	.concat()
+	.into_iter()
+	.map(|text| formula(text, Expect::Same))
+	.collect();
+	cases.extend(
+		REFUSED_EDGES
+			.iter()
+			.map(|text| formula(text, Expect::Refused)),
+	);
+	compare(&budget, &cases);
+}
+
+/// HyperFormula evaluates every operand and argument, IF's unused branch
+/// included, so a QUERY anywhere is fetched; SUM, AVERAGE, MIN and MAX stop
+/// at an error, and an unknown function evaluates nothing.
+#[test]
+fn d75_formula_engine_fetches_queries_from_every_branch() {
+	let budget = fixture("all-features");
+	let queries = queries(&budget);
+	let cases: Vec<Case> = [
+		"=IF(QUERY(\"static\")<>0, QUERY(\"all\"), 0)",
+		"=IF(QUERY(\"static\")=0, 0, QUERY(\"all\"))",
+		"=IF(QUERY(\"static\")<>0, QUERY_EXTRACT_TIMEFRAME_START(\"days\"), \"none\")",
+		"=IF(QUERY(\"static\")>0, BUDGET_QUERY(\"spent\", QUERY_EXTRACT_CATEGORIES(\"groceries\"), \"2026-01\", \"2026-06\"), 0)",
+		"=IF(QUERY(\"static\")<>0, BUDGET_QUERY(\"spent\", QUERY_EXTRACT_CATEGORIES(\"groceries\"), QUERY_EXTRACT_TIMEFRAME_START(\"static\"), \"2026-06\"), 2)",
+		"=1/QUERY(\"static\")+QUERY(\"payee\")",
+		"=IF(1/QUERY(\"static\"), QUERY(\"payee\"), 2)",
+		"=AND(1/QUERY(\"static\"), QUERY(\"payee\"))",
+		"=CONCATENATE(1/QUERY(\"static\"), QUERY(\"payee\"))",
+		"=ROUND(1/QUERY(\"static\"), QUERY(\"payee\"))",
+		"=LEFT(1/QUERY(\"static\"), -QUERY(\"payee\"))",
+		"=DATE(1/QUERY(\"static\")+2026, 1, QUERY(\"payee\"))",
+		"=EOMONTH(1/QUERY(\"static\")+46037, QUERY(\"payee\")/21600)",
+		"=BUDGET_QUERY(IF(1/QUERY(\"static\")<>0,\"spent\"), QUERY_EXTRACT_CATEGORIES(\"groceries\"), \"2026-01\", \"2026-06\")",
+		"=BUDGET_QUERY(\"spent\", QUERY_EXTRACT_CATEGORIES(IF(1/QUERY(\"static\")<>0,\"groceries\")), QUERY_EXTRACT_TIMEFRAME_START(\"static\"), \"2026-06\")",
+		"=BUDGET_QUERY(\"spent\", QUERY_EXTRACT_CATEGORIES(\"gro\"&\"ceries\"), \"2026-01\", \"2026-06\")",
+		"=SUM(1/QUERY(\"static\"), QUERY(\"payee\"))",
+		"=MAX(1/QUERY(\"static\"), QUERY(\"payee\"))",
+		"=IF(TRUE(), SUM(1/QUERY(\"static\"), QUERY(\"payee\")), FOO(QUERY(\"payee\")))",
+		"=IF(TRUE(), SUM(1/QUERY(\"static\"), QUERY(\"payee\")), ABS(QUERY(\"payee\"),1))",
+		"=IF(TRUE(), SUM(1/QUERY(\"static\"), QUERY(\"payee\")), SUM(1/0,QUERY(\"payee\")))",
+		"=IF(TRUE(), SUM(1/QUERY(\"static\"), QUERY(\"payee\")), #N/A+QUERY(\"payee\"))",
+	]
+	.iter()
+	.map(|text| with_queries(text, &queries))
+	.collect();
+	compare(&budget, &cases);
+}
+
+/// A small random formula over D75's functions, built from pieces Actual's
+/// card accepts and Veritas promises to match: no cell references or arrays,
+/// ASCII text only, and date functions only over real calendar dates.
+struct Generator {
+	state: u64,
+}
+
+impl Generator {
+	fn below(&mut self, n: u64) -> u64 {
+		self.state = self
+			.state
+			.wrapping_mul(6_364_136_223_846_793_005)
+			.wrapping_add(1_442_695_040_888_963_407);
+		(self.state >> 33) % n
+	}
+
+	fn pick<'a>(&mut self, items: &[&'a str]) -> &'a str {
+		items[usize::try_from(self.below(items.len() as u64)).unwrap()]
+	}
+
+	fn date(&mut self) -> String {
+		format!(
+			"DATE({}, {}, {})",
+			2000 + self.below(31),
+			self.below(14),
+			self.below(33)
+		)
+	}
+
+	fn query(&mut self) -> String {
+		let name = self.pick(&[
+			"all",
+			"static",
+			"groceries",
+			"everyday",
+			"lastYear",
+			"yearToDate",
+			"diningOrRent",
+			"missing",
+		]);
+		match self.below(3) {
+			0 => format!("QUERY(\"{name}\")"),
+			1 => format!(
+				"BUDGET_QUERY(\"{}\", QUERY_EXTRACT_CATEGORIES(\"{name}\"), QUERY_EXTRACT_TIMEFRAME_START(\"{name}\"), QUERY_EXTRACT_TIMEFRAME_END(\"{name}\"))",
+				self.pick(&["budgeted", "spent", "balance_start", "balance_end", "goal"])
+			),
+			_ => format!("QUERY_EXTRACT_TIMEFRAME_START(\"{name}\")"),
+		}
+	}
+
+	fn leaf(&mut self) -> String {
+		match self.below(8) {
+			0 => self
+				.pick(&[
+					"0",
+					"1",
+					"2",
+					"-3",
+					"7",
+					"100",
+					"12.5",
+					"0.1",
+					"1e3",
+					"50%",
+					"-0.25",
+					"1234567.891",
+				])
+				.to_owned(),
+			1 => self
+				.pick(&[
+					"\"abc\"",
+					"\"5\"",
+					"\"\"",
+					"\" 12 \"",
+					"\"2026-01-15\"",
+					"\"TRUE\"",
+					"\"a b\"",
+					"\"-4.5\"",
+				])
+				.to_owned(),
+			2 => self.pick(&["TRUE()", "FALSE()", "TODAY()"]).to_owned(),
+			3 => self.date(),
+			4 => self.query(),
+			5 => self.pick(&["1/0", "#N/A", "\"x\"+1"]).to_owned(),
+			_ => format!("{}", self.below(50)),
+		}
+	}
+
+	fn expr(&mut self, depth: u32) -> String {
+		if depth == 0 || self.below(4) == 0 {
+			return self.leaf();
+		}
+		let a = self.expr(depth - 1);
+		let b = self.expr(depth - 1);
+		match self.below(14) {
+			0 | 1 => format!(
+				"({a}{}{b})",
+				self.pick(&[
+					"+", "-", "*", "/", "^", "&", "=", "<>", "<", ">", "<=", ">="
+				])
+			),
+			2 => format!("-{a}"),
+			3 => {
+				let c = self.expr(depth - 1);
+				format!("IF({a}, {b}, {c})")
+			}
+			4 => format!(
+				"{}({a}, {b})",
+				self.pick(&["AND", "OR", "SUM", "AVERAGE", "MIN", "MAX", "CONCATENATE"])
+			),
+			5 => format!(
+				"{}({a})",
+				self.pick(&["NOT", "ABS", "LEN", "UPPER", "LOWER", "SUM", "ROUND"])
+			),
+			6 => format!("ROUND({a}, {})", self.below(5)),
+			7 => format!("{}({a}, {})", self.pick(&["LEFT", "RIGHT"]), self.below(6)),
+			8 => format!("{}({})", self.pick(&["YEAR", "MONTH", "DAY"]), self.date()),
+			9 => format!(
+				"EOMONTH({}, {})",
+				self.date(),
+				i64::try_from(self.below(25)).unwrap() - 12
+			),
+			10 => format!(
+				"{}({})",
+				self.pick(&["YEAR", "MONTH", "DAY"]),
+				self.below(80_000)
+			),
+			11 => format!("({a}{}{b})", self.pick(&["+", "*", "&"])),
+			_ => format!("IF({a}, {b})"),
+		}
+	}
+}
+
+/// An independent random sweep of D75's grammar against Actual's card:
+/// 1,500 formulas over the all-features budget, each the same value or the
+/// same error message as Actual, with nothing refused.
+#[test]
+fn d75_random_formulas_over_the_subset_match_actual() {
+	let budget = fixture("all-features");
+	let queries = queries(&budget);
+	let mut generator = Generator {
+		state: 0x0005_eed0_fd75_u64,
+	};
+	let cases: Vec<Case> = (0..1_500)
+		.map(|_| {
+			let depth = u32::try_from(generator.below(4)).unwrap() + 1;
+			with_queries(&format!("={}", generator.expr(depth)), &queries)
+		})
+		.collect();
+	let sheet = EnvelopeSheet::compute(&budget, CivilDate::from(today())).unwrap();
+	let mut kinds = [0_usize; 5];
+	for case in &cases {
+		let card = formula_card(&budget, &sheet, meta(&case.meta).as_ref(), today()).unwrap();
+		kinds[match card.value {
+			FormulaValue::Number(_) => 0,
+			FormulaValue::Text(_) => 1,
+			FormulaValue::Boolean(_) => 2,
+			FormulaValue::Error(_) => 3,
+			FormulaValue::Empty => 4,
+		}] += 1;
+	}
+	assert!(
+		kinds[..4].iter().all(|&count| count >= 100),
+		"the sweep reaches numbers, text, booleans and errors alike: {kinds:?}"
+	);
+	compare(&budget, &cases);
+}
+
+/// D75's exclusions beyond the list above: functions HyperFormula has that
+/// Actual's card computes, which Veritas must show as an unknown function
+/// (`Formula error: NAME`), never as a value of its own, in any letter case.
+/// In a branch IF doesn't take, it changes nothing, in either app.
+#[test]
+fn d75_excluded_functions_actual_computes_show_name_in_veritas() {
+	let budget = fixture("all-features");
+	let cases: Vec<Case> = [
+		"=PI()",
+		"=MOD(5,2)",
+		"=TRIM(\" a \")",
+		"=SUBSTITUTE(\"aa\",\"a\",\"b\")",
+		"=FIND(\"b\",\"abc\")",
+		"=REPT(\"a\",3)",
+		"=CEILING(2.5,1)",
+		"=FLOOR(2.5,1)",
+		"=WEEKDAY(46037)",
+		"=TRUNC(2.7)",
+		"=SIGN(-2)",
+		"=PRODUCT(2,3)",
+		"=MEDIAN(1,2,3)",
+		"=EXACT(\"a\",\"a\")",
+		"=CHAR(65)",
+		"=CODE(\"A\")",
+		"=ISNUMBER(1)",
+		"=COUNTA(1,2)",
+		"=PROPER(\"ab\")",
+		"=sqrt(4)",
+		"=Power(2,3)",
+		"=SUM(1, SQRT(4))",
+	]
+	.iter()
+	.map(|text| formula(text, Expect::OutOfScope))
+	.collect();
+	let mut cases = cases;
+	cases.push(formula("=IF(TRUE(), 1, MOD(5,2))", Expect::Same));
+	cases.push(formula("=IF(FALSE(), MOD(5,2), \"kept\")", Expect::Same));
+	compare(&budget, &cases);
+}
+
+/// Results from 10^15 to 10^25, where the 11-digit export's floating-point
+/// division shows in the last bit (`=7^26` exports 9.387480337600001e21).
+#[test]
+fn d75_formula_engine_exports_large_results_as_actual_does() {
+	let budget = fixture("all-features");
+	let mut generator = Generator { state: 26 };
+	let mut cases = Vec::new();
+	for base in 2..=40u64 {
+		for exponent in [13, 17, 19, 23, 26, 31] {
+			let power = (base as f64).powi(exponent);
+			if (1e15..1e25).contains(&power) {
+				cases.push(formula(&format!("={base}^{exponent}"), Expect::Same));
+			}
+		}
+	}
+	for _ in 0..400 {
+		let digits = 1_000_000 + generator.below(9_000_000);
+		let scale = 9 + generator.below(10);
+		let factor = 1 + generator.below(999_999);
+		cases.push(formula(
+			&format!("={digits}e{scale}*{factor}"),
+			Expect::Same,
+		));
+	}
+	compare(&budget, &cases);
 }
