@@ -439,6 +439,27 @@ pub enum Command {
 	CreateCustomReport {
 		settings: CustomReportSettings,
 	},
+	/// v16. The name on every statement's header and on the tax summary
+	/// (ST-3): trimmed, one line, at most 100 characters. Blank clears it, so
+	/// the budget's name shows again. A `veritas_meta` row; the `setting`
+	/// entity.
+	SetEntityName {
+		name: String,
+	},
+	/// v16. A category's TAX-2 bucket, or `nil` to clear it. Every bucket is
+	/// allowed on every kind of category (`TaxCategoryBucket.oppositeDirection`
+	/// says when its rows count as negative). The `categoryMeta` entity.
+	SetCategoryTaxBucket {
+		category_id: String,
+		bucket: Option<crate::reports::TaxBucket>,
+	},
+	/// v16. What a tag means on the tax summary, or `nil` to unmap it. One
+	/// leading `#` is dropped; a blank tag, or one with whitespace or another
+	/// `#` in it, is `Invalid` (TAX-1). Case-sensitive. The `taxTag` entity.
+	SetTaxTag {
+		tag: String,
+		meaning: Option<crate::tax_setup::TaxTagMeaning>,
+	},
 }
 
 impl veritas_session::Command for Command {
@@ -1085,6 +1106,20 @@ impl Command {
 					veritas_domain::CustomReportId::new(veritas_store::new_id()),
 					settings,
 				)?])
+			}
+			Command::SetEntityName { name } => {
+				veritas_session::settings::set_entity_name(data, name)
+			}
+			Command::SetCategoryTaxBucket {
+				category_id,
+				bucket,
+			} => veritas_session::tax::set_category_tax_bucket(
+				data,
+				&category(category_id),
+				bucket.map(Into::into),
+			),
+			Command::SetTaxTag { tag, meaning } => {
+				veritas_session::tax::set_tax_tag(data, tag, meaning.map(Into::into))
 			}
 			_ => Err(CoreError::Internal(
 				"a budget command was planned without the envelope sheet".to_owned(),

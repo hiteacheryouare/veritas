@@ -349,7 +349,7 @@ fn line(total: Money, rows: &[TransactionId]) -> ReportLine {
 	}
 }
 
-fn report_line(from: &reports::Line) -> ReportLine {
+pub(crate) fn report_line(from: &reports::Line) -> ReportLine {
 	line(from.total, &from.rows)
 }
 
@@ -369,6 +369,27 @@ fn category_name(budget: &BudgetData, id: &CategoryId) -> String {
 		.unwrap_or_default()
 }
 
+pub(crate) fn report_category(budget: &BudgetData, line: &reports::CategoryLine) -> ReportCategory {
+	let group = line
+		.category
+		.as_ref()
+		.and_then(|id| budget.categories.get(id))
+		.and_then(|category| budget.category_groups.get(&category.group));
+	ReportCategory {
+		category_id: line.category.as_ref().map(ToString::to_string),
+		name: line
+			.category
+			.as_ref()
+			.map(|id| category_name(budget, id))
+			.unwrap_or_default(),
+		group_id: group.map(|group| group.id.to_string()),
+		group_name: group.map(|group| group.name.clone()),
+		labels: line.labels.into(),
+		total: line.total.minor(),
+		count: line.rows.len() as u64,
+	}
+}
+
 fn section(budget: &BudgetData, from: &reports::Section) -> ReportSection {
 	ReportSection {
 		total: from.total.minor(),
@@ -376,26 +397,7 @@ fn section(budget: &BudgetData, from: &reports::Section) -> ReportSection {
 		categories: from
 			.categories
 			.iter()
-			.map(|line| {
-				let group = line
-					.category
-					.as_ref()
-					.and_then(|id| budget.categories.get(id))
-					.and_then(|category| budget.category_groups.get(&category.group));
-				ReportCategory {
-					category_id: line.category.as_ref().map(ToString::to_string),
-					name: line
-						.category
-						.as_ref()
-						.map(|id| category_name(budget, id))
-						.unwrap_or_default(),
-					group_id: group.map(|group| group.id.to_string()),
-					group_name: group.map(|group| group.name.clone()),
-					labels: line.labels.into(),
-					total: line.total.minor(),
-					count: line.rows.len() as u64,
-				}
-			})
+			.map(|line| report_category(budget, line))
 			.collect(),
 	}
 }
@@ -725,7 +727,24 @@ fn owners_equity(
 	})
 }
 
-fn tax_bucket(bucket: reports::Bucket) -> TaxBucket {
+impl From<TaxBucket> for reports::Bucket {
+	fn from(bucket: TaxBucket) -> Self {
+		match bucket {
+			TaxBucket::W2Income => reports::Bucket::W2Income,
+			TaxBucket::InterestIncome => reports::Bucket::InterestIncome,
+			TaxBucket::BusinessIncome => reports::Bucket::BusinessIncome,
+			TaxBucket::BusinessExpense => reports::Bucket::BusinessExpense,
+			TaxBucket::Charitable => reports::Bucket::Charitable,
+			TaxBucket::Medical => reports::Bucket::Medical,
+			TaxBucket::Education => reports::Bucket::Education,
+			TaxBucket::Hsa => reports::Bucket::Hsa,
+			TaxBucket::RetirementContribution => reports::Bucket::RetirementContribution,
+			TaxBucket::TaxesWithheld => reports::Bucket::TaxesWithheld,
+		}
+	}
+}
+
+pub(crate) fn tax_bucket(bucket: reports::Bucket) -> TaxBucket {
 	match bucket {
 		reports::Bucket::W2Income => TaxBucket::W2Income,
 		reports::Bucket::InterestIncome => TaxBucket::InterestIncome,

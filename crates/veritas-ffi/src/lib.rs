@@ -13,6 +13,8 @@ mod records;
 mod reports;
 mod rules;
 mod session;
+mod statements;
+mod tax_setup;
 #[cfg(test)]
 mod test_support;
 
@@ -68,6 +70,8 @@ pub use rules::{
 	RuleSource, RuleSplitLine, RuleStage, RuleValue, RuleValueKind, rule_choices,
 };
 pub use session::{ChangeListener, Session};
+pub use statements::{IncomeStatement, StatementEntity, StatementGroup};
+pub use tax_setup::{TaxCategoryBucket, TaxSetup, TaxTagMapping, TaxTagMeaning};
 
 uniffi::setup_scaffolding!();
 
