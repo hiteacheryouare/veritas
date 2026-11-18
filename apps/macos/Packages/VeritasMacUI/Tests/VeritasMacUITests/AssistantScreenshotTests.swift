@@ -53,10 +53,14 @@ struct AssistantScreenshotTests {
 		await workspace.reopen(directory: StubLaunch.budgetDirectory)
 		let (settings, defaults, suite) = self.settings(.available, on: true)
 		defer { defaults.removePersistentDomain(forName: suite) }
-		let panel = AssistantPanelModel(makeAnswerer: settings.makeAnswerer) {
-			workspace.readOnlyQueries.map { AssistantContext(queries: $0, format: workspace.format, today: "2026-11-17") }
+		func makePanel() -> AssistantPanelModel {
+			AssistantPanelModel(makeAnswerer: settings.makeAnswerer) {
+				workspace.readOnlyQueries.map { AssistantContext(queries: $0, format: workspace.format, today: "2026-11-17") }
+			}
 		}
-		try render(AssistantPanel(model: panel).frame(width: 340, height: 520), named: "panel-empty")
+		try render(AssistantPanel(model: makePanel()).frame(width: 340, height: 520), named: "panel-empty")
+		// Each rendered panel stops its model's answer when its offscreen window goes, so the asked panel is never rendered before it answers.
+		let panel = makePanel()
 		for question in ["What did I spend on groceries last month?", "How is my net worth?"] {
 			panel.draft = question
 			panel.ask()
