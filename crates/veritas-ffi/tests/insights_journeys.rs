@@ -616,3 +616,738 @@ fn tax_setup_drives_the_tax_summary_and_survives_undo_a_reopen_and_actual() {
 		]
 	);
 }
+
+fn fresh(label: &str, currency: &str) -> (Scratch, Arc<Session>) {
+	let scratch = Scratch::new(label);
+	let session = block_on(Session::create_budget(
+		label.to_owned(),
+		scratch.budget(),
+		veritas_ffi::NumberFormat {
+			currency: Some(currency.to_owned()),
+			style: veritas_ffi::NumberStyle::CommaDot,
+			hide_decimals: false,
+			symbol_first: None,
+			symbol_space: None,
+		},
+		veritas_ffi::NewBudgetOptions {
+			retirement_401k: false,
+			hsa: false,
+			accounts: Vec::new(),
+		},
+		CancelToken::new(),
+	))
+	.unwrap();
+	session.budget_month(NOVEMBER, TODAY.to_owned()).unwrap();
+	(scratch, session)
+}
+
+fn created_id(session: &Session, command: Command, kind: veritas_ffi::EntityKind) -> String {
+	session
+		.perform(command)
+		.unwrap()
+		.entities
+		.into_iter()
+		.find(|e| e.kind == kind && e.id.is_some())
+		.and_then(|e| e.id)
+		.unwrap()
+}
+
+fn new_account(
+	session: &Session,
+	name: &str,
+	kind: veritas_ffi::NewAccountKind,
+	starting: i64,
+	loan: Option<veritas_ffi::LoanTerms>,
+) -> String {
+	created_id(
+		session,
+		Command::CreateAccount {
+			account: veritas_ffi::NewAccount {
+				name: name.to_owned(),
+				kind,
+				starting_balance: starting,
+				loan,
+			},
+		},
+		veritas_ffi::EntityKind::Account,
+	)
+}
+
+#[test]
+fn d77_sg_8_a_yen_goal_with_spending_keeps_its_budget_and_a_dollar_goal_still_gets_a_suggestion() {
+	// FC-5 SG-8 through the FFI on budgets made the way Ryan makes them: a
+	// goal "New laptop" (target 150000 on the budget scale, due 2027-06-15)
+	// budgeted 10000 this month and next, with one small purchase in it.
+	// In yen the purchase (¥500, stored -50000) makes the goal's available
+	// mix scales, so it gets no suggestion, its line says why in yen, Apply
+	// suggestions leaves its cell alone, and its ETA and pace say "spending
+	// recorded". The same goal in dollars ($5.00, stored -500) keeps all of
+	// them. A purchase dated later this month, after today, counts too: D77
+	// reads spending through the end of the month.
+	use veritas_ffi::EntityKind;
+	let december = Month {
+		year: 2026,
+		month: 12,
+	};
+	for (currency, purchase, date) in [
+		("JPY", -50_000, "2026-11-10"),
+		("JPY", -50_000, "2026-11-28"),
+		("USD", -500, "2026-11-10"),
+	] {
+		let what = format!("{currency} purchase on {date}");
+		let (_scratch, session) = fresh(&format!("sg8-{currency}-{date}"), currency);
+		let account = new_account(
+			&session,
+			"Checking",
+			veritas_ffi::NewAccountKind::Checking,
+			50_000_000,
+			None,
+		);
+		let goal = created_id(
+			&session,
+			Command::CreateGoal {
+				name: "New laptop".to_owned(),
+				target: 150_000,
+				target_date: Some("2027-06-15".to_owned()),
+				icon: None,
+				color: None,
+			},
+			EntityKind::Goal,
+		);
+		let goals = || session.goals(TODAY.to_owned()).unwrap();
+		let category = goals()
+			.goals
+			.into_iter()
+			.find(|g| g.id == goal)
+			.unwrap()
+			.category_id;
+		for month in [NOVEMBER, december] {
+			perform(
+				&session,
+				Command::SetBudget {
+					month,
+					category_id: category.clone(),
+					amount: 10_000,
+				},
+			);
+		}
+		perform(
+			&session,
+			entry(&account, date, purchase, &category, "laptop bag"),
+		);
+
+		let suggestions =
+			block_on(session.budget_suggestions(TODAY.to_owned(), CancelToken::new())).unwrap();
+		assert_eq!(suggestions.month, december, "{what}");
+		let line = suggestions
+			.items
+			.iter()
+			.find(|item| item.category_id == category)
+			.unwrap_or_else(|| panic!("{what}: the goal is listed"))
+			.clone();
+		let summary = goals().goals.into_iter().find(|g| g.id == goal).unwrap();
+		let forecast =
+			block_on(session.forecast(TODAY.to_owned(), Vec::new(), CancelToken::new())).unwrap();
+		let eta = forecast
+			.baseline
+			.goal_etas
+			.iter()
+			.find(|eta| eta.goal_id == goal)
+			.unwrap()
+			.clone();
+		perform(
+			&session,
+			Command::ApplySuggestions {
+				today: TODAY.to_owned(),
+			},
+		);
+		let december_cell = session
+			.budget_month(december, TODAY.to_owned())
+			.unwrap()
+			.groups
+			.iter()
+			.flat_map(|g| &g.envelopes)
+			.find(|e| e.id == category)
+			.unwrap()
+			.budgeted;
+		session.undo().unwrap();
+		if currency == "JPY" {
+			assert_eq!(line.amount, None, "{what}: no suggestion");
+			assert_eq!(
+				line.reason, "New laptop: spending recorded, keeping ¥10,000",
+				"{what}"
+			);
+			assert_eq!(
+				december_cell, 10_000,
+				"{what}: Apply suggestions keeps the goal's cell"
+			);
+			assert_eq!(
+				summary.pace,
+				Some(veritas_ffi::GoalPace::SpendingRecorded),
+				"{what}"
+			);
+			assert_eq!(summary.suggested_monthly, None, "{what}");
+			assert_eq!(eta.text, "No ETA: spending recorded", "{what}");
+			assert_eq!(eta.remaining, None, "{what}: no remaining figure");
+		} else {
+			let amount = line
+				.amount
+				.unwrap_or_else(|| panic!("{what}: dollars keep the suggestion: {}", line.reason));
+			assert!(
+				!line.reason.contains("spending recorded"),
+				"{}",
+				line.reason
+			);
+			assert_eq!(december_cell, amount, "{what}: Apply suggestions writes it");
+			assert_ne!(summary.pace, Some(veritas_ffi::GoalPace::SpendingRecorded));
+			assert!(summary.suggested_monthly.is_some());
+			assert_ne!(eta.text, "No ETA: spending recorded");
+		}
+	}
+}
+
+#[test]
+fn wrapped_shares_always_add_up_to_1000() {
+	// R-WRAP-2: with amounts hidden, each top-five list and its "Everything
+	// else" add up to exactly 1000 tenths, and total out with net does too,
+	// on all-features' years and on a year built to land on awkward thirds,
+	// with a refund-heavy category and more than five payees.
+	fn check(report: &WrappedReport, what: &str) {
+		if !report.has_data {
+			return;
+		}
+		let lists = [
+			(
+				report
+					.top_categories
+					.iter()
+					.map(|c| c.share)
+					.collect::<Vec<_>>(),
+				report.shares.other_categories,
+				"categories",
+			),
+			(
+				report
+					.top_groups
+					.iter()
+					.map(|g| g.share)
+					.collect::<Vec<_>>(),
+				report.shares.other_groups,
+				"groups",
+			),
+			(
+				report
+					.top_payees
+					.iter()
+					.map(|p| p.share)
+					.collect::<Vec<_>>(),
+				report.shares.other_payees,
+				"payees",
+			),
+		];
+		for (shares, other, list) in lists {
+			if shares.is_empty() {
+				continue;
+			}
+			let sum: i64 = shares.iter().sum::<i64>() + other.unwrap_or(0);
+			assert_eq!(sum, 1000, "{what} {list}: {shares:?} + {other:?}");
+		}
+		if let (Some(out), Some(net)) = (report.shares.out_vs_in, report.shares.net) {
+			assert_eq!(out + net, 1000, "{what}: total out and net");
+		}
+	}
+	let scratch = Scratch::new("wrapped-shares");
+	let session = import(&scratch);
+	for year in [2025, 2026] {
+		check(&wrapped(&session, year), &format!("all-features {year}"));
+	}
+	let (_fresh, fresh) = fresh("wrapped-thirds", "USD");
+	let account = new_account(
+		&fresh,
+		"Checking",
+		veritas_ffi::NewAccountKind::Checking,
+		0,
+		None,
+	);
+	let month = fresh.budget_month(NOVEMBER, TODAY.to_owned()).unwrap();
+	let income = month.groups.iter().find(|g| g.is_income).unwrap().envelopes[0]
+		.id
+		.clone();
+	let spending: Vec<String> = month
+		.groups
+		.iter()
+		.filter(|g| !g.is_income)
+		.flat_map(|g| g.envelopes.iter().map(|e| e.id.clone()))
+		.take(8)
+		.collect();
+	perform(&fresh, entry(&account, "2025-01-05", 999_999, &income, ""));
+	for (n, category) in spending.iter().take(3).enumerate() {
+		let mut draft = TransactionDraft {
+			id: None,
+			account_id: account.clone(),
+			date: format!("2025-0{}-10", n + 2),
+			amount: -10_000,
+			payee_id: None,
+			payee_name: Some(format!("Shop {n}")),
+			category_id: Some(category.clone()),
+			notes: None,
+			cleared: true,
+			splits: Vec::new(),
+		};
+		perform(
+			&fresh,
+			Command::AddTransaction {
+				transaction: draft.clone(),
+			},
+		);
+		draft.payee_name = Some(format!("Kiosk {n}"));
+		draft.amount = -1;
+		perform(&fresh, Command::AddTransaction { transaction: draft });
+	}
+	perform(
+		&fresh,
+		entry(&account, "2025-06-01", -700, &spending[3], "refunded later"),
+	);
+	perform(
+		&fresh,
+		entry(&account, "2025-06-20", 2_100, &spending[3], "refund"),
+	);
+	for (n, category) in spending.iter().enumerate().skip(4) {
+		perform(
+			&fresh,
+			entry(
+				&account,
+				&format!("2025-07-{:02}", 10 + n),
+				-(333 + n as i64),
+				category,
+				"",
+			),
+		);
+	}
+	check(&wrapped(&fresh, 2025), "built year");
+	assert!(
+		wrapped(&fresh, 2025).top_payees.len() == 5,
+		"more than five payees"
+	);
+}
+
+#[test]
+fn the_income_statement_is_net_profit_for_every_range() {
+	// R-REP-7 ST-3: net income always equals Net Profit for the same range,
+	// and revenue and expenses carry Net Profit's income and expense totals
+	// and categories, for a month, a quarter, a year to date and twelve
+	// months across a new year.
+	let scratch = Scratch::new("income-statement");
+	let session = import(&scratch);
+	let month = |year: i32, month: u32| Month { year, month };
+	for (first, last) in [
+		(month(2026, 10), month(2026, 10)),
+		(month(2026, 7), month(2026, 9)),
+		(month(2026, 1), month(2026, 11)),
+		(month(2025, 11), month(2026, 10)),
+	] {
+		let report = block_on(session.net_profit(first, last, CancelToken::new())).unwrap();
+		let first_day = format!("{}-{:02}-01", first.year, first.month);
+		let last_day = report.total.last.clone();
+		let statement = block_on(session.income_statement(
+			first_day.clone(),
+			last_day.clone(),
+			CancelToken::new(),
+		))
+		.unwrap();
+		let what = format!("{first_day} to {last_day}");
+		assert_eq!(
+			statement.net_income.total, report.total.net_profit.total,
+			"{what}"
+		);
+		assert_eq!(
+			statement.total_revenue.total, report.total.income.total,
+			"{what}"
+		);
+		assert_eq!(
+			statement.total_expenses.total, report.total.expenses.total,
+			"{what}"
+		);
+		let lines = |groups: &[veritas_ffi::StatementGroup]| -> std::collections::BTreeMap<Option<String>, i64> {
+			groups
+				.iter()
+				.flat_map(|g| &g.categories)
+				.filter(|c| c.total != 0)
+				.map(|c| (c.category_id.clone(), c.total))
+				.collect()
+		};
+		let net_profit_lines = |section: &veritas_ffi::ReportSection| -> std::collections::BTreeMap<Option<String>, i64> {
+			section
+				.categories
+				.iter()
+				.filter(|c| c.total != 0)
+				.map(|c| (c.category_id.clone(), c.total))
+				.collect()
+		};
+		assert_eq!(
+			lines(&statement.revenue),
+			net_profit_lines(&report.total.income),
+			"{what} revenue"
+		);
+		assert_eq!(
+			lines(&statement.expenses),
+			net_profit_lines(&report.total.expenses),
+			"{what} expenses"
+		);
+		for group in statement.revenue.iter().chain(&statement.expenses) {
+			assert_eq!(
+				group.total,
+				group.categories.iter().map(|c| c.total).sum::<i64>(),
+				"{what} {:?}",
+				group.group_name
+			);
+		}
+	}
+}
+
+#[test]
+fn a_what_if_moves_its_horizons_by_its_amount_and_every_horizon_adds_up() {
+	// R-FC-1 and R-FC-2 through the FFI on all-features: horizons at 3, 6,
+	// 10 and 12 months whose account balances add up to their net worth
+	// inside the band, and a one-time what-if (a $1,000.00 repair in March)
+	// that lowers each horizon from March on by exactly its amount, leaves
+	// the earlier ones alone, shifts the band without widening it, and is
+	// one undo step.
+	use veritas_ffi::{EntityKind, ScenarioChange};
+	let scratch = Scratch::new("what-if-horizons");
+	let session = import(&scratch);
+	let scenario = created_id(
+		&session,
+		Command::CreateScenario {
+			name: "Roof repair".to_owned(),
+		},
+		EntityKind::Scenario,
+	);
+	perform(
+		&session,
+		Command::AddScenarioEvent {
+			scenario_id: scenario.clone(),
+			change: ScenarioChange::OneTime {
+				date: "2027-03-15".to_owned(),
+				account_id: CHECKING.to_owned(),
+				category_id: Some(HOUSEHOLD.to_owned()),
+				amount: -100_000,
+			},
+			today: TODAY.to_owned(),
+		},
+	);
+	let forecast =
+		block_on(session.forecast(TODAY.to_owned(), vec![scenario.clone()], CancelToken::new()))
+			.unwrap();
+	let horizons = |projection: &veritas_ffi::ForecastProjection| -> Vec<(u32, Month, i64)> {
+		projection
+			.horizons
+			.iter()
+			.map(|h| (h.months, h.month, h.net_worth))
+			.collect()
+	};
+	let base = horizons(&forecast.baseline);
+	assert_eq!(base.iter().map(|h| h.0).collect::<Vec<_>>(), [3, 6, 10, 12]);
+	for horizon in &forecast.baseline.horizons {
+		assert_eq!(
+			horizon.accounts.iter().map(|a| a.balance).sum::<i64>(),
+			horizon.net_worth,
+			"{} months: the accounts add up to net worth",
+			horizon.months
+		);
+		if let (Some(low), Some(high)) = (horizon.band_low, horizon.band_high) {
+			assert!(
+				low <= horizon.net_worth && horizon.net_worth <= high,
+				"{} months: inside the band",
+				horizon.months
+			);
+		}
+	}
+	let what_if = &forecast.scenarios[0];
+	for (base_horizon, scenario_horizon) in forecast.baseline.horizons.iter().zip(&what_if.horizons)
+	{
+		let shift = if (base_horizon.month.year, base_horizon.month.month) >= (2027, 3) {
+			100_000
+		} else {
+			0
+		};
+		assert_eq!(
+			scenario_horizon.net_worth,
+			base_horizon.net_worth - shift,
+			"{} months",
+			base_horizon.months
+		);
+		assert_eq!(
+			(scenario_horizon.band_low, scenario_horizon.band_high),
+			(
+				base_horizon.band_low.map(|l| l - shift),
+				base_horizon.band_high.map(|h| h - shift)
+			),
+			"{} months: the band's width never changes",
+			base_horizon.months
+		);
+	}
+	session.undo().unwrap();
+	let undone =
+		block_on(session.forecast(TODAY.to_owned(), vec![scenario.clone()], CancelToken::new()))
+			.unwrap();
+	assert_eq!(
+		horizons(&undone.scenarios[0]),
+		base,
+		"undoing the event leaves the what-if at the baseline"
+	);
+}
+
+#[test]
+fn a_car_loan_built_in_the_app_is_forecast_payment_by_payment_as_fc_2_and_actual_say() {
+	// The loan gap: a car loan made through the FFI with its terms (6.00%,
+	// $300 a month), one recorded payment split by the wizard ($60 interest,
+	// $20 escrow, a $5 late fee, $215 principal), and its monthly bill to
+	// the loan from November. The forecast lists the loan with a known split
+	// and FL-5d's "Not repeated" note for the fee, and each
+	// payment splits FC-2's way: interest on the balance at the start of the
+	// month at 6.00% / 12 rounded half up, the last escrow repeated, the rest
+	// principal into the loan. Each payment adds back up to the bill, as
+	// Actual's own forecast/generate has it on the same dates, and the loan's
+	// balance at each horizon is today's less the principal paid by then.
+	use veritas_ffi::{
+		BillAmount, BillDate, BillDraft, BillFrequency, BillRepeat, BillRepeatEnd, CategoryKind,
+		ForecastFlowKind, LoanPaymentDraft, LoanTerms,
+	};
+	let (scratch, session) = fresh("loan-forecast", "USD");
+	let checking = new_account(
+		&session,
+		"Checking",
+		veritas_ffi::NewAccountKind::Checking,
+		5_000_000,
+		None,
+	);
+	let loan = new_account(
+		&session,
+		"Car loan",
+		veritas_ffi::NewAccountKind::Loan,
+		1_200_000,
+		Some(LoanTerms {
+			rate_bps: Some(600),
+			payment: Some(30_000),
+			payment_day: Some(15),
+			lender: Some("Credit union".to_owned()),
+		}),
+	);
+	let veritas_ffi::KindTarget::One {
+		category_id: principal,
+	} = session.kind_target(CategoryKind::DebtPrincipal).unwrap()
+	else {
+		panic!("the starter set has one principal category");
+	};
+	let month = session.budget_month(NOVEMBER, TODAY.to_owned()).unwrap();
+	let envelope = |name: &str| {
+		month
+			.groups
+			.iter()
+			.flat_map(|g| &g.envelopes)
+			.find(|e| e.name == name)
+			.unwrap_or_else(|| panic!("no starter envelope {name}"))
+			.id
+			.clone()
+	};
+	let (interest, escrow, fees) = (
+		envelope("Miscellaneous"),
+		envelope("Car Insurance"),
+		envelope("Gifts"),
+	);
+	perform(
+		&session,
+		Command::RecordLoanPayment {
+			payment: LoanPaymentDraft {
+				id: Some("october".to_owned()),
+				from_account_id: checking.clone(),
+				loan_account_id: loan.clone(),
+				date: "2026-10-15".to_owned(),
+				total: 30_000,
+				interest: 6_000,
+				escrow: 2_000,
+				fees: 500,
+				principal_category_id: principal.clone(),
+				interest_category_id: Some(interest.clone()),
+				escrow_category_id: Some(escrow.clone()),
+				fees_category_id: Some(fees.clone()),
+				notes: None,
+				cleared: true,
+				fund_principal: false,
+			},
+		},
+	);
+	let loan_payee = session
+		.payees()
+		.unwrap()
+		.into_iter()
+		.find(|p| p.transfer_account_id.as_deref() == Some(loan.as_str()))
+		.unwrap()
+		.id;
+	perform(
+		&session,
+		Command::CreateBill {
+			bill_id: Some("car-payment".to_owned()),
+			bill: BillDraft {
+				name: Some("Car payment".to_owned()),
+				payee_id: Some(loan_payee),
+				account_id: Some(checking.clone()),
+				amount: BillAmount::Exact { amount: -30_000 },
+				date: BillDate::Repeat {
+					repeat: BillRepeat {
+						start: "2026-11-15".to_owned(),
+						interval: 1,
+						frequency: BillFrequency::Monthly,
+						patterns: Vec::new(),
+						weekend: None,
+						end: BillRepeatEnd::Never,
+					},
+				},
+				category_id: None,
+				auto_post: false,
+			},
+		},
+	);
+
+	let forecast =
+		block_on(session.forecast(TODAY.to_owned(), Vec::new(), CancelToken::new())).unwrap();
+	let listed = forecast
+		.loans
+		.iter()
+		.find(|l| l.account_id == loan)
+		.unwrap_or_else(|| {
+			panic!(
+				"the car loan carries a note, so it is listed: {:?}",
+				forecast.loans
+			)
+		});
+	assert!(
+		!listed.estimated_from_amounts && !listed.interest_assumed_zero,
+		"a mapped split is known: {listed:?}"
+	);
+	assert_eq!(listed.notes.len(), 1, "{:?}", listed.notes);
+	assert!(
+		listed.notes[0].starts_with("Not repeated: Gifts"),
+		"FL-5d: the mapped fee isn't repeated, and the screen says so: {:?}",
+		listed.notes
+	);
+
+	let mut by_date: std::collections::BTreeMap<String, Vec<&veritas_ffi::ForecastFlow>> =
+		std::collections::BTreeMap::new();
+	for flow in forecast
+		.known_flows
+		.iter()
+		.filter(|f| f.bill_id.as_deref() == Some("car-payment"))
+	{
+		by_date.entry(flow.date.clone()).or_default().push(flow);
+	}
+	assert!(by_date.len() >= 12, "a year of payments: {}", by_date.len());
+	let mut owed = 1_200_000 - 21_500;
+	let mut paid_principal = std::collections::BTreeMap::new();
+	for (date, flows) in &by_date {
+		let part = |kind: ForecastFlowKind, category: Option<&str>| -> i64 {
+			flows
+				.iter()
+				.filter(|f| {
+					f.account_id == checking
+						&& f.kind == kind && f.category_id.as_deref() == category
+				})
+				.map(|f| f.amount)
+				.sum()
+		};
+		let month_interest = (owed * 600 + 60_000) / 120_000;
+		let expected_principal = (30_000 - month_interest - 2_000).min(owed);
+		assert_eq!(
+			part(ForecastFlowKind::Expense, Some(&interest)),
+			-month_interest,
+			"{date}: interest on {owed} at 6.00%"
+		);
+		assert_eq!(
+			part(ForecastFlowKind::Expense, Some(&escrow)),
+			-2_000,
+			"{date}: the last escrow, repeated"
+		);
+		let into_loan: i64 = flows
+			.iter()
+			.filter(|f| {
+				f.account_id == checking
+					&& f.kind == ForecastFlowKind::Transfer
+					&& f.counterpart_account_id.as_deref() == Some(loan.as_str())
+			})
+			.map(|f| f.amount)
+			.sum();
+		assert_eq!(
+			into_loan, -expected_principal,
+			"{date}: the rest is principal into the loan"
+		);
+		assert_eq!(
+			flows
+				.iter()
+				.filter(|f| f.account_id == checking)
+				.map(|f| f.amount)
+				.sum::<i64>(),
+			-(month_interest + 2_000 + expected_principal),
+			"{date}: the parts add back up to the payment"
+		);
+		owed -= expected_principal;
+		paid_principal.insert(date.clone(), expected_principal);
+	}
+	for horizon in &forecast.baseline.horizons {
+		let end = format!("{}-{:02}-31", horizon.month.year, horizon.month.month);
+		let principal_by_then: i64 = paid_principal
+			.iter()
+			.filter(|(date, _)| date.as_str() <= end.as_str())
+			.map(|(_, p)| p)
+			.sum();
+		let balance = horizon
+			.accounts
+			.iter()
+			.find(|a| a.account_id == loan)
+			.unwrap()
+			.balance;
+		assert_eq!(
+			balance,
+			-(1_178_500 - principal_by_then),
+			"{} months: the loan's balance",
+			horizon.months
+		);
+	}
+
+	let zip = scratch.0.join("loan.zip").display().to_string();
+	export(&session, &zip);
+	let Some(oracle) = oracle() else {
+		return;
+	};
+	let last = by_date.keys().last().unwrap().clone();
+	let actual = node(&oracle, &["forecast-occurrences", &zip, &last]);
+	let theirs: std::collections::BTreeMap<String, i64> = actual
+		.as_array()
+		.unwrap()
+		.iter()
+		.filter(|o| o["schedule"] == "car-payment" && o["account"] == checking.as_str())
+		.map(|o| {
+			(
+				o["date"].as_str().unwrap().to_owned(),
+				o["amount"].as_i64().unwrap(),
+			)
+		})
+		.collect();
+	let ours: std::collections::BTreeMap<String, i64> = by_date
+		.iter()
+		.map(|(date, flows)| {
+			(
+				date.clone(),
+				flows
+					.iter()
+					.filter(|f| f.account_id == checking)
+					.map(|f| f.amount)
+					.sum(),
+			)
+		})
+		.collect();
+	assert_eq!(
+		ours, theirs,
+		"the same payment dates and amounts as Actual's forecast"
+	);
+}
