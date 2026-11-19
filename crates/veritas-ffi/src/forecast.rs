@@ -1695,4 +1695,122 @@ mod tests {
 			}
 		}
 	}
+
+	/// FC-6 E-16 (D77): the trigger runs through the end of the current
+	/// budget month, so a purchase dated after today still trips it, ahead
+	/// of "no history". Spending to date, the figure, stays through today.
+	#[test]
+	fn e_16_a_purchase_later_this_month_trips_d77_before_no_history() {
+		let scratch = Scratch::new("e-16");
+		let core = Core::<Store>::create_budget(
+			"JPY",
+			&scratch.budget(),
+			&crate::NumberFormat {
+				currency: Some("JPY".to_owned()),
+				style: crate::NumberStyle::CommaDot,
+				hide_decimals: false,
+				symbol_first: None,
+				symbol_space: None,
+			},
+			&crate::NewBudgetOptions {
+				retirement_401k: false,
+				hsa: false,
+				accounts: Vec::new(),
+			},
+			&token(),
+		)
+		.unwrap();
+		core.goals(TODAY).unwrap();
+		let account = core
+			.perform(Command::CreateAccount {
+				account: crate::NewAccount {
+					name: "Checking".to_owned(),
+					kind: crate::NewAccountKind::Checking,
+					starting_balance: 10_000_000,
+					loan: None,
+				},
+			})
+			.unwrap()
+			.entities
+			.iter()
+			.find(|e| e.kind == EntityKind::Account)
+			.and_then(|e| e.id.clone())
+			.unwrap();
+		let goal = core
+			.perform(Command::CreateGoal {
+				name: "New laptop".to_owned(),
+				target: 150_000,
+				target_date: Some("2027-06-30".to_owned()),
+				icon: None,
+				color: None,
+			})
+			.unwrap()
+			.entities
+			.iter()
+			.find(|e| e.kind == EntityKind::Goal)
+			.and_then(|e| e.id.clone())
+			.unwrap();
+		let summary = || {
+			core.goals(TODAY)
+				.unwrap()
+				.into_iter()
+				.find(|g| g.id == goal)
+				.unwrap()
+		};
+		let eta = || {
+			core.forecast(TODAY, &[], &token())
+				.unwrap()
+				.baseline
+				.goal_etas
+				.into_iter()
+				.find(|eta| eta.goal_id == goal)
+				.unwrap()
+		};
+		let category = summary().category_id;
+		core.perform(Command::SetBudget {
+			month: crate::Month {
+				year: 2026,
+				month: 11,
+			},
+			category_id: category.clone(),
+			amount: 25_000,
+		})
+		.unwrap();
+		let purchase = |id: &str, date: &str, amount: i64| {
+			core.perform(Command::AddTransaction {
+				transaction: crate::TransactionDraft {
+					id: Some(id.to_owned()),
+					account_id: account.clone(),
+					date: date.to_owned(),
+					amount,
+					payee_id: None,
+					payee_name: None,
+					category_id: Some(category.clone()),
+					notes: None,
+					cleared: false,
+					splits: Vec::new(),
+				},
+			})
+			.unwrap();
+		};
+
+		assert!(
+			matches!(summary().pace, Some(crate::GoalPace::NoHistory { .. })),
+			"E-10 before the purchase"
+		);
+		assert_eq!(eta().status, GoalEtaStatus::NoHistory);
+
+		purchase("later", "2026-11-28", -50_000);
+		let shown = summary();
+		assert_eq!(shown.pace, Some(crate::GoalPace::SpendingRecorded));
+		assert_eq!(shown.suggested_monthly, None, "no needed figure");
+		assert_eq!(shown.spent, 0, "the figure stays through today");
+		let later = eta();
+		assert_eq!(later.status, GoalEtaStatus::SpendingRecorded);
+		assert_eq!(later.text, "No ETA: spending recorded");
+		assert_eq!(later.remaining, None);
+
+		purchase("today", TODAY, -300);
+		assert_eq!(summary().spent, 300, "a purchase dated today counts");
+	}
 }
