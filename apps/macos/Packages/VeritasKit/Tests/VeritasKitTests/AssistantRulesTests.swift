@@ -90,9 +90,12 @@ struct AssistantZeroPlaceTests {
 		let format = workspace.format
 		#expect(format.decimalPlaces == 0)
 		let context = AssistantContext(queries: try #require(workspace.readOnlyQueries), format: format, today: WorkspaceModel.today())
+		let thisMonth = String(context.today.prefix(7))
+		let sheet = try await context.queries.budgetMonth(try #require(AssistantDates.month(thisMonth)), today: context.today)
+		let coreNote = try #require(sheet.mixedScaleNote, "the core sets CLS-12.10's note in a 0-place budget")
 		let text = try await GoalsTool(context: context).call(arguments: .init())
 		let lines = text.components(separatedBy: "\n")
-		#expect(lines.first == MoneyFormat.mixedScaleNote)
+		#expect(lines.first == coreNote, "goals() carries no note before v12, so the tool's line must match the core's word for word")
 		let goalLine = try #require(lines.first { $0.hasPrefix("Rice cooker: ") })
 		#expect(goalLine.contains("target \(format.wholeCurrency(spent.target, on: .budget))"))
 		#expect(goalLine.contains("available \(format.currency(spent.available, on: .budget))"))
@@ -106,8 +109,8 @@ struct AssistantZeroPlaceTests {
 		let trip = try #require(lines.first { $0.hasPrefix("Trip: ") })
 		#expect(trip.hasPrefix("Trip: available ¥0, target ¥50,000"))
 
-		let month = try await BudgetMonthTool(context: context).call(arguments: .init(month: String(WorkspaceModel.today().prefix(7))))
-		#expect(month.components(separatedBy: "\n").first == MoneyFormat.mixedScaleNote, "the note comes before the figures it explains")
+		let month = try await BudgetMonthTool(context: context).call(arguments: .init(month: thisMonth))
+		#expect(month.components(separatedBy: "\n").first == coreNote, "the note comes before the figures it explains")
 		await workspace.closeBudget()
 	}
 }
