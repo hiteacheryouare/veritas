@@ -246,10 +246,7 @@ impl Forecaster<'_> {
 						amount: None,
 						register_amount: None,
 						basis: Basis::GoalSpendingRecorded,
-						reason: format!(
-							"{name}: spending recorded, keeping {}",
-							copy.budget(current)
-						),
+						reason: format!("{name}: spending recorded, keeping {kept}"),
 					}
 				}
 				(CategoryKind::Expense, Some(goal)) => match goal.target_date {
