@@ -131,6 +131,7 @@ struct AssistantToolTests {
 			#expect(goals.goals.count == 2)
 			let format = goals.format
 			let text = try await GoalsTool(context: context(budget)).call(arguments: .init())
+			#expect(text.hasPrefix("Goals\n"), "no scale note in a 2-place budget")
 			#expect(!Self.hasStatementParentheses(text), "\(text)")
 			for goal in goals.goals {
 				#expect(text.contains("\n\(goal.name): \(format.wholeCurrency(goal.progressAmount, on: .budget)) of \(format.wholeCurrency(goal.target, on: .budget)) (\(goal.progressPercent)%)"), "\(goal.name)")

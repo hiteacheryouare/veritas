@@ -30,7 +30,7 @@ struct BudgetSessionQueries: ReadOnlyBudgetQueries {
 		try await session.accounts()
 	}
 
-	func goals(today: String) async throws -> [GoalSummary] {
+	func goals(today: String) async throws -> GoalList {
 		try await session.goals(today: today)
 	}
 

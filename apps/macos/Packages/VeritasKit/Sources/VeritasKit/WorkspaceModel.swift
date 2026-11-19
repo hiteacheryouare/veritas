@@ -161,7 +161,7 @@ public final class WorkspaceModel {
 	public func goals() async -> [GoalSummary] {
 		guard let session else { return [] }
 		do {
-			return try await session.goals(today: Self.today())
+			return try await session.goals(today: Self.today()).goals
 		} catch {
 			present(error, isRefresh: true)
 			return []

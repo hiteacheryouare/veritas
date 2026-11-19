@@ -220,8 +220,8 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 		budget.month(month)
 	}
 
-	func goals(today: String) async throws -> [GoalSummary] {
-		budget.goals
+	func goals(today: String) async throws -> GoalList {
+		GoalList(goals: budget.goals, mixedScaleNote: nil, zeroPlaces: false)
 	}
 
 	func goalClosePreview(_ goalID: String, releaseTo: String?, today: String) async throws -> GoalClosePreview {

@@ -125,7 +125,7 @@ final class RecordingQueries: ReadOnlyBudgetQueries {
 	func cashFlowStatement(first: String, last: String) async throws -> CashFlowColumn { throw record("cashFlowStatement(first:last:)") }
 	func budgetMonth(_ month: Month, today: String) async throws -> BudgetMonth { throw record("budgetMonth(_:today:)") }
 	func accounts() async throws -> AccountList { throw record("accounts()") }
-	func goals(today: String) async throws -> [GoalSummary] { throw record("goals(today:)") }
+	func goals(today: String) async throws -> GoalList { throw record("goals(today:)") }
 	func taxSummary(year: Int32) async throws -> TaxSummary { throw record("taxSummary(year:)") }
 	func customReports() async throws -> [CustomReportItem] { throw record("customReports()") }
 	func customReport(_ id: String, today: String) async throws -> CustomReportView { throw record("customReport(_:today:)") }

@@ -41,14 +41,14 @@ struct CannedQueries: ReadOnlyBudgetQueries {
 	struct Missing: Error {}
 
 	var tax: TaxSummary?
-	var goalList: [GoalSummary]?
+	var goalList: GoalList?
 
 	func netProfit(first: Month, last: Month) async throws -> NetProfitReport { throw Missing() }
 	func balanceSheet(asOf: String) async throws -> BalanceSheet { throw Missing() }
 	func cashFlowStatement(first: String, last: String) async throws -> CashFlowColumn { throw Missing() }
 	func budgetMonth(_ month: Month, today: String) async throws -> BudgetMonth { throw Missing() }
 	func accounts() async throws -> AccountList { throw Missing() }
-	func goals(today: String) async throws -> [GoalSummary] { guard let goalList else { throw Missing() }; return goalList }
+	func goals(today: String) async throws -> GoalList { guard let goalList else { throw Missing() }; return goalList }
 	func taxSummary(year: Int32) async throws -> TaxSummary { guard let tax else { throw Missing() }; return tax }
 	func customReports() async throws -> [CustomReportItem] { throw Missing() }
 	func customReport(_ id: String, today: String) async throws -> CustomReportView { throw Missing() }
@@ -90,12 +90,12 @@ struct AssistantZeroPlaceTests {
 		let format = workspace.format
 		#expect(format.decimalPlaces == 0)
 		let context = AssistantContext(queries: try #require(workspace.readOnlyQueries), format: format, today: WorkspaceModel.today())
-		let thisMonth = String(context.today.prefix(7))
-		let sheet = try await context.queries.budgetMonth(try #require(AssistantDates.month(thisMonth)), today: context.today)
-		let coreNote = try #require(sheet.mixedScaleNote, "the core sets CLS-12.10's note in a 0-place budget")
+		let list = try await context.queries.goals(today: context.today)
+		#expect(list.zeroPlaces)
+		let coreNote = try #require(list.mixedScaleNote, "the core sets CLS-12.10's note in a 0-place budget")
 		let text = try await GoalsTool(context: context).call(arguments: .init())
 		let lines = text.components(separatedBy: "\n")
-		#expect(lines.first == coreNote, "goals() carries no note before v12, so the tool's line must match the core's word for word")
+		#expect(lines.first == coreNote)
 		let goalLine = try #require(lines.first { $0.hasPrefix("Rice cooker: ") })
 		#expect(goalLine.contains("target \(format.wholeCurrency(spent.target, on: .budget))"))
 		#expect(goalLine.contains("available \(format.currency(spent.available, on: .budget))"))
@@ -109,7 +109,7 @@ struct AssistantZeroPlaceTests {
 		let trip = try #require(lines.first { $0.hasPrefix("Trip: ") })
 		#expect(trip.hasPrefix("Trip: available ¥0, target ¥50,000"))
 
-		let month = try await BudgetMonthTool(context: context).call(arguments: .init(month: thisMonth))
+		let month = try await BudgetMonthTool(context: context).call(arguments: .init(month: String(context.today.prefix(7))))
 		#expect(month.components(separatedBy: "\n").first == coreNote, "the note comes before the figures it explains")
 		await workspace.closeBudget()
 	}

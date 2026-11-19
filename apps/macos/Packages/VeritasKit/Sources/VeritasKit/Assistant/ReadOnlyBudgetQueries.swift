@@ -9,7 +9,7 @@ public protocol ReadOnlyBudgetQueries: Sendable {
 	func cashFlowStatement(first: String, last: String) async throws -> CashFlowColumn
 	func budgetMonth(_ month: Month, today: String) async throws -> BudgetMonth
 	func accounts() async throws -> AccountList
-	func goals(today: String) async throws -> [GoalSummary]
+	func goals(today: String) async throws -> GoalList
 	func taxSummary(year: Int32) async throws -> TaxSummary
 	func customReports() async throws -> [CustomReportItem]
 	func customReport(_ id: String, today: String) async throws -> CustomReportView

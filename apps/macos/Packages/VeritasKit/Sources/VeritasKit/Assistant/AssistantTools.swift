@@ -221,14 +221,14 @@ struct GoalsTool: Tool {
 		Self.text(try await context.queries.goals(today: context.today), format: context.format)
 	}
 
-	/// In a 0-place budget (CLS-12.14) the note comes first, a goal's mixed
+	/// In a 0-place budget (CLS-12.14) the core's note comes first, a goal's mixed
 	/// figure is labeled only "available", and spending to date has its own line.
-	static func text(_ goals: [GoalSummary], format: MoneyFormat) -> String {
-		guard !goals.isEmpty else { return "This budget has no goals." }
-		let zeroPlaces = format.decimalPlaces == 0
-		var text = zeroPlaces ? [MoneyFormat.mixedScaleNote, "Goals"] : ["Goals"]
-		for goal in goals {
-			text += lines(goal, format: format, zeroPlaces: zeroPlaces)
+	static func text(_ list: GoalList, format: MoneyFormat) -> String {
+		guard !list.goals.isEmpty else { return "This budget has no goals." }
+		var text = list.mixedScaleNote.map { [$0] } ?? []
+		text.append("Goals")
+		for goal in list.goals {
+			text += lines(goal, format: format, zeroPlaces: list.zeroPlaces)
 		}
 		return text.joined(separator: "\n")
 	}
