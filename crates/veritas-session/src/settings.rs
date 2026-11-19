@@ -32,10 +32,7 @@ pub fn entity_name(data: &BudgetData, budget_name: Option<&str>) -> EntityName {
 /// Trimmed; blank clears it, so the budget's name shows again.
 pub fn set_entity_name(data: &BudgetData, name: &str) -> Result<Vec<Row>, CoreError> {
 	let name = name.trim();
-	if name
-		.chars()
-		.any(|c| matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}'))
-	{
+	if name.chars().any(is_line_break) {
 		return Err(CoreError::Invalid(
 			"Put the entity name on one line.".to_owned(),
 		));
@@ -53,4 +50,59 @@ pub fn set_entity_name(data: &BudgetData, name: &str) -> Result<Vec<Row>, CoreEr
 		key: SettingKey::EntityName,
 		value,
 	})])
+}
+
+/// Unicode's mandatory breaks (UAX #14 BK, CR, LF, NL): LF, VT, FF, CR, NEL,
+/// LINE SEPARATOR and PARAGRAPH SEPARATOR.
+fn is_line_break(c: char) -> bool {
+	matches!(
+		c,
+		'\n' | '\u{b}' | '\u{c}' | '\r' | '\u{85}' | '\u{2028}' | '\u{2029}'
+	)
+}
+
+#[cfg(test)]
+mod tests {
+	use veritas_domain::BudgetType;
+
+	use super::*;
+
+	fn set(name: &str) -> Result<Vec<Row>, CoreError> {
+		set_entity_name(&BudgetData::empty(BudgetType::Envelope), name)
+	}
+
+	#[test]
+	fn st_3_any_line_break_inside_the_name_is_invalid() {
+		for name in [
+			"Household\nLLC",
+			"Household\rLLC",
+			"Household\r\nLLC",
+			"Household\u{b}LLC",
+			"Household\u{c}LLC",
+			"Household\u{85}LLC",
+			"Household\u{2028}LLC",
+			"Household\u{2029}LLC",
+		] {
+			assert!(matches!(set(name), Err(CoreError::Invalid(_))), "{name:?}");
+		}
+		assert!(
+			set(" Household, LLC\n").is_ok(),
+			"a trailing break is trimmed away"
+		);
+	}
+
+	#[test]
+	fn st_3_the_limit_is_100_unicode_scalar_values() {
+		assert!(set(&"é".repeat(100)).is_ok(), "100 scalars, 200 bytes");
+		assert!(matches!(set(&"é".repeat(101)), Err(CoreError::Invalid(_))));
+		let decomposed = "e\u{301}";
+		assert!(
+			set(&decomposed.repeat(50)).is_ok(),
+			"50 characters as seen, 100 scalars"
+		);
+		assert!(
+			matches!(set(&decomposed.repeat(51)), Err(CoreError::Invalid(_))),
+			"51 characters as seen, but 102 scalars"
+		);
+	}
 }
