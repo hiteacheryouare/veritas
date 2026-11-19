@@ -1656,3 +1656,116 @@ fn a_payment_with_no_interest_never_prefills_its_escrow_as_interest() {
 	);
 	session.close().unwrap();
 }
+
+#[test]
+fn a_principal_only_payment_prefills_its_principal() {
+	// DEBT-3 L-5e: a last payment with no expense lines needs no mapping. Its
+	// principal is the total, interest blank, escrow 0, never the loan's
+	// usual 40000, whether the wizard wrote it or it is a plain transfer.
+	let setup = loan_setup("principal-only", 980_000);
+	let session = &setup.session;
+	let defaults = |date: &str| {
+		session
+			.loan_payment_defaults(setup.loan.clone(), date.to_owned())
+			.unwrap()
+	};
+	let mut only = payment(&setup, "only", "2026-11-20", 32_000, 0);
+	only.interest_category_id = None;
+	perform(session, Command::RecordLoanPayment { payment: only });
+	let next = defaults("2026-12-01");
+	assert_eq!(
+		(next.total, next.interest, next.escrow),
+		(Some(32_000), None, Some(0)),
+		"the wizard's principal-only payment"
+	);
+	assert_eq!(
+		(next.from_account_id, next.principal_category_id),
+		(Some(setup.checking.clone()), Some(setup.principal.clone()))
+	);
+
+	perform(
+		session,
+		Command::AddTransaction {
+			transaction: veritas_ffi::TransactionDraft {
+				id: Some("plain".to_owned()),
+				account_id: setup.checking.clone(),
+				date: "2026-12-05".to_owned(),
+				amount: -27_500,
+				payee_id: Some(transfer_payee(session, &setup.loan)),
+				payee_name: None,
+				category_id: Some(setup.principal.clone()),
+				notes: None,
+				cleared: false,
+				splits: Vec::new(),
+			},
+		},
+	);
+	let next = defaults("2026-12-10");
+	assert_eq!(
+		(next.total, next.interest, next.escrow),
+		(Some(27_500), None, Some(0)),
+		"a plain transfer, as Actual writes one, is a principal-only payment too"
+	);
+}
+
+#[test]
+fn a_principal_only_payment_made_in_actual_prefills_its_principal() {
+	// L-5e for payments Ryan makes in Actual itself: a plain transfer to the
+	// loan in the principal envelope, and a split whose only line is that
+	// transfer. Either one is the last payment, pre-filling its principal as
+	// the total with interest blank and escrow 0, not the loan's usual 40000.
+	let setup = loan_setup("principal-only-actual", 980_000);
+	let zip = setup._scratch.join("base.zip");
+	block_on(
+		setup
+			.session
+			.export_actual_zip(text(&zip), CancelToken::new()),
+	)
+	.unwrap();
+	let Some(oracle) = oracle() else {
+		return;
+	};
+	for (label, transaction) in [
+		(
+			"plain",
+			serde_json::json!({"id": "plain", "date": "2026-12-05", "amount": -27_500,
+				"payee": {"transferTo": setup.loan}, "category": setup.principal}),
+		),
+		(
+			"split",
+			serde_json::json!({"id": "split", "date": "2026-12-05", "amount": -31_000,
+				"subtransactions": [{"amount": -31_000, "payee": {"transferTo": setup.loan}, "category": setup.principal}]}),
+		),
+	] {
+		let made = setup._scratch.join(&format!("{label}.zip"));
+		actual_apply(
+			&oracle,
+			&zip,
+			serde_json::json!([{"op": "addTransactions", "account": setup.checking, "transactions": [transaction]}]),
+			&made,
+			41,
+		);
+		let (_kept, opened) = reimported(&made, &format!("principal-only-{label}"));
+		let next = opened
+			.loan_payment_defaults(setup.loan.clone(), "2026-12-10".to_owned())
+			.unwrap();
+		let principal = -transaction["amount"].as_i64().unwrap();
+		assert_eq!(
+			(next.total, next.interest, next.escrow),
+			(Some(principal), None, Some(0)),
+			"{label}: made in Actual, principal only"
+		);
+		assert_eq!(
+			(
+				next.from_account_id.as_deref(),
+				next.principal_category_id.as_deref()
+			),
+			(
+				Some(setup.checking.as_str()),
+				Some(setup.principal.as_str())
+			),
+			"{label}"
+		);
+		opened.close().unwrap();
+	}
+}
