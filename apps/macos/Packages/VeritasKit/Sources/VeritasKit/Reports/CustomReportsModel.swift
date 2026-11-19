@@ -126,6 +126,7 @@ public final class CustomReportsModel {
 	}
 
 	public var format: MoneyFormat { workspace.format }
+	public var numberStyle: NumberStyle { workspace.numberStyle }
 	public var isReadOnly: Bool { workspace.readOnly != nil }
 	public var isEditing: Bool { draft != nil }
 
@@ -258,6 +259,7 @@ public final class DashboardModel {
 	}
 
 	public var format: MoneyFormat { workspace.format }
+	public var numberStyle: NumberStyle { workspace.numberStyle }
 	public var isReadOnly: Bool { workspace.readOnly != nil }
 	public var canEdit: Bool { !isReadOnly && workspace.canEditDashboards }
 	public var canPlace: Bool { !isReadOnly }

@@ -248,6 +248,19 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 	func customReport(_ id: String, today: String) async throws -> CustomReportView { try reports.customReport(id) }
 	func previewCustomReport(_ settings: CustomReportSettings, today: String) async throws -> CustomReportView { StubReports.view(settings) }
 	func dashboards(today: String) async throws -> [DashboardPage] { [] }
+
+	func accounts() async throws -> AccountList {
+		let accounts = accountGroups.flatMap(\.accounts).map {
+			AccountDetail(id: $0.id, name: $0.name, offBudget: false, closed: $0.isInactive, groupId: nil, cleared: $0.balance, uncleared: 0, total: $0.balance, note: nil, lastReconciled: nil)
+		}
+		return AccountList(accounts: accounts, groups: [])
+	}
+
+	func payees() async throws -> [PayeeDetail] {
+		["Corner Market", "Employer", "Landlord", "Power Co."].enumerated().map { index, name in
+			PayeeDetail(id: "payee-\(index)", name: name, transferAccountId: nil, favorite: false, learnCategories: true, transactions: 4)
+		}
+	}
 	let canEditDashboards = true
 	func dashboardSheets(today: String) async throws -> [DashboardSheet] { dashboardStore.all() }
 	func addWidget(page: String, kind: WidgetKind, x: Int64, y: Int64, width: Int64, height: Int64, config: WidgetConfig) async throws -> String {
