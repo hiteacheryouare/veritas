@@ -15,21 +15,21 @@ struct GoalWordsTests {
 		let words = GoalWords(active(pace: .onTrack(etaMonth: Month(year: 2027, month: 3))), format: MoneyFormat(), thisMonth: november)
 		#expect(words.note == "On track for March")
 		#expect(words.tone == .available)
-		#expect(words.detail == "Budget $76 a month")
+		#expect(words.detail == "Budget $76.00 a month")
 		let far = GoalWords(active(pace: .onTrack(etaMonth: Month(year: 2027, month: 8))), format: MoneyFormat(), thisMonth: november)
 		#expect(far.note == "On track for August 2027")
 	}
 
 	@Test func aGoalBehindSaysWhatItNeedsAsAWarning() {
 		let words = GoalWords(active(pace: .behind(neededMonthly: 41_000)), format: MoneyFormat(), thisMonth: november)
-		#expect(words.note == "Behind, needs $410 a month")
+		#expect(words.note == "Behind, needs $410.00 a month")
 		#expect(words.tone == .low)
 		#expect(words.detail == nil)
 	}
 
 	@Test func noHistoryIsNeutralAndNothingAddedIsAWarning() {
 		let fresh = GoalWords(active(pace: .noHistory(neededMonthly: 7_600)), format: MoneyFormat(), thisMonth: november)
-		#expect(fresh.note == "Budget $76 a month")
+		#expect(fresh.note == "Budget $76.00 a month")
 		#expect(fresh.detail == "No ETA yet")
 		#expect(fresh.tone == .neutral)
 		let stalled = GoalWords(active(pace: .notAdding(neededMonthly: 7_600)), format: MoneyFormat(), thisMonth: november)
@@ -39,10 +39,30 @@ struct GoalWordsTests {
 
 	@Test func withoutAPaceTheSuggestionAndTargetShow() {
 		let words = GoalWords(active(pace: nil), format: MoneyFormat(), thisMonth: november)
-		#expect(words.note == "Budget $76 a month")
+		#expect(words.note == "Budget $76.00 a month")
 		#expect(words.detail == "Target March 2027")
 		let undated = GoalWords(active(pace: nil, monthly: nil), format: MoneyFormat(), thisMonth: november)
 		#expect(undated.note == "No target date")
+	}
+
+	@Test func aSuggestionShowsItsCentsInATwoPlaceBudget() {
+		// Fred on #83: DEBT-8.1's G-1, 150000 over 7 months, suggests 21429, never "$214".
+		let suggested = GoalWords(active(pace: nil, monthly: 21_429), format: MoneyFormat(), thisMonth: november)
+		#expect(suggested.note == "Budget $214.29 a month")
+		let behind = GoalWords(active(pace: .behind(neededMonthly: 21_429)), format: MoneyFormat(), thisMonth: november)
+		#expect(behind.note == "Behind, needs $214.29 a month")
+		let stalled = GoalWords(active(pace: .notAdding(neededMonthly: 21_429)), format: MoneyFormat(), thisMonth: november)
+		#expect(stalled.detail == "Budget $214.29 a month")
+	}
+
+	@Test func aYenSuggestionIsWholeYenOnTheBudgetScale() {
+		// Goal amounts are budget cells (D63), so a yen goal's minor units are whole yen:
+		// ¥15,000 over 7 months is ceil(15000 / 7) = 2143.
+		let yen = MoneyFormat(currencySymbol: "¥", decimalPlaces: 0)
+		let suggested = GoalWords(active(pace: nil, monthly: 2_143), format: yen, thisMonth: november)
+		#expect(suggested.note == "Budget ¥2,143 a month")
+		let fresh = GoalWords(active(pace: .noHistory(neededMonthly: 2_143)), format: yen, thisMonth: november)
+		#expect(fresh.note == "Budget ¥2,143 a month")
 	}
 
 	@Test func aReachedGoalSpentPastZeroReadsOverAndOneWithMoneyLeftReadsLeft() {
