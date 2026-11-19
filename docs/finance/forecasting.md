@@ -214,7 +214,7 @@ Each suggestion carries exactly one reason line, built from these templates (dol
 | Debt principal | `{Category} ${amount}, principal of the last loan payment`. `amount` is that principal rounded half up to whole dollars |
 | No history, no bill | No suggestion. `{Category}: no history yet, keeping ${current budgeted}` |
 
-In the two "keeping" lines, `{current budgeted}` is the category's budgeted amount for the suggested month, shown in whole dollars rounded half up. It is a label only. The budget cell keeps its exact cents and nothing is written.
+In every "keeping" line (no target date, reached, no history and no bill, and the active goal with recorded spending in a budget without 2 places), `{current budgeted}` is the category's budgeted amount for the suggested month, that is the month after the current month that the suggestions are for, never the current month's. All of them read the same month, so they cannot drift apart. It is shown in whole dollars rounded half up, or in a budget without 2 places as the cell's own integer in the currency's whole units (CLS-12.9). It is a label only. The budget cell keeps its exact cents and nothing is written.
 
 Notices (never silently scale the numbers): if the sum of suggestions exceeds the forecast income for the month, show "Suggestions exceed expected income by ${amount}". Suggestions never include transfers.
 
