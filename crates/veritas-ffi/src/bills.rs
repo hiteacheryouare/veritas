@@ -249,6 +249,12 @@ pub struct UpcomingBill {
 	pub auto_post: bool,
 	/// Due, Missed or Upcoming.
 	pub status: BillStatus,
+	/// v14. Whether Paid dated today counts as paying this occurrence in
+	/// Actual, as `BillDetail.paid_today_counts` says for the bill. Only the
+	/// bill's next occurrence can be: Paid always pays the next one. Lets the
+	/// tray confirm "Post today" on an occurrence days out.
+	#[uniffi(default = false)]
+	pub paid_today_counts: bool,
 }
 
 const UPCOMING_DAYS: i64 = 7;
@@ -588,6 +594,10 @@ pub(crate) fn upcoming(
 			continue;
 		};
 		let bill = summary(data, &schedule.id, today)?;
+		let next_counts = match bill.read_only_reason {
+			Some(BillReadOnlyReason::MissingRule | BillReadOnlyReason::UnreadableRule) => false,
+			_ => veritas_rules::counts_as_paid(data, &schedule.id, today)?,
+		};
 		let dates = bill_dates(data, &schedule.id, next, end).unwrap_or_default();
 		for date in dates {
 			let status = if date == next {
@@ -621,6 +631,7 @@ pub(crate) fn upcoming(
 				is_income: bill.is_income,
 				auto_post: bill.auto_post,
 				status,
+				paid_today_counts: date == next && next_counts,
 			});
 		}
 	}
@@ -672,20 +683,29 @@ impl Session {
 	/// Every bill, active ones first by next date, then paused and ended
 	/// ones. `today` is the local date, `YYYY-MM-DD`.
 	pub fn bills(&self, today: String) -> Result<Vec<BillSummary>, FfiError> {
-		self.core
-			.call(|session| bills(session.data()?, civil_date(&today)?))
+		self.core.call(|session| {
+			let today = civil_date(&today)?;
+			session.set_today(today);
+			bills(session.data()?, today)
+		})
 	}
 
 	/// One bill for the editor, with its next few dates.
 	pub fn bill(&self, bill_id: String, today: String) -> Result<BillDetail, FfiError> {
-		self.core
-			.call(|session| bill_detail(session.data()?, &bill_id, civil_date(&today)?))
+		self.core.call(|session| {
+			let today = civil_date(&today)?;
+			session.set_today(today);
+			bill_detail(session.data()?, &bill_id, today)
+		})
 	}
 
 	/// The upcoming tray (Actual shows 7 days) and the timeline: unpaid
 	/// occurrences through `today + days`, oldest first.
 	pub fn upcoming(&self, days: u32, today: String) -> Result<Vec<UpcomingBill>, FfiError> {
-		self.core
-			.call(|session| upcoming(session.data()?, days, civil_date(&today)?))
+		self.core.call(|session| {
+			let today = civil_date(&today)?;
+			session.set_today(today);
+			upcoming(session.data()?, days, today)
+		})
 	}
 }

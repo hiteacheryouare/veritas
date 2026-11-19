@@ -2586,6 +2586,30 @@ fn upcoming_bills_carry_their_amount_kind_account_and_category() {
 	assert_eq!(kinds("power").0, Some(veritas_ffi::BillAmountKind::About));
 	assert_eq!(kinds("water").0, Some(veritas_ffi::BillAmountKind::Between));
 	assert_eq!(kinds("savings").1, None, "a bill without a category");
+	// v14 paidTodayCounts: the bill editor's answer, on its next occurrence only.
+	let mut seen = std::collections::BTreeSet::new();
+	for row in &upcoming {
+		let editor = session
+			.bill(row.bill_id.clone(), "2026-11-01".to_owned())
+			.unwrap()
+			.paid_today_counts;
+		let first = seen.insert(row.bill_id.clone());
+		assert_eq!(
+			row.paid_today_counts,
+			first && editor,
+			"{} on {}",
+			row.bill_id,
+			row.date
+		);
+	}
+	let near = session.upcoming(30, "2026-11-16".to_owned()).unwrap();
+	let water_rows: Vec<_> = near.iter().filter(|row| row.bill_id == "water").collect();
+	assert_eq!(
+		(water_rows[0].date.as_str(), water_rows[0].paid_today_counts),
+		("2026-11-18", true),
+		"two days out, Paid today pays the next occurrence"
+	);
+	assert!(water_rows[1..].iter().all(|row| !row.paid_today_counts));
 	let ours = scratch.join("ours.zip");
 	export(&session, &ours);
 	let Some(oracle) = oracle() else { return };
@@ -3360,7 +3384,7 @@ fn a_range_bill_takes_its_smaller_amount_first_and_reads_actuals_either_way() {
 		bill: water(-6_000, -4_000),
 	});
 	assert!(
-		matches!(&refused, Err(FfiError::Invalid { message }) if message == "Put the lower amount first"),
+		matches!(&refused, Err(FfiError::Invalid { message }) if message == "Put the smaller amount first"),
 		"{refused:?}"
 	);
 	let ours = scratch.join("ours.zip");
@@ -3422,4 +3446,111 @@ fn a_range_bill_takes_its_smaller_amount_first_and_reads_actuals_either_way() {
 		.find(|c| c["field"] == "amount")
 		.unwrap();
 	assert_eq!(amount["value"], json!({"num1": -4_000, "num2": -6_000}));
+}
+
+#[test]
+fn paid_today_counts_says_whether_actuals_service_will_move_the_bill_on() {
+	// v15 paidTodayCounts against Actual's own verdict. Two confirm-first
+	// bills, one due in 2 days and one in 5. "Post today" on each, then the
+	// schedule service once both dates have passed: Actual moves a bill on
+	// only when it counted today's row as paying the occurrence (the other
+	// stays on its missed date), which is what the tray's flag must have
+	// said beforehand. Veritas and Actual must agree on both.
+	let scratch = Scratch::new("paid-today-counts");
+	let setup = import(&scratch, &small_zip(), "setup");
+	see(&setup, "2026-11-16");
+	for (id, start) in [("near", "2026-11-18"), ("far", "2026-11-21")] {
+		create(
+			&setup,
+			id,
+			bill(
+				id,
+				CITY_POWER,
+				BillAmount::Exact { amount: -3_000 },
+				monthly(start, None),
+				Some(UTILITIES),
+				false,
+			),
+		);
+	}
+	let tray = setup.upcoming(7, "2026-11-16".to_owned()).unwrap();
+	let flag = |id: &str| {
+		tray.iter()
+			.find(|row| row.bill_id == id)
+			.unwrap()
+			.paid_today_counts
+	};
+	assert!(flag("near"), "2 days out: Post today pays the occurrence");
+	assert!(!flag("far"), "5 days out: Post today doesn't");
+	let base = scratch.join("base.zip");
+	export(&setup, &base);
+	setup.close().unwrap();
+
+	let session = import(&scratch, &base, "veritas");
+	see(&session, "2026-11-16");
+	for id in ["near", "far"] {
+		perform(
+			&session,
+			Command::PostBillNow {
+				bill_id: id.to_owned(),
+				dated_today: true,
+			},
+		);
+	}
+	session.maintain("2026-11-22".to_owned()).unwrap();
+	let ours: Vec<(String, Option<String>)> = ["near", "far"]
+		.iter()
+		.map(|id| {
+			(
+				id.to_string(),
+				bill_on(&session, id, "2026-11-22").next_date,
+			)
+		})
+		.collect();
+	assert_eq!(
+		ours,
+		[
+			("near".to_owned(), Some("2026-12-18".to_owned())),
+			("far".to_owned(), Some("2026-11-21".to_owned())),
+		],
+		"the service moved on exactly the bill the flag said Post today would pay"
+	);
+	session.close().unwrap();
+
+	let Some(oracle) = oracle() else { return };
+	let posted_zip = scratch.join("actual-posted.zip");
+	actual_apply(
+		&oracle,
+		&base,
+		json!([{"op": "postSchedule", "id": "near", "today": true}, {"op": "postSchedule", "id": "far", "today": true}]),
+		&posted_zip,
+		"2026-11-16",
+		31,
+	);
+	let ran = scratch.join("actual-ran.zip");
+	actual_apply(
+		&oracle,
+		&posted_zip,
+		json!([{"op": "openBudgetSchedules"}]),
+		&ran,
+		"2026-11-22",
+		32,
+	);
+	let dump: Value = serde_json::from_slice(&node(
+		&oracle,
+		&["dump", &text(&ran), "--today", "2026-11-22"],
+	))
+	.unwrap();
+	let theirs: Vec<(String, Option<String>)> = ["near", "far"]
+		.iter()
+		.map(|id| {
+			(
+				id.to_string(),
+				dump["computed"]["schedules"][id]["nextDate"]
+					.as_str()
+					.map(str::to_owned),
+			)
+		})
+		.collect();
+	assert_eq!(ours, theirs, "Actual's service agrees");
 }
