@@ -33,7 +33,9 @@ pub use projection::{
 pub use scenario::{
 	MAX_COMPARED, cadence_dates, in_the_past, validate as validate_scenario, validate_new,
 };
-pub use schedules::{ESTIMATED_SPLIT, EscrowSource, NotRepeated, ScheduledFlows, Unforecast};
+pub use schedules::{
+	ESTIMATED_SPLIT, EscrowSource, NO_INTEREST_LINE, NotRepeated, ScheduledFlows, Unforecast,
+};
 pub use suggest::{Basis, Envelope, Suggestion, Suggestions, next_month_envelopes};
 pub use wrapped::{
 	CategoryRank, Change, GroupRank, NoSpend, PayeeRank, PriorYear, Redacted, Streak, Wrapped,

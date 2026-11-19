@@ -459,10 +459,12 @@ impl Session {
 		today: String,
 	) -> Result<LoanPaymentDefaults, FfiError> {
 		self.core.call(|session| {
+			let today = date(&today)?;
+			session.set_today(today);
 			let defaults = loans::payment_defaults(
 				session.data()?,
 				&AccountId::new(loan_account_id.as_str()),
-				date(&today)?,
+				today,
 			)?;
 			Ok(LoanPaymentDefaults {
 				from_account_id: text(defaults.from),

@@ -106,6 +106,12 @@ public enum BillWords {
 		"Post for \(day(date))"
 	}
 
+	/// Asked before Post today when Actual won't count a payment today as
+	/// paying that occurrence (`UpcomingBill.paidTodayCounts`, contract v15).
+	public static func postTodayConfirm(_ date: String) -> String {
+		"This won't pay the \(day(date)) bill. Post today anyway?"
+	}
+
 	/// The editor's line under Auto-post for an estimated amount. Nil for an exact one.
 	public static func estimate(_ kind: BillAmountKind) -> String? {
 		switch kind {

@@ -71,7 +71,7 @@ final class StubBills: @unchecked Sendable {
 		return bills()
 			.filter { $0.state == .active && ($0.nextDate ?? "9999") <= last }
 			.sorted { ($0.nextDate ?? "") < ($1.nextDate ?? "") }
-			.map { UpcomingBill(billId: $0.id, name: $0.name, payeeName: $0.payeeName, accountId: $0.accountId, date: $0.nextDate ?? "", scheduledAmount: $0.scheduledAmount, isIncome: $0.isIncome, autoPost: $0.autoPost, status: $0.status == .scheduled ? .upcoming : $0.status) }
+			.map { UpcomingBill(billId: $0.id, name: $0.name, payeeName: $0.payeeName, accountId: $0.accountId, date: $0.nextDate ?? "", scheduledAmount: $0.scheduledAmount, isIncome: $0.isIncome, autoPost: $0.autoPost, status: $0.status == .scheduled ? .upcoming : $0.status, paidTodayCounts: true) }
 	}
 
 	/// Applies a bill command. Returns false for a command that isn't a bill's.

@@ -2079,3 +2079,134 @@ fn a_locked_row_is_unchecked_only_after_it_is_unlocked() {
 	assert!(!open.reconciled && !open.cleared);
 	assert_eq!(account(&session, &everyday).cleared, 40_000);
 }
+
+#[test]
+fn a_new_accounts_starting_balance_takes_the_shells_local_date() {
+	// In the US evening the UTC date is already tomorrow. The session starts
+	// from the UTC date at open, so every call the shell makes with its local
+	// `today` pins it: maintain, the bill screens and the loan pre-fill as
+	// well as the budget reads. An account created right after only
+	// maintain(today:) is dated that day, never the UTC date.
+	let scratch = Scratch::new("local-today");
+	let session = block_on(Session::import_actual_zip(
+		text(&small_zip()),
+		text(&scratch.join("budget")),
+		CancelToken::new(),
+	))
+	.unwrap();
+	let starting_date = |id: &str| {
+		session
+			.register(
+				RegisterScope::Account {
+					account_id: id.to_owned(),
+				},
+				RegisterFilter::default(),
+				RegisterSort {
+					key: RegisterSortKey::Date,
+					ascending: true,
+				},
+				0,
+				10,
+			)
+			.unwrap()
+			.rows
+			.into_iter()
+			.find(|row| row.starting_balance)
+			.unwrap()
+			.date
+	};
+	for (pin, name, local) in [
+		("maintain", "Evening checking", "2027-03-04"),
+		("bills", "Bills checking", "2027-03-11"),
+		("upcoming", "Tray checking", "2027-03-18"),
+	] {
+		match pin {
+			"maintain" => {
+				session.maintain(local.to_owned()).unwrap();
+			}
+			"bills" => {
+				session.bills(local.to_owned()).unwrap();
+			}
+			_ => {
+				session.upcoming(7, local.to_owned()).unwrap();
+			}
+		}
+		let id = new_account(&session, name, NewAccountKind::Checking, 12_500);
+		assert_eq!(starting_date(&id), local, "{pin} pins the local date");
+	}
+}
+
+#[test]
+fn a_reopened_budget_dates_a_new_account_by_the_local_date_its_first_call_carries() {
+	// The evening case through a real reopen: the app closes and opens the
+	// budget again (the session restarts from the UTC date), and the first
+	// call it makes carries the local date. Each of the other date-carrying
+	// calls the contract names pins it too: the bill editor's `bill` and
+	// the loan wizard's pre-fill.
+	let scratch = Scratch::new("local-today-reopen");
+	let session = import(&scratch, &small_zip(), "budget");
+	session.maintain("2027-04-01".to_owned()).unwrap();
+	let loan = new_account(&session, "Car loan", NewAccountKind::Loan, 900_000);
+	perform(
+		&session,
+		Command::CreateBill {
+			bill_id: Some("gym".to_owned()),
+			bill: veritas_ffi::BillDraft {
+				name: Some("Gym".to_owned()),
+				payee_id: None,
+				account_id: Some(new_account(
+					&session,
+					"Everyday",
+					NewAccountKind::Checking,
+					0,
+				)),
+				amount: veritas_ffi::BillAmount::Exact { amount: -4_000 },
+				date: veritas_ffi::BillDate::Once {
+					date: "2027-05-01".to_owned(),
+				},
+				category_id: None,
+				auto_post: false,
+			},
+		},
+	);
+	session.close().unwrap();
+	let starting_date = |session: &Session, id: &str| {
+		register(session, in_account(id))
+			.into_iter()
+			.find(|row| row.starting_balance)
+			.unwrap()
+			.date
+	};
+	for (pin, local) in [
+		("maintain", "2027-04-09"),
+		("bill", "2027-04-16"),
+		("loanPaymentDefaults", "2027-04-23"),
+	] {
+		let reopened = reopen(&scratch, "budget");
+		match pin {
+			"maintain" => {
+				reopened.maintain(local.to_owned()).unwrap();
+			}
+			"bill" => {
+				reopened.bill("gym".to_owned(), local.to_owned()).unwrap();
+			}
+			_ => {
+				reopened
+					.loan_payment_defaults(loan.clone(), local.to_owned())
+					.unwrap();
+			}
+		}
+		let id = new_account(
+			&reopened,
+			&format!("Opened {pin}"),
+			NewAccountKind::Savings,
+			7_500,
+		);
+		assert_eq!(
+			starting_date(&reopened, &id),
+			local,
+			"after a reopen, {pin} alone pins the local date"
+		);
+		reopened.close().unwrap();
+	}
+}

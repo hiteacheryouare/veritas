@@ -51,6 +51,9 @@ struct RealCoreBillsScreenTests {
 			#expect(!model.tray.contains { $0.billId == gym.id }, "so it leaves the tray")
 			#expect(model.bill(gym.id)?.nextDate == inTwo, "the next date moves at the service's next run, as in Actual")
 
+			#expect(gymDue.paidTodayCounts, "two days out, paying today counts the occurrence")
+			let fineDue = try #require(model.tray.first { $0.billId == fine.id })
+			#expect(!fineDue.paidTodayCounts, "three days out it doesn't, so the tray asks before Post today (v15)")
 			#expect(await model.postNow(fine.id, datedToday: true), "\(String(describing: model.actionProblem?.message))")
 			#expect(try await posted(budget, fine.id).map(\.date) == [today], "Post today posts today")
 			// Actual's getStatus counts a post only from two days before the
@@ -93,7 +96,7 @@ struct RealCoreBillsScreenTests {
 			await model.edit(try #require(model.bill(salary.id)))
 			model.editing?.draft.amount = .between(low: 260_000, high: 245_000)
 			#expect(await model.save() == false)
-			#expect(model.editing?.problem == "Put the lower amount first")
+			#expect(model.editing?.problem == "Put the smaller amount first")
 			model.editing = nil
 
 			let power = try await create(model, "Power", amount: .about(amount: 9_000), start: today)

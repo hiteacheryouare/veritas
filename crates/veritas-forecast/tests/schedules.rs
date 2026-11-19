@@ -12,7 +12,9 @@ use veritas_domain::{
 	AccountKind, AccountMeta, ConditionsOp, Rule, RuleId, RuleStage, Schedule, ScheduleId,
 	SplitRole,
 };
-use veritas_forecast::{Certainty, ESTIMATED_SPLIT, FlowKind, Forecaster, ScheduledFlows};
+use veritas_forecast::{
+	Certainty, ESTIMATED_SPLIT, FlowKind, Forecaster, NO_INTEREST_LINE, ScheduledFlows,
+};
 
 const TODAY: &str = "2027-01-15";
 
@@ -842,5 +844,55 @@ fn fc_2_fl_5e_a_mapped_payment_with_no_rate_is_forecast() {
 			(-150100, Some(cat("Loan interest"))),
 			(-50000, Some(cat("Electric"))),
 		]
+	);
+}
+
+#[test]
+fn fc_2_a_principal_only_payment_is_known_and_flags_zero_interest() {
+	// FC-2: a last payment with no expense lines needs no mapping. Its split
+	// is known, escrow is 0, and with no rate interest is taken as 0 and
+	// flagged, so the screen shows NO_INTEREST_LINE.
+	let mut book = Book::household();
+	mapped_last_payment(&mut book, 30_000_000, 20000, &[], None);
+	let result = flows(&book);
+	assert!(result.unforecast.is_empty(), "{:?}", result.unforecast);
+	assert!(result.estimated_splits.is_empty());
+	assert_eq!(
+		result.interest_assumed_zero,
+		[acct("LOAN")],
+		"{NO_INTEREST_LINE}"
+	);
+	let february = february(&result);
+	assert_eq!(february, [(-20000, Some(cat("Loan principal")))]);
+	assert!(
+		of(&result, "LOAN")
+			.iter()
+			.all(|flow| flow.certainty == Certainty::Exact)
+	);
+
+	let mut with_rate = Book::household();
+	mapped_last_payment(&mut with_rate, 30_000_000, 20000, &[], Some(600));
+	assert!(
+		flows(&with_rate).interest_assumed_zero.is_empty(),
+		"with a rate, interest comes from the rate"
+	);
+}
+
+#[test]
+fn fc_2_a_mapped_payment_with_no_interest_line_and_no_rate_is_flagged() {
+	use veritas_domain::LoanPart::Escrow;
+	let mut book = Book::household();
+	mapped_last_payment(
+		&mut book,
+		30_020_000,
+		20000,
+		&[("Electric", 50000, Some(Escrow))],
+		None,
+	);
+	let result = flows(&book);
+	assert_eq!(result.interest_assumed_zero, [acct("LOAN")]);
+	assert_eq!(
+		NO_INTEREST_LINE,
+		"No interest line on the last payment, interest taken as 0"
 	);
 }
