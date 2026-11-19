@@ -6,9 +6,9 @@ use rusqlite::{OptionalExtension, Transaction as SqlTransaction, params_from_ite
 use veritas_domain::{
 	Account, AccountGroup, AccountId, AccountKind, AccountMeta, BudgetCell, BudgetType, Category,
 	CategoryGroup, CategoryId, CategoryKind, CategoryMeta, CivilDate, CoreError, CustomReportRow,
-	DashboardPage, Goal, GoalStatus, Money, Payee, PayeeId, Rule, RuleStage, Schedule, ScheduleId,
-	ScheduleJsonPaths, ScheduleMeta, SplitRole, Tag, Transaction, TransactionId, TransactionMeta,
-	Widget, YearMonth,
+	DashboardPage, Goal, GoalStatus, LoanPaymentPart, Money, Payee, PayeeId, Rule, RuleStage,
+	Schedule, ScheduleId, ScheduleJsonPaths, ScheduleMeta, SplitRole, Tag, Transaction,
+	TransactionId, TransactionMeta, Widget, YearMonth,
 };
 
 use crate::connection::storage;
@@ -249,6 +249,15 @@ fn transaction_meta_columns(row: &TransactionMeta) -> Columns {
 	vec![
 		("adjustment", flag(row.adjustment)),
 		("needs_actual", text(row.needs_actual.as_deref())),
+	]
+}
+
+fn loan_payment_part_columns(row: &LoanPaymentPart) -> Columns {
+	vec![
+		("payment", owned(row.payment.as_str())),
+		("line", owned(row.line.as_str())),
+		("part", owned(row.part.stored())),
+		("tombstone", flag(row.tombstone)),
 	]
 }
 
@@ -797,6 +806,24 @@ impl<'conn> Writer<'conn> {
 			)
 			.map(|_| ())
 			.map_err(storage)
+	}
+
+	pub fn put_loan_payment_part(
+		&mut self,
+		before: Option<&LoanPaymentPart>,
+		after: Option<&LoanPaymentPart>,
+	) -> Result<(), CoreError> {
+		let Some(id) = before.or(after).map(|row| row.id.clone()) else {
+			return Ok(());
+		};
+		self.put_veritas(
+			"veritas_loan_payment_part",
+			"id",
+			id.as_str(),
+			before,
+			after,
+			loan_payment_part_columns,
+		)
 	}
 
 	pub fn put_schedule_meta(

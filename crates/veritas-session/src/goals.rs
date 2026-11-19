@@ -7,7 +7,7 @@ use veritas_domain::{
 	Row, TransactionKind, YearMonth,
 };
 use veritas_engine::goals::{self as engine, Suggestion};
-use veritas_engine::{BudgetEditor, BudgetWrites, Envelope, EnvelopeSheet, NumberFormat};
+use veritas_engine::{BudgetEditor, BudgetWrites, Envelope, EnvelopeSheet};
 use veritas_reports::Classification;
 
 use crate::categories;
@@ -414,9 +414,7 @@ fn live_category(data: &BudgetData, id: &CategoryId) -> Result<(), CoreError> {
 }
 
 fn editor<'a>(data: &'a BudgetData, sheet: &'a EnvelopeSheet) -> BudgetEditor<'a> {
-	let format =
-		NumberFormat::from_preference(data.format.number_format.as_deref().unwrap_or("comma-dot"));
-	BudgetEditor::new(data, sheet, format, data.format.hide_fraction)
+	BudgetEditor::new(data, sheet)
 }
 
 fn extend(writes: &mut BudgetWrites, more: BudgetWrites) {

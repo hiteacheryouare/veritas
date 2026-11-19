@@ -96,13 +96,18 @@ public final class TransferPurposeModel {
 		switch target {
 		case .several(let ids): all.filter { ids.contains($0.id) }.map(\.choice)
 		case .one: []
-		case .none?, nil: all.filter { !$0.isIncome }.map(\.choice)
+		case .none?, .oneHidden?, .oneArchived?, .severalHidden?, nil: all.filter { !$0.isIncome }.map(\.choice)
 		}
 	}
 
-	/// No envelope has the answer's kind, so one is chosen or made.
+	/// No visible envelope has the answer's kind, so one is chosen or made.
+	/// Contract v12's hidden and archived matches don't block that; offering
+	/// to show one again (`reviveKindCategory`) isn't built yet.
 	public var needsKind: Bool {
-		if case .none? = target { true } else { false }
+		switch target {
+		case .none?, .oneHidden?, .oneArchived?, .severalHidden?: true
+		case .one?, .several?, nil: false
+		}
 	}
 
 	public var isAnswered: Bool {
@@ -171,7 +176,7 @@ public final class TransferPurposeModel {
 			switch target {
 			case .one(let id): id == categoryID
 			case .several(let ids): ids.contains(categoryID)
-			case .none: false
+			case .none, .oneHidden, .oneArchived, .severalHidden: false
 			}
 		}
 		if holds(debt) { return .debt }

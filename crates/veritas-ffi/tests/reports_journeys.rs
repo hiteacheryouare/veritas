@@ -274,7 +274,7 @@ fn every_report_is_fresh_after_each_kind_of_commit_undo_redo_restore_and_reopen(
 				category_id: GROCERIES.to_owned(),
 				amount: 77_700,
 			},
-			false,
+			true,
 		),
 		(
 			"dining out deleted into household",
@@ -419,7 +419,7 @@ fn with_a_goal_open_every_edit_still_reaches_the_reports() {
 		.find(|e| e.kind == veritas_ffi::EntityKind::Category && e.id.is_some())
 		.and_then(|e| e.id.clone())
 		.unwrap();
-	assert!(!session.goals(TODAY.to_owned()).unwrap().is_empty());
+	assert!(!session.goals(TODAY.to_owned()).unwrap().goals.is_empty());
 	let before = screens(&session);
 	assert_eq!(before, second_window(&scratch));
 

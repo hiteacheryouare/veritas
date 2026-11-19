@@ -7,16 +7,18 @@ import VeritasKit
 struct WidgetConfigSheet: View {
 	let card: DashboardCard
 	let reports: [CustomReportItem]
-	let choices: FilterChoices?
+	let names: BudgetNames
+	let style: NumberStyle
 	let save: (WidgetConfig) -> Void
 	@State private var config: WidgetConfig
 	@State private var months: Int
 	@Environment(\.dismiss) private var dismiss
 
-	init(card: DashboardCard, reports: [CustomReportItem], choices: FilterChoices? = nil, save: @escaping (WidgetConfig) -> Void) {
+	init(card: DashboardCard, reports: [CustomReportItem], names: BudgetNames, style: NumberStyle, save: @escaping (WidgetConfig) -> Void) {
 		self.card = card
 		self.reports = reports
-		self.choices = choices
+		self.names = names
+		self.style = style
 		self.save = save
 		_config = State(initialValue: card.config)
 		let frame = card.config.timeFrame
@@ -92,7 +94,7 @@ struct WidgetConfigSheet: View {
 				}
 				if kind.hasFilters {
 					Section("Filters") {
-						ConditionsEditor(conditions: $config.conditions, matchAny: $config.conditionsOr, choices: choices)
+						ConditionsEditor(conditions: $config.conditions, matchAny: $config.conditionsOr, names: names, style: style)
 					}
 				}
 			}
@@ -112,7 +114,6 @@ struct WidgetConfigSheet: View {
 			.padding(Spacing.s5)
 		}
 		.frame(width: 520, height: 600)
-		.task { await choices?.load() }
 		.containerIdentifier("sheet.widgetConfig")
 	}
 
@@ -134,75 +135,5 @@ private struct MonthChoice: View {
 				Text(ReportPeriod.monthYear($0)).tag($0)
 			}
 		}
-	}
-}
-
-/// Actual's filters: field, operator and value, matched all together or any one.
-struct ConditionsEditor: View {
-	@Binding var conditions: [ReportCondition]
-	@Binding var matchAny: Bool
-	var choices: FilterChoices?
-
-	var body: some View {
-		if conditions.count > 1 {
-			Picker("Match", selection: $matchAny) {
-				Text("All filters").tag(false)
-				Text("Any filter").tag(true)
-			}
-			.pickerStyle(.segmented)
-			.accessibilityIdentifier("filters.match")
-		}
-		ForEach(Array(conditions.indices), id: \.self) { index in
-			let condition = $conditions[index]
-			VStack(alignment: .leading, spacing: Spacing.s2) {
-				HStack(spacing: Spacing.s2) {
-					Picker("Field", selection: condition.field) {
-						ForEach(ReportCondition.fields, id: \.id) { Text($0.title).tag($0.id) }
-					}
-					.labelsHidden()
-					.fixedSize()
-					Picker("Operator", selection: condition.op) {
-						ForEach(ReportCondition.operators(for: condition.wrappedValue.field), id: \.id) { Text($0.title).tag($0.id) }
-					}
-					.labelsHidden()
-					.fixedSize()
-					Spacer(minLength: 0)
-					Button {
-						conditions.remove(at: index)
-					} label: {
-						Image(systemName: "minus.circle")
-					}
-					.buttonStyle(.borderless)
-					.accessibilityLabel("Remove filter")
-				}
-				if let options = choices?.options(for: condition.wrappedValue) {
-					Picker("Value", selection: condition.text) {
-						if !options.contains(where: { $0.id == condition.wrappedValue.text }) {
-							Text("Choose").tag(condition.wrappedValue.text)
-						}
-						ForEach(options) { option in
-							Text(option.group.map { "\(option.name) (\($0))" } ?? option.name).tag(option.id)
-						}
-					}
-					.labelsHidden()
-					.accessibilityIdentifier("filters.choice")
-				} else {
-					TextField("Value", text: condition.text, prompt: Text("Value"))
-						.labelsHidden()
-						.textFieldStyle(.roundedBorder)
-						.accessibilityIdentifier("filters.value")
-				}
-			}
-			.onChange(of: condition.wrappedValue.field) {
-				if !ReportCondition.operators(for: condition.wrappedValue.field).contains(where: { $0.id == condition.wrappedValue.op }) { condition.wrappedValue.op = "is" }
-			}
-		}
-		Button {
-			conditions.append(ReportCondition(field: "notes", op: "contains", value: "\"\""))
-		} label: {
-			Label("Add filter", systemImage: "plus")
-		}
-		.buttonStyle(.borderless)
-		.accessibilityIdentifier("filters.add")
 	}
 }

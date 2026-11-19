@@ -5,85 +5,18 @@ use std::sync::Arc;
 
 use veritas_domain::{BudgetData, CivilDate, CoreError, CustomReportId, CustomReportRow, Row};
 use veritas_reports::{
-	self as reports, BalanceType, CustomReport, GroupBy, Interval, Json, SortBy, Uncategorized,
+	self as reports, BalanceType, CustomReport, GroupBy, Interval, SortBy, Uncategorized,
 };
 
 use crate::FfiError;
 use crate::blocking::{CancelToken as CancelHandle, run};
 use crate::budget::civil_date;
+use crate::rules::{RuleCondition, filter_conditions, stored_filters};
 use crate::session::Session;
 
 /// Actual's first day of the week until its `firstDayOfWeekIdx` preference
 /// is read: Sunday.
 pub(crate) const FIRST_DAY_OF_WEEK: u32 = 0;
-
-/// One filter condition as Actual stores it. `value` and `options` are
-/// Actual's JSON as text: `"\"<id>\""` for an id or a string, `-5000` for an
-/// amount, `true`, `["a","b"]` for `oneOf`, `{"num1":1,"num2":2}` for
-/// `isbetween`; `options` is `{"inflow":true}`, `{"outflow":true}`,
-/// `{"month":true}` or `{"year":true}`, or `nil`.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
-pub struct ReportCondition {
-	pub field: String,
-	pub op: String,
-	pub value: String,
-	#[uniffi(default = None)]
-	pub options: Option<String>,
-}
-
-pub(crate) fn report_condition(stored: &Json) -> ReportCondition {
-	let text = |key: &str| {
-		stored
-			.get(key)
-			.and_then(Json::as_str)
-			.unwrap_or_default()
-			.to_owned()
-	};
-	ReportCondition {
-		field: text("field"),
-		op: text("op"),
-		value: stored.get("value").unwrap_or(&Json::Null).stringify(),
-		options: stored
-			.get("options")
-			.filter(|options| !matches!(options, Json::Null))
-			.map(Json::stringify),
-	}
-}
-
-fn json(text: &str, what: &str) -> Result<Json, CoreError> {
-	Json::parse(text).map_err(|reason| CoreError::Invalid(format!("a filter's {what}: {reason}")))
-}
-
-/// The conditions to store. One that matches a stored condition keeps that
-/// condition's JSON exactly; a new one is written the way Actual's filter
-/// editor writes it.
-pub(crate) fn stored_conditions(
-	conditions: &[ReportCondition],
-	stored: &[Json],
-) -> Result<Vec<Json>, CoreError> {
-	conditions
-		.iter()
-		.map(|condition| {
-			let value = json(&condition.value, "value")?;
-			let options = condition
-				.options
-				.as_deref()
-				.map(|options| json(options, "options"))
-				.transpose()?;
-			let same = |old: &&Json| {
-				let old = report_condition(old);
-				old.field == condition.field
-					&& old.op == condition.op
-					&& old.value == value.stringify()
-					&& old.options == options.as_ref().map(Json::stringify)
-			};
-			match stored.iter().find(same) {
-				Some(old) => Ok(old.clone()),
-				None => reports::condition(&condition.field, &condition.op, value, options),
-			}
-		})
-		.collect()
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum ReportGrouping {
@@ -125,7 +58,7 @@ pub enum ReportIntervalUnit {
 
 /// A custom report's settings, with Actual's defaults filled in. Saving
 /// writes back only what changed; the filter conditions are kept as stored.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct CustomReportSettings {
 	pub id: String,
 	pub name: String,
@@ -150,7 +83,7 @@ pub struct CustomReportSettings {
 	pub include_current: bool,
 	pub trim_intervals: bool,
 	/// The report's filters, all of which must match unless `conditions_or`.
-	pub conditions: Vec<ReportCondition>,
+	pub conditions: Vec<RuleCondition>,
 	pub conditions_or: bool,
 }
 
@@ -219,7 +152,7 @@ pub struct CustomReportData {
 
 /// A report as the viewer draws it. `problem` says why there is no `data`:
 /// a setting Veritas can't evaluate yet, shown with "Open in Actual".
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct CustomReportView {
 	pub settings: CustomReportSettings,
 	pub data: Option<CustomReportData>,
@@ -316,7 +249,7 @@ fn interval(unit: ReportIntervalUnit) -> Interval {
 	}
 }
 
-pub(crate) fn settings(report: &CustomReport) -> CustomReportSettings {
+pub(crate) fn settings(budget: &BudgetData, report: &CustomReport) -> CustomReportSettings {
 	CustomReportSettings {
 		id: report.id.to_string(),
 		name: report.name.clone(),
@@ -336,7 +269,7 @@ pub(crate) fn settings(report: &CustomReport) -> CustomReportSettings {
 		show_uncategorized: report.show_uncategorized,
 		include_current: report.include_current,
 		trim_intervals: report.trim_intervals,
-		conditions: report.conditions.iter().map(report_condition).collect(),
+		conditions: filter_conditions(budget, &report.conditions),
 		conditions_or: report.conditions_or,
 	}
 }
@@ -361,7 +294,16 @@ pub(crate) fn edited(
 ) -> Result<CustomReport, CoreError> {
 	let mut report = stored(budget, &settings.id)?;
 	report.name = report_name(budget, &settings.name, Some(&report.id))?;
-	report.conditions = stored_conditions(&settings.conditions, &report.conditions)?;
+	applied(budget, report, settings)
+}
+
+/// `report` with every setting but the name applied.
+fn applied(
+	budget: &BudgetData,
+	mut report: CustomReport,
+	settings: &CustomReportSettings,
+) -> Result<CustomReport, CoreError> {
+	report.conditions = stored_filters(budget, &settings.conditions, &report.conditions)?;
 	report.conditions_or = settings.conditions_or;
 	reports::check_conditions(&report.conditions, report.conditions_or)?;
 	report.start_date = settings.start_date.clone();
@@ -410,25 +352,10 @@ fn report_name(
 	Ok(name.to_owned())
 }
 
-/// A new report as `report/create` inserts it: every column `fromJS` writes,
-/// with Actual's defaults for what the settings don't carry (no trend lines,
-/// all tags, `BarGraph`). `settings.id` is ignored.
-pub(crate) fn create_custom_report(
-	budget: &BudgetData,
-	id: CustomReportId,
-	settings: &CustomReportSettings,
-) -> Result<Row, CoreError> {
-	let name = report_name(budget, &settings.name, None)?;
-	if settings.group_by == ReportGrouping::Tag
-		&& settings.balance_type == ReportBalanceKind::Budgeted
-	{
-		return Err(CoreError::Invalid(
-			"Budgeted reports cannot be split by tags.".to_owned(),
-		));
-	}
-	let conditions = stored_conditions(&settings.conditions, &[])?;
-	reports::check_conditions(&conditions, settings.conditions_or)?;
-	let blank = CustomReportRow {
+/// A report with nothing set: the row `report/create` starts from, with no
+/// trend lines and all tags.
+fn blank_report(id: CustomReportId, name: String) -> CustomReport {
+	let row = CustomReportRow {
 		id,
 		name: Some(name.clone()),
 		start_date: None,
@@ -455,28 +382,61 @@ pub(crate) fn create_custom_report(
 		trim_intervals: None,
 		show_trend_lines: Some(0),
 	};
-	let report = CustomReport {
-		id: blank.id.clone(),
+	CustomReport {
+		id: row.id.clone(),
 		name,
-		start_date: settings.start_date.clone(),
-		end_date: settings.end_date.clone(),
-		date_static: settings.date_static,
-		date_range: settings.date_range.clone(),
-		total_mode: settings.total_mode,
-		group_by: group_by(settings.group_by),
-		balance_type: balance_type(settings.balance_type),
-		sort_by: sort_by(settings.sort_by),
-		interval: interval(settings.interval),
-		show_empty: settings.show_empty,
-		show_off_budget: settings.show_off_budget,
-		show_hidden: settings.show_hidden,
-		show_uncategorized: settings.show_uncategorized,
-		include_current: settings.include_current,
-		trim_intervals: settings.trim_intervals,
-		conditions,
-		conditions_or: settings.conditions_or,
-		row: blank,
-	};
+		start_date: String::new(),
+		end_date: String::new(),
+		date_static: false,
+		date_range: None,
+		total_mode: false,
+		group_by: GroupBy::Category,
+		balance_type: BalanceType::TotalDebts,
+		sort_by: SortBy::Desc,
+		interval: Interval::Monthly,
+		show_empty: false,
+		show_off_budget: false,
+		show_hidden: false,
+		show_uncategorized: false,
+		include_current: false,
+		trim_intervals: false,
+		conditions: Vec::new(),
+		conditions_or: false,
+		row,
+	}
+}
+
+/// What the editor's settings show: the saved report with them applied, or,
+/// for a report not saved yet (no id, or one that isn't saved), a new one.
+fn previewed(
+	budget: &BudgetData,
+	settings: &CustomReportSettings,
+) -> Result<CustomReport, CoreError> {
+	let saved = Some(settings.id.as_str())
+		.filter(|id| !id.is_empty())
+		.and_then(|id| stored(budget, id).ok());
+	let mut base = saved.unwrap_or_else(|| blank_report(CustomReportId::new(""), String::new()));
+	base.name = settings.name.trim().to_owned();
+	applied(budget, base, settings)
+}
+
+/// A new report as `report/create` inserts it: every column `fromJS` writes,
+/// with Actual's defaults for what the settings don't carry (no trend lines,
+/// all tags, `BarGraph`). `settings.id` is ignored.
+pub(crate) fn create_custom_report(
+	budget: &BudgetData,
+	id: CustomReportId,
+	settings: &CustomReportSettings,
+) -> Result<Row, CoreError> {
+	let name = report_name(budget, &settings.name, None)?;
+	if settings.group_by == ReportGrouping::Tag
+		&& settings.balance_type == ReportBalanceKind::Budgeted
+	{
+		return Err(CoreError::Invalid(
+			"Budgeted reports cannot be split by tags.".to_owned(),
+		));
+	}
+	let report = applied(budget, blank_report(id, name), settings)?;
 	let mut row = report.to_new_row();
 	row.graph_type = Some(
 		settings
@@ -574,12 +534,12 @@ pub(crate) fn view(
 ) -> Result<CustomReportView, CoreError> {
 	match reports::evaluate_report(budget, report, today.naive(), FIRST_DAY_OF_WEEK) {
 		Ok(data) => Ok(CustomReportView {
-			settings: settings(report),
+			settings: settings(budget, report),
 			data: Some(report_data(&data, report.balance_type)),
 			problem: None,
 		}),
 		Err(CoreError::Invalid(problem)) => Ok(CustomReportView {
-			settings: settings(report),
+			settings: settings(budget, report),
 			data: None,
 			problem: Some(problem),
 		}),
@@ -644,7 +604,7 @@ impl Session {
 		let core = self.core.clone();
 		run(&cancel, move |cancel| {
 			core.report(cancel, |budget, _| {
-				view(budget, &edited(budget, &settings)?, civil_date(&today)?)
+				view(budget, &previewed(budget, &settings)?, civil_date(&today)?)
 			})
 		})
 		.await
@@ -691,10 +651,42 @@ mod tests {
 	}
 
 	#[test]
+	fn a_new_report_previews_with_its_filters_without_saving() {
+		let (_scratch, core) = imported("all-features");
+		let budget = data(&core);
+		let mut draft = settings(&budget, &stored(&budget, SPENDING).unwrap());
+		draft.conditions.clear();
+		let unfiltered = view(&budget, &previewed(&budget, &draft).unwrap(), today())
+			.unwrap()
+			.data
+			.unwrap();
+		draft.id = String::new();
+		draft.name = String::new();
+		draft.conditions = vec![RuleCondition {
+			field: crate::RuleField::AmountOutflow,
+			op: crate::RuleConditionOp::Gte,
+			value: crate::RuleValue::Amount { amount: 10_000 },
+		}];
+		let preview = view(&budget, &previewed(&budget, &draft).unwrap(), today()).unwrap();
+		assert_eq!(preview.problem, None);
+		assert_eq!(preview.settings.conditions, draft.conditions);
+		let filtered = preview.data.unwrap();
+		assert!(filtered.total.abs() < unfiltered.total.abs());
+		draft.id = "not-saved-yet".to_owned();
+		assert_eq!(
+			view(&budget, &previewed(&budget, &draft).unwrap(), today())
+				.unwrap()
+				.data,
+			Some(filtered)
+		);
+		assert_eq!(data(&core).custom_reports, budget.custom_reports);
+	}
+
+	#[test]
 	fn report_names_clash_only_when_they_match_exactly_as_in_actual() {
 		let (_scratch, core) = imported("all-features");
 		let budget = data(&core);
-		let mut settings = settings(&stored(&budget, SPENDING).unwrap());
+		let mut settings = settings(&budget, &stored(&budget, SPENDING).unwrap());
 		settings.name = "net worth over time".to_owned();
 		assert!(edited(&budget, &settings).is_ok());
 		settings.name = "Net worth over time".to_owned();
@@ -708,7 +700,7 @@ mod tests {
 	fn a_setting_veritas_cannot_evaluate_comes_back_as_a_problem_not_an_error() {
 		let (_scratch, core) = imported("all-features");
 		let budget = data(&core);
-		let mut settings = settings(&stored(&budget, SPENDING).unwrap());
+		let mut settings = settings(&budget, &stored(&budget, SPENDING).unwrap());
 		settings.balance_type = ReportBalanceKind::Budgeted;
 		let report = view(&budget, &edited(&budget, &settings).unwrap(), today()).unwrap();
 		assert_eq!(report.data, None);
@@ -718,8 +710,9 @@ mod tests {
 	#[test]
 	fn saving_a_report_writes_only_what_changed_and_undoes() {
 		let (scratch, core) = imported("all-features");
-		let before = data(&core).custom_reports[&CustomReportId::new(SPENDING)].clone();
-		let mut edit = settings(&CustomReport::from_row(&before).unwrap());
+		let budget = data(&core);
+		let before = budget.custom_reports[&CustomReportId::new(SPENDING)].clone();
+		let mut edit = settings(&budget, &CustomReport::from_row(&before).unwrap());
 		edit.name = "  Where it went  ".to_owned();
 		edit.graph_type = Some("DonutGraph".to_owned());
 		core.perform(Command::SaveCustomReport {

@@ -42,6 +42,9 @@ impl StoreTransaction for Writer<'_> {
 				delta.before.as_ref().map(|row| &row.paths),
 				delta.after.as_ref().map(|row| &row.paths),
 			),
+			Change::LoanPaymentPart(delta) => {
+				self.put_loan_payment_part(delta.before.as_ref(), delta.after.as_ref())
+			}
 			Change::ScheduleMeta(delta) => self.put_schedule_meta(
 				&delta.key,
 				delta.before.as_ref().map(|row| &row.meta),

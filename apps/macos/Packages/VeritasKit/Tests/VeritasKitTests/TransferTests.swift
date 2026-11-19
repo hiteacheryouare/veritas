@@ -86,7 +86,7 @@ final class TransferFakeSession: BudgetSession, @unchecked Sendable {
 	func loanPaymentDefaults(_ loanAccountID: String, today: String) async throws -> LoanPaymentDefaults { defaults }
 	func loanPaymentPreview(_ loanAccountID: String, date: String, total: Int64, interest: Int64, escrow: Int64, fees: Int64) async throws -> LoanPaymentPreview {
 		let principal = total - interest - escrow - fees
-		return LoanPaymentPreview(principal: principal, outstanding: 980_000, estimate: 8_003, rateBps: 980, problem: principal < 0 ? .interestAbovePayment(shortBy: -principal) : nil)
+		return LoanPaymentPreview(principal: principal, outstanding: 980_000, estimate: 8_003, rateBps: 980, problem: principal < 0 ? .paymentTooSmall(shortBy: -principal) : nil, principalFunding: 0, principalFundingAsked: 0)
 	}
 	func recordLoanPayment(_ payment: LoanPaymentDraft) async throws { payments.append(payment) }
 	var loans: [String: LoanTerms] = ["carloan": LoanTerms(rateBps: 980, payment: 41_200, paymentDay: 12, lender: "Lakeshore Credit Union")]
@@ -306,7 +306,7 @@ struct TransferTests {
 		let model = await move(to: "carloan", amount: "50.00")
 		model.interest.type("80.00")
 		await model.refreshPreview()
-		#expect(model.loan?.problem == .interestAbovePayment(shortBy: 3_000))
+		#expect(model.loan?.problem == .paymentTooSmall(shortBy: 3_000))
 		#expect(!model.canSave)
 	}
 

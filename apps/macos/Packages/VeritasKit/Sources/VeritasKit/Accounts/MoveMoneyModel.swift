@@ -100,7 +100,7 @@ public final class MoveMoneyModel: Identifiable {
 		guard let toID, toID != fromID, workspace.readOnly == nil else { return false }
 		if asksPurpose, !purpose.isAnswered { return false }
 		if isLoanPayment, isNew {
-			if case .interestAbovePayment? = loan?.problem { return false }
+			if case .paymentTooSmall? = loan?.problem { return false }
 			if principalCategoryID == nil || (previewedInterest != 0 && interestCategoryID == nil) { return false }
 		}
 		return true

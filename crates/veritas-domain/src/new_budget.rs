@@ -16,6 +16,18 @@ pub struct NumberFormat {
 }
 
 impl NumberFormat {
+	/// Whether the new budget hides fractions: as asked, and always for a
+	/// 0-place currency, as Actual's currency picker sets it
+	/// (`Currency.tsx:115-122`, CLS-12.3).
+	pub fn hides_fraction(&self) -> bool {
+		self.hide_decimals
+			|| self
+				.currency
+				.as_deref()
+				.and_then(crate::currency)
+				.is_some_and(|currency| !currency.code.is_empty() && currency.decimal_places == 0)
+	}
+
 	/// Where Actual's currency picker places this currency's symbol, or
 	/// Actual's own default (before, no space) without one.
 	pub fn currency_symbol_placement(currency: Option<&str>) -> (bool, bool) {

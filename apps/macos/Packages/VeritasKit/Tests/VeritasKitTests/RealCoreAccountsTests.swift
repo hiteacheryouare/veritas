@@ -283,7 +283,7 @@ struct RealCoreAccountsTests {
 			move.interest.type("30")
 			move.escrow.type("40")
 			await move.refreshPreview()
-			#expect(move.loan?.problem == .interestAbovePayment(shortBy: 2_000))
+			#expect(move.loan?.problem == .paymentTooSmall(shortBy: 2_000))
 			#expect(!move.canSave)
 		}
 	}

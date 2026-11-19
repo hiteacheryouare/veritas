@@ -65,7 +65,7 @@ struct DashboardScreen: View {
 			}
 		}
 		.sheet(item: $configuring) { card in
-			WidgetConfigSheet(card: card, reports: reports, choices: model.filterChoices()) { config in
+			WidgetConfigSheet(card: card, reports: reports, names: model.names, style: model.numberStyle) { config in
 				Task { await model.configure(card, config) }
 			}
 		}
@@ -310,7 +310,7 @@ private enum Handle: CaseIterable {
 	}
 }
 
-/// Title, its range under it, and the card's headline figure on the right.
+/// Title, the range or comparison under it, and the card's headline figure on the right.
 private struct WidgetHeader: View {
 	let card: DashboardCard
 	let format: MoneyFormat
@@ -328,8 +328,8 @@ private struct WidgetHeader: View {
 						InfoButton(caption: caption)
 					}
 				}
-				if let range = card.range {
-					Text(range.title)
+				if let subtitle = card.subtitle {
+					Text(subtitle)
 						.font(.text(.caption))
 						.foregroundStyle(.textSecondary)
 						.lineLimit(1)
@@ -342,32 +342,47 @@ private struct WidgetHeader: View {
 
 	@ViewBuilder private var headline: some View {
 		switch card.content {
-		case .netWorth(let points, let change):
-			if let last = points.last {
+		case .netWorth(_, _, _, let netWorth, let change, _, _, _, _, _):
+			VStack(alignment: .trailing, spacing: 2) {
+				ReportAmount(amount: netWorth, format: format, weight: .semibold)
+					.accessibilityLabel("\(CardWords.netWorth(filtered: card.isFiltered)) \(format.amount(netWorth, on: .register))")
+				Signed(amount: change, format: format)
+			}
+		case .cashFlow(_, _, _, let change):
+			Signed(amount: change, format: format, weight: .semibold)
+				.accessibilityLabel("Money in less money out \(format.amount(change, on: .register))")
+		case .spending(_, _, _, _, _, _, _, let difference):
+			// Actual's tones: more than the comparison is the overspent tone.
+			Text((difference > 0 ? "+" : "") + format.amount(difference, on: .register))
+				.font(.figures(.body, weight: .semibold))
+				.foregroundStyle(difference == 0 ? Color.textPrimary : (difference > 0 ? Color.moneyOverspent : Color.moneyAvailable))
+		case .balanceForecast(_, _, _, _, true, let points, let low, _, _, _):
+			if let ending = points.last {
 				VStack(alignment: .trailing, spacing: 2) {
-					ReportAmount(amount: last.netWorth, format: format, weight: .semibold)
-					if let change {
-						Signed(amount: change, format: format)
+					Text("\(CardWords.endingBalance) \(format.amount(ending.balance, on: .register))")
+						.font(.figures(.body, weight: .semibold))
+						.foregroundStyle(ending.balance < 0 ? Color.moneyOverspent : Color.textPrimary)
+					if let low {
+						Text("\(CardWords.lowestBalance) \(format.amount(low.balance, on: .register))")
+							.font(.figures(.caption))
+							.foregroundStyle(.textSecondary)
 					}
 				}
 			}
-		case .cashFlow(_, _, let net, let classified):
-			Signed(amount: net, format: format, weight: .semibold)
-				.accessibilityLabel("\(classified ? "Net Profit" : "Money in less money out") \(format.amount(net, on: .register))")
-		case .spending(_, _, _, _, let difference, _):
-			Signed(amount: difference, format: format, weight: .semibold)
-		case .calendar(_, _, let income, let expenses):
-			HStack(spacing: Spacing.s2) {
-				Label(format.amount(income, on: .register), systemImage: "arrow.up")
-					.foregroundStyle(Color.moneyAvailable)
-					.accessibilityLabel("Money in \(format.amount(income, on: .register))")
-				Label(format.amount(expenses, on: .register), systemImage: "arrow.down")
-					.foregroundStyle(Color.moneyNeutral)
-					.accessibilityLabel("Money out \(format.amount(expenses, on: .register))")
+		case .calendar(let months):
+			if let shown = months.last {
+				HStack(spacing: Spacing.s2) {
+					Label(format.amount(shown.totalIncome, on: .register), systemImage: "arrow.up")
+						.foregroundStyle(Color.moneyAvailable)
+						.accessibilityLabel("Money in \(format.amount(shown.totalIncome, on: .register))")
+					Label(format.amount(shown.totalExpense, on: .register), systemImage: "arrow.down")
+						.foregroundStyle(Color.moneyNeutral)
+						.accessibilityLabel("Money out \(format.amount(shown.totalExpense, on: .register))")
+				}
+				.font(.figures(.caption, weight: .semibold))
+				.labelStyle(.titleAndIcon)
 			}
-			.font(.figures(.caption, weight: .semibold))
-			.labelStyle(.titleAndIcon)
-		case .ageOfMoney(let days, let trend, _, let insufficientData):
+		case .ageOfMoney(_, _, _, _, let days, let trend, let insufficientData):
 			if let days, !insufficientData {
 				VStack(alignment: .trailing, spacing: 2) {
 					Text(days == 1 ? "1 day" : "\(days) days").font(.figures(.heading, weight: .semibold)).foregroundStyle(Color.moneyAvailable)
@@ -376,7 +391,7 @@ private struct WidgetHeader: View {
 						.foregroundStyle(.textSecondary)
 				}
 			}
-		case .crossover(_, _, _, _, let years):
+		case .crossover(_, _, _, _, _, _, _, _, let years, _, _):
 			VStack(alignment: .trailing, spacing: 2) {
 				Text(years.map { $0.formatted(.number.precision(.fractionLength(0...1))) } ?? "N/A")
 					.font(.figures(.heading, weight: .semibold))
@@ -385,19 +400,15 @@ private struct WidgetHeader: View {
 					.foregroundStyle(.textSecondary)
 			}
 			.accessibilityElement(children: .combine)
-		case .monteCarlo(_, let rate, let age):
-			if let rate {
-				VStack(alignment: .trailing, spacing: 2) {
-					Text(rate.formatted(.percent.precision(.fractionLength(0))))
-						.font(.figures(.heading, weight: .semibold))
-					if let age {
-						Text("Success rate to age \(age)")
-							.font(.text(.caption))
-							.foregroundStyle(.textSecondary)
-					}
-				}
-				.accessibilityElement(children: .combine)
+		case .monteCarlo(let percent, _, let endAge, _, _):
+			VStack(alignment: .trailing, spacing: 2) {
+				Text(CardWords.successRate(percent))
+					.font(.figures(.heading, weight: .semibold))
+				Text(CardWords.successRateLabel(endAge: endAge))
+					.font(.text(.caption))
+					.foregroundStyle(.textSecondary)
 			}
+			.accessibilityElement(children: .combine)
 		default:
 			EmptyView()
 		}
@@ -423,81 +434,74 @@ private struct WidgetBody: View {
 
 	var body: some View {
 		switch card.content {
-		case .summary(let figure), .formula(let figure):
-			BigFigure(figure: figure, format: format)
-		case .netWorth(let points, _):
-			Chart(points, id: \.month) { point in
-				AreaMark(x: .value("Month", ReportPeriod.shortMonth(point.month)), y: .value("Net worth", format.chartValue(point.netWorth, on: .register)))
-					.foregroundStyle(Color.moneyIncomeFill.opacity(0.16))
-				LineMark(x: .value("Month", ReportPeriod.shortMonth(point.month)), y: .value("Net worth", format.chartValue(point.netWorth, on: .register)))
-					.foregroundStyle(Color.moneyIncomeFill)
-			}
-			.chartYAxis(.hidden)
-			.chartYScale(domain: .automatic(includesZero: false))
-		case .cashFlow(let income, let expenses, _, let classified):
-			PairBars(first: (classified ? "Income" : "Money in", income, Color.moneyIncomeFill), second: (classified ? "Expenses" : "Money out", expenses, Color.chartExpense), format: format)
-		case .spending(let month, let spent, let compareMonth, let compareSpent, _, let classified):
-			VStack(alignment: .leading, spacing: Spacing.s1) {
-				Text(card.config.conditions.isEmpty ? (classified ? "Spending" : "Everything except income categories") : "Selected rows")
+		case .summary:
+			BigFigure(figure: card.summaryFigure ?? .undefined, format: format)
+		case .formula(_, let value, _, let fontSize, let staticFontSize):
+			FormulaFigure(value: value, fontSize: fontSize, staticFontSize: staticFontSize, format: format)
+		case .netWorth(_, _, let points, _, _, _, _, _, _, let series):
+			NetWorthChart(points: points, series: series, stacked: card.config.mode == "stacked", filtered: card.isFiltered, format: format)
+		case .cashFlow(_, let income, let expense, _):
+			PairBars(first: ("Money in", income, Color.moneyIncomeFill), second: ("Money out", expense, Color.chartExpense), format: format)
+		case .spending(let mode, let compare, let compareTo, _, _, let days, let headlineDay, _):
+			SpendingChart(mode: mode, compare: compare, compareTo: compareTo, days: days, headlineDay: headlineDay, filtered: card.isFiltered, format: format)
+		case .sankey(_, _, _, _, let showPercentages, let nodes, let links):
+			SankeyCardCanvas(nodes: nodes, links: links, showPercentages: showPercentages, format: format)
+		case .balanceForecast(_, let source, _, let zeroBased, let hasForecast, let points, let low, let scheduled, let filtered, let today):
+			if hasForecast {
+				VStack(alignment: .leading, spacing: Spacing.s1) {
+					ForecastChart(points: points, low: low, today: today, zeroBased: zeroBased, format: format)
+						.frame(maxHeight: .infinity)
+					Text(CardWords.forecastFooter(source: source, scheduled: scheduled, filtered: filtered))
+						.font(.text(.caption))
+						.foregroundStyle(.textSecondary)
+						.lineLimit(2)
+				}
+			} else {
+				Text(CardWords.noForecast)
 					.font(.text(.caption))
 					.foregroundStyle(.textSecondary)
-				PairBars(first: (ReportPeriod.monthName(month), spent, Color.chartExpense), second: (ReportPeriod.monthName(compareMonth), compareSpent, Color.chartExpenseSoft), format: format)
+					.multilineTextAlignment(.center)
+					.frame(maxWidth: .infinity, maxHeight: .infinity)
 			}
-		case .sankey(let report):
-			SankeyCanvas(report: report, format: format, compact: true) { _ in }
+		case .monteCarlo(_, _, _, _, let chart):
+			MonteCarloChart(points: chart, format: format)
 		case .customReport(let report):
 			CustomReportDetail(view: report, format: format, compact: true)
-		case .markdown(let text):
+		case .markdown(let text, _):
 			ScrollView { MarkdownText(text: text) }
-		case .calendar(let month, let days, _, _):
-			CalendarGrid(month: month, days: days, format: format)
-		case .crossover(let months, let expenses, let income, let crossover, _):
+		case .calendar(let months):
+			if let month = months.last {
+				CalendarGrid(month: month, format: format)
+			}
+		case .crossover(_, _, let points, let crossover, _, _, _, _, _, _, _):
 			Chart {
-				ForEach(Array(months.enumerated()), id: \.offset) { index, month in
-					LineMark(x: .value("Month", index), y: .value("Amount", format.chartValue(expenses[index], on: .register)), series: .value("Line", card.config.conditions.isEmpty ? "All non-income categories" : "Selected categories"))
+				ForEach(Array(points.enumerated()), id: \.offset) { index, point in
+					LineMark(x: .value("Month", index), y: .value("Amount", format.chartValue(point.expenses, on: .register)), series: .value("Line", card.isFiltered ? "Selected categories" : "All non-income categories"))
 						.foregroundStyle(Color.chartExpense)
-					LineMark(x: .value("Month", index), y: .value("Amount", format.chartValue(income[index], on: .register)), series: .value("Line", "Investment income"))
+					LineMark(x: .value("Month", index), y: .value("Amount", format.chartValue(point.investmentIncome, on: .register)), series: .value("Line", "Investment income"))
 						.foregroundStyle(Color.chartSavings)
 				}
 			}
 			.chartXAxis(.hidden)
 			.chartYAxis(.hidden)
 			.accessibilityLabel(crossover.map { "Investment income covers expenses from \(ReportPeriod.monthYear($0))" } ?? "Investment income against expenses")
-		case .budgetAnalysis(let months, let budgeted, let spent):
+		case .budgetAnalysis(_, _, let months, _, _, _, _):
 			Chart {
-				ForEach(Array(months.enumerated()), id: \.offset) { index, month in
-					BarMark(x: .value("Month", ReportPeriod.shortMonth(month)), y: .value("Amount", format.chartValue(budgeted[index], on: .budget)))
+				ForEach(months, id: \.month) { point in
+					BarMark(x: .value("Month", ReportPeriod.shortMonth(point.month)), y: .value("Amount", format.chartValue(point.budgeted, on: .register)))
 						.position(by: .value("Series", "Budgeted"))
 						.foregroundStyle(Color.moneyIncomeFill)
-					BarMark(x: .value("Month", ReportPeriod.shortMonth(month)), y: .value("Amount", format.chartValue(spent[index], on: .budget)))
+					BarMark(x: .value("Month", ReportPeriod.shortMonth(point.month)), y: .value("Amount", format.chartValue(point.spent, on: .register)))
 						.position(by: .value("Series", "Spent"))
 						.foregroundStyle(Color.chartExpense)
 				}
 			}
 			.chartYAxis(.hidden)
-		case .balanceForecast(let points):
-			Chart(points, id: \.month) { point in
-				AreaMark(x: .value("Month", point.month.firstDay), yStart: .value("Lowest balance", format.chartValue(point.low, on: .register)), yEnd: .value("Highest balance", format.chartValue(point.high, on: .register)))
-					.foregroundStyle(Color.chartBand)
-				LineMark(x: .value("Month", point.month.firstDay), y: .value("Balance", format.chartValue(point.middle, on: .register)))
-					.foregroundStyle(Color.moneyIncomeFill)
-			}
-			.chartXAxis(.hidden)
-			.chartYAxis(.hidden)
-		case .monteCarlo(let points, _, _):
-			Chart(points, id: \.month) { point in
-				AreaMark(x: .value("Month", point.month.firstDay), yStart: .value("Lower range", format.chartValue(point.low, on: .register)), yEnd: .value("Upper range", format.chartValue(point.high, on: .register)))
-					.foregroundStyle(Color.chartBand)
-				LineMark(x: .value("Month", point.month.firstDay), y: .value("Median", format.chartValue(point.middle, on: .register)))
-					.foregroundStyle(Color.moneyIncomeFill)
-			}
-			.chartXAxis(.hidden)
-			.chartYAxis(.hidden)
-		case .ageOfMoney(_, _, let series, _):
-			Chart(Array(series.enumerated()), id: \.offset) { index, days in
-				AreaMark(x: .value("Month", index), y: .value("Days", days))
+		case .ageOfMoney(_, _, _, let points, _, _, _):
+			Chart(Array(points.enumerated()), id: \.offset) { index, point in
+				AreaMark(x: .value("Period", index), y: .value("Days", point.days))
 					.foregroundStyle(Color.moneyAvailableFill.opacity(0.18))
-				LineMark(x: .value("Month", index), y: .value("Days", days))
+				LineMark(x: .value("Period", index), y: .value("Days", point.days))
 					.foregroundStyle(Color.moneyAvailable)
 			}
 			.chartXAxis(.hidden)
@@ -510,13 +514,13 @@ private struct WidgetBody: View {
 			Text(message)
 				.foregroundStyle(.textSecondary)
 				.accessibilityIdentifier("card.problem")
-		case .pending, .unknown:
+		case .unknown:
 			EmptyView()
 		}
 	}
 }
 
-/// A summary or formula card's figure, as large as the card allows.
+/// A summary card's figure, as large as the card allows.
 private struct BigFigure: View {
 	let figure: CardFigure
 	let format: MoneyFormat
@@ -525,8 +529,6 @@ private struct BigFigure: View {
 		switch figure {
 		case .money(let amount): format.amount(amount, on: .register)
 		case .percent(let value): (value / 100).formatted(.percent.precision(.fractionLength(0...1)))
-		case .number(let value): value.formatted(.number.precision(.fractionLength(0...2)))
-		case .days(let value): value == 1 ? "1 day" : "\(value) days"
 		case .undefined: ""
 		}
 	}
@@ -540,6 +542,33 @@ private struct BigFigure: View {
 				.lineLimit(1)
 				.minimumScaleFactor(0.5)
 				.foregroundStyle(figure.isNegative ? Color.moneyOverspent : Color.moneyAvailable)
+				.frame(maxWidth: .infinity, maxHeight: .infinity)
+		}
+		.accessibilityElement(children: .combine)
+		.accessibilityIdentifier("widget.figure")
+	}
+}
+
+/// What the formula returns, with nothing added (ST-10.10). An error shows
+/// Actual's own message in the error colour.
+private struct FormulaFigure: View {
+	let value: FormulaValue
+	let fontSize: FormulaFontSize
+	let staticFontSize: Double
+	let format: MoneyFormat
+
+	var body: some View {
+		let shown = CardWords.formula(value, format: format)
+		GeometryReader { proxy in
+			let lines = shown.text.split(separator: "\n", omittingEmptySubsequences: false)
+			let longest = CGFloat(max(lines.map(\.count).max() ?? 1, 1))
+			let fitted = min(proxy.size.height * 0.85 / CGFloat(max(lines.count, 1)), proxy.size.width / (longest * 0.6))
+			Text(shown.text)
+				.font(.system(size: fontSize == .static ? staticFontSize : max(fitted, 12), weight: .semibold, design: .rounded))
+				.monospacedDigit()
+				.multilineTextAlignment(.center)
+				.minimumScaleFactor(0.5)
+				.foregroundStyle(shown.isError ? Color.moneyOverspent : Color.textPrimary)
 				.frame(maxWidth: .infinity, maxHeight: .infinity)
 		}
 		.accessibilityElement(children: .combine)
@@ -576,22 +605,313 @@ private struct PairBars: View {
 	}
 }
 
-private struct CalendarGrid: View {
-	let month: Month
-	let days: [CalendarDay]
+/// The net worth card: the trend line, or each account stacked, with the
+/// hovered period's figures.
+private struct NetWorthChart: View {
+	let points: [NetWorthCardPoint]
+	let series: [NetWorthCardSeries]
+	let stacked: Bool
+	let filtered: Bool
+	let format: MoneyFormat
+	@State private var selected: Int?
+
+	var body: some View {
+		Chart {
+			if stacked {
+				ForEach(series, id: \.accountId) { account in
+					ForEach(Array(account.points.enumerated()), id: \.offset) { index, balance in
+						AreaMark(x: .value("Period", index), y: .value("Balance", format.chartValue(balance, on: .register)), stacking: .standard)
+							.foregroundStyle(by: .value("Account", account.accountId))
+					}
+				}
+			} else {
+				ForEach(Array(points.enumerated()), id: \.offset) { index, point in
+					AreaMark(x: .value("Period", index), y: .value(CardWords.netWorth(filtered: filtered), format.chartValue(point.netWorth, on: .register)))
+						.foregroundStyle(Color.moneyIncomeFill.opacity(0.16))
+					LineMark(x: .value("Period", index), y: .value(CardWords.netWorth(filtered: filtered), format.chartValue(point.netWorth, on: .register)))
+						.foregroundStyle(Color.moneyIncomeFill)
+				}
+			}
+			if let selected, points.indices.contains(selected) {
+				RuleMark(x: .value("Period", selected))
+					.foregroundStyle(Color.textTertiary)
+					.annotation(position: .top, overflowResolution: .init(x: .fit(to: .chart), y: .disabled)) {
+						tooltip(points[selected])
+					}
+			}
+		}
+		.chartForegroundStyleScale(domain: series.map(\.accountId), range: series.map { CardPalette.color($0.color) })
+		.chartLegend(.hidden)
+		.chartXSelection(value: $selected)
+		.chartXAxis(.hidden)
+		.chartYAxis(.hidden)
+		.chartYScale(domain: .automatic(includesZero: false))
+	}
+
+	private func tooltip(_ point: NetWorthCardPoint) -> some View {
+		VStack(alignment: .leading, spacing: 2) {
+			Text(CardWords.day(point.start)).font(.text(.caption, weight: .semibold))
+			line(CardWords.assets(filtered: filtered), point.assets)
+			line(CardWords.liabilities(filtered: filtered), point.debt)
+			line("Change", point.change)
+			line(CardWords.netWorth(filtered: filtered), point.netWorth)
+		}
+		.padding(Spacing.s2)
+		.background(.surfaceRaised, in: .rect(cornerRadius: Radius.control))
+		.overlay { RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Color.edgeControl) }
+	}
+
+	private func line(_ title: String, _ amount: Int64) -> some View {
+		HStack {
+			Text(title).foregroundStyle(.textSecondary)
+			Spacer(minLength: Spacing.s3)
+			Text(format.amount(amount, on: .register)).monospacedDigit()
+		}
+		.font(.text(.caption))
+	}
+}
+
+/// The spending card: this month's running total against the comparison,
+/// day by day, with the month-to-date figure labeled as ST-10.10 says.
+private struct SpendingChart: View {
+	let mode: SpendingCardMode
+	let compare: Month
+	let compareTo: Month
+	let days: [SpendingCardDay]
+	let headlineDay: UInt32
+	let filtered: Bool
 	let format: MoneyFormat
 
+	private var comparison: String {
+		switch mode {
+		case .singleMonth: ReportPeriod.monthName(compareTo)
+		case .average: "Average"
+		case .budget: "Budgeted"
+		}
+	}
+
+	var body: some View {
+		VStack(alignment: .leading, spacing: Spacing.s1) {
+			if let today = days.first(where: { $0.day == headlineDay })?.compare {
+				HStack(spacing: Spacing.s1) {
+					Text(CardWords.spending(filtered: filtered)).foregroundStyle(.textSecondary)
+					Text(format.amount(today, on: .register)).font(.figures(.caption, weight: .semibold))
+				}
+				.font(.text(.caption))
+				.lineLimit(1)
+				.accessibilityElement(children: .combine)
+			}
+			Chart {
+				ForEach(days, id: \.day) { day in
+					if let other = otherValue(day) {
+						LineMark(x: .value("Day", Int(day.day)), y: .value("Amount", other), series: .value("Line", comparison))
+							.foregroundStyle(Color.chartExpenseSoft)
+					}
+					if let value = day.compare {
+						LineMark(x: .value("Day", Int(day.day)), y: .value("Amount", format.chartValue(value, on: .register)), series: .value("Line", ReportPeriod.monthName(compare)))
+							.foregroundStyle(Color.chartExpense)
+					}
+				}
+			}
+			.chartXAxis(.hidden)
+			.chartYAxis(.hidden)
+		}
+	}
+
+	private func otherValue(_ day: SpendingCardDay) -> Double? {
+		switch mode {
+		case .singleMonth: day.compareTo.map { format.chartValue($0, on: .register) }
+		case .average: format.chartValue(day.average, on: .register)
+		case .budget: day.budget.isFinite ? format.chartValue(day.budget, on: .register) : nil
+		}
+	}
+}
+
+/// The balance forecast card's running balance, its lowest point and this month.
+private struct ForecastChart: View {
+	let points: [ForecastCardPoint]
+	let low: ForecastCardPoint?
+	let today: UInt32?
+	let zeroBased: Bool
+	let format: MoneyFormat
+
+	var body: some View {
+		Chart {
+			ForEach(Array(points.enumerated()), id: \.offset) { index, point in
+				LineMark(x: .value("Day", index), y: .value("Balance", format.chartValue(point.balance, on: .register)))
+					.foregroundStyle(Color.moneyIncomeFill)
+			}
+			if let low, let index = points.firstIndex(of: low) {
+				PointMark(x: .value("Day", index), y: .value(CardWords.lowestBalance, format.chartValue(low.balance, on: .register)))
+					.foregroundStyle(low.balance < 0 ? Color.moneyOverspent : Color.textSecondary)
+			}
+			if let today {
+				RuleMark(x: .value("Day", Int(today)))
+					.foregroundStyle(Color.chartGrid)
+			}
+		}
+		.chartXAxis(.hidden)
+		.chartYAxis(.hidden)
+		.chartYScale(domain: .automatic(includesZero: zeroBased))
+	}
+}
+
+/// The Monte Carlo fan: p10 to p90 and p25 to p75 shaded, p50 drawn. A
+/// point whose balance is NaN or infinite is a gap.
+private struct MonteCarloChart: View {
+	let points: [MonteCarloCardPoint]
+	let format: MoneyFormat
+
+	private struct Run: Identifiable {
+		let id: Int
+		let points: [MonteCarloCardPoint]
+	}
+
+	private var runs: [Run] {
+		var runs: [[MonteCarloCardPoint]] = [[]]
+		for point in points {
+			if [point.p10, point.p25, point.p50, point.p75, point.p90, point.age].allSatisfy(\.isFinite) {
+				runs[runs.count - 1].append(point)
+			} else if !(runs.last?.isEmpty ?? true) {
+				runs.append([])
+			}
+		}
+		return runs.filter { !$0.isEmpty }.enumerated().map { Run(id: $0.offset, points: $0.element) }
+	}
+
+	var body: some View {
+		Chart {
+			ForEach(runs) { run in
+				ForEach(run.points, id: \.year) { point in
+					AreaMark(x: .value("Age", point.age), yStart: .value("10th percentile", value(point.p10)), yEnd: .value("90th percentile", value(point.p90)), series: .value("Band", "outer.\(run.id)"))
+						.foregroundStyle(Color.chartBand)
+					AreaMark(x: .value("Age", point.age), yStart: .value("25th percentile", value(point.p25)), yEnd: .value("75th percentile", value(point.p75)), series: .value("Band", "inner.\(run.id)"))
+						.foregroundStyle(Color.chartBand)
+					LineMark(x: .value("Age", point.age), y: .value("Median", value(point.p50)), series: .value("Band", "median.\(run.id)"))
+						.foregroundStyle(Color.moneyIncomeFill)
+				}
+			}
+		}
+		.chartXAxis(.hidden)
+		.chartYAxis(.hidden)
+		.chartXScale(domain: .automatic(includesZero: false))
+	}
+
+	private func value(_ minorUnits: Double) -> Double {
+		format.chartValue(minorUnits, on: .register)
+	}
+}
+
+/// The Sankey card's graph as the core lays it out: nodes worded by
+/// ST-10.10, ribbons as wide as their links.
+private struct SankeyCardCanvas: View {
+	let nodes: [SankeyCardNode]
+	let links: [SankeyCardLink]
+	let showPercentages: Bool
+	let format: MoneyFormat
+
+	var body: some View {
+		GeometryReader { proxy in
+			let layout = SankeyCardLayout(nodes: nodes, links: links, size: proxy.size)
+			ZStack(alignment: .topLeading) {
+				Canvas { context, _ in
+					for ribbon in layout.ribbons {
+						let tint = links[ribbon.link].color.map(CardPalette.color) ?? CardPalette.color(nodes[ribbon.source].color)
+						context.fill(Self.path(ribbon), with: .color(tint.opacity(0.3)))
+					}
+					for node in layout.nodes {
+						context.fill(Path(roundedRect: node.rect, cornerRadius: 2), with: .color(CardPalette.color(nodes[node.index].color)))
+					}
+				}
+				ForEach(layout.nodes, id: \.index) { placed in
+					let node = nodes[placed.index]
+					let words = CardWords.sankey(node.label) ?? ""
+					let leading = placed.column == layout.columns - 1 && layout.columns > 1
+					if placed.rect.height >= 10 {
+						HStack(spacing: 4) {
+							Text(words).font(.text(.caption, weight: .medium))
+							if showPercentages, !node.percentage.isEmpty {
+								Text(node.percentage).font(.figures(.caption)).foregroundStyle(.textSecondary)
+							}
+						}
+						.lineLimit(1)
+						.fixedSize()
+						.frame(width: 160, alignment: leading ? .trailing : .leading)
+						.position(x: leading ? placed.rect.minX - 6 - 80 : placed.rect.maxX + 6 + 80, y: placed.rect.midY)
+						.allowsHitTesting(false)
+					}
+					Color.clear
+						.frame(width: placed.rect.width + 6, height: max(placed.rect.height, 10))
+						.contentShape(.rect)
+						.position(x: placed.rect.midX, y: placed.rect.midY)
+						.help(help(placed.index))
+						.accessibilityElement()
+						.accessibilityLabel(showPercentages && !node.percentage.isEmpty ? "\(words), \(node.percentage)" : words)
+				}
+			}
+		}
+		.accessibilityElement(children: .contain)
+		.accessibilityIdentifier("sankey.card")
+	}
+
+	/// A node's words, and for an Other node what it holds.
+	private func help(_ index: Int) -> String {
+		let words = CardWords.sankey(nodes[index].label) ?? ""
+		guard nodes[index].label == .other else { return words }
+		let folded = links.filter { $0.target.map(Int.init) == index || Int($0.source) == index }.flatMap(\.folded)
+		return ([words] + folded.map { "\($0.name) \(format.amount($0.value, on: .register))" }).joined(separator: "\n")
+	}
+
+	static func path(_ ribbon: SankeyCardLayout.Ribbon) -> Path {
+		var path = Path()
+		let middle = (ribbon.sourceX + ribbon.targetX) / 2
+		path.move(to: CGPoint(x: ribbon.sourceX, y: ribbon.sourceSpan.lowerBound))
+		path.addCurve(to: CGPoint(x: ribbon.targetX, y: ribbon.targetSpan.lowerBound), control1: CGPoint(x: middle, y: ribbon.sourceSpan.lowerBound), control2: CGPoint(x: middle, y: ribbon.targetSpan.lowerBound))
+		path.addLine(to: CGPoint(x: ribbon.targetX, y: ribbon.targetSpan.upperBound))
+		path.addCurve(to: CGPoint(x: ribbon.sourceX, y: ribbon.sourceSpan.upperBound), control1: CGPoint(x: middle, y: ribbon.targetSpan.upperBound), control2: CGPoint(x: middle, y: ribbon.sourceSpan.upperBound))
+		path.closeSubpath()
+		return path
+	}
+}
+
+/// The core's chart colours 0 to 8 (Actual's `chartQual1` to `chartQual9`),
+/// drawn in Veritas's own palette.
+enum CardPalette {
+	static let colors: [Color] = [
+		.moneyIncomeFill, .chartSavings, .chartDebtPaydown, .scenario3, .moneyLowFill, .chartExpense, .moneyOverspentFill, .scenarioBaseline, .moneyAvailable
+	]
+
+	static func color(_ index: UInt8) -> Color {
+		colors[Int(index) % colors.count]
+	}
+
+	static func color(_ color: SankeyCardColor) -> Color {
+		switch color {
+		case .palette(let index): Self.color(index)
+		case .toBudgetPositive: .moneyAvailableFill
+		case .toBudgetNegative: .moneyOverspentFill
+		case .gray: .chartExpense
+		case .blue: .moneyIncomeFill
+		}
+	}
+}
+
+private struct CalendarGrid: View {
+	let month: CalendarCardMonth
+	let format: MoneyFormat
+
+	private var first: Month? { Month(date: month.start) }
+
 	private var leadingBlanks: Int {
-		guard let date = month.dateValue else { return 0 }
+		guard let date = first?.dateValue else { return 0 }
 		return Calendar.current.component(.weekday, from: date) - Calendar.current.firstWeekday
 	}
 
 	var body: some View {
 		let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
 		let symbols = Calendar.current.veryShortStandaloneWeekdaySymbols
-		let first = Calendar.current.firstWeekday - 1
-		let ordered = Array(symbols[first...] + symbols[..<first])
-		let biggest = max(days.map { max($0.income, $0.expenses) }.max() ?? 1, 1)
+		let firstWeekday = Calendar.current.firstWeekday - 1
+		let ordered = Array(symbols[firstWeekday...] + symbols[..<firstWeekday])
 		LazyVGrid(columns: columns, spacing: 4) {
 			ForEach(cells(ordered), id: \.id) { cell in
 				switch cell.kind {
@@ -600,7 +920,7 @@ private struct CalendarGrid: View {
 				case .blank:
 					Color.clear.frame(height: 30)
 				case .day(let day):
-					dayCell(day, biggest: biggest)
+					dayCell(day)
 				}
 			}
 		}
@@ -609,33 +929,35 @@ private struct CalendarGrid: View {
 	private enum CellKind {
 		case weekday(String)
 		case blank
-		case day(CalendarDay)
+		case day(CalendarDayCell)
 	}
 
 	private func cells(_ symbols: [String]) -> [(id: String, kind: CellKind)] {
 		symbols.enumerated().map { ("weekday\($0.offset)", .weekday($0.element)) }
 			+ (0..<((leadingBlanks + 7) % 7)).map { ("blank\($0)", .blank) }
-			+ days.map { ("day\($0.day)", .day($0)) }
+			+ month.days.map { ("day\($0.date)", .day($0)) }
 	}
 
-	private func dayCell(_ day: CalendarDay, biggest: Int64) -> some View {
-		ZStack(alignment: .bottom) {
+	/// Each bar is the day's share of the month, as the core sizes it.
+	private func dayCell(_ day: CalendarDayCell) -> some View {
+		let number = Int(day.date.suffix(2)) ?? 1
+		return ZStack(alignment: .bottom) {
 			RoundedRectangle(cornerRadius: 4).fill(Color.track.opacity(0.5))
 			HStack(alignment: .bottom, spacing: 2) {
 				if day.income > 0 {
-					Rectangle().fill(Color.moneyAvailableFill).frame(width: 4, height: 24 * CGFloat(day.income) / CGFloat(biggest))
+					Rectangle().fill(Color.moneyAvailableFill).frame(width: 4, height: 24 * CGFloat(day.incomeSize) / 100)
 				}
-				if day.expenses > 0 {
-					Rectangle().fill(Color.moneyOverspentFill).frame(width: 4, height: 24 * CGFloat(day.expenses) / CGFloat(biggest))
+				if day.expense > 0 {
+					Rectangle().fill(Color.moneyOverspentFill).frame(width: 4, height: 24 * CGFloat(day.expenseSize) / 100)
 				}
 			}
 			.frame(maxWidth: .infinity, alignment: .trailing)
 			.padding(3)
-			Text("\(day.day)").font(.figures(.caption)).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(4)
+			Text("\(number)").font(.figures(.caption)).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading).padding(4)
 		}
 		.frame(height: 30)
 		.accessibilityElement(children: .ignore)
-		.accessibilityLabel("\(day.day): in \(format.amount(day.income, on: .register)), out \(format.amount(day.expenses, on: .register))")
+		.accessibilityLabel("\(number): money in \(format.amount(day.income, on: .register)), money out \(format.amount(day.expense, on: .register))")
 	}
 }
 
@@ -673,29 +995,6 @@ struct MarkdownText: View {
 
 	static func inline(_ text: String) -> AttributedString {
 		(try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
-	}
-}
-
-/// Captions for the cards that show Actual's raw-movement numbers
-/// (docs/finance/statements.md ST-10.10). They live in the info popover only.
-enum CardWords {
-	/// A card still on Net Profit's figures gets no raw-movement caption.
-	static func caption(_ card: DashboardCard) -> String? {
-		switch card.content {
-		case .cashFlow(_, _, _, true), .spending(_, _, _, _, _, true): return nil
-		default: return caption(card.kind)
-		}
-	}
-
-	static func caption(_ kind: WidgetKind?) -> String? {
-		switch kind {
-		case .calendar: "All money in and out of every account. Both sides of transfers and card payments count. Includes refunds. Not Net Profit."
-		case .ageOfMoney: "How old your money is when you spend it. Every deposit counts as new money, and every payment or move out of your budget accounts counts as spending."
-		case .crossover: "Every category outside the income group, including categories Veritas treats as savings or debt paydown. Not Net Profit's Expenses."
-		case .cashFlow: "Deposits and payments in your budget accounts, up to today. Leaves out transfers between accounts, including card payments and moves to savings or loans. Includes refunds, starting balances and reconciliation adjustments."
-		case .spending: "Every row in your budget accounts that is not in an income category, including rows with no category and transfers out of your budget. Refunds reduce it. Not Net Profit's Expenses."
-		default: nil
-		}
 	}
 }
 

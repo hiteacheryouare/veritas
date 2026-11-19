@@ -53,9 +53,9 @@ struct ReportScreenshotTests {
 		let model = DashboardModel(workspace: workspace)
 		await model.load()
 		let salary = try #require(model.sheet?.cards.first { $0.id == "salary" })
-		try render(WidgetConfigSheet(card: salary, reports: []) { _ in }, named: "widget-config-summary")
+		try render(WidgetConfigSheet(card: salary, reports: [], names: model.names, style: .commaDot) { _ in }, named: "widget-config-summary")
 		let notes = try #require(model.sheet?.cards.first { $0.id == "notes" })
-		try render(WidgetConfigSheet(card: notes, reports: []) { _ in }, named: "widget-config-text")
+		try render(WidgetConfigSheet(card: notes, reports: [], names: model.names, style: .commaDot) { _ in }, named: "widget-config-text")
 	}
 
 	@Test func standardReports() async throws {
@@ -77,7 +77,7 @@ struct ReportScreenshotTests {
 		await model.edit()
 		model.draft?.settings.totalMode = false
 		model.draft?.settings.graphType = "StackedBarGraph"
-		model.draft?.conditions = [ReportCondition(field: "category", op: "isNot", value: "Rent"), ReportCondition(field: "amount", op: "gt", value: "20.00")]
+		model.draft?.conditions = [RuleCondition(field: .category, op: .isNot, value: .id(id: "rent")), RuleCondition(field: .amount, op: .gt, value: .amount(amount: 2_000))]
 		await model.refreshPreview()
 		try render(CustomReportsScreen(workspace: workspace, model: model), named: "custom-report-editing", size: CGSize(width: 1340, height: 1000))
 		model.cancelEditing()

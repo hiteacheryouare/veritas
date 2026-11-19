@@ -713,6 +713,22 @@ The full key set is `SyncedPrefs` (`lc/types/prefs.ts:20-77`). The `budgetName` 
 
 ---
 
+### 3.12 Veritas's own tables (`veritas_*`)
+
+Veritas keeps what Actual can't express in its own tables in the same `db.sqlite` (`contracts/veritas-schema-v1.sql`). Actual never reads them, and a budget opened in Actual is unaffected by them. veritas-store creates any missing table with `CREATE TABLE IF NOT EXISTS` when it adopts a budget, and every read checks that the table exists first, so an older file opened read-only reads as having no rows. There are no foreign keys; the audit checks references.
+
+| Table | Holds |
+|---|---|
+| `veritas_meta` | `schema_version` |
+| `veritas_category_meta` | a category's kind, tax bucket and archive date (CLS-3, TAX-2, R-BUD-5) |
+| `veritas_account_meta` | an account's kind and loan terms (ST-2, R-DEBT-1) |
+| `veritas_goal` | goals (DEBT-8) |
+| `veritas_transaction_meta` | reconcile adjustments and "may need Actual" notes (CLS-5, D64) |
+| `veritas_loan_payment_part` | `(id, payment, line, part, tombstone)`: which expense line of a loan payment the wizard wrote as `interest`, `escrow` or `fees`, written in the same SQLite transaction and undo step as the payment; an edit tombstones the old rows. DEBT-3's pre-fill and FC-2's forecast read parts only through it (D76) |
+| `veritas_schedule_meta` | Paused versus Ended for a completed bill (R-BILL-3) |
+| `veritas_tax_tag` | which tags mean which tax bucket (TAX-1) |
+| `veritas_scenario`, `veritas_scenario_event` | forecast scenarios (R-FC-2) |
+
 ## 4. Transactions, accounts, payees, categories
 
 ### 4.1 The server write path

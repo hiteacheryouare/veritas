@@ -475,8 +475,8 @@ final class StubAccounts: @unchecked Sendable {
 			let principal = total - interest - escrow - fees
 			let rate = loans[loan]?.rateBps
 			let estimate = rate.map { (outstanding * $0 + 60_000) / 120_000 }
-			let problem: LoanPaymentProblem? = principal < 0 ? .interestAbovePayment(shortBy: -principal) : principal > outstanding ? .paysOff(credit: principal - outstanding) : nil
-			return LoanPaymentPreview(principal: principal, outstanding: outstanding, estimate: estimate, rateBps: rate, problem: problem)
+			let problem: LoanPaymentProblem? = principal < 0 ? .paymentTooSmall(shortBy: -principal) : principal > outstanding ? .paysOff(credit: principal - outstanding) : nil
+			return LoanPaymentPreview(principal: principal, outstanding: outstanding, estimate: estimate, rateBps: rate, problem: problem, principalFunding: 0, principalFundingAsked: 0)
 		}
 	}
 
@@ -516,6 +516,10 @@ final class StubAccounts: @unchecked Sendable {
 
 	private func categoryName(_ id: String) -> String? {
 		Self.categories[id] ?? created[id]
+	}
+
+	private func categoryName(_ id: String?) -> String? {
+		id.flatMap(categoryName)
 	}
 
 	private func make(_ draft: TransactionDraft, id: String) throws -> Txn {

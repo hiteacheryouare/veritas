@@ -195,18 +195,18 @@ private final class Recorder: ChangeListener, @unchecked Sendable {
 			== CategoryHistory(transactions: 0, budgetedMonths: 0, taxBucket: nil))
 	_ = try session.perform(command: .deleteCategory(categoryId: categoryId))
 
-	_ = try session.goals(today: today)
+	_ = try session.goals(today: today).goals
 	let created = try session.perform(
 		command: .createGoal(
 			name: "New laptop", target: 100_000, targetDate: "2027-06-30", icon: nil, color: nil))
 	let goalId = try #require(created.entities.first { $0.kind == .goal }?.id)
-	let goal = try #require(try session.goals(today: today).first { $0.id == goalId })
+	let goal = try #require(try session.goals(today: today).goals.first { $0.id == goalId })
 	#expect(goal.state == .active)
 	#expect(goal.monthsLeft == 8)
 
 	_ = try session.perform(
 		command: .setBudget(month: november, categoryId: goal.categoryId, amount: 100_000))
-	let reached = try #require(try session.goals(today: today).first { $0.id == goalId })
+	let reached = try #require(try session.goals(today: today).goals.first { $0.id == goalId })
 	#expect(reached.state == .reached)
 	#expect(reached.progressPercent == 100)
 	#expect(reached.progressAmount == 100_000)
@@ -220,14 +220,14 @@ private final class Recorder: ChangeListener, @unchecked Sendable {
 	#expect(preview.leftover == 100_000)
 	_ = try session.perform(
 		command: .closeGoal(goalId: goalId, releaseToCategoryId: nil, alsoMoveLater: false))
-	#expect(try session.goals(today: today).first { $0.id == goalId }?.state == .closed)
+	#expect(try session.goals(today: today).goals.first { $0.id == goalId }?.state == .closed)
 
 	#expect(throws: FfiError.self) {
 		try session.perform(command: .retargetGoal(goalId: goalId, target: 150_000, targetDate: nil))
 	}
 	_ = try session.perform(command: .reopenGoal(goalId: goalId))
 	_ = try session.perform(command: .retargetGoal(goalId: goalId, target: 150_000, targetDate: nil))
-	let retargeted = try #require(try session.goals(today: today).first { $0.id == goalId })
+	let retargeted = try #require(try session.goals(today: today).goals.first { $0.id == goalId })
 	#expect(retargeted.state == .active)
 	#expect(retargeted.reachedMonth == november)
 	#expect(retargeted.target == 150_000)

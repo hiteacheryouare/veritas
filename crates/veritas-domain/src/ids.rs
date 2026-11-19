@@ -41,4 +41,5 @@ id!(
 	DashboardPageId,
 	WidgetId,
 	ScenarioEventId,
+	LoanPaymentPartId,
 );

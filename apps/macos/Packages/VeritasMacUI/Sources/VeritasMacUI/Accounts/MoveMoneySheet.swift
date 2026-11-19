@@ -188,7 +188,7 @@ private struct LoanSplit: View {
 			}
 			if let loan = model.loan {
 				switch loan.problem {
-				case .interestAbovePayment(let shortBy)?:
+				case .paymentTooSmall(let shortBy)?:
 					Text(MoveMoneySheet.shortText(shortBy, format: model.format))
 						.foregroundStyle(Color.moneyOverspent)
 						.accessibilityIdentifier("moveMoney.loanProblem")
