@@ -4,7 +4,7 @@
 
 use veritas_domain::{
 	BudgetData, CategoryGroupId, CategoryId, CivilDate, CoreError, Goal, GoalId, GoalStatus, Money,
-	Row, TransactionKind, YearMonth,
+	Row, YearMonth,
 };
 use veritas_engine::goals::{self as engine, Suggestion};
 use veritas_engine::{BudgetEditor, BudgetWrites, Envelope, EnvelopeSheet};
@@ -93,7 +93,8 @@ pub fn goals(
 			continue;
 		};
 		let available = available(sheet, &goal.category, month);
-		let spent = spending_to_date(classification, &goal.category, sheet.today())?;
+		let spent =
+			veritas_forecast::spending_to_date(classification, &goal.category, sheet.today())?;
 		let state = match goal.status {
 			GoalStatus::Active => GoalState::Active,
 			GoalStatus::Reached if available < goal.target => GoalState::ReachedSpent,
@@ -443,26 +444,6 @@ fn available(sheet: &EnvelopeSheet, category: &CategoryId, month: YearMonth) -> 
 	sheet
 		.category(month, category)
 		.map_or(Money::ZERO, |cell| cell.balance)
-}
-
-/// CLS-6 `expense_total` for one category, every row through `today`, read
-/// from the classification every report uses so the figures agree (DEBT-8).
-/// Never clamped: a refund bigger than the spending makes it negative.
-pub fn spending_to_date(
-	classification: &Classification,
-	category: &CategoryId,
-	today: CivilDate,
-) -> Result<Money, CoreError> {
-	let mut total = Money::ZERO;
-	for row in classification.through(today) {
-		if row.is_primary()
-			&& row.kind() == TransactionKind::Expense
-			&& row.category.as_ref() == Some(category)
-		{
-			total = total.checked_sub(row.amount)?;
-		}
-	}
-	Ok(total)
 }
 
 /// Rounds down, and stops at 99 until the goal is reached, so the ring never
