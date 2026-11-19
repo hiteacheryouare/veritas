@@ -88,7 +88,8 @@ pub struct GoalEtaItem {
 	pub goal_id: String,
 	pub name: String,
 	pub status: GoalEtaStatus,
-	pub remaining: i64,
+	/// `nil` for `.spendingRecorded`, where it would mix scales (D77).
+	pub remaining: Option<i64>,
 	pub pace: Option<i64>,
 	pub optimistic_pace: Option<i64>,
 	pub pessimistic_pace: Option<i64>,
@@ -609,7 +610,7 @@ fn goal_eta(data: &BudgetData, eta: &GoalEta) -> GoalEtaItem {
 				pessimistic: pessimistic.map(Month::from),
 			},
 		},
-		remaining: eta.remaining.minor(),
+		remaining: (eta.status != EtaStatus::SpendingRecorded).then(|| eta.remaining.minor()),
 		pace: eta.pace.map(|(mid, _, _)| mid.minor()),
 		optimistic_pace: eta.pace.map(|(_, max, _)| max.minor()),
 		pessimistic_pace: eta.pace.map(|(_, _, min)| min.minor()),
@@ -1675,6 +1676,7 @@ mod tests {
 				assert_eq!(base.status, GoalEtaStatus::SpendingRecorded);
 				assert_eq!(base.text, "No ETA: spending recorded");
 				assert_eq!(base.on_track, None);
+				assert_eq!(base.remaining, None, "it would mix scales");
 				assert_eq!(
 					what_if.status,
 					GoalEtaStatus::SpendingRecorded,
@@ -1688,6 +1690,7 @@ mod tests {
 				);
 				assert!(shown.suggested_monthly.is_some());
 				assert_ne!(base.status, GoalEtaStatus::SpendingRecorded);
+				assert!(base.remaining.is_some());
 				assert_ne!(what_if.status, GoalEtaStatus::SpendingRecorded);
 			}
 		}
