@@ -137,6 +137,16 @@ public struct MoneyFormat: Hashable, Sendable {
 		return (whole < 0 ? "\u{2212}" : "") + withSymbol(digits)
 	}
 
+	/// A formula card's number, in whole units, at the currency's places:
+	/// rounded only to be shown, half up as Actual's `amountToInteger` rounds.
+	/// `nil` when it can't be shown, such as NaN or infinity.
+	public func number(_ units: Double) -> String? {
+		let scaled = (units * pow(10, Double(shownPlaces)) + 0.5).rounded(.down)
+		guard scaled.isFinite, scaled.magnitude < 9.0e18 else { return nil }
+		let minorUnits = Int64(scaled)
+		return sign(minorUnits, minorUnits.magnitude) + digits(minorUnits.magnitude, places: shownPlaces)
+	}
+
 	private var shownPlaces: Int {
 		hidesDecimals ? 0 : Int(decimalPlaces)
 	}

@@ -205,13 +205,273 @@ impl TransactionFilter {
 			budget,
 			transaction,
 		};
+		self.passes(transaction.date.naive(), &|condition| {
+			condition_matches(condition, &row)
+		})
+	}
+
+	/// Whether a transaction the balance forecast made up passes, judged in
+	/// memory the way `matchesForecastFilters` judges the AQL that
+	/// `conditionsToAQL` builds (`forecast-filters.ts:186-299`). That differs
+	/// from SQL only on text and names: a missing text never passes `$like`
+	/// or `$notlike`, and `%` doesn't reach across a line break.
+	pub(crate) fn matches_object(&self, object: &FilterObject) -> Result<bool, CoreError> {
+		self.passes(object.date, &|condition| object_matches(condition, object))
+	}
+
+	fn passes(
+		&self,
+		date: NaiveDate,
+		condition: &dyn Fn(&Condition) -> Result<bool, CoreError>,
+	) -> Result<bool, CoreError> {
 		for clause in &self.clauses {
-			let passed = clause_matches(clause, &row)?;
+			let passed = clause_matches(clause, date, condition)?;
 			if passed == self.any {
 				return Ok(passed);
 			}
 		}
 		Ok(!self.any)
+	}
+}
+
+/// A transaction the balance forecast made up, as its in-memory filter reads
+/// it (`ForecastFilterObject`): the account only when the forecast covers it,
+/// and the payee, category and group only when they're live.
+#[derive(Clone, Debug)]
+pub(crate) struct FilterObject {
+	pub amount: i64,
+	pub date: NaiveDate,
+	pub notes: Option<String>,
+	pub imported_payee: Option<String>,
+	pub cleared: bool,
+	pub reconciled: bool,
+	pub transfer: bool,
+	pub account: Option<ObjectAccount>,
+	pub payee: Option<Named>,
+	pub category: Option<ObjectCategory>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct Named {
+	pub id: String,
+	pub name: String,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ObjectAccount {
+	pub id: String,
+	pub name: String,
+	pub off_budget: bool,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ObjectCategory {
+	pub id: String,
+	pub name: String,
+	pub group: Option<Named>,
+}
+
+/// What `getValueByPath` finds: a path through a null object is
+/// `undefined`, which equals nothing, not even null.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Found<'a> {
+	Undefined,
+	Null,
+	Text(&'a str),
+}
+
+impl<'a> Found<'a> {
+	fn of(value: Option<&'a str>) -> Found<'a> {
+		value.map_or(Found::Null, Found::Text)
+	}
+
+	fn equals(self, expected: Option<&str>) -> bool {
+		match (self, expected) {
+			(Found::Null, None) => true,
+			(Found::Text(text), Some(expected)) => text == expected,
+			_ => false,
+		}
+	}
+
+	fn text(self) -> Option<&'a str> {
+		match self {
+			Found::Text(text) => Some(text),
+			_ => None,
+		}
+	}
+}
+
+impl FilterObject {
+	fn id(&self, field: Field) -> Found<'_> {
+		match field {
+			Field::Payee => Found::of(self.payee.as_ref().map(|payee| payee.id.as_str())),
+			Field::Category => Found::of(self.category.as_ref().map(|c| c.id.as_str())),
+			Field::Account => Found::of(self.account.as_ref().map(|a| a.id.as_str())),
+			Field::CategoryGroup => match &self.category {
+				None => Found::Undefined,
+				Some(category) => Found::of(category.group.as_ref().map(|g| g.id.as_str())),
+			},
+			_ => Found::Undefined,
+		}
+	}
+
+	fn name(&self, field: Field) -> Found<'_> {
+		fn named(value: Option<&str>) -> Found<'_> {
+			value.map_or(Found::Undefined, Found::Text)
+		}
+		match field {
+			Field::Payee => named(self.payee.as_ref().map(|payee| payee.name.as_str())),
+			Field::Category => named(self.category.as_ref().map(|c| c.name.as_str())),
+			Field::Account => named(self.account.as_ref().map(|a| a.name.as_str())),
+			Field::CategoryGroup => named(
+				self.category
+					.as_ref()
+					.and_then(|category| category.group.as_ref())
+					.map(|group| group.name.as_str()),
+			),
+			_ => Found::Undefined,
+		}
+	}
+
+	fn text(&self, field: Field) -> Option<&str> {
+		match field {
+			Field::Notes => self.notes.as_deref(),
+			Field::ImportedPayee => self.imported_payee.as_deref(),
+			_ => None,
+		}
+	}
+}
+
+/// JS's `i`-flag `Canonicalize` outside Unicode mode: the upper case when
+/// it is one character and doesn't turn non-ASCII into ASCII.
+fn fold(c: char) -> char {
+	let mut upper = c.to_uppercase();
+	match (upper.next(), upper.next()) {
+		(Some(single), None) if c.is_ascii() || !single.is_ascii() => single,
+		_ => c,
+	}
+}
+
+/// `likeToRegex('%' + needle + '%').test(text)`: `%` is `.*`, which stops
+/// at a line break, and the rest is literal and case-insensitive.
+fn memory_like(needle: &str, text: &str) -> bool {
+	let text: Vec<char> = text.chars().collect();
+	let tokens = std::iter::once(None)
+		.chain(needle.chars().map(|c| (c != '%').then(|| fold(c))))
+		.chain(std::iter::once(None));
+	let mut reached = vec![false; text.len() + 1];
+	reached[0] = true;
+	for token in tokens {
+		match token {
+			None => {
+				for j in 1..=text.len() {
+					if reached[j - 1]
+						&& !matches!(text[j - 1], '\n' | '\r' | '\u{2028}' | '\u{2029}')
+					{
+						reached[j] = true;
+					}
+				}
+			}
+			Some(c) => {
+				let mut next = vec![false; text.len() + 1];
+				for j in 1..=text.len() {
+					next[j] = reached[j - 1] && fold(text[j - 1]) == c;
+				}
+				reached = next;
+			}
+		}
+	}
+	reached[text.len()]
+}
+
+fn memory_regex(condition: &Condition, text: Option<&str>) -> Result<bool, CoreError> {
+	match text {
+		Some(text) => regex_test(condition, Some(text)),
+		None => Ok(false),
+	}
+}
+
+fn object_matches(condition: &Condition, object: &FilterObject) -> Result<bool, CoreError> {
+	use ConditionValue as V;
+	let field = condition.field;
+	let op = condition.op;
+	match field.kind() {
+		FieldKind::Id => {
+			let id = object.id(field);
+			Ok(match (op, &condition.value) {
+				(Op::Is, V::Id(value)) => id.equals(value.as_deref()),
+				(Op::IsNot, V::Id(value)) => !id.equals(value.as_deref()),
+				(Op::OneOf, V::IdList(values)) => values.iter().any(|v| id.equals(v.as_deref())),
+				(Op::NotOneOf, V::IdList(values)) => {
+					!values.is_empty() && values.iter().all(|v| !id.equals(v.as_deref()))
+				}
+				(Op::Contains, V::Id(Some(needle))) => object
+					.name(field)
+					.text()
+					.is_some_and(|name| memory_like(needle, name)),
+				(Op::DoesNotContain, V::Id(Some(needle))) => object
+					.name(field)
+					.text()
+					.is_some_and(|name| !memory_like(needle, name)),
+				(Op::Matches, _) => return memory_regex(condition, object.name(field).text()),
+				(Op::OnBudget, _) => object.account.as_ref().is_some_and(|a| !a.off_budget),
+				(Op::OffBudget, _) => object.account.as_ref().is_some_and(|a| a.off_budget),
+				_ => {
+					return Err(unsupported(format!("the filter {field:?} {op:?}")));
+				}
+			})
+		}
+		FieldKind::Text => {
+			let raw = object.text(field);
+			let lower = raw.map(str::to_lowercase);
+			let column = lower.as_deref();
+			Ok(match (op, &condition.value) {
+				(Op::Is, V::Text(value)) if value.is_empty() => column.is_none_or(str::is_empty),
+				(Op::Is, V::Text(value)) => column == Some(value.as_str()),
+				(Op::IsNot, V::Text(value)) => column != Some(value.as_str()),
+				(Op::OneOf, V::TextList(values)) => {
+					values.iter().any(|value| column == Some(value.as_str()))
+				}
+				(Op::NotOneOf, V::TextList(values)) => {
+					!values.is_empty() && values.iter().all(|value| column != Some(value.as_str()))
+				}
+				(Op::Contains, V::Text(needle)) => {
+					column.is_some_and(|text| memory_like(needle, text))
+				}
+				(Op::DoesNotContain, V::Text(needle)) => {
+					column.is_some_and(|text| !memory_like(needle, text))
+				}
+				(Op::Matches, _) => return memory_regex(condition, column),
+				(Op::HasTags | Op::HasAnyTag, V::Text(value)) => {
+					let tags = extract_tags(value);
+					let found = |tag: &String| raw.is_some_and(|text| has_tag(text, tag));
+					if tags.is_empty() {
+						false
+					} else if op == Op::HasTags {
+						tags.iter().all(found)
+					} else {
+						tags.iter().any(found)
+					}
+				}
+				_ => {
+					return Err(unsupported(format!("the filter {field:?} {op:?}")));
+				}
+			})
+		}
+		FieldKind::Number => number_matches(condition, object.amount),
+		FieldKind::Date => date_matches(condition, object.date),
+		FieldKind::Boolean => {
+			let V::Bool(wanted) = condition.value else {
+				return Ok(false);
+			};
+			let actual = match field {
+				Field::Cleared => object.cleared,
+				Field::Reconciled => object.reconciled,
+				Field::Transfer => object.transfer,
+				_ => false,
+			};
+			Ok(actual == wanted)
+		}
 	}
 }
 
@@ -240,27 +500,28 @@ fn special_case(condition: Condition) -> Result<Clause, CoreError> {
 	})
 }
 
-fn clause_matches(clause: &Clause, row: &Row) -> Result<bool, CoreError> {
+fn clause_matches(
+	clause: &Clause,
+	date: NaiveDate,
+	condition: &dyn Fn(&Condition) -> Result<bool, CoreError>,
+) -> Result<bool, CoreError> {
 	match clause {
-		Clause::Condition(condition) => condition_matches(condition, row),
+		Clause::Condition(single) => condition(single),
 		Clause::All(conditions) => {
-			for condition in conditions {
-				if !condition_matches(condition, row)? {
+			for single in conditions {
+				if !condition(single)? {
 					return Ok(false);
 				}
 			}
 			Ok(true)
 		}
-		Clause::Days { days, approx } => {
-			let date = row.transaction.date.naive();
-			Ok(days.iter().any(|day| {
-				if *approx {
-					within_two_days(date, *day)
-				} else {
-					date == *day
-				}
-			}))
-		}
+		Clause::Days { days, approx } => Ok(days.iter().any(|day| {
+			if *approx {
+				within_two_days(date, *day)
+			} else {
+				date == *day
+			}
+		})),
 	}
 }
 
@@ -308,7 +569,7 @@ fn regex_test(condition: &Condition, column: Option<&str>) -> Result<bool, CoreE
 }
 
 /// JavaScript's `\s`, outside Unicode mode.
-fn is_js_space(c: char) -> bool {
+pub(crate) fn is_js_space(c: char) -> bool {
 	matches!(
 		c,
 		'\t' | '\n' | '\u{0B}' | '\u{0C}' | '\r' | ' ' | '\u{A0}' | '\u{1680}' | '\u{2000}'
@@ -432,49 +693,8 @@ fn condition_matches(condition: &Condition, row: &Row) -> Result<bool, CoreError
 				}
 			})
 		}
-		FieldKind::Number => {
-			#[allow(clippy::cast_precision_loss)]
-			let amount = row.transaction.amount.minor() as f64;
-			let signed = |op: Op, value: f64| match condition.sign {
-				AmountSign::Outflow => amount < 0.0 && compare(op, -amount, value),
-				AmountSign::Inflow => amount > 0.0 && compare(op, amount, value),
-				AmountSign::Any => compare(op, amount, value),
-			};
-			Ok(match (op, &condition.value) {
-				(Op::IsApprox, V::Number(number)) => {
-					let threshold = math_round(number.abs() * 0.075);
-					signed(Op::Gte, number - threshold) && signed(Op::Lte, number + threshold)
-				}
-				(Op::IsBetween, V::Between(a, b)) => {
-					let (low, high) = if a < b { (*a, *b) } else { (*b, *a) };
-					amount >= low && amount <= high
-				}
-				(Op::Is | Op::Gt | Op::Gte | Op::Lt | Op::Lte, V::Number(number)) => {
-					signed(op, *number)
-				}
-				_ => {
-					return Err(unsupported(format!("the filter {field:?} {op:?}")));
-				}
-			})
-		}
-		FieldKind::Date => {
-			let date = row.transaction.date.naive();
-			Ok(match (op, &condition.value) {
-				(Op::Is, V::Date(DateValue::Day(day))) => date == *day,
-				(Op::Is, V::Date(DateValue::Month(month))) => {
-					date.year() == month.year() && date.month() == month.month()
-				}
-				(Op::Is, V::Date(DateValue::Year(year))) => date.year() == *year,
-				(Op::IsApprox, V::Date(DateValue::Day(day))) => within_two_days(date, *day),
-				(Op::Gt, V::Date(DateValue::Day(day))) => date > *day,
-				(Op::Gte, V::Date(DateValue::Day(day))) => date >= *day,
-				(Op::Lt, V::Date(DateValue::Day(day))) => date < *day,
-				(Op::Lte, V::Date(DateValue::Day(day))) => date <= *day,
-				_ => {
-					return Err(unsupported(format!("the filter {field:?} {op:?}")));
-				}
-			})
-		}
+		FieldKind::Number => number_matches(condition, row.transaction.amount.minor()),
+		FieldKind::Date => date_matches(condition, row.transaction.date.naive()),
 		FieldKind::Boolean => {
 			let V::Bool(wanted) = condition.value else {
 				return Ok(false);
@@ -492,6 +712,57 @@ fn condition_matches(condition: &Condition, row: &Row) -> Result<bool, CoreError
 	}
 }
 
+/// AQL's number filters, which read the same in SQL and in memory.
+fn number_matches(condition: &Condition, amount: i64) -> Result<bool, CoreError> {
+	use ConditionValue as V;
+	let field = condition.field;
+	let op = condition.op;
+	#[allow(clippy::cast_precision_loss)]
+	let amount = amount as f64;
+	let signed = |op: Op, value: f64| match condition.sign {
+		AmountSign::Outflow => amount < 0.0 && compare(op, -amount, value),
+		AmountSign::Inflow => amount > 0.0 && compare(op, amount, value),
+		AmountSign::Any => compare(op, amount, value),
+	};
+	Ok(match (op, &condition.value) {
+		(Op::IsApprox, V::Number(number)) => {
+			let threshold = math_round(number.abs() * 0.075);
+			signed(Op::Gte, number - threshold) && signed(Op::Lte, number + threshold)
+		}
+		(Op::IsBetween, V::Between(a, b)) => {
+			let (low, high) = if a < b { (*a, *b) } else { (*b, *a) };
+			amount >= low && amount <= high
+		}
+		(Op::Is | Op::Gt | Op::Gte | Op::Lt | Op::Lte, V::Number(number)) => signed(op, *number),
+		_ => {
+			return Err(unsupported(format!("the filter {field:?} {op:?}")));
+		}
+	})
+}
+
+/// AQL's date filters, which compare `yyyy-MM-dd` text the same in SQL and
+/// in memory.
+fn date_matches(condition: &Condition, date: NaiveDate) -> Result<bool, CoreError> {
+	use ConditionValue as V;
+	let field = condition.field;
+	let op = condition.op;
+	Ok(match (op, &condition.value) {
+		(Op::Is, V::Date(DateValue::Day(day))) => date == *day,
+		(Op::Is, V::Date(DateValue::Month(month))) => {
+			date.year() == month.year() && date.month() == month.month()
+		}
+		(Op::Is, V::Date(DateValue::Year(year))) => date.year() == *year,
+		(Op::IsApprox, V::Date(DateValue::Day(day))) => within_two_days(date, *day),
+		(Op::Gt, V::Date(DateValue::Day(day))) => date > *day,
+		(Op::Gte, V::Date(DateValue::Day(day))) => date >= *day,
+		(Op::Lt, V::Date(DateValue::Day(day))) => date < *day,
+		(Op::Lte, V::Date(DateValue::Day(day))) => date <= *day,
+		_ => {
+			return Err(unsupported(format!("the filter {field:?} {op:?}")));
+		}
+	})
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -504,5 +775,14 @@ mod tests {
 		assert!(!has_tag("#foods", "#food"));
 		assert!(!has_tag("#Food", "#food"));
 		assert_eq!(extract_tags("#a ##b #a"), vec!["#a", "#b"]);
+	}
+
+	#[test]
+	fn the_forecast_like_is_a_case_blind_regex_that_stops_at_line_breaks() {
+		assert!(memory_like("gym", "Iron GYM"));
+		assert!(memory_like("a%c", "abc"));
+		assert!(!memory_like("a_c", "abc"));
+		assert!(!memory_like("b", "a\nb"));
+		assert!(memory_like("\nb", "a\nb"));
 	}
 }

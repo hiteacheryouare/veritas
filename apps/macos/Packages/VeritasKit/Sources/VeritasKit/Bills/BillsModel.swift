@@ -24,12 +24,6 @@ public struct BillEditing: Hashable, Sendable {
 	}
 }
 
-public enum BillAmountKind: CaseIterable, Hashable, Sendable {
-	case exact
-	case about
-	case between
-}
-
 /// The editor's fields over the draft's enums: switching once to repeating
 /// keeps the date as the start, and back again keeps the start.
 public extension BillEditing {

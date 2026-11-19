@@ -370,7 +370,7 @@ fn veritas_rows_survive_actuals_reexport_of_an_edited_budget_r_io_6() {
 	let after_dump = canonical_dump_to_vec(&reexported).unwrap();
 	let before = table_sections(&before_dump, "veritas_");
 	let after = table_sections(&after_dump, "veritas_");
-	assert_eq!(before.len(), 9, "{before:#?}");
+	assert_eq!(before.len(), 10, "{before:#?}");
 	for needle in ["veritas-goal", "\"hsa\"", "veritas-groceries", "\"asset\""] {
 		assert!(
 			before.iter().any(|section| section.contains(needle)),

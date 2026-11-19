@@ -1,16 +1,16 @@
 import Foundation
 import VeritasCore
 
-// TEMPORARY, until contract v13's `ruleChoices()`. The menus below copy
-// Actual's rule editor by hand; once the core hands them over, this file
-// gets deleted and the editor reads the core's lists instead.
+// TEMPORARY. Contract v13's `ruleChoices()` now hands these menus over; the
+// copy below, named apart from the core's `RuleChoices`, goes once the
+// editor reads the core's lists instead.
 // Adapted from Actual (MIT): RuleEditor.tsx, loot-core/src/shared/rules.ts and desktop-client/src/util/rule.ts.
 
 /// What the sentence editor's menus offer, copied from Actual's rule editor:
 /// `FIELD_INFO` and `TYPE_INFO` in loot-core/src/shared/rules.ts, and
 /// `conditionFields`, `getActionFields` and `getSplitActionFields` in
 /// RuleEditor.tsx. The core still decides whether a draft is valid.
-public enum RuleChoices {
+public enum RuleMenus {
 	public static let conditionFields: [RuleField] = [
 		.importedPayee, .account, .category, .categoryGroup, .date, .payee, .notes, .amount, .amountInflow, .amountOutflow, .cleared
 	]
@@ -26,7 +26,7 @@ public enum RuleChoices {
 		case .date: return [.is, .isApprox, .gt, .gte, .lt, .lte]
 		case .amount: return number
 		case .amountInflow, .amountOutflow: return number.filter { $0 != .isBetween }
-		case .cleared, .reconciled, .transfer, .parent: return [.is]
+		case .cleared, .reconciled, .transfer, .parent, .saved: return [.is]
 		}
 	}
 
@@ -39,7 +39,7 @@ public enum RuleChoices {
 		case .isBetween: return .amountRange(num1: 0, num2: 0)
 		case .is, .isNot, .isApprox, .gt, .gte, .lt, .lte:
 			switch field {
-			case .payee, .account, .category, .categoryGroup: return .id(id: nil)
+			case .payee, .account, .category, .categoryGroup, .saved: return .id(id: nil)
 			case .amount, .amountInflow, .amountOutflow: return .amount(amount: 0)
 			case .date: return .date(date: today)
 			case .cleared, .reconciled, .transfer, .parent: return .bool(value: true)
@@ -83,7 +83,7 @@ public enum RuleChoices {
 		switch kind {
 		case .set(let field):
 			let value: RuleValue = switch field {
-			case .payee, .account, .category, .categoryGroup: .id(id: nil)
+			case .payee, .account, .category, .categoryGroup, .saved: .id(id: nil)
 			case .amount, .amountInflow, .amountOutflow: .amount(amount: 0)
 			case .date: .date(date: today)
 			case .cleared, .reconciled, .transfer, .parent: .bool(value: true)
@@ -145,17 +145,17 @@ public extension RuleEditing {
 
 	mutating func setField(_ field: RuleField, ofCondition index: Int, today: String) {
 		guard draft.conditions.indices.contains(index) else { return }
-		let ops = RuleChoices.ops(for: field)
+		let ops = RuleMenus.ops(for: field)
 		let current = draft.conditions[index].op
 		let op = ops.contains(current) ? current : ops.first ?? .is
-		draft.conditions[index] = RuleCondition(field: field, op: op, value: RuleChoices.blank(field, op, today: today))
+		draft.conditions[index] = RuleCondition(field: field, op: op, value: RuleMenus.blank(field, op, today: today))
 	}
 
 	/// A new op keeps the value when it takes the same kind of value.
 	mutating func setOp(_ op: RuleConditionOp, ofCondition index: Int, today: String) {
 		guard draft.conditions.indices.contains(index) else { return }
 		let condition = draft.conditions[index]
-		let blank = RuleChoices.blank(condition.field, op, today: today)
+		let blank = RuleMenus.blank(condition.field, op, today: today)
 		draft.conditions[index].op = op
 		if !blank.isSameKind(as: condition.value) {
 			draft.conditions[index].value = blank
@@ -164,10 +164,10 @@ public extension RuleEditing {
 
 	/// The first choice the line doesn't use yet, as Actual adds actions.
 	mutating func addAction(line: UInt32, today: String) {
-		let choices = line == 0 ? RuleChoices.actions : RuleChoices.splitLineActions
-		let used = Set(actionIndices(line: line).compactMap { RuleChoices.ActionKind(draft.actions[$0]) })
+		let choices = line == 0 ? RuleMenus.actions : RuleMenus.splitLineActions
+		let used = Set(actionIndices(line: line).compactMap { RuleMenus.ActionKind(draft.actions[$0]) })
 		let kind = choices.first { !used.contains($0) } ?? .set(.category)
-		let action = RuleChoices.blank(kind, line: line, today: today)
+		let action = RuleMenus.blank(kind, line: line, today: today)
 		if let last = actionIndices(line: line).last {
 			draft.actions.insert(action, at: last + 1)
 		} else {
@@ -180,9 +180,9 @@ public extension RuleEditing {
 		draft.actions.remove(at: index)
 	}
 
-	mutating func setKind(_ kind: RuleChoices.ActionKind, ofAction index: Int, today: String) {
-		guard draft.actions.indices.contains(index), RuleChoices.ActionKind(draft.actions[index]) != kind else { return }
-		draft.actions[index] = RuleChoices.blank(kind, line: draft.actions[index].splitIndex, today: today)
+	mutating func setKind(_ kind: RuleMenus.ActionKind, ofAction index: Int, today: String) {
+		guard draft.actions.indices.contains(index), RuleMenus.ActionKind(draft.actions[index]) != kind else { return }
+		draft.actions[index] = RuleMenus.blank(kind, line: draft.actions[index].splitIndex, today: today)
 	}
 
 	/// A new line takes an equal share of the remainder, as in Actual.
@@ -200,9 +200,9 @@ public extension RuleEditing {
 		}
 	}
 
-	mutating func setAllocation(_ allocation: RuleChoices.Allocation, line: UInt32) {
+	mutating func setAllocation(_ allocation: RuleMenus.Allocation, line: UInt32) {
 		guard let index = actionIndices(line: line).first, draft.actions[index].op == .setSplitAmount,
-			RuleChoices.Allocation(draft.actions[index].value) != allocation
+			RuleMenus.Allocation(draft.actions[index].value) != allocation
 		else { return }
 		draft.actions[index].value = allocation.blank
 	}

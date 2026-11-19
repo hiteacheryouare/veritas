@@ -79,7 +79,7 @@ struct RealCoreBillsScreenTests {
 			#expect(rows.map(\.date) == [today])
 
 			// About, then exact, then back to a range, all saved with the income sign.
-			for amount in [BillAmount.about(amount: 255_000), .exact(amount: 250_500), .between(low: 260_000, high: 245_000)] {
+			for amount in [BillAmount.about(amount: 255_000), .exact(amount: 250_500), .between(low: 245_000, high: 260_000)] {
 				await model.edit(try #require(model.bill(salary.id)))
 				#expect(model.editing?.draft.amount.low ?? -1 >= 0, "the editor shows magnitudes")
 				model.editing?.draft.amount = amount
@@ -88,6 +88,13 @@ struct RealCoreBillsScreenTests {
 				#expect(saved.kind == amount.kind, "\(amount)")
 				#expect(saved.low > 0 && saved.high > 0, "\(saved) stays income")
 			}
+
+			// v13: a range is ordered by size, and the larger amount first is refused.
+			await model.edit(try #require(model.bill(salary.id)))
+			model.editing?.draft.amount = .between(low: 260_000, high: 245_000)
+			#expect(await model.save() == false)
+			#expect(model.editing?.problem == "Put the lower amount first")
+			model.editing = nil
 
 			let power = try await create(model, "Power", amount: .about(amount: 9_000), start: today)
 			await model.edit(power)

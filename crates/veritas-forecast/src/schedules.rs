@@ -2,14 +2,16 @@ use std::collections::BTreeSet;
 
 use veritas_domain::{
 	AccountId, AccountKind, BudgetData, CategoryId, CategoryKind, CivilDate, ConditionsOp,
-	CoreError, Money, PayeeId, Schedule, ScheduleId, TransactionKind,
+	CoreError, LoanPart, Money, PayeeId, Schedule, ScheduleId, Transaction, TransactionKind,
 };
 use veritas_reports::{ClassifiedRow, Period};
 use veritas_rules::{
 	Action, AmountSign, ConditionValue, DateValue, Field, Op, ParsedRule, SetField, schedule_dates,
 };
 
-use crate::flows::{FlowKind, KnownFlow, LoanPayment, MonthSoFar, ScheduleAmount, Shortfall};
+use crate::flows::{
+	Certainty, FlowKind, KnownFlow, LoanPayment, MonthSoFar, ScheduleAmount, Shortfall,
+};
 use crate::history::balances;
 use crate::math::round_half_up;
 use crate::projection::Forecaster;
@@ -38,7 +40,14 @@ pub struct ScheduledFlows {
 	/// The part of each loan's last payment taken as escrow (FC-2), for
 	/// "Escrow taken from {category} {amount}".
 	pub escrow_sources: Vec<EscrowSource>,
+	/// Loans whose last payment has no usable D76 mapping, so its split was
+	/// estimated from the amounts and its flows are `estimated` (FC-2):
+	/// "Estimated from the amounts".
+	pub estimated_splits: Vec<AccountId>,
 }
+
+/// FC-2's label for a loan in `estimated_splits`.
+pub const ESTIMATED_SPLIT: &str = "Estimated from the amounts";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct EscrowSource {
@@ -74,12 +83,14 @@ pub struct NotRepeated {
 }
 
 /// A loan's payment read from its last payment, the parts not repeated,
-/// where the escrow came from and what this month has already paid.
+/// where the escrow came from, what this month has already paid, and
+/// whether the split is known from D76's mapping (else estimated).
 type Inferred = (
 	LoanPayment,
 	Vec<NotRepeated>,
 	Option<EscrowSource>,
 	Option<MonthSoFar>,
+	bool,
 );
 
 fn compare_order(
@@ -180,6 +191,7 @@ impl Forecaster<'_> {
 			shortfalls: Vec::new(),
 			not_repeated: Vec::new(),
 			escrow_sources: Vec::new(),
+			estimated_splits: Vec::new(),
 		};
 		for schedule in self.budget.schedules.values() {
 			if schedule.tombstone || schedule.completed {
@@ -265,7 +277,7 @@ impl Forecaster<'_> {
 			// FC-2: a bill paying a loan is that loan's payment, split into
 			// interest, escrow and principal, never one transfer.
 			scheduled_loans.insert(counterpart.clone());
-			let (loan_payment, not_repeated, escrow_source, so_far) =
+			let (loan_payment, not_repeated, escrow_source, so_far, known) =
 				match self.loan_payment(counterpart, name, amount.checked_neg()?, today)? {
 					Ok(found) => found,
 					Err(reason) => return Ok(Err(reason)),
@@ -277,6 +289,14 @@ impl Forecaster<'_> {
 			let split = loan_payment.split_from(&dates, so_far)?;
 			result.not_repeated.extend(not_repeated);
 			result.escrow_sources.extend(escrow_source);
+			if !known {
+				result.estimated_splits.push(counterpart.clone());
+			}
+			let certainty = if known {
+				certainty
+			} else {
+				Certainty::Estimate
+			};
 			result
 				.flows
 				.extend(split.flows.into_iter().map(|flow| KnownFlow {
@@ -363,6 +383,16 @@ impl Forecaster<'_> {
 				.collect(),
 			None => Vec::new(),
 		};
+		let mapped = last
+			.parent
+			.as_ref()
+			.map(|parent| self.budget.loan_payment_parts_of(parent))
+			.unwrap_or_default();
+		if !mapped.is_empty() {
+			return self
+				.mapped_payment(loan, name, payment, today, last, &parts, &mapped, rate)
+				.map(Ok);
+		}
 		let order = |row: &&ClassifiedRow| self.category_order(row.category.as_ref());
 		let by_order = |a: &&ClassifiedRow, b: &&ClassifiedRow| compare_order(&order(a), &order(b));
 		let interest = match (parts.as_slice(), rate) {
@@ -455,7 +485,79 @@ impl Forecaster<'_> {
 			not_repeated,
 			escrow_source,
 			so_far,
+			false,
 		)))
+	}
+
+	/// FC-2 case 1: the last payment's parts as D76 recorded them. Interest
+	/// and escrow are the mapped lines (interest's amount is used only with
+	/// no rate), mapped fees and any line with no mapping row are listed and
+	/// not repeated, and the split is known.
+	#[allow(clippy::too_many_arguments)]
+	fn mapped_payment(
+		&self,
+		loan: &AccountId,
+		name: String,
+		payment: Money,
+		today: CivilDate,
+		last: &ClassifiedRow,
+		parts: &[&ClassifiedRow],
+		mapped: &[(LoanPart, &Transaction)],
+		rate: Option<i64>,
+	) -> Result<Inferred, CoreError> {
+		let line = |wanted: LoanPart| {
+			mapped
+				.iter()
+				.find(|(part, _)| *part == wanted)
+				.and_then(|(_, line)| parts.iter().copied().find(|row| row.id == line.id))
+		};
+		let (interest, escrow) = (line(LoanPart::Interest), line(LoanPart::Escrow));
+		let used = |row: &ClassifiedRow| {
+			[interest, escrow]
+				.iter()
+				.flatten()
+				.any(|kept| kept.id == row.id)
+		};
+		let mut not_repeated: Vec<NotRepeated> = parts
+			.iter()
+			.filter(|row| !used(row))
+			.map(|row| {
+				Ok(NotRepeated {
+					loan: loan.clone(),
+					category: row.category.clone(),
+					amount: row.amount.checked_neg()?,
+				})
+			})
+			.collect::<Result<_, CoreError>>()?;
+		not_repeated.sort_by(|a, b| a.amount.cmp(&b.amount).reverse());
+		let magnitude = |row: Option<&ClassifiedRow>| -> Result<Money, CoreError> {
+			row.map_or(Ok(Money::ZERO), |row| row.amount.checked_neg())
+		};
+		let interest_category = interest.and_then(|row| row.category.clone());
+		let owed = balances(self.budget, &self.classification, today)?
+			.get(loan)
+			.copied()
+			.unwrap_or(0);
+		let so_far = self.month_so_far(loan, interest_category.as_ref(), today)?;
+		Ok((
+			LoanPayment {
+				from: last.account.clone(),
+				loan: loan.clone(),
+				name,
+				payment,
+				rate_bps: rate,
+				last_interest: magnitude(interest)?,
+				escrow: magnitude(escrow)?,
+				outstanding: Money::from_minor(owed).checked_neg()?,
+				interest_category,
+				escrow_category: escrow.and_then(|row| row.category.clone()),
+				principal_category: last.category.clone(),
+			},
+			not_repeated,
+			None,
+			so_far,
+			true,
+		))
 	}
 
 	/// The budget screen's order of a category: group, then category, then id.
@@ -532,7 +634,7 @@ impl Forecaster<'_> {
 				.get(loan)
 				.map(|account| account.name.clone())
 				.unwrap_or_default();
-			let (loan_payment, not_repeated, escrow_source, so_far) =
+			let (loan_payment, not_repeated, escrow_source, so_far, known) =
 				match self.loan_payment(loan, name, payment, today)? {
 					Ok(found) => found,
 					Err(reason) => {
@@ -558,7 +660,17 @@ impl Forecaster<'_> {
 			let split = loan_payment.split_from(&dates, so_far)?;
 			result.not_repeated.extend(not_repeated);
 			result.escrow_sources.extend(escrow_source);
-			result.flows.extend(split.flows);
+			if known {
+				result.flows.extend(split.flows);
+			} else {
+				result.estimated_splits.push(loan.clone());
+				result
+					.flows
+					.extend(split.flows.into_iter().map(|flow| KnownFlow {
+						certainty: Certainty::Estimate,
+						..flow
+					}));
+			}
 			result.shortfalls.extend(split.shortfalls);
 		}
 		Ok(())

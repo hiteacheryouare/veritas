@@ -12,7 +12,7 @@ use veritas_domain::{
 };
 use veritas_engine::goals;
 use veritas_engine::{
-	AverageSpan, BudgetEditor, BudgetWrites, Envelope, EnvelopeSheet, NumberFormat, SheetChange,
+	AverageSpan, BudgetEditor, BudgetWrites, Envelope, EnvelopeSheet, SheetChange,
 };
 
 /// The ids ops can name: expense categories by index, then the income category.
@@ -316,7 +316,7 @@ impl Session {
 		action: impl FnOnce(&BudgetEditor<'_>) -> BudgetWrites,
 		actual: Vec<(&str, Value)>,
 	) {
-		let editor = BudgetEditor::new(&self.budget, &self.sheet, NumberFormat::CommaDot, false);
+		let editor = BudgetEditor::new(&self.budget, &self.sheet);
 		let writes = action(&editor);
 		writes.apply_to(&mut self.budget);
 		if let Some(month) = writes.first_month() {
@@ -685,7 +685,7 @@ impl Session {
 			close_month_dismissed_available: None,
 		};
 		let to = self.envelope(to);
-		let editor = BudgetEditor::new(&self.budget, &self.sheet, NumberFormat::CommaDot, false);
+		let editor = BudgetEditor::new(&self.budget, &self.sheet);
 		let leftover = self.sheet.category(month, &goal.category).unwrap().balance;
 		let closing = goals::close(&editor, &self.sheet, &goal, month, &to).unwrap();
 		assert!(

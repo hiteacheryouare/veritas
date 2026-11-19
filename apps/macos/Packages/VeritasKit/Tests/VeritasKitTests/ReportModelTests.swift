@@ -169,7 +169,7 @@ final class ReportFakeSession: BudgetSession, @unchecked Sendable {
 		return "p\(dashboard.count - 1)"
 	}
 	func createReport(_ draft: ReportDraft) async throws -> String {
-		edits.append("report \(draft.settings.name) \(draft.conditions.map { "\($0.field) \($0.op) \($0.value)" })")
+		edits.append("report \(draft.settings.name) \(draft.conditions.map { "\(FilterWords.field($0.field)) \(FilterWords.op($0.op, on: $0.field))" })")
 		return "r2"
 	}
 }
@@ -281,33 +281,49 @@ struct SankeyLayoutTests {
 
 @MainActor
 struct DashboardModelTests {
-	@Test func contractSevenCardsKeepTheirNameRangeAndFigures() {
-		var pending = WidgetConfig.named("Retirement odds")
-		pending.timeFrame = WidgetTimeFrame(mode: "static", start: "2026-06", end: "2026-11")
+	@Test func v14CardsTakeTheirTitleRangeAndFigureFromTheCoresView() {
+		var named = WidgetConfig.named("Retirement odds")
+		named.timeFrame = WidgetTimeFrame(mode: "static", start: "2026-06", end: "2026-11")
 		var percent = WidgetConfig.named(nil)
 		percent.summary = "percentage"
+		var filtered = WidgetConfig.named(nil)
+		filtered.conditions = [RuleCondition(field: .payee, op: .is, value: .id(id: "employer"))]
+		let range = WidgetRange(start: "2026-06", end: "2026-11", mode: "static")
 		let cards = [
-			DashboardWidget(id: "p", kind: "monte-carlo-card", x: 0, y: 0, width: 4, height: 2, minWidth: 3, minHeight: 2, config: pending, view: .pending),
-			DashboardWidget(id: "f", kind: "cash-flow-card", x: 0, y: 0, width: 4, height: 2, minWidth: 2, minHeight: 2, config: .named(nil), view: .cashFlow(first: Month(year: 2026, month: 11), last: Month(year: 2026, month: 11), income: 100, expenses: 40, netProfit: 60)),
+			DashboardWidget(id: "mc", kind: "monte-carlo-card", x: 0, y: 0, width: 4, height: 2, minWidth: 3, minHeight: 2, config: named, view: .monteCarlo(successPercent: 85.3, startAge: 45, endAge: 90, simulations: 5_000, chart: [])),
+			DashboardWidget(id: "f", kind: "cash-flow-card", x: 0, y: 0, width: 4, height: 2, minWidth: 2, minHeight: 2, config: .named(nil), view: .cashFlow(range: range, income: 100, expense: -40, change: 60)),
 			DashboardWidget(id: "s", kind: "summary-card", x: 0, y: 0, width: 4, height: 2, minWidth: 2, minHeight: 2, config: percent, view: .summary(start: "2026-01-01", end: "2026-11-30", value: 18.4, dividend: 184, divisor: 1000)),
 			DashboardWidget(id: "m", kind: "custom-report", x: 0, y: 0, width: 4, height: 2, minWidth: 2, minHeight: 1, config: .named(nil), view: .missingReport),
-			DashboardWidget(id: "u", kind: "future-card", x: 0, y: 0, width: 4, height: 2, minWidth: 1, minHeight: 1, config: .named(nil), view: .unknown(kind: "future-card"))
+			DashboardWidget(id: "u", kind: "future-card", x: 0, y: 0, width: 4, height: 2, minWidth: 1, minHeight: 1, config: .named(nil), view: .unknown(kind: "future-card")),
+			DashboardWidget(id: "nw", kind: "net-worth-card", x: 0, y: 0, width: 4, height: 2, minWidth: 3, minHeight: 2, config: filtered, view: Self.netWorth(range)),
+			DashboardWidget(id: "fx", kind: "formula-card", x: 0, y: 0, width: 4, height: 2, minWidth: 1, minHeight: 1, config: .named("Hidden"), view: .formula(formula: "=1", value: .number(value: 1), showTitle: false, fontSize: .dynamic, staticFontSize: 32)),
+			DashboardWidget(id: "sp", kind: "spending-card", x: 0, y: 0, width: 4, height: 2, minWidth: 3, minHeight: 2, config: .named(nil), view: .spending(mode: .budget, compare: Month(year: 2026, month: 11), compareTo: Month(year: 2026, month: 10), averageFirst: nil, averageLast: nil, days: [], headlineDay: 17, difference: 0)),
+			DashboardWidget(id: "nan", kind: "summary-card", x: 0, y: 0, width: 4, height: 2, minWidth: 2, minHeight: 2, config: .named(nil), view: .summary(start: "2026-01-01", end: "2026-11-30", value: .nan, dividend: 0, divisor: 0))
 		].map(DashboardCard.init)
 		#expect(cards[0].title == "Retirement odds")
-		#expect(cards[0].content == .pending)
-		#expect(cards[0].range == ReportPeriod(first: Month(year: 2026, month: 6), last: Month(year: 2026, month: 11)))
-		#expect(cards[1].content == .cashFlow(income: 100, expenses: 40, netProfit: 60, classified: true), "the core's cash flow is Net Profit's figures until Actual's land")
-		#expect(cards[2].content == .summary(.percent(18.4)))
+		#expect(cards[0].range == nil, "a Monte Carlo card has no range")
+		#expect(cards[1].title == "Cash flow")
+		#expect(cards[1].range == ReportPeriod(first: Month(year: 2026, month: 6), last: Month(year: 2026, month: 11)), "the range is the core's, not the stored time frame")
+		#expect(cards[2].summaryFigure == .percent(18.4))
 		#expect(cards[2].minimumSize == (2, 2))
 		#expect(cards[3].content == .missingReport)
-		#expect(cards[4].content == .unknown)
+		#expect(cards[4].content == .unknown(kind: "future-card"))
 		#expect(cards[4].title == "future-card")
+		#expect(cards[5].title == "Balance of matching rows", "ST-10.10: a filtered net worth card isn't the budget's net worth")
+		#expect(cards[6].title == nil, "a formula card set to hide its title shows none, its name included")
+		#expect(cards[7].title == "Monthly spending")
+		#expect(cards[7].subtitle == "Compare November 2026 to budgeted")
+		#expect(cards[8].summaryFigure == .undefined, "a NaN summary is drawn blank")
+	}
+
+	static func netWorth(_ range: WidgetRange) -> WidgetView {
+		.netWorth(range: range, interval: .monthly, points: [], netWorth: 0, change: 0, lowest: nil, highest: nil, hasNegative: false, accounts: [], series: [])
 	}
 
 	@Test func placingAWidgetClampsToTheGridAndSendsOneCommand() async {
 		let session = ReportFakeSession()
 		session.dashboard = [DashboardPage(id: "main", name: "Main", widgets: [
-			DashboardWidget(id: "w", kind: "net-worth-card", x: 0, y: 0, width: 6, height: 2, minWidth: 3, minHeight: 2, config: .named("Net worth"), view: .pending)
+			DashboardWidget(id: "w", kind: "net-worth-card", x: 0, y: 0, width: 6, height: 2, minWidth: 3, minHeight: 2, config: .named("Net worth"), view: .markdown(text: "", align: nil))
 		])]
 		let workspace = WorkspaceModel(library: ReportFakeLibrary(session: session), format: MoneyFormat())
 		await workspace.reopen(directory: URL(filePath: "/tmp/budget"))
@@ -417,8 +433,8 @@ struct DashboardEditingTests {
 
 	func open() async -> DashboardModel {
 		session.dashboard = [DashboardPage(id: "main", name: "Main", widgets: [
-			DashboardWidget(id: "w", kind: "net-worth-card", x: 2, y: 0, width: 6, height: 2, minWidth: 3, minHeight: 2, config: .named("Net worth"), view: .netWorth(points: [])),
-			DashboardWidget(id: "s", kind: "sankey-card", x: 0, y: 2, width: 8, height: 3, minWidth: 3, minHeight: 3, config: .named(nil), view: .netWorth(points: []))
+			DashboardWidget(id: "w", kind: "net-worth-card", x: 2, y: 0, width: 6, height: 2, minWidth: 3, minHeight: 2, config: .named("Net worth"), view: DashboardModelTests.netWorth(WidgetRange(start: "2026-06", end: "2026-11", mode: "sliding-window"))),
+			DashboardWidget(id: "s", kind: "sankey-card", x: 0, y: 2, width: 8, height: 3, minWidth: 3, minHeight: 3, config: .named(nil), view: DashboardModelTests.netWorth(WidgetRange(start: "2026-06", end: "2026-11", mode: "sliding-window")))
 		])]
 		let workspace = WorkspaceModel(library: ReportFakeLibrary(session: session), format: MoneyFormat())
 		await workspace.reopen(directory: URL(filePath: "/tmp/budget"))
@@ -483,9 +499,9 @@ struct DashboardEditingTests {
 		#expect(model.isCreating)
 		#expect(session.edits.isEmpty)
 		model.draft?.settings.name = "Dining"
-		model.draft?.conditions = [ReportCondition(field: "category", op: "is", value: "Dining out")]
+		model.draft?.conditions = [RuleCondition(field: .category, op: .is, value: .id(id: "dining"))]
 		#expect(await model.save())
-		#expect(session.edits == ["report Dining [\"category is Dining out\"]"])
+		#expect(session.edits == ["report Dining [\"Category is\"]"])
 		#expect(model.choice == .custom(id: "r2"))
 	}
 }

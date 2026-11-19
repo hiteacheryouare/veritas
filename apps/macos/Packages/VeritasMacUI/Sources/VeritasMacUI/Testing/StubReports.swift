@@ -322,7 +322,7 @@ final class StubReports: @unchecked Sendable {
 		}
 	}
 
-	private var filters: [String: ([ReportCondition], Bool)] = [:]
+	private var filters: [String: ([RuleCondition], Bool)] = [:]
 	private var created = 0
 
 	func draft(_ id: String) throws -> ReportDraft {

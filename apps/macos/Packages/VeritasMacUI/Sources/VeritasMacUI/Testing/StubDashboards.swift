@@ -6,7 +6,7 @@ import VeritasKit
 /// Dashboards for the stub budget, with every widget type and made-up figures,
 /// editable in memory so UI tests can add, move, configure and remove.
 private func meta(
-	name: String? = nil, timeFrame: WidgetTimeFrame? = nil, conditions: [ReportCondition] = [], mode: String? = nil,
+	name: String? = nil, timeFrame: WidgetTimeFrame? = nil, conditions: [RuleCondition] = [], mode: String? = nil,
 	summary: SummaryKind? = nil, content: String? = nil, textAlign: String? = nil, formula: String? = nil, reportId: String? = nil
 ) -> WidgetConfig {
 	WidgetConfig(
@@ -29,33 +29,33 @@ final class StubDashboards: @unchecked Sendable {
 		let year = WidgetTimeFrame(mode: .slidingWindow, start: Month(year: 2025, month: 12), end: Self.november)
 		let six = WidgetTimeFrame(mode: .slidingWindow, start: Month(year: 2026, month: 6), end: Self.november)
 		let main: [(String, WidgetKind, (Int64, Int64, Int64, Int64), WidgetConfig)] = [
-			("salary", .summary, (0, 0, 4, 2), meta(name: "Salary YTD", timeFrame: ytd, conditions: [ReportCondition(field: "category", op: "is", value: "\"Paycheck\"")], summary: .sum)),
+			("salary", .summary, (0, 0, 4, 2), meta(name: "Salary YTD", timeFrame: ytd, conditions: [RuleCondition(field: .category, op: .is, value: .id(id: "paycheck"))], summary: .sum)),
 			("burn", .summary, (4, 0, 4, 2), meta(name: "Average month", timeFrame: year, summary: .avgPerMonth)),
 			("rate", .formula, (8, 0, 4, 2), meta(name: "Savings rate", formula: "=1-(SPENT/INCOME)")),
 			("worth", .netWorth, (0, 2, 6, 3), meta(name: "Net worth", timeFrame: six, mode: "trend")),
 			("flow", .cashFlow, (6, 2, 3, 3), meta(name: "Cash flow, this month")),
-			("spending", .spending, (9, 2, 3, 3), meta(name: "This month against last", mode: "single-month")),
+			("spending", .spending, (9, 2, 3, 3), meta(mode: "single-month")),
 			("calendar", .calendar, (0, 5, 4, 4), meta(name: "Calendar")),
 			("age", .ageOfMoney, (4, 5, 4, 2), meta(name: "Age of money", timeFrame: six)),
 			("analysis", .budgetAnalysis, (8, 5, 4, 2), meta(name: "Budget analysis", timeFrame: six)),
 			("crossover", .crossover, (4, 7, 4, 2), meta(name: "Crossover point")),
-			("forecast", .balanceForecast, (8, 7, 4, 2), meta(name: "Balance forecast")),
-			("sankey", .sankey, (0, 9, 8, 3), meta(name: "Where it went", timeFrame: WidgetTimeFrame(mode: .lastMonth, start: Month(year: 2026, month: 10), end: Month(year: 2026, month: 10)), mode: "spent")),
+			("forecast", .balanceForecast, (8, 7, 4, 2), meta()),
+			("sankey", .sankey, (0, 9, 8, 3), meta( timeFrame: WidgetTimeFrame(mode: .lastMonth, start: Month(year: 2026, month: 10), end: Month(year: 2026, month: 10)), mode: "spent")),
 			("notes", .markdown, (8, 9, 4, 2), meta(content: "## Budget notes\n\nPay the card **in full** every month.", textAlign: "left")),
 			("future", .markdown, (8, 11, 4, 1), meta()),
-			("montecarlo", .monteCarlo, (0, 12, 6, 2), meta(name: "Retirement odds")),
+			("montecarlo", .monteCarlo, (0, 12, 6, 2), meta()),
 			("report", .customReport, (6, 12, 6, 3), meta(reportId: "spending"))
 		]
 		var cards = main.map { id, kind, frame, config in
 			self.card(id: id, kind: kind, frame: frame, config: config)
 		}
 		if let index = cards.firstIndex(where: { $0.id == "future" }) {
-			cards[index] = DashboardCard(id: "future", kind: nil, rawKind: "future-widget-card", x: 8, y: 11, width: 4, height: 1, config: .empty, content: .unknown)
+			cards[index] = DashboardCard(id: "future", kind: nil, rawKind: "future-widget-card", x: 8, y: 11, width: 4, height: 1, config: .empty, content: .unknown(kind: "future-widget-card"))
 		}
 		sheets = [
 			DashboardSheet(id: "main", name: "Main", cards: cards),
 			DashboardSheet(id: "deep", name: "Deep dive", cards: [
-				card(id: "dining", kind: .summary, frame: (0, 0, 4, 2), config: meta(name: "Dining out YTD", timeFrame: ytd, conditions: [ReportCondition(field: "category", op: "is", value: "\"Dining out\"")], summary: .sum))
+				card(id: "dining", kind: .summary, frame: (0, 0, 4, 2), config: meta(name: "Dining out YTD", timeFrame: ytd, conditions: [RuleCondition(field: .category, op: .is, value: .id(id: "dining"))], summary: .sum))
 			])
 		]
 	}
@@ -67,7 +67,7 @@ final class StubDashboards: @unchecked Sendable {
 	func card(id: String, kind: WidgetKind, frame: (Int64, Int64, Int64, Int64), config: WidgetConfig) -> DashboardCard {
 		DashboardCard(
 			id: id, kind: kind, rawKind: kind.rawValue, x: frame.0, y: frame.1, width: frame.2, height: frame.3,
-			config: config, content: content(kind, config), range: range(kind, config)
+			config: config, content: content(kind, config)
 		)
 	}
 
@@ -95,65 +95,126 @@ final class StubDashboards: @unchecked Sendable {
 		}
 	}
 
-	func content(_ kind: WidgetKind, _ config: WidgetConfig) -> CardContent {
+	func widgetRange(_ kind: WidgetKind, _ config: WidgetConfig) -> WidgetRange {
+		let period = range(kind, config) ?? ReportPeriod(first: Self.november, last: Self.november)
+		return WidgetRange(start: String(period.first.firstDay.prefix(7)), end: String(period.last.firstDay.prefix(7)), mode: config.timeFrame?.mode ?? "sliding-window")
+	}
+
+	func content(_ kind: WidgetKind, _ config: WidgetConfig) -> WidgetView {
 		let november = Self.november
 		let months = ReportPeriod(first: november.adding(months: -5), last: november).months
 		switch kind {
 		case .netWorth:
-			let points = reports.netWorth(first: months[0], last: november)
-			return .netWorth(points, change: WidgetView.netWorth(points: points).change)
-		case .cashFlow: return .cashFlow(income: 387_440, expenses: 310_566, netProfit: 76_874, classified: false)
+			let worth = reports.netWorth(first: months[0].adding(months: -1), last: november)
+			let points = worth.indices.map { index in
+				NetWorthCardPoint(
+					start: worth[index].month.firstDay, netWorth: worth[index].netWorth, assets: worth[index].assets, debt: worth[index].liabilities,
+					change: index == 0 ? 0 : worth[index].netWorth - worth[index - 1].netWorth
+				)
+			}
+			let series = [
+				NetWorthCardSeries(accountId: "card", name: "Card", points: points.map { -$0.debt }, color: 1),
+				NetWorthCardSeries(accountId: "checking", name: "Checking", points: points.map(\.assets), color: 0)
+			]
+			return .netWorth(
+				range: widgetRange(kind, config), interval: .monthly, points: points, netWorth: points.last?.netWorth ?? 0,
+				change: (points.last?.netWorth ?? 0) - (points.first?.netWorth ?? 0), lowest: points.map(\.netWorth).min(), highest: points.map(\.netWorth).max(),
+				hasNegative: false, accounts: ["checking", "card"], series: series
+			)
+		case .cashFlow:
+			return .cashFlow(range: widgetRange(kind, config), income: 387_440, expense: -310_566, change: 76_874)
 		case .spending:
-			let view = WidgetView.spending(month: november, spent: 310_566, compareMonth: november.adding(months: -1), compareSpent: 461_844)
-			return .spending(month: november, spent: 310_566, compareMonth: november.adding(months: -1), compareSpent: 461_844, difference: view.difference ?? 0, classified: false)
-		case .sankey: return .sankey(reports.sankey(first: "2026-10-01", last: "2026-10-31"))
+			let days = (1...28).map { day -> SpendingCardDay in
+				let spent = Int64(day) * -11_090
+				return SpendingCardDay(day: UInt32(day), compare: day <= 17 ? spent : nil, compareTo: Int64(day) * -16_494, average: Int64(day) * -14_200, budget: Double(day) * -16_100)
+			}
+			return .spending(mode: .singleMonth, compare: november, compareTo: november.adding(months: -1), averageFirst: nil, averageLast: nil, days: days, headlineDay: 17, difference: -91_852)
+		case .sankey:
+			let nodes = [
+				SankeyCardNode(key: "employer", label: .name(name: "Employer"), percentage: "100%", color: .palette(index: 0)),
+				SankeyCardNode(key: "paycheck", label: .name(name: "Paycheck"), percentage: "100%", color: .palette(index: 0)),
+				SankeyCardNode(key: "accounts", label: .allAccounts, percentage: "100%", color: .blue),
+				SankeyCardNode(key: "housing", label: .name(name: "Housing and utilities"), percentage: "55.1%", color: .palette(index: 1)),
+				SankeyCardNode(key: "everyday", label: .name(name: "Everyday"), percentage: "21.9%", color: .palette(index: 2)),
+				SankeyCardNode(key: "everyday-other", label: .other, percentage: "8.8%", color: .gray),
+				SankeyCardNode(key: "rent", label: .name(name: "Rent"), percentage: "51.2%", color: .palette(index: 1)),
+				SankeyCardNode(key: "groceries", label: .name(name: "Groceries"), percentage: "13.1%", color: .palette(index: 2))
+			]
+			let links = [
+				SankeyCardLink(source: 0, target: 1, value: 322_400, folded: [], color: nil),
+				SankeyCardLink(source: 1, target: 2, value: 322_400, folded: [], color: nil),
+				SankeyCardLink(source: 2, target: 3, value: 177_600, folded: [], color: nil),
+				SankeyCardLink(source: 2, target: 4, value: 70_590, folded: [], color: nil),
+				SankeyCardLink(source: 3, target: 6, value: 165_000, folded: [], color: nil),
+				SankeyCardLink(source: 4, target: 7, value: 42_210, folded: [], color: nil),
+				SankeyCardLink(source: 4, target: 5, value: 28_380, folded: [SankeyFolded(name: "Dining out", value: 21_475), SankeyFolded(name: "Household", value: 6_905)], color: nil)
+			]
+			let shown = Month(year: 2026, month: 10)
+			return .sankey(range: widgetRange(kind, config), first: shown, last: shown, mode: config.mode == "budgeted" ? .budgeted : .categorized, showPercentages: false, nodes: nodes, links: links)
 		case .customReport:
 			let id = config.reportId ?? "spending"
-			return (try? reports.customReport(id)).map(CardContent.customReport) ?? .unknown
-		case .markdown: return .markdown(config.content ?? "")
+			return (try? reports.customReport(id)).map { WidgetView.customReport(report: $0) } ?? .missingReport
+		case .markdown:
+			return .markdown(text: config.content ?? "", align: config.textAlign)
 		case .summary:
-			let base: Int64 = config.conditions.isEmpty ? 2_961_80 : (config.conditions.first?.text == "Dining out" ? 1_404_20 : 48_210_55)
-			switch config.summaryKind {
-			case .sum: return .summary(.money(config.conditions.first?.text == "Dining out" ? -base : base))
-			case .avgPerMonth: return .summary(.money(config.conditions.isEmpty ? -base : base / 11))
-			case .avgPerYear: return .summary(.money(config.conditions.isEmpty ? -base * 12 : base))
-			case .avgPerTransact: return .summary(.money(-4_215))
-			case .percentage: return .summary(.percent(18.4))
+			let period = widgetRange(kind, config)
+			let dining = config.conditions.first?.value == .id(id: "dining")
+			let base: Double = config.conditions.isEmpty ? 2_961_80 : (dining ? 1_404_20 : 48_210_55)
+			let value: Double = switch config.summaryKind {
+			case .sum: dining ? -base : base
+			case .avgPerMonth: config.conditions.isEmpty ? -base : base / 11
+			case .avgPerYear: config.conditions.isEmpty ? -base * 12 : base
+			case .avgPerTransact: -4_215
+			case .percentage: 18.4
 			}
+			return .summary(start: period.start, end: period.end, value: value, dividend: 0, divisor: 0)
 		case .calendar:
-			let days = (1...november.dayCount).map { day -> CalendarDay in
+			let days = (1...november.dayCount).map { day -> CalendarDayCell in
 				let income: Int64 = day == 1 || day == 15 ? 193_720 : 0
-				let expenses: Int64 = day > 13 ? 0 : Int64((day * 37) % 9) * 1_250
-				return CalendarDay(day: day, income: income, expenses: expenses)
+				let expense: Int64 = day > 13 ? 0 : Int64((day * 37) % 9) * 1_250
+				return CalendarDayCell(date: String(format: "2026-11-%02d", day), income: income, expense: expense, incomeSize: income > 0 ? 50 : 0, expenseSize: Double(expense) / 100)
 			}
-			return .calendar(month: november, days: days, income: 387_440, expenses: 211_250)
-		case .formula: return .formula(.percent(18.4))
+			return .calendar(months: [CalendarCardMonth(start: november.firstDay, end: november.lastDay, days: days, totalIncome: 387_440, totalExpense: 211_250)])
+		case .formula:
+			return .formula(formula: config.formula ?? "", value: .number(value: 0.184), showTitle: true, fontSize: .dynamic, staticFontSize: 32)
 		case .crossover:
 			let span = ReportPeriod(first: november, last: november.adding(months: 35)).months
-			let expenses: [Double] = span.indices.map { 380_000 + Double($0) * 900 }
-			let income: [Double] = span.indices.map { 120_000 + Double($0) * 8_200 }
+			let points = span.indices.map { index in
+				CrossoverCardPoint(month: span[index], investmentIncome: 120_000 + Double(index) * 8_200, expenses: 380_000 + Double(index) * 900, nestEgg: 0, adjustedExpenses: nil, projection: index > 0)
+			}
 			return .crossover(
-				months: span,
-				expenses: expenses,
-				income: income,
-				crossover: span.last.map { $0.adding(months: 2) },
-				years: 3.2
+				start: november, end: span[span.count - 1], points: points, crossover: span.last.map { $0.adding(months: 2) },
+				lastKnownBalance: 0, lastKnownMonthlyIncome: 0, lastKnownMonthlyExpenses: 0, historicalReturn: nil, yearsToRetire: 3.2,
+				targetMonthlyIncome: nil, targetNestEgg: nil
 			)
 		case .budgetAnalysis:
-			return .budgetAnalysis(months: months, budgeted: [452_000, 455_000, 460_000, 458_000, 462_000, 465_000], spent: [438_820, 490_255, 610_490, 451_137, 461_844, 310_566])
+			let budgeted: [Int64] = [452_000, 455_000, 460_000, 458_000, 462_000, 465_000]
+			let spent: [Int64] = [438_820, 490_255, 610_490, 451_137, 461_844, 310_566]
+			let points = months.indices.map { BudgetAnalysisPoint(month: months[$0], budgeted: budgeted[$0], spent: -spent[$0], balance: budgeted[$0] - spent[$0], overspendingAdjustment: 0) }
+			return .budgetAnalysis(start: months[0].firstDay, end: november.lastDay, months: points, totalBudgeted: 2_752_000, totalSpent: -2_763_112, totalOverspendingAdjustment: 0, finalOverspendingAdjustment: 0)
 		case .balanceForecast:
-			let span = ReportPeriod(first: november, last: november.adding(months: 11)).months
-			return .balanceForecast(span.enumerated().map { index, month in
-				let middle = 812_440 + Int64(index) * 41_000
-				return ForecastPoint(month: month, low: middle - Int64(index) * 18_000, middle: middle, high: middle + Int64(index) * 18_000)
-			})
-		case .ageOfMoney: return .ageOfMoney(days: 41, trend: .up, series: [33, 35, 36, 38, 38, 41], insufficientData: false)
+			let points = (1...30).map { day -> ForecastCardPoint in
+				let paid: Int64 = day >= 15 ? 300_000 : 0
+				let rent: Int64 = day >= 2 ? -165_000 : 0
+				return ForecastCardPoint(date: String(format: "2026-11-%02d", day), balance: 812_440 + rent + paid - Int64(day) * 2_100)
+			}
+			let low = points.min { $0.balance < $1.balance }
+			return .balanceForecast(
+				range: WidgetRange(start: november.firstDay, end: november.lastDay, mode: "sliding-window"), source: .schedules, granularity: .daily,
+				zeroBased: false, hasForecast: true, points: points, low: low == points.last ? nil : low, scheduled: 3, filtered: !config.conditions.isEmpty, today: nil
+			)
+		case .ageOfMoney:
+			let points = [33, 35, 36, 38, 38, 41].enumerated().map { AgePoint(period: months[$0.offset].firstDay, days: Int64($0.element)) }
+			return .ageOfMoney(start: months[0].firstDay, end: november.lastDay, granularity: .monthly, points: points, currentDays: 41, trend: .up, insufficientData: false)
 		case .monteCarlo:
-			let span = ReportPeriod(first: Month(year: 2027, month: 1), last: Month(year: 2046, month: 1)).months.enumerated().filter { $0.offset % 12 == 0 }.map(\.element)
-			return .monteCarlo(points: span.enumerated().map { index, month in
-				let middle = 9_500_000 + Int64(index) * 2_400_000
-				return ForecastPoint(month: month, low: middle - Int64(index) * 1_100_000, middle: middle, high: middle + Int64(index) * 1_600_000)
-			}, successRate: 0.82)
+			let chart = (0...20).map { year -> MonteCarloCardPoint in
+				let middle = 9_500_000 + Double(year) * 2_400_000
+				return MonteCarloCardPoint(
+					year: UInt32(year), age: 45 + Double(year), p10: middle - Double(year) * 1_100_000, p25: middle - Double(year) * 550_000,
+					p50: middle, p75: middle + Double(year) * 800_000, p90: middle + Double(year) * 1_600_000
+				)
+			}
+			return .monteCarlo(successPercent: 85.3, startAge: 45, endAge: 90, simulations: 5_000, chart: chart)
 		}
 	}
 
