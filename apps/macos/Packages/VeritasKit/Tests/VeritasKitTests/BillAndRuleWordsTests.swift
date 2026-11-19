@@ -20,6 +20,10 @@ struct BillAndRuleWordsTests {
 		#expect(BillWords.postFor("2026-11-12") == "Post for \(BillWords.day("2026-11-12"))")
 	}
 
+	@Test func postTodayAsksFirstWhenItWontPayTheOccurrence() {
+		#expect(BillWords.postTodayConfirm("2026-11-21") == "This won't pay the \(BillWords.day("2026-11-21")) bill. Post today anyway?")
+	}
+
 	@Test func theEstimateLineFollowsTheAmountKind() {
 		#expect(BillWords.estimate(.exact) == nil)
 		#expect(BillWords.estimate(.about) == "Auto-post adds a transaction for this amount.")
