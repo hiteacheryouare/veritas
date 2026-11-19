@@ -234,8 +234,12 @@ impl Forecaster<'_> {
 				// recorded spending would get a suggestion off by about 100x.
 				(CategoryKind::Expense, Some(goal))
 					if goal.status == GoalStatus::Active
-						&& copy.places != 2
-						&& self.spending_to_date(id, today)? != Money::ZERO =>
+						&& crate::goal::spending_recorded(
+							self.budget,
+							&self.classification,
+							id,
+							today,
+						)? =>
 				{
 					Suggestion {
 						category: id.clone(),
@@ -424,25 +428,6 @@ impl Forecaster<'_> {
 			basis,
 			reason,
 		})
-	}
-
-	/// CLS-6 `expense_total` for `category` through `today`: the goal's
-	/// Spending to date.
-	fn spending_to_date(
-		&self,
-		category: &CategoryId,
-		today: CivilDate,
-	) -> Result<Money, CoreError> {
-		let mut total = Money::ZERO;
-		for row in self.classification.through(today) {
-			if row.is_primary()
-				&& row.kind() == TransactionKind::Expense
-				&& row.category.as_ref() == Some(category)
-			{
-				total = total.checked_sub(row.amount)?;
-			}
-		}
-		Ok(total)
 	}
 
 	/// DEBT-3 source 1: the latest principal paid from this envelope, capped

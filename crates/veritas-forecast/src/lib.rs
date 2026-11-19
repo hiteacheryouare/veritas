@@ -25,7 +25,7 @@ pub use baseline::{Baseline, INDEX_ACTIVE_MIN, INDEX_MAX, INDEX_MIN, SEASON_MIN,
 pub use flows::{
 	Certainty, FlowKind, KnownFlow, LoanPayment, LoanSplit, MonthSoFar, ScheduleAmount, Shortfall,
 };
-pub use goal::{EtaStatus, GoalEta, goal_eta, goal_etas, month_name};
+pub use goal::{EtaStatus, GoalEta, goal_eta, goal_etas, month_name, spending_recorded};
 pub use history::Side;
 pub use projection::{
 	Comparison, Forecaster, HORIZONS, HorizonForecast, MonthForecast, Projection,

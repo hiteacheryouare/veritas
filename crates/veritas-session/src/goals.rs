@@ -108,8 +108,13 @@ pub fn goals(
 		};
 		// D77: no ETA and no needed figure once spending exists outside a
 		// 2-place budget, so the Goals screen agrees with the forecast.
-		let spending_recorded =
-			state == GoalState::Active && data.format.decimal_places() != 2 && spent != Money::ZERO;
+		let spending_recorded = state == GoalState::Active
+			&& veritas_forecast::spending_recorded(
+				data,
+				classification,
+				&goal.category,
+				sheet.today(),
+			)?;
 		let (suggestion, pace) = match suggestion {
 			Some(_) if spending_recorded => (None, Some(GoalPace::SpendingRecorded)),
 			Some(suggestion) => (
