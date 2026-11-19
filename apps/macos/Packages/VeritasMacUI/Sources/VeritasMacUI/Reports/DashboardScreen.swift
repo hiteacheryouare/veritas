@@ -448,11 +448,14 @@ private struct WidgetBody: View {
 			SankeyCardCanvas(nodes: nodes, links: links, showPercentages: showPercentages, format: format)
 		case .balanceForecast(_, let source, _, let zeroBased, let hasForecast, let points, let low, let scheduled, let filtered, let today):
 			if hasForecast {
-				ForecastChart(points: points, low: low, today: today, zeroBased: zeroBased, format: format)
-				Text(CardWords.forecastFooter(source: source, scheduled: scheduled, filtered: filtered))
-					.font(.text(.caption))
-					.foregroundStyle(.textSecondary)
-					.lineLimit(2)
+				VStack(alignment: .leading, spacing: Spacing.s1) {
+					ForecastChart(points: points, low: low, today: today, zeroBased: zeroBased, format: format)
+						.frame(maxHeight: .infinity)
+					Text(CardWords.forecastFooter(source: source, scheduled: scheduled, filtered: filtered))
+						.font(.text(.caption))
+						.foregroundStyle(.textSecondary)
+						.lineLimit(2)
+				}
 			} else {
 				Text(CardWords.noForecast)
 					.font(.text(.caption))
@@ -791,6 +794,7 @@ private struct MonteCarloChart: View {
 		}
 		.chartXAxis(.hidden)
 		.chartYAxis(.hidden)
+		.chartXScale(domain: .automatic(includesZero: false))
 	}
 
 	private func value(_ minorUnits: Double) -> Double {
