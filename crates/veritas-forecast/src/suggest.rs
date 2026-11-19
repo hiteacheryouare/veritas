@@ -238,7 +238,7 @@ impl Forecaster<'_> {
 							self.budget,
 							&self.classification,
 							id,
-							today,
+							month,
 						)? =>
 				{
 					Suggestion {

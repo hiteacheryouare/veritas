@@ -266,20 +266,21 @@ pub fn spending_to_date(
 }
 
 /// D77's trigger: outside a 2-place budget, whether the goal category has
-/// any spending through the end of the current budget month. Actual's
-/// `available` reads every row in the month's envelope, a purchase dated
-/// later this month included, so the trigger does too. (Spending to date,
-/// the figure, stays through `today`.)
+/// any spending through the end of `month`, the month whose envelope is
+/// read. Actual's `available` reads every row in that envelope, a purchase
+/// dated after today included, so the trigger does too. The ETA and the
+/// pace line pass the current month; a suggestion passes the suggested one.
+/// (Spending to date, the figure, stays through `today`.)
 pub fn spending_recorded(
 	budget: &BudgetData,
 	classification: &Classification,
 	category: &CategoryId,
-	today: CivilDate,
+	month: YearMonth,
 ) -> Result<bool, CoreError> {
 	if budget.format.decimal_places() == 2 {
 		return Ok(false);
 	}
-	let month_end = veritas_reports::Period::month(today.year_month()).last();
+	let month_end = veritas_reports::Period::month(month).last();
 	Ok(spending_to_date(classification, category, month_end)? != Money::ZERO)
 }
 
@@ -302,7 +303,7 @@ pub fn goal_etas(
 			let available = sheet
 				.category(current, &goal.category)
 				.map_or(Money::ZERO, |cell| cell.balance);
-			let recorded = spending_recorded(budget, classification, &goal.category, today)?;
+			let recorded = spending_recorded(budget, classification, &goal.category, current)?;
 			goal_eta(budget, &goal.id, current, available, recorded, scenario)
 		})
 		.collect()
