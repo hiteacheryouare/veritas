@@ -30,7 +30,7 @@ struct AssistantReadOnlyTests {
 	static let forbidden = ["perform(", "Command", ".change(", "BudgetSession", "WorkspaceModel"]
 
 	@Test func theQueryProtocolDeclaresOnlyTheReads() throws {
-		let source = try String(contentsOf: Self.kitAssistant.appending(path: "ReadOnlyBudgetQueries.swift"), encoding: .utf8)
+		let source = try Self.text(of: Self.kitAssistant.appending(path: "ReadOnlyBudgetQueries.swift"))
 		let body = try #require(source.components(separatedBy: "public protocol ReadOnlyBudgetQueries").last?.components(separatedBy: "\n}").first)
 		let requirements = body.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty && !$0.hasPrefix("//") && !$0.hasPrefix(": Sendable") }
 		let names = Set(requirements.map(Self.signature))
@@ -42,7 +42,7 @@ struct AssistantReadOnlyTests {
 		let files = try Self.sources(in: Self.kitAssistant) + Self.sources(in: Self.uiAssistant)
 		#expect(!files.isEmpty)
 		for file in files {
-			let text = try String(contentsOf: file, encoding: .utf8)
+			let text = try Self.text(of: file)
 			for word in Self.forbidden {
 				#expect(!text.contains(word), "\(file.lastPathComponent) mentions \(word)")
 			}
@@ -93,6 +93,11 @@ struct AssistantReadOnlyTests {
 		let parameters = declaration.drop { $0 != "(" }.dropFirst().prefix { $0 != ")" }
 		let labels = parameters.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces).prefix { $0 != " " && $0 != ":" } }
 		return "\(name)(\(labels.map { "\($0):" }.joined()))"
+	}
+
+	/// The repo checks out *.swift with CRLF, and Swift treats `\r\n` as one character that never equals `\n`.
+	static func text(of file: URL) throws -> String {
+		try String(contentsOf: file, encoding: .utf8).replacingOccurrences(of: "\r\n", with: "\n")
 	}
 
 	static func sources(in directory: URL) throws -> [URL] {
