@@ -32,6 +32,8 @@ extension BudgetSession {
 	func previewCustomReport(_ settings: CustomReportSettings, today: String) async throws -> CustomReportView { throw FfiError.Cancelled }
 	func dashboards(today: String) async throws -> [DashboardPage] { [] }
 	var canEditDashboards: Bool { false }
+	func accounts() async throws -> AccountList { AccountList(accounts: [], groups: []) }
+	func payees() async throws -> [PayeeDetail] { [] }
 	func dashboardSheets(today: String) async throws -> [DashboardSheet] { try await dashboards(today: today).map(DashboardSheet.init) }
 	func addWidget(page: String, kind: WidgetKind, x: Int64, y: Int64, width: Int64, height: Int64, config: WidgetConfig) async throws -> String { "" }
 	func removeWidget(_ id: String) async throws {}
