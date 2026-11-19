@@ -376,12 +376,11 @@ struct RealCoreAccountsTests {
 			#expect(await move.save())
 			#expect(try budget.sqlite("SELECT count(*) FROM transactions WHERE category = ''") == [["0"]], "the empty interest category v10 is sent is never written")
 			let defaults = try #require(await workspace.report { try await $0.loanPaymentDefaults(Self.carLoan, today: WorkspaceModel.today()) })
-			withKnownIssue("Known core bug: loanPaymentDefaults reads the last payment's expense lines by position, so with no interest line the escrow line comes back as interest and the fees line as escrow") {
-				#expect(defaults.total == 29_500, "the last payment less its fees: \(String(describing: defaults.total))")
-				#expect(defaults.interest == 0, "interest: \(String(describing: defaults.interest))")
-				#expect(defaults.escrow == 4_000, "escrow: \(String(describing: defaults.escrow))")
-				#expect(defaults.interestCategoryId != AllFeatures.household, "escrow's envelope isn't the interest envelope")
-			}
+			// v13 (L-5c): parts come from the recorded lines, never by position, and no interest line pre-fills none.
+			#expect(defaults.total == 29_500, "the last payment less its fees: \(String(describing: defaults.total))")
+			#expect(defaults.interest == nil, "interest: \(String(describing: defaults.interest))")
+			#expect(defaults.escrow == 4_000, "escrow: \(String(describing: defaults.escrow))")
+			#expect(defaults.interestCategoryId != AllFeatures.household, "escrow's envelope isn't the interest envelope")
 		}
 	}
 
