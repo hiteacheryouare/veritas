@@ -361,6 +361,15 @@ impl<B: Backend> Core<B> {
 		})
 	}
 
+	/// Sets the session's local date from a call that carries the shell's
+	/// `today` (v15), for reads that don't otherwise pass through it.
+	pub(crate) fn pin_today(&self, today: &str) -> Result<(), FfiError> {
+		self.call(|session| {
+			session.set_today(crate::budget::civil_date(today)?);
+			Ok(())
+		})
+	}
+
 	pub(crate) fn maintain(&self, today: &str) -> Result<Change, FfiError> {
 		self.call(|session| {
 			let today = crate::budget::civil_date(today)?;

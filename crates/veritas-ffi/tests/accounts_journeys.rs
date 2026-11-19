@@ -2210,3 +2210,82 @@ fn a_reopened_budget_dates_a_new_account_by_the_local_date_its_first_call_carrie
 		reopened.close().unwrap();
 	}
 }
+
+#[test]
+fn dashboards_and_custom_reports_pin_the_shells_local_date_too() {
+	// v16: every call that carries the shell's `today` sets the session's
+	// local date, the async report reads included. An account created right
+	// after each is dated that day.
+	let scratch = Scratch::new("local-today-reports");
+	let zip =
+		Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/synthetic/all-features.zip");
+	let session = block_on(Session::import_actual_zip(
+		text(&zip),
+		text(&scratch.join("budget")),
+		CancelToken::new(),
+	))
+	.unwrap();
+	let starting_date = |id: &str| {
+		session
+			.register(
+				RegisterScope::Account {
+					account_id: id.to_owned(),
+				},
+				RegisterFilter::default(),
+				RegisterSort {
+					key: RegisterSortKey::Date,
+					ascending: true,
+				},
+				0,
+				10,
+			)
+			.unwrap()
+			.rows
+			.into_iter()
+			.find(|row| row.starting_balance)
+			.unwrap()
+			.date
+	};
+	let report = session
+		.custom_reports()
+		.unwrap()
+		.into_iter()
+		.next()
+		.expect("all-features has a saved custom report");
+	let settings = block_on(session.custom_report(
+		report.id.clone(),
+		"2027-01-01".to_owned(),
+		CancelToken::new(),
+	))
+	.unwrap()
+	.settings;
+	for (pin, name, local) in [
+		("dashboards", "Dashboard checking", "2027-05-04"),
+		("customReport", "Report checking", "2027-05-11"),
+		("previewCustomReport", "Preview checking", "2027-05-18"),
+	] {
+		match pin {
+			"dashboards" => {
+				block_on(session.dashboards(local.to_owned(), CancelToken::new())).unwrap();
+			}
+			"customReport" => {
+				block_on(session.custom_report(
+					report.id.clone(),
+					local.to_owned(),
+					CancelToken::new(),
+				))
+				.unwrap();
+			}
+			_ => {
+				block_on(session.preview_custom_report(
+					settings.clone(),
+					local.to_owned(),
+					CancelToken::new(),
+				))
+				.unwrap();
+			}
+		}
+		let id = new_account(&session, name, NewAccountKind::Checking, 12_500);
+		assert_eq!(starting_date(&id), local, "{pin} pins the local date");
+	}
+}
