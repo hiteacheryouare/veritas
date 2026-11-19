@@ -234,11 +234,16 @@ impl Wrapped {
 				basis_points,
 			});
 		}
-		let redacted = self.redacted();
-		if let Some((Some(category), tenths)) = redacted.categories.first() {
+		// FC-8: rounded half away from zero on its own, not the redaction's
+		// largest remainder, which can hand the top row an extra tenth.
+		let categorized = Money::checked_sum(self.top_categories.iter().map(|rank| rank.total))
+			.and_then(|top| top.checked_add(self.other_categories));
+		if let (Some(top), Ok(categorized)) = (self.top_categories.first(), categorized)
+			&& let Some(tenths) = tenths(top.total, categorized)
+		{
 			facts.push(FunFact::TopCategoryShare {
-				category: category.clone(),
-				tenths: *tenths,
+				category: top.category.clone(),
+				tenths,
 			});
 		}
 		let evaluated_days = self.no_spend.evaluated_days();

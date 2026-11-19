@@ -498,3 +498,58 @@ fn fc_8_prior_year_facts_skip_new_and_partial_years() {
 		"a prior year that starts late is labeled, not compared"
 	);
 }
+
+#[test]
+fn w_18_top_category_share_rounds_half_away_from_zero() {
+	// Categorized spending 10000, top category 3335: 333.5 rounds to 334.
+	// The redaction's largest remainder gives the same row 333, because the
+	// three smaller rows have bigger remainders, so the fact rounds alone.
+	let mut book = Book::household();
+	nets(
+		&mut book,
+		&[
+			("Groceries", 3335),
+			("Dining", 3329),
+			("Fuel", 3319),
+			("Fun", 17),
+		],
+	);
+	book.row("CHK", "2027-04-01", -5000);
+	let result = wrap(&book, 2027, "2027-12-31");
+	assert_eq!(result.redacted().categories[0].1, 333);
+	let top = result
+		.fun_facts()
+		.into_iter()
+		.find(|fact| matches!(fact, FunFact::TopCategoryShare { .. }));
+	assert_eq!(
+		top,
+		Some(FunFact::TopCategoryShare {
+			category: CategoryId::new("Groceries"),
+			tenths: 334
+		}),
+		"of categorized spending: the uncategorized 5000 isn't in the base"
+	);
+}
+
+#[test]
+fn w_19_no_spend_share_rounds_half_away_from_zero() {
+	// 16 evaluated days, 5 of them no-spend: 312.5 rounds to 313.
+	let mut book = Book::household();
+	for day in 1..=16 {
+		if ![3, 5, 8, 12, 14].contains(&day) {
+			book.spend("Dining", &format!("2027-01-{day:02}"), -1000);
+		}
+	}
+	let share = wrap(&book, 2027, "2027-01-16")
+		.fun_facts()
+		.into_iter()
+		.find(|fact| matches!(fact, FunFact::NoSpendShare { .. }));
+	assert_eq!(
+		share,
+		Some(FunFact::NoSpendShare {
+			days: 5,
+			evaluated_days: 16,
+			tenths: 313
+		})
+	);
+}
