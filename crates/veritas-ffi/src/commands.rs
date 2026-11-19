@@ -926,6 +926,18 @@ fn date(text: &Option<String>) -> Result<Option<CivilDate>, CoreError> {
 }
 
 impl Command {
+	/// The shell's local date a command carries. `Core::perform` pins the
+	/// session's date to it before planning, as every call carrying `today`
+	/// does (v15), so the sheet the plan reads is that day's too.
+	pub(crate) fn local_today(&self) -> Option<&str> {
+		match self {
+			Command::AddScenarioEvent { today, .. }
+			| Command::EditScenarioEvent { today, .. }
+			| Command::ApplySuggestions { today } => Some(today),
+			_ => None,
+		}
+	}
+
 	/// Commands that don't read the envelope sheet.
 	fn plan_plain(&self, data: &BudgetData) -> Result<Vec<Row>, CoreError> {
 		let category = |id: &String| CategoryId::new(id.as_str());

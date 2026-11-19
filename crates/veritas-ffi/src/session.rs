@@ -297,8 +297,13 @@ impl<B: Backend> Core<B> {
 	}
 
 	pub(crate) fn perform(&self, command: Command) -> Result<Change, FfiError> {
-		self.call(|session| session.perform(&command))
-			.map(|changes| Change::from(&changes))
+		self.call(|session| {
+			if let Some(today) = command.local_today() {
+				session.set_today(crate::budget::civil_date(today)?);
+			}
+			session.perform(&command)
+		})
+		.map(|changes| Change::from(&changes))
 	}
 
 	pub(crate) fn undo(&self) -> Result<Change, FfiError> {

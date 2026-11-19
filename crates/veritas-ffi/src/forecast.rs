@@ -912,7 +912,11 @@ impl<B: veritas_session::Backend> Core<B> {
 	}
 
 	pub(crate) fn scenarios(&self, today: &str) -> Result<Vec<ScenarioSummary>, FfiError> {
-		self.call(|session| scenario_list(session.data()?, civil_date(today)?))
+		self.call(|session| {
+			let today = civil_date(today)?;
+			session.set_today(today);
+			scenario_list(session.data()?, today)
+		})
 	}
 }
 

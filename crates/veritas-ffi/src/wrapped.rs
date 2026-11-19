@@ -367,6 +367,7 @@ impl Session {
 	) -> Result<WrappedReport, FfiError> {
 		let core = self.core.clone();
 		run(&cancel, move |cancel| {
+			core.pin_today(&today)?;
 			core.report(cancel, |budget, classification| {
 				wrapped_report(budget, classification, year, civil_date(&today)?)
 			})
