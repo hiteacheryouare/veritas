@@ -501,6 +501,19 @@ fn references(data: &BudgetData, findings: &mut Findings) {
 			exists,
 		);
 	}
+	for part in data.loan_payment_parts.values().filter(|p| !p.tombstone) {
+		for target in [&part.payment, &part.line] {
+			let exists = data.transactions.get(target).map(|_| false);
+			reference(
+				findings,
+				"veritas_loan_payment_part",
+				part.id.as_str(),
+				"transaction",
+				target.as_str(),
+				exists,
+			);
+		}
+	}
 	for schedule in data.schedule_meta.keys() {
 		let exists = data.schedules.get(schedule).map(|_| false);
 		reference(

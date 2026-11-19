@@ -52,9 +52,7 @@ struct RealCoreReportTests {
 			await model.edit()
 			var draft = try #require(model.draft)
 			draft.settings.name = "Food, without refunds"
-			var condition = ReportCondition(field: "notes", op: "doesNotContain", value: "", options: nil)
-			condition.text = "refund"
-			draft.conditions.append(condition)
+			draft.conditions.append(RuleCondition(field: .notes, op: .doesNotContain, value: .text(text: "refund")))
 			model.draft = draft
 			model.setFixedRange(first: Month(year: 2026, month: 5), last: Self.october)
 			await model.refreshPreview()
@@ -67,15 +65,11 @@ struct RealCoreReportTests {
 			var fresh = try #require(model.draft)
 			fresh.settings.name = "Big payees"
 			fresh.settings.groupBy = .payee
-			var big = ReportCondition(field: "amount", op: "lt", value: "", options: nil)
-			big.text = "-10000"
-			fresh.conditions = [big]
+			fresh.conditions = [RuleCondition(field: .amount, op: .lt, value: .amount(amount: -10_000))]
 			model.draft = fresh
 			await model.refreshPreview()
-			withKnownIssue("Known gap until v11: an unsaved report has no id and the core's previewCustomReport answers NotFound for it, so a new report shows the core's error instead of a preview until it's saved") {
-				#expect(model.preview != nil)
-			}
-			#expect(model.preview != nil || model.previewProblem != nil, "the editor shows a preview or the core's error, never nothing")
+			let unsaved = try #require(model.preview, "v14 previews a report that isn't saved yet: \(model.previewProblem ?? "")")
+			#expect(unsaved.data != nil, "with its filter")
 			#expect(await model.save())
 			let freshSaved = try #require(model.view)
 			#expect(freshSaved.data != nil && freshSaved.problem == nil, "saved, the new report computes")
@@ -120,12 +114,12 @@ struct RealCoreReportTests {
 			dining.name = "Dining this year"
 			dining.summaryKind = .sum
 			dining.timeFrame = WidgetTimeFrame(mode: .fixed, start: Month(year: 2026, month: 1), end: Self.october)
-			dining.conditions = [ReportCondition(field: "category", op: "is", value: "\"\(AllFeatures.diningOut)\"", options: nil)]
+			dining.conditions = [RuleCondition(field: .category, op: .is, value: .id(id: AllFeatures.diningOut))]
 			await model.add(.summary, config: dining)
 			let added = try #require(model.sheet?.cards.first { $0.config.name == "Dining this year" })
 			let bottom = try #require(model.sheet?.cards.filter { $0.id != added.id }.map { $0.y + $0.height }.max())
 			#expect((added.x, added.y, added.width, added.height) == (0, bottom, 4, 2), "under everything, at Actual's default size")
-			guard case .summary(.money(let total)) = added.content else {
+			guard case .money(let total)? = added.summaryFigure else {
 				Issue.record("a dining total, got \(added.content)")
 				return
 			}
@@ -169,7 +163,7 @@ struct RealCoreReportTests {
 
 			model.pageID = Self.deepDive
 			let unknown = try #require(model.sheet?.cards.first { $0.id == Self.futureWidget })
-			#expect(unknown.kind == nil && unknown.content == .unknown)
+			#expect(unknown.kind == nil && unknown.content == .unknown(kind: unknown.rawKind))
 			await model.move(unknown, columns: 4)
 			let moved = try #require(model.sheet?.cards.first { $0.id == Self.futureWidget })
 			await model.resize(moved, columns: 1, rows: 1)
@@ -267,9 +261,9 @@ struct RealCoreReportTests {
 		}
 	}
 
-	@Test func cashFlowCardsCarryNetProfitsClassifiedFiguresForTheirRange() async throws {
-		// Contract v7's interim: until the widget follow-up, the cash flow
-		// card shows Net Profit's classified income, expenses and Net Profit.
+	@Test func cashFlowCardsShowActualsMoneyInAndOutForTheirRange() async throws {
+		// v14: the cash flow card sums Actual's raw movement (ST-10.10), not
+		// Net Profit's classified figures.
 		try await RealBudget.with { budget in
 			let model = DashboardModel(workspace: budget.workspace)
 			await model.load()
@@ -279,18 +273,80 @@ struct RealCoreReportTests {
 			config.timeFrame = WidgetTimeFrame(mode: .fixed, start: Month(year: 2026, month: 5), end: Self.october)
 			await model.configure(card, config)
 			let shown = try #require(model.sheet?.cards.first { $0.id == card.id })
-			guard case .cashFlow(let income, let expenses, let netProfit, let classified) = shown.content else {
+			guard case .cashFlow(_, let income, let expense, let change) = shown.content else {
 				Issue.record("a cash flow card, got \(shown.content)")
 				return
 			}
-			#expect(classified)
 			let range = try #require(shown.range)
 			#expect((range.first, range.last) == (Month(year: 2026, month: 5), Self.october))
-			let report = try #require(await budget.workspace.report { try await $0.netProfit(first: range.first, last: range.last) })
-			#expect(income == report.total.income.total)
-			#expect(expenses == report.total.expenses.total)
-			#expect(netProfit == report.total.netProfit.total)
-			#expect(income != 0 && expenses != 0)
+			#expect(income > 0 && expense < 0, "money in is positive and money out negative, as Actual sums them")
+			#expect(change == income + expense, "the headline is the core's money in less money out")
+			#expect(CardWords.caption(shown)?.contains("Leaves out transfers between accounts") == true)
+		}
+	}
+
+	@Test func everyV14CardOnTheFixtureDrawsWithItsOwnWords() async throws {
+		// D73: every card draws natively. The new cards and the reworked ones
+		// arrive with the data ST-10.10 words, on the register's scale (D74).
+		try await RealBudget.with { budget in
+			let model = DashboardModel(workspace: budget.workspace)
+			await model.load()
+			model.pageID = Self.mainPage
+			for kind in [WidgetKind.balanceForecast, .formula, .monteCarlo, .sankey, .netWorth, .spending] {
+				var config = WidgetConfig.empty
+				if kind == .formula { config.formula = "=1/0" }
+				await model.add(kind, config: config)
+			}
+			let cards = model.sheet?.cards ?? []
+			for card in cards {
+				if case .problem(let message) = card.content { Issue.record("\(card.rawKind) is a problem card: \(message)") }
+			}
+			let forecast = try #require(cards.last { $0.kind == .balanceForecast })
+			#expect(forecast.title == "Balance with scheduled transactions")
+			if case .balanceForecast(_, let source, _, _, let hasForecast, let points, _, let scheduled, let filtered, _) = forecast.content {
+				if hasForecast { #expect(!points.isEmpty) }
+				#expect(!CardWords.forecastFooter(source: source, scheduled: scheduled, filtered: filtered).isEmpty)
+			} else {
+				Issue.record("a balance forecast, got \(forecast.content)")
+			}
+			let formula = try #require(cards.last { $0.kind == .formula })
+			#expect(formula.title == "Formula")
+			if case .formula(_, let value, _, _, _) = formula.content {
+				let shown = CardWords.formula(value, format: budget.workspace.format)
+				#expect(shown.text == "Formula error: DIV_BY_ZERO" && shown.isError, "\(shown)")
+			} else {
+				Issue.record("a formula card, got \(formula.content)")
+			}
+			let monteCarlo = try #require(cards.last { $0.kind == .monteCarlo })
+			#expect(monteCarlo.title == "Monte Carlo analysis")
+			if case .monteCarlo(let percent, _, let endAge, let simulations, let chart) = monteCarlo.content {
+				#expect(simulations >= 1_000)
+				#expect(!chart.isEmpty)
+				#expect(CardWords.successRateLabel(endAge: endAge).hasPrefix("Success rate to age "))
+				#expect(CardWords.successRate(percent).hasSuffix("%"))
+			} else {
+				Issue.record("a Monte Carlo card, got \(monteCarlo.content)")
+			}
+			let sankey = try #require(cards.last { $0.kind == .sankey })
+			#expect(sankey.title == "Money flow by category")
+			if case .sankey(_, _, _, _, _, let nodes, let links) = sankey.content {
+				#expect(!nodes.isEmpty && !links.isEmpty)
+				let structural = nodes.filter { if case .name = $0.label { false } else { true } }
+				#expect(!structural.compactMap { CardWords.sankey($0.label) }.contains("Income"), "only a real category or group may read Income")
+			} else {
+				Issue.record("a Sankey card, got \(sankey.content)")
+			}
+			let worth = try #require(cards.last { $0.kind == .netWorth })
+			if case .netWorth(_, _, let points, let netWorth, let change, _, _, _, _, _) = worth.content {
+				let last = try #require(points.last)
+				#expect(netWorth == last.netWorth, "the headline is the last point")
+				#expect(change == last.netWorth - (points.first?.netWorth ?? 0), "and its change runs from the first point")
+			} else {
+				Issue.record("a net worth card, got \(worth.content)")
+			}
+			let spending = try #require(cards.last { $0.kind == .spending })
+			#expect(spending.title == "Monthly spending")
+			#expect(spending.subtitle?.hasPrefix("Compare ") == true)
 		}
 	}
 }

@@ -8,9 +8,7 @@ mod common;
 
 use common::*;
 use veritas_domain::{CoreError, Money};
-use veritas_engine::{
-	AverageSpan, BudgetEditor, BudgetWrites, Envelope, NumberFormat, SheetChange,
-};
+use veritas_engine::{AverageSpan, BudgetEditor, BudgetWrites, Envelope, SheetChange};
 
 fn budgeted(budget: &Budget, month: &str, category: &str) -> Money {
 	budget
@@ -137,29 +135,37 @@ fn moving_budget_to_to_budget_only_lowers_the_source() {
 }
 
 #[test]
-fn movement_notes_follow_the_number_format_and_name_deleted_categories_like_actual() {
-	let budget = small_fixture();
-	let sheet = budget.sheet(TODAY);
-	let dot_comma = BudgetEditor::new(&budget.0, &sheet, NumberFormat::DotComma, false);
-	let writes = dot_comma
-		.move_budget(
-			ym("2026-10"),
-			cents(123_456),
-			&cat("groceries"),
-			&to("dining"),
-		)
-		.unwrap();
-	assert!(writes.notes[0].1.contains("Reassigned 1.234,56 from"));
-	let hidden_cents = BudgetEditor::new(&budget.0, &sheet, NumberFormat::CommaDot, true);
-	let writes = hidden_cents
-		.move_budget(
-			ym("2026-10"),
-			cents(2_050),
-			&cat("groceries"),
-			&to("dining"),
-		)
-		.unwrap();
-	assert!(writes.notes[0].1.contains("Reassigned 21 from"));
+fn movement_notes_use_actuals_server_format_and_name_deleted_categories_like_actual() {
+	// addMovementNotes runs on the server with the default formatter:
+	// comma-dot, 2 fraction digits, whatever the budget's number format or
+	// hideFraction. Only the currency's places change the amount.
+	let note_for = |budget: &Budget, amount: i64| {
+		let sheet = budget.sheet(TODAY);
+		BudgetEditor::new(&budget.0, &sheet)
+			.move_budget(
+				ym("2026-10"),
+				cents(amount),
+				&cat("groceries"),
+				&to("dining"),
+			)
+			.unwrap()
+			.notes[0]
+			.1
+			.clone()
+	};
+	let mut euro = small_fixture();
+	euro.0.format.number_format = Some("dot-comma".to_owned());
+	assert!(note_for(&euro, 123_456).contains("Reassigned 1,234.56 from"));
+	let mut hidden = small_fixture();
+	hidden.0.format.hide_fraction = true;
+	assert!(note_for(&hidden, 123_456).contains("Reassigned 1,234.56 from"));
+	let mut yen = small_fixture();
+	yen.0.format.currency_code = Some("JPY".to_owned());
+	yen.0.format.hide_fraction = true;
+	assert!(
+		note_for(&yen, 500).contains("Reassigned 500.00 from"),
+		"integerToCurrency divides by the currency's places, still with 2 digits"
+	);
 
 	let mut budget = small_fixture();
 	budget.category("dining", "everyday", false).tombstone = true;
@@ -326,7 +332,7 @@ fn holds_add_up_and_stay_between_zero_and_to_budget() {
 
 	let empty = Budget::actual_seed();
 	let sheet = empty.sheet(TODAY);
-	let editor = BudgetEditor::new(&empty.0, &sheet, NumberFormat::CommaDot, false);
+	let editor = BudgetEditor::new(&empty.0, &sheet);
 	assert_eq!(
 		editor
 			.hold_for_next_month(ym("2026-11"), cents(100))
@@ -358,7 +364,7 @@ fn transfer_available_is_clamped_to_to_budget_and_writes_no_note() {
 fn carryover_is_written_from_the_start_month_through_the_last_created_month() {
 	let budget = small_fixture();
 	let sheet = budget.sheet(TODAY);
-	let editor = BudgetEditor::new(&budget.0, &sheet, NumberFormat::CommaDot, false);
+	let editor = BudgetEditor::new(&budget.0, &sheet);
 	let writes = editor
 		.set_carryover(ym("2026-10"), &cat("dining"), true)
 		.unwrap();
@@ -428,7 +434,7 @@ fn set_zero_clears_every_live_expense_category_hidden_ones_too() {
 fn averages_walk_back_from_last_month_to_the_first_activity() {
 	let budget = small_fixture();
 	let sheet = budget.sheet(TODAY);
-	let editor = BudgetEditor::new(&budget.0, &sheet, NumberFormat::CommaDot, false);
+	let editor = BudgetEditor::new(&budget.0, &sheet);
 	let average = |month: &str, category: &str, span| {
 		editor
 			.category_average(ym(month), &cat(category), span)
@@ -471,7 +477,7 @@ fn averages_round_halves_toward_positive_infinity_like_math_round() {
 	budget.txn("sep", "a", "2026-09-03", -2, Some("food"));
 	budget.txn("oct", "a", "2026-10-03", -1, Some("food"));
 	let sheet = budget.sheet(TODAY);
-	let editor = BudgetEditor::new(&budget.0, &sheet, NumberFormat::CommaDot, false);
+	let editor = BudgetEditor::new(&budget.0, &sheet);
 	assert_eq!(
 		editor
 			.category_average(ym("2026-11"), &cat("food"), AverageSpan::Three)
@@ -514,7 +520,7 @@ fn income_auto_hold_and_its_resets() {
 fn moving_an_envelope_to_itself_is_refused() {
 	let budget = small_fixture();
 	let sheet = budget.sheet(TODAY);
-	let editor = BudgetEditor::new(&budget.0, &sheet, NumberFormat::CommaDot, false);
+	let editor = BudgetEditor::new(&budget.0, &sheet);
 	let result = editor.move_budget(ym("2026-10"), cents(100), &cat("rent"), &to("rent"));
 	assert!(matches!(result, Err(CoreError::Invalid(_))));
 }
@@ -523,7 +529,7 @@ fn moving_an_envelope_to_itself_is_refused() {
 fn amounts_beyond_actuals_safe_range_are_refused() {
 	let budget = small_fixture();
 	let sheet = budget.sheet(TODAY);
-	let editor = BudgetEditor::new(&budget.0, &sheet, NumberFormat::CommaDot, false);
+	let editor = BudgetEditor::new(&budget.0, &sheet);
 	let too_big = cents(1 << 51);
 	assert!(matches!(
 		editor.set_budget(ym("2026-10"), &cat("rent"), too_big),
@@ -562,12 +568,7 @@ fn the_sheet_catches_up_from_the_first_month_an_edit_touches() {
 		Box::new(|e| e.set_average(ym("2027-02"), AverageSpan::Six).unwrap()),
 	];
 	for edit in edits {
-		let writes = edit(&BudgetEditor::new(
-			&budget.0,
-			&sheet,
-			NumberFormat::CommaDot,
-			false,
-		));
+		let writes = edit(&BudgetEditor::new(&budget.0, &sheet));
 		writes.apply_to(&mut budget.0);
 		sheet
 			.apply(&budget.0, SheetChange::Month(writes.first_month().unwrap()))

@@ -23,6 +23,7 @@ public enum RuleWords {
 		case .reconciled: "reconciled"
 		case .transfer: "transfer"
 		case .parent: "parent"
+		case .saved: "saved filter"
 		}
 	}
 
@@ -61,7 +62,7 @@ public enum RuleWords {
 		}
 	}
 
-	public static func action(_ kind: RuleChoices.ActionKind) -> String {
+	public static func action(_ kind: RuleMenus.ActionKind) -> String {
 		switch kind {
 		case .set(let field): "set \(Self.field(field))"
 		case .prependNotes: action(RuleActionOp.prependNotes)
@@ -71,7 +72,7 @@ public enum RuleWords {
 	}
 
 	/// Actual's allocation menu (desktop-client/src/util/rule.ts).
-	public static func allocation(_ allocation: RuleChoices.Allocation) -> String {
+	public static func allocation(_ allocation: RuleMenus.Allocation) -> String {
 		switch allocation {
 		case .fixedAmount: "a fixed amount"
 		case .percent: "a fixed percent of the remainder"
@@ -97,7 +98,7 @@ public enum RuleWords {
 		case .deleteTransaction, .linkSchedule:
 			return Self.action(action.op)
 		case .setSplitAmount:
-			let allocation = RuleChoices.Allocation(action.value)
+			let allocation = RuleMenus.Allocation(action.value)
 			let words = "\(Self.action(action.op)) \(Self.allocation(allocation))"
 			return allocation == .remainder ? words : "\(words): \(value(action.value, on: .amount, names: names, format: format))"
 		}

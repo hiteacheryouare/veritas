@@ -242,6 +242,19 @@ fn read_condition(
 	Some((condition, problem))
 }
 
+/// A report or dashboard filter, which Actual stores as a rule condition
+/// (`FiltersMenu.tsx` `onValidateAndApply`). `None` when Actual defines no
+/// such field or op. A month or year date is told by its value's length, as
+/// `subfieldFromFilter` tells it.
+pub fn filter_condition(budget: &BudgetData, item: &Json) -> Option<SentenceCondition> {
+	read_condition(budget, item).map(|(condition, _)| condition)
+}
+
+/// A condition or action value as Actual stores it, in JSON.
+pub fn stored_value(value: &Value) -> String {
+	value_json(value)
+}
+
 fn read_action(budget: &BudgetData, item: &Json) -> Option<(SentenceAction, Option<&'static str>)> {
 	let option = |key: &str| item.get("options").and_then(|options| options.get(key));
 	let split = match option("splitIndex") {

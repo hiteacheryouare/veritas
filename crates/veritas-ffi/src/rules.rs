@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use veritas_domain::{BudgetData, ConditionsOp, CoreError, Row, RuleId, TransactionId};
+use veritas_reports::{self as reports, Json};
 use veritas_rules::{AmountSign, Field, Op};
 use veritas_session::rules::{self as session_rules, ChangedField, Source};
 
@@ -25,7 +26,9 @@ pub enum RuleConditionsOp {
 }
 
 /// A transaction field. `AmountInflow` and `AmountOutflow` are conditions
-/// only: Actual stores them as `amount` with an inflow or outflow option.
+/// only: Actual stores them as `amount` with an inflow or outflow option
+/// (`deserializeField`, `lc/shared/rules.ts:120-128`). `Saved` is a report
+/// or dashboard filter only: a saved filter, by id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum RuleField {
 	ImportedPayee,
@@ -35,14 +38,26 @@ pub enum RuleField {
 	Category,
 	CategoryGroup,
 	Notes,
+	/// Actual's signed amount in minor units: negative is money out, positive
+	/// money in. "amount is -5000" matches a 50.00 payment.
 	Amount,
+	/// Money in only. The value is positive and compared with the amount as
+	/// it is; a negative amount never matches. When rules run, an amount of 0
+	/// passes the sign check (`lc/server/rules/condition.ts:262-266`); the
+	/// preview's search wants more than 0 (`transaction-rules.ts:557-561`).
 	AmountInflow,
+	/// Money out only. The value is positive and compared with the amount's
+	/// absolute value, so "outflow is 5000" matches -5000; a positive amount
+	/// never matches. When rules run, 0 passes the sign check
+	/// (`condition.ts:256-261`); the preview's search wants less than 0
+	/// (`transaction-rules.ts:550-556`).
 	AmountOutflow,
 	Date,
 	Cleared,
 	Reconciled,
 	Transfer,
 	Parent,
+	Saved,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -171,6 +186,11 @@ pub struct RuleSentence {
 	/// Veritas evaluates and applies all of it. When false, transactions it
 	/// would touch get "may need Actual".
 	pub runs_in_veritas: bool,
+	/// v13. For a bill's rule, the bill's name (`nil` when it has none).
+	/// Actual's rules page describes the link as the payee and next date
+	/// instead (`describeSchedule`, `dc/util/schedule.ts:210-219`).
+	#[uniffi(default = None)]
+	pub bill_name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
@@ -225,6 +245,80 @@ pub struct RuleMatch {
 	pub changes: Vec<RuleFieldChange>,
 	/// The lines a split rule would give it, in order.
 	pub split_lines: Vec<RuleSplitLine>,
+	/// v13. The row is reconciled, so the register shows it locked.
+	#[uniffi(default = false)]
+	pub reconciled: bool,
+	/// v13. The row carries "may need Actual": a rule couldn't run on it here.
+	#[uniffi(default = false)]
+	pub may_need_actual: bool,
+}
+
+/// The kind of value a condition op or an action field takes in a draft.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum RuleValueKind {
+	/// `.id`.
+	Id,
+	/// `.ids`, at least one.
+	Ids,
+	/// `.text`.
+	Text,
+	/// `.texts`, at least one, none blank.
+	Texts,
+	/// `.amount`, in the sign its field states.
+	Amount,
+	/// `.amountRange`.
+	AmountRange,
+	/// `.date`.
+	Date,
+	/// `.date`, `.month` or `.year`.
+	DateMonthOrYear,
+	/// `.bool`.
+	Bool,
+	/// `.percent`.
+	Percent,
+	/// `.nothing`.
+	Nothing,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct RuleOpChoice {
+	pub op: RuleConditionOp,
+	pub value: RuleValueKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct RuleConditionChoice {
+	pub field: RuleField,
+	/// In the order Actual's op menu lists them.
+	pub ops: Vec<RuleOpChoice>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct RuleActionOpChoice {
+	pub op: RuleActionOp,
+	/// `nil` for `set`, whose value follows its field.
+	pub value: Option<RuleValueKind>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct RuleActionFieldChoice {
+	pub field: RuleField,
+	pub value: RuleValueKind,
+}
+
+/// What the sentence editor's pickers offer, from Actual's own tables.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct RuleChoices {
+	/// The condition fields in the order of Actual's field menu.
+	pub condition_fields: Vec<RuleConditionChoice>,
+	/// The ops on the transaction itself.
+	pub action_ops: Vec<RuleActionOpChoice>,
+	/// The fields `set` offers on the transaction itself.
+	pub action_fields: Vec<RuleActionFieldChoice>,
+	/// The fields `set` offers on a split line.
+	pub split_line_fields: Vec<RuleActionFieldChoice>,
+	/// A split line's amount: `amount` (fixed), `percent`, `nothing` (remainder).
+	pub split_amounts: Vec<RuleValueKind>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -271,8 +365,8 @@ fn field(field: Field, sign: AmountSign) -> RuleField {
 	}
 }
 
-fn core_field(field: RuleField) -> (Field, AmountSign) {
-	match field {
+fn core_field(field: RuleField) -> Result<(Field, AmountSign), CoreError> {
+	Ok(match field {
 		RuleField::AmountInflow => (Field::Amount, AmountSign::Inflow),
 		RuleField::AmountOutflow => (Field::Amount, AmountSign::Outflow),
 		RuleField::ImportedPayee => (Field::ImportedPayee, AmountSign::Any),
@@ -288,7 +382,12 @@ fn core_field(field: RuleField) -> (Field, AmountSign) {
 		RuleField::Reconciled => (Field::Reconciled, AmountSign::Any),
 		RuleField::Transfer => (Field::Transfer, AmountSign::Any),
 		RuleField::Parent => (Field::Parent, AmountSign::Any),
-	}
+		RuleField::Saved => {
+			return Err(CoreError::Invalid(
+				"A rule can't use a saved filter.".to_owned(),
+			));
+		}
+	})
 }
 
 macro_rules! same_variants {
@@ -362,8 +461,16 @@ fn core_value(value: &RuleValue) -> Result<veritas_rules::Value, CoreError> {
 	})
 }
 
-fn sentence(sentence: veritas_rules::Sentence) -> RuleSentence {
+fn sentence(budget: &BudgetData, sentence: veritas_rules::Sentence) -> RuleSentence {
+	let bill_name = match &sentence.access {
+		veritas_rules::Access::Bill(schedule) => budget
+			.schedules
+			.get(schedule)
+			.and_then(|schedule| schedule.name.clone()),
+		_ => None,
+	};
 	RuleSentence {
+		bill_name,
 		id: sentence.id.to_string(),
 		stage: stage(sentence.stage),
 		conditions_op: match sentence.conditions_op {
@@ -405,7 +512,7 @@ pub(crate) fn draft(draft: &RuleDraft) -> Result<veritas_rules::Draft, CoreError
 		.conditions
 		.iter()
 		.map(|condition| {
-			let (field, sign) = core_field(condition.field);
+			let (field, sign) = core_field(condition.field)?;
 			Ok(veritas_rules::SentenceCondition {
 				field,
 				op: core_condition_op(condition.op),
@@ -418,7 +525,7 @@ pub(crate) fn draft(draft: &RuleDraft) -> Result<veritas_rules::Draft, CoreError
 		.actions
 		.iter()
 		.map(|action| {
-			let field = match action.field.map(core_field) {
+			let field = match action.field.map(core_field).transpose()? {
 				Some((_, AmountSign::Inflow | AmountSign::Outflow)) => {
 					return Err(CoreError::Invalid(
 						"An action sets the amount, not an inflow or outflow.".to_owned(),
@@ -445,6 +552,177 @@ pub(crate) fn draft(draft: &RuleDraft) -> Result<veritas_rules::Draft, CoreError
 	})
 }
 
+/// Actual's name for a filter's field (`FIELD_INFO`, shared/rules.ts:62-88).
+fn filter_field(field: RuleField) -> &'static str {
+	match field {
+		RuleField::ImportedPayee => "imported_payee",
+		RuleField::Payee => "payee",
+		RuleField::PayeeName => "payee_name",
+		RuleField::Account => "account",
+		RuleField::Category => "category",
+		RuleField::CategoryGroup => "category_group",
+		RuleField::Notes => "notes",
+		RuleField::Amount | RuleField::AmountInflow | RuleField::AmountOutflow => "amount",
+		RuleField::Date => "date",
+		RuleField::Cleared => "cleared",
+		RuleField::Reconciled => "reconciled",
+		RuleField::Transfer => "transfer",
+		RuleField::Parent => "parent",
+		RuleField::Saved => "saved",
+	}
+}
+
+fn serde(stored: &Json) -> Option<serde_json::Value> {
+	serde_json::from_str(&stored.stringify()).ok()
+}
+
+/// A stored report or dashboard filter, typed. `None` when Actual defines
+/// no such field or op.
+pub(crate) fn filter_condition(budget: &BudgetData, stored: &Json) -> Option<RuleCondition> {
+	if stored.get("field").and_then(Json::as_str) == Some("saved") {
+		let op = Op::from_stored(stored.get("op")?.as_str()?)?;
+		return Some(RuleCondition {
+			field: RuleField::Saved,
+			op: condition_op(op),
+			value: match stored.get("value") {
+				Some(Json::String(id)) => RuleValue::Id {
+					id: Some(id.clone()),
+				},
+				other => RuleValue::Raw {
+					json: other.unwrap_or(&Json::Null).stringify(),
+				},
+			},
+		});
+	}
+	let condition = veritas_rules::filter_condition(budget, &serde(stored)?)?;
+	Some(RuleCondition {
+		field: field(condition.field, condition.sign),
+		op: condition_op(condition.op),
+		value: value(condition.value),
+	})
+}
+
+pub(crate) fn filter_conditions(budget: &BudgetData, stored: &[Json]) -> Vec<RuleCondition> {
+	stored
+		.iter()
+		.filter_map(|condition| filter_condition(budget, condition))
+		.collect()
+}
+
+/// A new filter as Actual's filter editor saves it: inflow and outflow as
+/// `amount` with an option, and a month or year date with `month` or `year`
+/// (`subfieldToOptions.ts`).
+fn new_filter(condition: &RuleCondition) -> Result<Json, CoreError> {
+	let value = match &condition.value {
+		RuleValue::Raw { .. } => {
+			return Err(CoreError::Invalid(
+				"That filter can only be changed in Actual.".to_owned(),
+			));
+		}
+		RuleValue::Id { id } if condition.field == RuleField::Saved => id.as_deref().map_or_else(
+			|| "null".to_owned(),
+			|id| Json::String(id.to_owned()).stringify(),
+		),
+		other => veritas_rules::stored_value(&core_value(other)?),
+	};
+	let option = match (&condition.field, &condition.value) {
+		(RuleField::AmountInflow, _) => Some("inflow"),
+		(RuleField::AmountOutflow, _) => Some("outflow"),
+		(RuleField::Date, RuleValue::Month { .. }) => Some("month"),
+		(RuleField::Date, RuleValue::Year { .. }) => Some("year"),
+		_ => None,
+	};
+	let parse = |text: &str| {
+		Json::parse(text).map_err(|reason| CoreError::Invalid(format!("a filter: {reason}")))
+	};
+	reports::condition(
+		filter_field(condition.field),
+		core_condition_op(condition.op).stored(),
+		parse(&value)?,
+		option
+			.map(|option| parse(&format!(r#"{{"{option}":true}}"#)))
+			.transpose()?,
+	)
+}
+
+/// Pairs each condition with a stored filter it equals, in order and each
+/// at most once: the longest such pairing, as a diff would find it.
+fn kept_pairs(
+	conditions: &[RuleCondition],
+	typed: &[(usize, RuleCondition)],
+) -> Vec<(usize, usize)> {
+	let (rows, columns) = (typed.len(), conditions.len());
+	let mut longest = vec![vec![0_usize; columns + 1]; rows + 1];
+	for row in (0..rows).rev() {
+		for column in (0..columns).rev() {
+			longest[row][column] = if typed[row].1 == conditions[column] {
+				longest[row + 1][column + 1] + 1
+			} else {
+				longest[row + 1][column].max(longest[row][column + 1])
+			};
+		}
+	}
+	let mut pairs = Vec::new();
+	let (mut row, mut column) = (0, 0);
+	while row < rows && column < columns {
+		if typed[row].1 == conditions[column] {
+			pairs.push((typed[row].0, column));
+			row += 1;
+			column += 1;
+		} else if longest[row + 1][column] >= longest[row][column + 1] {
+			row += 1;
+		} else {
+			column += 1;
+		}
+	}
+	pairs
+}
+
+/// The filters to store, as Actual's filter editor keeps them. A condition
+/// paired with an equal stored filter keeps that filter's exact JSON, even
+/// when two stored filters type the same (one with a `customName`, say).
+/// Between kept filters, a changed condition takes the place of the stored
+/// filter it replaces, and a stored filter Veritas can't type stays after
+/// the filter it followed.
+pub(crate) fn stored_filters(
+	budget: &BudgetData,
+	conditions: &[RuleCondition],
+	stored: &[Json],
+) -> Result<Vec<Json>, CoreError> {
+	let typed: Vec<(usize, RuleCondition)> = stored
+		.iter()
+		.enumerate()
+		.filter_map(|(index, old)| filter_condition(budget, old).map(|typed| (index, typed)))
+		.collect();
+	let untyped = |index: usize| typed.iter().all(|(at, _)| *at != index);
+	let mut written = Vec::with_capacity(conditions.len() + stored.len());
+	let (mut next_stored, mut next_condition) = (0, 0);
+	let pairs = kept_pairs(conditions, &typed);
+	let ends = pairs
+		.iter()
+		.map(|&(at, column)| (at, column, true))
+		.chain(std::iter::once((stored.len(), conditions.len(), false)));
+	for (kept_at, kept_column, kept) in ends {
+		for (index, old) in stored.iter().enumerate().take(kept_at).skip(next_stored) {
+			if untyped(index) {
+				written.push(old.clone());
+			} else if next_condition < kept_column {
+				written.push(new_filter(&conditions[next_condition])?);
+				next_condition += 1;
+			}
+		}
+		for condition in &conditions[next_condition..kept_column] {
+			written.push(new_filter(condition)?);
+		}
+		if kept {
+			written.push(stored[kept_at].clone());
+		}
+		next_stored = kept_at + 1;
+		next_condition = kept_column + 1;
+	}
+	Ok(written)
+}
+
 /// Runs `with` on the source as the session reads it.
 fn with_source<T>(
 	source: &RuleSource,
@@ -463,6 +741,11 @@ fn preview(budget: &BudgetData, source: &RuleSource) -> Result<Vec<RuleMatch>, C
 		.map(|found| {
 			let row = found.transaction;
 			RuleMatch {
+				reconciled: row.reconciled,
+				may_need_actual: budget
+					.transaction_meta
+					.get(&row.id)
+					.is_some_and(|meta| meta.needs_actual.is_some()),
 				transaction_id: row.id.to_string(),
 				parent_id: match row.split {
 					veritas_domain::SplitRole::Child { parent } => Some(parent.to_string()),
@@ -496,6 +779,81 @@ fn preview(budget: &BudgetData, source: &RuleSource) -> Result<Vec<RuleMatch>, C
 			}
 		})
 		.collect())
+}
+
+fn value_kind(kind: veritas_rules::ValueKind) -> RuleValueKind {
+	use veritas_rules::ValueKind as K;
+	match kind {
+		K::Id => RuleValueKind::Id,
+		K::Ids => RuleValueKind::Ids,
+		K::Text => RuleValueKind::Text,
+		K::Texts => RuleValueKind::Texts,
+		K::Amount => RuleValueKind::Amount,
+		K::AmountRange => RuleValueKind::AmountRange,
+		K::Date => RuleValueKind::Date,
+		K::DateMonthOrYear => RuleValueKind::DateMonthOrYear,
+		K::Bool => RuleValueKind::Bool,
+		K::Percent => RuleValueKind::Percent,
+		K::Nothing => RuleValueKind::Nothing,
+	}
+}
+
+fn choices() -> RuleChoices {
+	let core = veritas_rules::choices();
+	let fields = |fields: Vec<(Field, veritas_rules::ValueKind)>| {
+		fields
+			.into_iter()
+			.map(|(f, kind)| RuleActionFieldChoice {
+				field: field(f, AmountSign::Any),
+				value: value_kind(kind),
+			})
+			.collect()
+	};
+	RuleChoices {
+		condition_fields: core
+			.conditions
+			.into_iter()
+			.map(|choice| RuleConditionChoice {
+				field: field(choice.field, choice.sign),
+				ops: choice
+					.ops
+					.into_iter()
+					.map(|(op, kind)| RuleOpChoice {
+						op: condition_op(op),
+						value: value_kind(kind),
+					})
+					.collect(),
+			})
+			.collect(),
+		action_ops: core
+			.action_ops
+			.into_iter()
+			.map(|(op, kind)| RuleActionOpChoice {
+				op: action_op(op),
+				value: kind.map(value_kind),
+			})
+			.collect(),
+		action_fields: fields(core.action_fields),
+		split_line_fields: fields(core.split_fields),
+		split_amounts: core.split_amounts.into_iter().map(value_kind).collect(),
+	}
+}
+
+/// What Actual's rule editor offers, with its feature flags off, so the
+/// sentence editor's pickers needn't keep a copy: the condition fields in
+/// its menu order (`dc/components/rules/RuleEditor.tsx:1004-1019`), each
+/// with `getValidOps` (`lc/shared/rules.ts:6-51`, `110-118`) and the value
+/// each op takes (inflow and outflow without `isBetween`,
+/// `RuleEditor.tsx:965-976`); the action ops (`RuleEditor.tsx:519-521`);
+/// the action fields (`getActionFields` without `payee_name`, which the
+/// editor hides, `RuleEditor.tsx:443-453`, `508-513`); the split-line fields
+/// (`getSplitActionFields`, `RuleEditor.tsx:455-460`); and the split amount
+/// methods (`dc/util/rule.ts:26-33`). Drafts also accept a few things the
+/// editor doesn't offer, such as conditions on `payeeName` or actions
+/// setting `importedPayee`, `payeeName` or `reconciled`.
+#[uniffi::export]
+pub fn rule_choices() -> Result<RuleChoices, FfiError> {
+	crate::guard(|| Ok(choices()))
 }
 
 /// `Command::CreateRule`, `EditRule`, `DeleteRule` and `ApplyRule`.
@@ -536,7 +894,7 @@ impl Session {
 			session.data().map(|budget| {
 				veritas_rules::sentences(budget)
 					.into_iter()
-					.map(sentence)
+					.map(|found| sentence(budget, found))
 					.collect()
 			})
 		})
@@ -572,6 +930,120 @@ mod tests {
 
 	fn condition(field: RuleField, op: RuleConditionOp, value: RuleValue) -> RuleCondition {
 		RuleCondition { field, op, value }
+	}
+
+	/// Saving after only deletes, only edits or only additions in the
+	/// listed filters writes what Actual's editor writes for the same edits
+	/// to the whole stored list: unlisted filters keep their place between
+	/// the listed ones, and every untouched filter keeps its text.
+	#[test]
+	fn saving_edited_filters_matches_the_same_edits_to_the_whole_stored_list() {
+		let budget = BudgetData::empty(veritas_domain::BudgetType::Envelope);
+		let listed = |value: &str| {
+			format!(r#"{{"field":"notes","op":"contains","value":"{value}","type":"string"}}"#)
+		};
+		let unlisted =
+			|n: u64| format!(r#"{{"field":"mood{n}","op":"is","value":"x","type":"string"}}"#);
+		let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
+		let mut next = |below: u64| {
+			seed = seed
+				.wrapping_mul(6_364_136_223_846_793_005)
+				.wrapping_add(1_442_695_040_888_963_407);
+			(seed >> 33) % below
+		};
+		let mut checked = 0;
+		for case in 0..600_u64 {
+			let len = next(9);
+			let full: Vec<String> = (0..len)
+				.map(|n| {
+					if next(3) == 0 {
+						unlisted(n)
+					} else {
+						listed(&format!("s{n}"))
+					}
+				})
+				.collect();
+			let stored: Vec<Json> = full.iter().map(|text| Json::parse(text).unwrap()).collect();
+			let mut view = filter_conditions(&budget, &stored);
+			let mut expected = full.clone();
+			let typed_at = |expected: &[String]| -> Vec<usize> {
+				expected
+					.iter()
+					.enumerate()
+					.filter(|(_, text)| text.contains("\"notes\""))
+					.map(|(at, _)| at)
+					.collect()
+			};
+			let family = case % 3;
+			for step in 0..=next(3) {
+				let positions = typed_at(&expected);
+				match family {
+					0 if !view.is_empty() => {
+						let pick = usize::try_from(next(view.len() as u64)).unwrap();
+						view.remove(pick);
+						expected.remove(positions[pick]);
+					}
+					1 if !view.is_empty() => {
+						let pick = usize::try_from(next(view.len() as u64)).unwrap();
+						let value = format!("e{case}-{step}");
+						view[pick].value = RuleValue::Text {
+							text: value.clone(),
+						};
+						expected[positions[pick]] = listed(&value);
+					}
+					2 => {
+						let value = format!("a{case}-{step}");
+						view.push(RuleCondition {
+							field: RuleField::Notes,
+							op: crate::RuleConditionOp::Contains,
+							value: RuleValue::Text {
+								text: value.clone(),
+							},
+						});
+						expected.push(listed(&value));
+					}
+					_ => {}
+				}
+			}
+			let written: Vec<String> = stored_filters(&budget, &view, &stored)
+				.unwrap()
+				.iter()
+				.map(Json::stringify)
+				.collect();
+			assert_eq!(written, expected, "case {case}: stored {full:?}");
+			checked += 1;
+		}
+		assert_eq!(checked, 600);
+	}
+
+	#[test]
+	fn filters_that_type_alike_keep_their_own_stored_text() {
+		let budget = BudgetData::empty(veritas_domain::BudgetType::Envelope);
+		let stored: Vec<Json> = [
+			r#"{"field":"notes","op":"contains","value":"trip","type":"string","customName":"Trips"}"#,
+			r#"{"field":"notes","op":"contains","value":"trip","type":"string"}"#,
+			r#"{"field":"mood","op":"is","value":"happy","type":"string"}"#,
+			r#"{"field":"amount","op":"gt","value":-500,"type":"number"}"#,
+		]
+		.iter()
+		.map(|text| Json::parse(text).unwrap())
+		.collect();
+		let typed = filter_conditions(&budget, &stored);
+		assert_eq!(typed.len(), 3);
+		assert_eq!(typed[0], typed[1]);
+		let text = |filters: &[Json]| filters.iter().map(Json::stringify).collect::<Vec<_>>();
+		assert_eq!(
+			text(&stored_filters(&budget, &typed, &stored).unwrap()),
+			text(&stored)
+		);
+		let mut edited = typed.clone();
+		edited[2].value = RuleValue::Amount { amount: -600 };
+		let written = text(&stored_filters(&budget, &edited, &stored).unwrap());
+		assert_eq!(written[..3], text(&stored)[..3]);
+		assert_eq!(
+			written[3],
+			r#"{"field":"amount","op":"gt","value":-600,"type":"number"}"#
+		);
 	}
 
 	fn set(field: RuleField, value: RuleValue) -> RuleAction {

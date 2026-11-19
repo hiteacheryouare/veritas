@@ -259,7 +259,19 @@ fn fc_2_amount_per_occurrence() {
 	let between = ScheduleAmount::IsBetween(cents(-9001), cents(-11000))
 		.per_occurrence(&book.budget, &electric)
 		.unwrap();
-	assert_eq!(between.0, cents(-10001));
+	assert_eq!(between.0, cents(-10000), "Math.round(-10000.5) is -10000");
+	let tie = ScheduleAmount::IsBetween(cents(-1001), cents(-1000))
+		.per_occurrence(&book.budget, &electric)
+		.unwrap();
+	assert_eq!(
+		tie.0,
+		cents(-1000),
+		"a negative tie goes toward +∞, as Math.round"
+	);
+	let positive = ScheduleAmount::IsBetween(cents(1000), cents(1001))
+		.per_occurrence(&book.budget, &electric)
+		.unwrap();
+	assert_eq!(positive.0, cents(1001));
 	let exact = ScheduleAmount::Is(cents(-165000))
 		.per_occurrence(&book.budget, &electric)
 		.unwrap();
@@ -1114,4 +1126,26 @@ fn fc_2_the_current_month_books_only_the_interest_still_to_come() {
 		cents(-75000),
 		"150000 for the month, 75000 already booked"
 	);
+}
+
+proptest::proptest! {
+	#![proptest_config(proptest::prelude::ProptestConfig::with_cases(512))]
+
+	/// FC-2 against what Actual's schedule service posts for the same bill:
+	/// `Math.round((num1 + num2) / 2)`, whose ties go toward +∞, for any
+	/// range in either order and either sign, including yen-sized amounts.
+	#[test]
+	fn fc_2_a_between_bills_forecast_amount_is_what_actual_posts(
+		num1 in -900_000_000_i64..900_000_000,
+		num2 in -900_000_000_i64..900_000_000,
+	) {
+		let book = Book::new();
+		#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+		let posted = ((num1 + num2) as f64 / 2.0 + 0.5).floor() as i64;
+		let (amount, certainty) = ScheduleAmount::IsBetween(cents(num1), cents(num2))
+			.per_occurrence(&book.budget, &ScheduleId::new("any"))
+			.unwrap();
+		proptest::prop_assert_eq!(amount, cents(posted));
+		proptest::prop_assert_eq!(certainty, Certainty::Estimate);
+	}
 }
