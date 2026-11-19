@@ -44,7 +44,14 @@ pub struct ScheduledFlows {
 	/// estimated from the amounts and its flows are `estimated` (FC-2):
 	/// "Estimated from the amounts".
 	pub estimated_splits: Vec<AccountId>,
+	/// Loans with a known split, no interest line and no rate, so interest is
+	/// taken as 0 (FC-2): "No interest line on the last payment, interest
+	/// taken as 0". The flag is the core's, so the screen never infers it.
+	pub interest_assumed_zero: Vec<AccountId>,
 }
+
+/// FC-2's label for a loan in `interest_assumed_zero`.
+pub const NO_INTEREST_LINE: &str = "No interest line on the last payment, interest taken as 0";
 
 /// FC-2's label for a loan in `estimated_splits`.
 pub const ESTIMATED_SPLIT: &str = "Estimated from the amounts";
@@ -84,12 +91,15 @@ pub struct NotRepeated {
 
 /// A loan's payment read from its last payment, the parts not repeated,
 /// where the escrow came from, what this month has already paid, and
-/// whether the split is known from D76's mapping (else estimated).
+/// whether the split is known (D76's mapping, or no expense lines at all;
+/// else estimated), and whether interest is taken as 0 for want of an
+/// interest line and a rate.
 type Inferred = (
 	LoanPayment,
 	Vec<NotRepeated>,
 	Option<EscrowSource>,
 	Option<MonthSoFar>,
+	bool,
 	bool,
 );
 
@@ -192,6 +202,7 @@ impl Forecaster<'_> {
 			not_repeated: Vec::new(),
 			escrow_sources: Vec::new(),
 			estimated_splits: Vec::new(),
+			interest_assumed_zero: Vec::new(),
 		};
 		for schedule in self.budget.schedules.values() {
 			if schedule.tombstone || schedule.completed {
@@ -277,7 +288,7 @@ impl Forecaster<'_> {
 			// FC-2: a bill paying a loan is that loan's payment, split into
 			// interest, escrow and principal, never one transfer.
 			scheduled_loans.insert(counterpart.clone());
-			let (loan_payment, not_repeated, escrow_source, so_far, known) =
+			let (loan_payment, not_repeated, escrow_source, so_far, known, zero_interest) =
 				match self.loan_payment(counterpart, name, amount.checked_neg()?, today)? {
 					Ok(found) => found,
 					Err(reason) => return Ok(Err(reason)),
@@ -291,6 +302,9 @@ impl Forecaster<'_> {
 			result.escrow_sources.extend(escrow_source);
 			if !known {
 				result.estimated_splits.push(counterpart.clone());
+			}
+			if zero_interest {
+				result.interest_assumed_zero.push(counterpart.clone());
 			}
 			let certainty = if known {
 				certainty
@@ -388,7 +402,9 @@ impl Forecaster<'_> {
 			.as_ref()
 			.map(|parent| self.budget.loan_payment_parts_of(parent))
 			.unwrap_or_default();
-		if !mapped.is_empty() {
+		// FC-2: a payment with no expense lines has nothing to identify, so
+		// its split is known like a mapped one.
+		if !mapped.is_empty() || parts.is_empty() {
 			return self
 				.mapped_payment(loan, name, payment, today, last, &parts, &mapped, rate)
 				.map(Ok);
@@ -486,6 +502,7 @@ impl Forecaster<'_> {
 			escrow_source,
 			so_far,
 			false,
+			false,
 		)))
 	}
 
@@ -557,6 +574,7 @@ impl Forecaster<'_> {
 			None,
 			so_far,
 			true,
+			interest.is_none() && rate.is_none(),
 		))
 	}
 
@@ -634,7 +652,7 @@ impl Forecaster<'_> {
 				.get(loan)
 				.map(|account| account.name.clone())
 				.unwrap_or_default();
-			let (loan_payment, not_repeated, escrow_source, so_far, known) =
+			let (loan_payment, not_repeated, escrow_source, so_far, known, zero_interest) =
 				match self.loan_payment(loan, name, payment, today)? {
 					Ok(found) => found,
 					Err(reason) => {
@@ -660,6 +678,9 @@ impl Forecaster<'_> {
 			let split = loan_payment.split_from(&dates, so_far)?;
 			result.not_repeated.extend(not_repeated);
 			result.escrow_sources.extend(escrow_source);
+			if zero_interest {
+				result.interest_assumed_zero.push(loan.clone());
+			}
 			if known {
 				result.flows.extend(split.flows);
 			} else {

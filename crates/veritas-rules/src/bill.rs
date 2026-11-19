@@ -342,7 +342,7 @@ impl Bill {
 				return Err(invalid("A range needs two different amounts"));
 			}
 			if low.minor().unsigned_abs() >= high.minor().unsigned_abs() {
-				return Err(invalid("Put the lower amount first"));
+				return Err(invalid("Put the smaller amount first"));
 			}
 		}
 		if let BillDate::Repeat(repeat) = &self.date {
@@ -1024,7 +1024,7 @@ mod tests {
 		assert!(range(-100, 100).is_err(), "neither is smaller");
 		assert!(matches!(
 			range(-6_000, -4_000),
-			Err(CoreError::Invalid(message)) if message == "Put the lower amount first"
+			Err(CoreError::Invalid(message)) if message == "Put the smaller amount first"
 		));
 		assert!(range(-4_000, -4_000).is_err());
 		assert!(with(&|r| r.end = RepeatEnd::AfterOccurrences(0)).is_err());
