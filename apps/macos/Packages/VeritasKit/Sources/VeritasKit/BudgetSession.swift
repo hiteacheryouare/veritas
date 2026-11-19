@@ -130,6 +130,9 @@ public protocol BudgetSession: AnyObject, Sendable {
 	/// What edited settings would show, without saving.
 	func previewCustomReport(_ settings: CustomReportSettings, today: String) async throws -> CustomReportView
 	func dashboards(today: String) async throws -> [DashboardPage]
+	/// Names for the filter editors' pickers.
+	func accounts() async throws -> AccountList
+	func payees() async throws -> [PayeeDetail]
 
 	/// Whether the core can add, remove and configure widgets and dashboards,
 	/// and save report filters. Until it can, those actions stay hidden.

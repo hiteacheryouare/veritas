@@ -208,6 +208,16 @@ final class CoreBudgetSession: BudgetSession {
 		return try await Core.cancellable { try await session.dashboards(today: today, cancel: $0) }
 	}
 
+	func accounts() async throws -> AccountList {
+		let session = session
+		return try await Core.run { try session.accounts() }
+	}
+
+	func payees() async throws -> [PayeeDetail] {
+		let session = session
+		return try await Core.run { try session.payees() }
+	}
+
 	/// Contract v7: dashboards, widgets and report filters are editable.
 	let canEditDashboards = true
 

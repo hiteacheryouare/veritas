@@ -100,7 +100,7 @@ public extension ReportSortOrder {
 }
 
 /// The custom report viewer and editor (R-REP-4). Edits preview live and
-/// save back in Actual's format; filter conditions stay as Actual wrote them.
+/// save back in Actual's format, filters included (contract v14).
 @MainActor
 @Observable
 public final class CustomReportsModel {
@@ -114,6 +114,8 @@ public final class CustomReportsModel {
 	public private(set) var preview: CustomReportView?
 	/// The core's error when the draft can't be previewed, shown in place of the preview.
 	public private(set) var previewProblem: String?
+	/// Payees, accounts and categories, for the filter editor's pickers.
+	public private(set) var names = BudgetNames.empty
 
 	@ObservationIgnored let workspace: WorkspaceModel
 	@ObservationIgnored public let standard: StandardReportModel
@@ -131,6 +133,7 @@ public final class CustomReportsModel {
 		if let items = await workspace.report({ try await $0.customReports() }) {
 			self.items = items
 		}
+		names = await workspace.budgetNames()
 		await show(choice)
 	}
 
@@ -245,6 +248,8 @@ public final class DashboardModel {
 	public private(set) var sheets: [DashboardSheet] = []
 	public var pageID: String?
 	public var isEditing = false
+	/// Payees, accounts and categories, for the widget filter editor's pickers.
+	public private(set) var names = BudgetNames.empty
 
 	@ObservationIgnored let workspace: WorkspaceModel
 
@@ -265,6 +270,7 @@ public final class DashboardModel {
 		let today = WorkspaceModel.today()
 		guard let sheets = await workspace.report({ try await $0.dashboardSheets(today: today) }) else { return }
 		self.sheets = sheets
+		names = await workspace.budgetNames()
 		if pageID == nil || !sheets.contains(where: { $0.id == pageID }) { pageID = sheets.first?.id }
 	}
 
