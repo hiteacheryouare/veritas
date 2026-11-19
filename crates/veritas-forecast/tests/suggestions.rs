@@ -319,6 +319,7 @@ fn eta(book: &Book, available: i64, scenario: Option<&Scenario>) -> veritas_fore
 		&GoalId::new("laptop"),
 		ym("2027-01"),
 		cents(available),
+		false,
 		scenario,
 	)
 	.unwrap()
@@ -557,7 +558,8 @@ fn fc_6_goal_etas_read_available_from_the_sheet() {
 	book.goal("old", "Old goal", 1000, None).status = veritas_domain::GoalStatus::Closed;
 	let today = date("2027-01-20");
 	let sheet = EnvelopeSheet::compute(&book.budget, today).unwrap();
-	let etas = goal_etas(&book.budget, &sheet, today, None).unwrap();
+	let classification = veritas_reports::classify(&book.budget);
+	let etas = goal_etas(&book.budget, &sheet, &classification, today, None).unwrap();
 	assert_eq!(etas.len(), 1);
 	assert_eq!(etas[0].remaining, cents(38000));
 	assert!(

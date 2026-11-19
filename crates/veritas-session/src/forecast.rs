@@ -57,9 +57,16 @@ pub fn forecast(
 		cancel.check()?;
 		projections.push(forecaster.project(today, &flows.flows, Some(scenario))?);
 	}
-	let mut etas = vec![goal_etas(data, sheet, today, None)?];
+	let classification = forecaster.classification();
+	let mut etas = vec![goal_etas(data, sheet, classification, today, None)?];
 	for scenario in &scenarios {
-		etas.push(goal_etas(data, sheet, today, Some(scenario))?);
+		etas.push(goal_etas(
+			data,
+			sheet,
+			classification,
+			today,
+			Some(scenario),
+		)?);
 	}
 	cancel.check()?;
 	Ok(ForecastView {

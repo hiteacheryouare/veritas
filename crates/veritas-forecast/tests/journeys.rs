@@ -706,6 +706,7 @@ fn following_the_goal_suggestion_keeps_the_eta_on_the_target_month() {
 			&GoalId::new("laptop"),
 			month,
 			cents(carry + 25000),
+			false,
 			None,
 		)
 		.unwrap();
@@ -766,6 +767,7 @@ fn an_extra_goal_contribution_this_month_moves_the_eta() {
 			&GoalId::new("laptop"),
 			ym("2027-01"),
 			cents(100000),
+			false,
 			scenario,
 		)
 		.unwrap()

@@ -1,7 +1,9 @@
 use veritas_domain::{
-	BudgetData, CivilDate, CoreError, GoalId, GoalStatus, Money, Scenario, YearMonth,
+	BudgetData, CategoryId, CivilDate, CoreError, GoalId, GoalStatus, Money, Scenario,
+	TransactionKind, YearMonth,
 };
 use veritas_engine::EnvelopeSheet;
+use veritas_reports::Classification;
 
 use crate::baseline::months_between;
 use crate::math::{ceil_div, median};
@@ -36,6 +38,9 @@ pub enum EtaStatus {
 	NoHistory,
 	/// The median pace is 0 or less.
 	NotAdding,
+	/// D77, CLS-12.14: outside a 2-place budget an active goal with spending
+	/// recorded has an `available` that mixes scales, so no ETA is given.
+	SpendingRecorded,
 	Eta {
 		month: YearMonth,
 		optimistic: YearMonth,
@@ -64,6 +69,7 @@ impl GoalEta {
 			EtaStatus::Spent => "Reached → Spent".to_owned(),
 			EtaStatus::NoHistory => "No ETA yet".to_owned(),
 			EtaStatus::NotAdding => "No ETA: nothing is being added".to_owned(),
+			EtaStatus::SpendingRecorded => "No ETA: spending recorded".to_owned(),
 			EtaStatus::Eta {
 				month,
 				optimistic,
@@ -118,6 +124,7 @@ pub fn goal_eta(
 	goal: &GoalId,
 	current: YearMonth,
 	available: Money,
+	spending_recorded: bool,
 	scenario: Option<&Scenario>,
 ) -> Result<GoalEta, CoreError> {
 	let overlay = Overlay::new(scenario);
@@ -159,6 +166,12 @@ pub fn goal_eta(
 	let eta = |pace: i64| months_to_go(remaining, pace, goal, current, overlay);
 	let status = match pace {
 		_ if found.status == GoalStatus::Reached && available < found.target => EtaStatus::Spent,
+		_ if found.status == GoalStatus::Active
+			&& spending_recorded
+			&& budget.format.decimal_places() != 2 =>
+		{
+			EtaStatus::SpendingRecorded
+		}
 		_ if found.status == GoalStatus::Reached || remaining == Money::ZERO => EtaStatus::Reached,
 		None => EtaStatus::NoHistory,
 		Some((mid, max, min)) => match eta(mid)? {
@@ -233,11 +246,32 @@ fn months_to_go(
 	current.offset(total).map(Reach::At)
 }
 
+/// DEBT-8's Spending to date: CLS-6 `expense_total` for `category` through
+/// `today`, the figure the Goals screen shows.
+pub fn spending_to_date(
+	classification: &Classification,
+	category: &CategoryId,
+	today: CivilDate,
+) -> Result<Money, CoreError> {
+	let mut total = Money::ZERO;
+	for row in classification.through(today) {
+		if row.is_primary()
+			&& row.kind() == TransactionKind::Expense
+			&& row.category.as_ref() == Some(category)
+		{
+			total = total.checked_sub(row.amount)?;
+		}
+	}
+	Ok(total)
+}
+
 /// The ETA of every goal that isn't closed, with `available` read from the
-/// envelope sheet for the current month.
+/// envelope sheet for the current month. A what-if never changes D77's "No
+/// ETA: spending recorded".
 pub fn goal_etas(
 	budget: &BudgetData,
 	sheet: &EnvelopeSheet,
+	classification: &Classification,
 	today: CivilDate,
 	scenario: Option<&Scenario>,
 ) -> Result<Vec<GoalEta>, CoreError> {
@@ -250,7 +284,15 @@ pub fn goal_etas(
 			let available = sheet
 				.category(current, &goal.category)
 				.map_or(Money::ZERO, |cell| cell.balance);
-			goal_eta(budget, &goal.id, current, available, scenario)
+			let spent = spending_to_date(classification, &goal.category, today)?;
+			goal_eta(
+				budget,
+				&goal.id,
+				current,
+				available,
+				spent != Money::ZERO,
+				scenario,
+			)
 		})
 		.collect()
 }

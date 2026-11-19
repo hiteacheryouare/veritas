@@ -67,6 +67,10 @@ pub enum GoalEtaStatus {
 	NoHistory,
 	/// "No ETA: nothing is being added".
 	NotAdding,
+	/// v16, D77: "No ETA: spending recorded". Outside a 2-place budget an
+	/// active goal with spending has a mixed-scale `available`, so the whole
+	/// line is this, with no range and no `onTrack`. A what-if never changes it.
+	SpendingRecorded,
 	/// `pessimistic` is `nil` when the slowest pace adds nothing.
 	Eta {
 		month: Month,
@@ -594,6 +598,7 @@ fn goal_eta(data: &BudgetData, eta: &GoalEta) -> GoalEtaItem {
 			EtaStatus::Spent => GoalEtaStatus::Spent,
 			EtaStatus::NoHistory => GoalEtaStatus::NoHistory,
 			EtaStatus::NotAdding => GoalEtaStatus::NotAdding,
+			EtaStatus::SpendingRecorded => GoalEtaStatus::SpendingRecorded,
 			EtaStatus::Eta {
 				month,
 				optimistic,
@@ -1534,6 +1539,157 @@ mod tests {
 				continue;
 			}
 			assert_eq!(Some(amount), theirs.get(key), "{key:?}");
+		}
+	}
+
+	/// D77 and FC-6 E-15: in a yen budget an active goal with spending
+	/// recorded has no ETA and no needed figure, on the Goals screen and in
+	/// the forecast alike, and a what-if doesn't change it. A 2-place budget
+	/// keeps both.
+	#[test]
+	fn d77_a_goal_with_spending_outside_a_2_place_budget_has_no_eta() {
+		for (currency, expect_none) in [("JPY", true), ("USD", false)] {
+			let scratch = Scratch::new(&format!("d77-{currency}"));
+			let core = Core::<Store>::create_budget(
+				currency,
+				&scratch.budget(),
+				&crate::NumberFormat {
+					currency: Some(currency.to_owned()),
+					style: crate::NumberStyle::CommaDot,
+					hide_decimals: false,
+					symbol_first: None,
+					symbol_space: None,
+				},
+				&crate::NewBudgetOptions {
+					retirement_401k: false,
+					hsa: false,
+					accounts: Vec::new(),
+				},
+				&veritas_session::CancelToken::default(),
+			)
+			.unwrap();
+			core.goals(TODAY).unwrap();
+			let account = core
+				.perform(Command::CreateAccount {
+					account: crate::NewAccount {
+						name: "Checking".to_owned(),
+						kind: crate::NewAccountKind::Checking,
+						starting_balance: 10_000_000,
+						loan: None,
+					},
+				})
+				.unwrap()
+				.entities
+				.iter()
+				.find(|e| e.kind == EntityKind::Account)
+				.and_then(|e| e.id.clone())
+				.unwrap();
+			let goal = core
+				.perform(Command::CreateGoal {
+					name: "New laptop".to_owned(),
+					target: 150_000,
+					target_date: Some("2027-12-31".to_owned()),
+					icon: None,
+					color: None,
+				})
+				.unwrap()
+				.entities
+				.iter()
+				.find(|e| e.kind == EntityKind::Goal)
+				.and_then(|e| e.id.clone())
+				.unwrap();
+			let summary = |core: &Core<Store>| {
+				core.goals(TODAY)
+					.unwrap()
+					.into_iter()
+					.find(|g| g.id == goal)
+					.unwrap()
+			};
+			let category = summary(&core).category_id;
+			for month in [9, 10, 11] {
+				core.perform(Command::SetBudget {
+					month: crate::Month { year: 2026, month },
+					category_id: category.clone(),
+					amount: 10_000,
+				})
+				.unwrap();
+			}
+			core.perform(Command::AddTransaction {
+				transaction: crate::TransactionDraft {
+					id: Some("purchase".to_owned()),
+					account_id: account.clone(),
+					date: "2026-11-10".to_owned(),
+					amount: -500,
+					payee_id: None,
+					payee_name: None,
+					category_id: Some(category.clone()),
+					notes: None,
+					cleared: false,
+					splits: Vec::new(),
+				},
+			})
+			.unwrap();
+			let shown = summary(&core);
+			let scenario = core
+				.perform(Command::CreateScenario {
+					name: "Save more".to_owned(),
+				})
+				.unwrap()
+				.entities[0]
+				.id
+				.clone()
+				.unwrap();
+			core.perform(Command::AddScenarioEvent {
+				scenario_id: scenario.clone(),
+				change: ScenarioChange::GoalContribution {
+					goal_id: goal.clone(),
+					amount: 40_000,
+					start_month: crate::Month {
+						year: 2026,
+						month: 12,
+					},
+					end_month: None,
+				},
+				today: TODAY.to_owned(),
+			})
+			.unwrap();
+			let forecast = core
+				.forecast(TODAY, &[scenario], &veritas_session::CancelToken::default())
+				.unwrap();
+			let eta = |projection: &ForecastProjection| {
+				projection
+					.goal_etas
+					.iter()
+					.find(|eta| eta.goal_id == goal)
+					.unwrap()
+					.clone()
+			};
+			let (base, what_if) = (eta(&forecast.baseline), eta(&forecast.scenarios[0]));
+			if expect_none {
+				assert_eq!(
+					shown.pace,
+					Some(crate::GoalPace::SpendingRecorded),
+					"{currency}"
+				);
+				assert_eq!(shown.suggested_monthly, None, "no needed figure");
+				assert_eq!(base.status, GoalEtaStatus::SpendingRecorded);
+				assert_eq!(base.text, "No ETA: spending recorded");
+				assert_eq!(base.on_track, None);
+				assert_eq!(
+					what_if.status,
+					GoalEtaStatus::SpendingRecorded,
+					"a what-if doesn't change it"
+				);
+			} else {
+				assert_ne!(
+					shown.pace,
+					Some(crate::GoalPace::SpendingRecorded),
+					"{currency}"
+				);
+				assert!(shown.suggested_monthly.is_some());
+				assert_ne!(base.status, GoalEtaStatus::SpendingRecorded);
+				assert_ne!(what_if.status, GoalEtaStatus::SpendingRecorded);
+			}
 		}
 	}
 }

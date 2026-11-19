@@ -38,6 +38,9 @@ pub enum GoalPace {
 	NoHistory { needed_monthly: Money },
 	/// Nothing added at the median pace lately, so no ETA.
 	NotAdding { needed_monthly: Money },
+	/// D77: outside a 2-place budget, spending is recorded, so `available`
+	/// mixes scales: "No ETA: spending recorded", with no needed figure.
+	SpendingRecorded,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -103,9 +106,17 @@ pub fn goals(
 			GoalState::Active => engine::suggestion(sheet, goal, month)?,
 			GoalState::Reached | GoalState::ReachedSpent | GoalState::Closed => None,
 		};
-		let pace = match suggestion {
-			Some(suggestion) => Some(pace(data, goal, month, available, suggestion)?),
-			None => None,
+		// D77: no ETA and no needed figure once spending exists outside a
+		// 2-place budget, so the Goals screen agrees with the forecast.
+		let spending_recorded =
+			state == GoalState::Active && data.format.decimal_places() != 2 && spent != Money::ZERO;
+		let (suggestion, pace) = match suggestion {
+			Some(_) if spending_recorded => (None, Some(GoalPace::SpendingRecorded)),
+			Some(suggestion) => (
+				Some(suggestion),
+				Some(pace(data, goal, month, available, suggestion)?),
+			),
+			None => (None, None),
 		};
 		let (later_budget, new_activity) = match (goal.status, goal.closed_month) {
 			(GoalStatus::Closed, Some(closed)) => (
@@ -154,7 +165,7 @@ fn pace(
 	suggestion: Suggestion,
 ) -> Result<GoalPace, CoreError> {
 	use veritas_forecast::EtaStatus;
-	let eta = veritas_forecast::goal_eta(data, &goal.id, month, available, None)?;
+	let eta = veritas_forecast::goal_eta(data, &goal.id, month, available, false, None)?;
 	let needed_monthly = suggestion.monthly;
 	Ok(match (eta.on_track, eta.status) {
 		(_, EtaStatus::NoHistory) => GoalPace::NoHistory { needed_monthly },
