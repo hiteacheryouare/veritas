@@ -1707,3 +1707,65 @@ fn a_principal_only_payment_prefills_its_principal() {
 		"a plain transfer, as Actual writes one, is a principal-only payment too"
 	);
 }
+
+#[test]
+fn a_principal_only_payment_made_in_actual_prefills_its_principal() {
+	// L-5e for payments Ryan makes in Actual itself: a plain transfer to the
+	// loan in the principal envelope, and a split whose only line is that
+	// transfer. Either one is the last payment, pre-filling its principal as
+	// the total with interest blank and escrow 0, not the loan's usual 40000.
+	let setup = loan_setup("principal-only-actual", 980_000);
+	let zip = setup._scratch.join("base.zip");
+	block_on(
+		setup
+			.session
+			.export_actual_zip(text(&zip), CancelToken::new()),
+	)
+	.unwrap();
+	let Some(oracle) = oracle() else {
+		return;
+	};
+	for (label, transaction) in [
+		(
+			"plain",
+			serde_json::json!({"id": "plain", "date": "2026-12-05", "amount": -27_500,
+				"payee": {"transferTo": setup.loan}, "category": setup.principal}),
+		),
+		(
+			"split",
+			serde_json::json!({"id": "split", "date": "2026-12-05", "amount": -31_000,
+				"subtransactions": [{"amount": -31_000, "payee": {"transferTo": setup.loan}, "category": setup.principal}]}),
+		),
+	] {
+		let made = setup._scratch.join(&format!("{label}.zip"));
+		actual_apply(
+			&oracle,
+			&zip,
+			serde_json::json!([{"op": "addTransactions", "account": setup.checking, "transactions": [transaction]}]),
+			&made,
+			41,
+		);
+		let (_kept, opened) = reimported(&made, &format!("principal-only-{label}"));
+		let next = opened
+			.loan_payment_defaults(setup.loan.clone(), "2026-12-10".to_owned())
+			.unwrap();
+		let principal = -transaction["amount"].as_i64().unwrap();
+		assert_eq!(
+			(next.total, next.interest, next.escrow),
+			(Some(principal), None, Some(0)),
+			"{label}: made in Actual, principal only"
+		);
+		assert_eq!(
+			(
+				next.from_account_id.as_deref(),
+				next.principal_category_id.as_deref()
+			),
+			(
+				Some(setup.checking.as_str()),
+				Some(setup.principal.as_str())
+			),
+			"{label}"
+		);
+		opened.close().unwrap();
+	}
+}
