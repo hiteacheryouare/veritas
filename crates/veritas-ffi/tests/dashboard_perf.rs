@@ -6,9 +6,9 @@
 )]
 
 //! R-PERF-4 for the dashboard through the exported API on perf-100k: the
-//! default dashboard within a typical report's 100 ms once warm, and each
-//! native card D73 adds, filtered the way a typical card is, costing the
-//! page no more than a typical report.
+//! default dashboard, and a page with every native card D73 draws, filtered
+//! the way a typical card is, each within a typical report's 100 ms once
+//! warm, and no card adding more than that.
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -19,8 +19,8 @@ use std::thread::Thread;
 use std::time::{Duration, Instant};
 
 use veritas_ffi::{
-	CancelToken, Command, ReportCondition, Session, TransactionDraft, WidgetConfig,
-	WidgetTimeFrame, WidgetView,
+	CancelToken, Command, RuleCondition, RuleConditionOp, RuleField, RuleValue, Session,
+	TransactionDraft, WidgetConfig, WidgetTimeFrame, WidgetView,
 };
 
 struct Unpark(Thread);
@@ -54,7 +54,7 @@ impl Drop for Scratch {
 const TYPICAL: Duration = Duration::from_millis(100);
 
 fn fastest(mut before: impl FnMut(), mut run: impl FnMut()) -> Duration {
-	(0..5)
+	(0..10)
 		.map(|_| {
 			before();
 			let started = Instant::now();
@@ -111,17 +111,19 @@ fn the_dashboard_with_every_native_card_meets_r_perf_4_on_perf_100k() {
 		end: "2026-10".to_owned(),
 	});
 	let filters = vec![
-		ReportCondition {
-			field: "category".to_owned(),
-			op: "isNot".to_owned(),
-			value: format!("\"{category}\""),
-			options: None,
+		RuleCondition {
+			field: RuleField::Category,
+			op: RuleConditionOp::IsNot,
+			value: RuleValue::Id {
+				id: Some(category.clone()),
+			},
 		},
-		ReportCondition {
-			field: "notes".to_owned(),
-			op: "doesNotContain".to_owned(),
-			value: "\"zzz\"".to_owned(),
-			options: None,
+		RuleCondition {
+			field: RuleField::Notes,
+			op: RuleConditionOp::DoesNotContain,
+			value: RuleValue::Text {
+				text: "zzz".to_owned(),
+			},
 		},
 	];
 	let draw = || {
@@ -137,6 +139,13 @@ fn the_dashboard_with_every_native_card_meets_r_perf_4_on_perf_100k() {
 		("age-of-money-card", None),
 		("budget-analysis-card", None),
 		("crossover-card", None),
+		("net-worth-card", None),
+		("cash-flow-card", None),
+		("spending-card", None),
+		("sankey-card", None),
+		("balance-forecast-card", None),
+		("formula-card", None),
+		("monte-carlo-card", None),
 	]
 	.into_iter()
 	.enumerate()
@@ -152,7 +161,10 @@ fn the_dashboard_with_every_native_card_meets_r_perf_4_on_perf_100k() {
 				config: WidgetConfig {
 					name: None,
 					time_frame: year.clone(),
-					conditions: if kind == "crossover-card" {
+					conditions: if matches!(
+						kind,
+						"crossover-card" | "formula-card" | "monte-carlo-card"
+					) {
 						Vec::new()
 					} else {
 						filters.clone()
@@ -205,10 +217,17 @@ fn the_dashboard_with_every_native_card_meets_r_perf_4_on_perf_100k() {
 						| WidgetView::AgeOfMoney { .. }
 						| WidgetView::BudgetAnalysis { .. }
 						| WidgetView::Crossover { .. }
+						| WidgetView::NetWorth { .. }
+						| WidgetView::CashFlow { .. }
+						| WidgetView::Spending { .. }
+						| WidgetView::Sankey { .. }
+						| WidgetView::BalanceForecast { .. }
+						| WidgetView::Formula { .. }
+						| WidgetView::MonteCarlo { .. }
 				)
 			})
 			.count();
-		assert!(drawn >= 5, "every native card drew");
+		assert!(drawn >= 12, "every native card drew");
 	};
 	show();
 	let warm = fastest(|| {}, show);
@@ -227,6 +246,7 @@ fn the_dashboard_with_every_native_card_meets_r_perf_4_on_perf_100k() {
 		default_warm <= TYPICAL,
 		"the default dashboard took {default_warm:?}"
 	);
+	assert!(warm <= TYPICAL, "every native card took {warm:?}");
 	for (kind, cost) in &marginal {
 		assert!(*cost <= TYPICAL, "{kind} adds {cost:?} to the dashboard");
 	}

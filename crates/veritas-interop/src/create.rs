@@ -80,8 +80,9 @@ fn build(
 	let mut planned = store.load()?.data;
 	let mut writer = store.writer()?;
 	writer.put_preference("numberFormat", budget.format.style.actual_value())?;
-	if budget.format.hide_decimals {
-		writer.put_preference("hideFraction", "true")?;
+	let hide_fraction = budget.format.hides_fraction();
+	if hide_fraction || budget.format.currency.is_some() {
+		writer.put_preference("hideFraction", if hide_fraction { "true" } else { "false" })?;
 	}
 	if let Some(code) = &budget.format.currency {
 		writer.put_preference("defaultCurrencyCode", code)?;

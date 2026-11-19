@@ -7,7 +7,7 @@ use veritas_domain::{
 	CategoryGroupId, CategoryId, CivilDate, Money, SplitRole, Transaction, TransactionId,
 	YearMonth,
 };
-use veritas_engine::{BudgetEditor, BudgetWrites, EnvelopeSheet, NumberFormat};
+use veritas_engine::{BudgetEditor, BudgetWrites, EnvelopeSheet};
 
 pub fn ym(text: &str) -> YearMonth {
 	YearMonth::parse(text).unwrap()
@@ -239,12 +239,7 @@ impl Budget {
 	/// Runs one budget action against a fresh sheet and applies its writes.
 	pub fn edit(&mut self, action: impl FnOnce(&BudgetEditor<'_>) -> BudgetWrites) -> BudgetWrites {
 		let sheet = self.sheet(TODAY);
-		let writes = action(&BudgetEditor::new(
-			&self.0,
-			&sheet,
-			NumberFormat::CommaDot,
-			false,
-		));
+		let writes = action(&BudgetEditor::new(&self.0, &sheet));
 		writes.apply_to(&mut self.0);
 		writes
 	}

@@ -61,6 +61,9 @@ pub enum EntityKind {
 	CategoryMeta,
 	AccountMeta,
 	TransactionMeta,
+	/// v13. Which expense line of a loan payment is interest, escrow or fees
+	/// (D76). It changes together with its payment's transaction.
+	LoanPaymentPart,
 	TaxTag,
 	Goal,
 	CustomReport,
@@ -110,6 +113,7 @@ impl From<&CoreEntity> for EntityRef {
 			CoreEntity::CategoryMeta(id) => row(EntityKind::CategoryMeta, id),
 			CoreEntity::AccountMeta(id) => row(EntityKind::AccountMeta, id),
 			CoreEntity::TransactionMeta(id) => row(EntityKind::TransactionMeta, id),
+			CoreEntity::LoanPaymentPart(id) => row(EntityKind::LoanPaymentPart, id),
 			CoreEntity::TaxTag(tag) => row(EntityKind::TaxTag, tag),
 			CoreEntity::Goal(id) => row(EntityKind::Goal, id),
 			CoreEntity::CustomReport(id) => row(EntityKind::CustomReport, id),

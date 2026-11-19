@@ -320,8 +320,7 @@ private struct CustomReportTable: View {
 	}
 }
 
-/// Actual's report settings, previewed as they change. Filters stay as
-/// Actual wrote them.
+/// Actual's report settings, previewed as they change.
 private struct CustomReportEditor: View {
 	let model: CustomReportsModel
 	@State private var draft: ReportDraft
@@ -392,7 +391,7 @@ private struct CustomReportEditor: View {
 			}
 			Section("Filters") {
 				if model.canEditFilters {
-					ConditionsEditor(conditions: $draft.conditions, matchAny: $draft.conditionsOr)
+					ConditionsEditor(conditions: $draft.conditions, matchAny: $draft.conditionsOr, names: model.names, style: model.numberStyle)
 				} else if draft.settings.conditions.count > 0 {
 					Text(draft.settings.conditions.count == 1 ? "1 filter" : "\(draft.settings.conditions.count) filters")
 						.foregroundStyle(.textSecondary)

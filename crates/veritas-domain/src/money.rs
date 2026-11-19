@@ -45,6 +45,30 @@ impl Money {
 	pub const fn is_negative(self) -> bool {
 		self.0 < 0
 	}
+
+	/// A register-scale amount (2 implied places) on the budget scale of a
+	/// currency with `places` (CLS-12.9, CLS-12.11). With fewer than 2 places
+	/// it is rounded half up to whole units first, so 50000 is 500 in a yen
+	/// budget and 50050 is 501. A 2-place currency keeps the integer.
+	pub fn register_to_budget_scale(self, places: u8) -> Result<Money, CoreError> {
+		match places {
+			2 => Ok(self),
+			0 | 1 => {
+				let unit = 10_i64.pow(u32::from(2 - places));
+				let rounded = self
+					.0
+					.checked_add(unit / 2)
+					.ok_or(CoreError::Overflow)?
+					.div_euclid(unit);
+				Ok(Money(rounded))
+			}
+			_ => 10_i64
+				.checked_pow(u32::from(places - 2))
+				.and_then(|scale| self.0.checked_mul(scale))
+				.map(Money)
+				.ok_or(CoreError::Overflow),
+		}
+	}
 }
 
 impl fmt::Display for Money {
@@ -58,6 +82,21 @@ impl fmt::Display for Money {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn a_register_amount_moves_to_the_budget_scale_by_the_currencys_places() {
+		let scaled = |minor, places| {
+			Money::from_minor(minor)
+				.register_to_budget_scale(places)
+				.unwrap()
+				.minor()
+		};
+		assert_eq!(scaled(32_017, 2), 32_017, "2 places: one scale");
+		assert_eq!(scaled(50_000, 0), 500, "CLS-12.9: 50000 is 500 yen");
+		assert_eq!(scaled(50_050, 0), 501, "half up");
+		assert_eq!(scaled(50_049, 0), 500);
+		assert_eq!(scaled(1_234, 3), 12_340);
+	}
 
 	#[test]
 	fn displays_whole_cents_without_float_error() {

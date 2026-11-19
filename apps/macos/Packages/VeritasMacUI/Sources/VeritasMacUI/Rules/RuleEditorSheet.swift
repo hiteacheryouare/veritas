@@ -103,7 +103,7 @@ struct RuleEditorSheet: View {
 	private func conditionRow(_ index: Int, _ condition: RuleCondition) -> some View {
 		HStack(spacing: Spacing.s2) {
 			Picker("Field", selection: Binding(get: { condition.field }, set: { field in change { $0.setField(field, ofCondition: index, today: today) } })) {
-				ForEach(Self.including(condition.field, in: RuleChoices.conditionFields), id: \.self) { field in
+				ForEach(Self.including(condition.field, in: RuleMenus.conditionFields), id: \.self) { field in
 					Text(RuleWords.field(field)).tag(field)
 				}
 			}
@@ -111,7 +111,7 @@ struct RuleEditorSheet: View {
 			.frame(width: 150, alignment: .leading)
 			.accessibilityIdentifier("ruleEditor.condition.\(index).field")
 			Picker("Op", selection: Binding(get: { condition.op }, set: { op in change { $0.setOp(op, ofCondition: index, today: today) } })) {
-				ForEach(Self.including(condition.op, in: RuleChoices.ops(for: condition.field)), id: \.self) { op in
+				ForEach(Self.including(condition.op, in: RuleMenus.ops(for: condition.field)), id: \.self) { op in
 					Text(RuleWords.op(op, on: condition.field)).tag(op)
 				}
 			}
@@ -142,7 +142,7 @@ struct RuleEditorSheet: View {
 				GroupedRows {
 					ForEach(indices, id: \.self) { index in
 						if index != indices.first { Divider().padding(.leading, Spacing.s4) }
-						actionRow(index, choices: RuleChoices.actions)
+						actionRow(index, choices: RuleMenus.actions)
 					}
 				}
 			}
@@ -164,9 +164,15 @@ struct RuleEditorSheet: View {
 		}
 	}
 
-	private func actionRow(_ index: Int, choices: [RuleChoices.ActionKind]) -> some View {
-		let action = editing.draft.actions[index]
-		let kind = RuleChoices.ActionKind(action)
+	/// A row can redraw with its old index after Save or Cancel clears the draft.
+	@ViewBuilder private func actionRow(_ index: Int, choices: [RuleMenus.ActionKind]) -> some View {
+		if let action = editing.draft.actions[safe: index] {
+			actionRow(index, action: action, choices: choices)
+		}
+	}
+
+	private func actionRow(_ index: Int, action: RuleAction, choices: [RuleMenus.ActionKind]) -> some View {
+		let kind = RuleMenus.ActionKind(action)
 		return HStack(spacing: Spacing.s2) {
 			Picker("Action", selection: Binding(get: { kind }, set: { kind in if let kind { change { $0.setKind(kind, ofAction: index, today: today) } } })) {
 				ForEach(Self.including(kind, in: choices), id: \.self) { choice in
@@ -207,10 +213,10 @@ struct RuleEditorSheet: View {
 					HStack(spacing: Spacing.s2) {
 						Text(RuleWords.action(RuleActionOp.setSplitAmount))
 						Picker("Allocation", selection: Binding(
-							get: { RuleChoices.Allocation(allocation.value) },
+							get: { RuleMenus.Allocation(allocation.value) },
 							set: { choice in change { $0.setAllocation(choice, line: line) } }
 						)) {
-							ForEach(RuleChoices.Allocation.allCases, id: \.self) { choice in
+							ForEach(RuleMenus.Allocation.allCases, id: \.self) { choice in
 								Text(RuleWords.allocation(choice)).tag(choice)
 							}
 						}
@@ -226,7 +232,7 @@ struct RuleEditorSheet: View {
 				}
 				ForEach(indices.dropFirst(), id: \.self) { index in
 					Divider().padding(.leading, Spacing.s4)
-					actionRow(index, choices: RuleChoices.splitLineActions)
+					actionRow(index, choices: RuleMenus.splitLineActions)
 				}
 			}
 			Button {

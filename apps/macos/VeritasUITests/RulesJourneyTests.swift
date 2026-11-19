@@ -63,7 +63,7 @@ final class RulesJourneyTests: XCTestCase {
 		text.click()
 		text.typeKey("a", modifierFlags: .command)
 		text.typeText("AMAZON")
-		sheet.buttons["ruleEditor.addAction"].click()
+		sheet.links["ruleEditor.addAction"].click()
 		XCTAssertTrue(sheet.popUpButtons["ruleEditor.action.2.kind"].waitForExistence(timeout: 5))
 		attachScreenshot(of: app, named: "edit-rule")
 		sheet.buttons["ruleEditor.action.2.remove"].click()
@@ -117,7 +117,14 @@ final class RulesJourneyTests: XCTestCase {
 		XCTAssertFalse(app.menuButtons["rule.templated.menu"].exists)
 		XCTAssertTrue(row.staticTexts["rule.templated.actualOnly"].exists)
 		row.doubleClick()
-		XCTAssertFalse(app.descendants(matching: .any)["sheet.ruleEditor"].waitForExistence(timeout: 2))
+		let reasons = app.staticTexts["rule.templated.reasons"]
+		XCTAssertTrue(reasons.waitForExistence(timeout: 5), "a double-click says why instead of opening the editor")
+		XCTAssertFalse(app.descendants(matching: .any)["sheet.ruleEditor"].exists)
+	}
+
+	@MainActor
+	func testEditInActualSaysWhy() {
+		let app = openRules()
 		app.buttons["rule.templated.editInActual"].click()
 		let reasons = app.staticTexts["rule.templated.reasons"]
 		XCTAssertTrue(reasons.waitForExistence(timeout: 5))
@@ -129,7 +136,7 @@ final class RulesJourneyTests: XCTestCase {
 	func testABillsRuleOpensItsBill() {
 		let app = openRules()
 		XCTAssertFalse(app.menuButtons["rule.rent-rule.menu"].exists)
-		app.buttons["rule.rent-rule.openBill"].click()
+		app.links["rule.rent-rule.openBill"].click()
 		XCTAssertTrue(app.screen("bills").waitForExistence(timeout: 5))
 	}
 

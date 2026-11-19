@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use veritas_domain::{BudgetData, CategoryId, CivilDate, CoreError, Money, Row};
-use veritas_engine::{BudgetEditor, EnvelopeSheet, NumberFormat};
+use veritas_engine::{BudgetEditor, EnvelopeSheet};
 use veritas_session::register::{self, Filter, Scope, Sort};
 use veritas_session::{Command, Session, SessionOptions};
 
@@ -201,12 +201,7 @@ impl Command for SetBudget {
 		data: &BudgetData,
 		sheet: &EnvelopeSheet,
 	) -> Result<Vec<Row>, CoreError> {
-		let editor = BudgetEditor::new(
-			data,
-			sheet,
-			NumberFormat::from_preference("comma-dot"),
-			false,
-		);
+		let editor = BudgetEditor::new(data, sheet);
 		let writes = editor.set_budget(sheet.today().year_month(), &self.category, self.amount)?;
 		Ok(veritas_session::writes::rows(data, &writes))
 	}

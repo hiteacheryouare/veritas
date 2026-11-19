@@ -32,17 +32,61 @@ impl From<CategoryKind> for veritas_domain::CategoryKind {
 }
 
 /// Where CLS-4.1 files a loan payment's principal or a savings move.
+/// Visible categories always win; v12's hidden cases come only when none
+/// has the kind.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
 pub enum KindTarget {
-	/// No visible category has the kind: offer `createKindCategory`.
+	/// No category has the kind, visible or not: offer `createKindCategory`.
 	None,
 	One {
 		category_id: String,
 	},
-	/// The user picks.
+	/// Several visible: the user picks.
 	Several {
 		category_ids: Vec<String>,
 	},
+	/// v12. One hidden match: confirm 'Show "{name}" again and use it?' (with
+	/// the group when it is hidden too), then `reviveKindCategory`.
+	OneHidden {
+		category: HiddenCategoryMatch,
+	},
+	/// v12. One archived match: confirm 'Restore "{name}" and use it?', then
+	/// `reviveKindCategory`; or "Create a new category" under a free name.
+	OneArchived {
+		category: HiddenCategoryMatch,
+	},
+	/// v12. Several hidden or archived matches, in budget order: list each
+	/// with its group and "(hidden)" or "(archived)", plus "Create a new
+	/// category". The pick is confirmed, then `reviveKindCategory`.
+	SeveralHidden {
+		categories: Vec<HiddenCategoryMatch>,
+	},
+}
+
+/// v12. A category of the kind that isn't visible (CLS-4.1): hidden, in a
+/// hidden group, or archived (`archived`, which reads "(archived)" over
+/// "(hidden)"). Reviving it shows the category and its group again.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct HiddenCategoryMatch {
+	pub category_id: String,
+	pub name: String,
+	pub group_id: String,
+	pub group_name: String,
+	pub group_is_hidden: bool,
+	pub archived: bool,
+}
+
+impl From<veritas_engine::category_kinds::HiddenMatch> for HiddenCategoryMatch {
+	fn from(found: veritas_engine::category_kinds::HiddenMatch) -> Self {
+		HiddenCategoryMatch {
+			category_id: found.category.to_string(),
+			name: found.name,
+			group_id: found.group.to_string(),
+			group_name: found.group_name,
+			group_is_hidden: found.group_hidden,
+			archived: found.archived,
+		}
+	}
 }
 
 /// Where `createKindCategory` would put the new category. When
@@ -112,9 +156,9 @@ impl From<veritas_domain::LoanTerms> for LoanTerms {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
 pub enum LoanPaymentProblem {
-	/// DEBT-2.2: interest, escrow and fees are more than the payment. Saving
-	/// is refused.
-	InterestAbovePayment { short_by: i64 },
+	/// v12. DEBT-2.2: interest, escrow and fees together are more than the
+	/// payment, by `short_by`. Saving is refused. Was `InterestAbovePayment`.
+	PaymentTooSmall { short_by: i64 },
 	/// DEBT-2.3: "This pays off the loan and leaves a credit of $X". A warning.
 	PaysOff { credit: i64 },
 }
@@ -129,6 +173,15 @@ pub struct LoanPaymentPreview {
 	pub estimate: Option<i64>,
 	pub rate_bps: Option<i64>,
 	pub problem: Option<LoanPaymentProblem>,
+	/// v12. What `fundPrincipal` would budget for this principal in the
+	/// payment's month, on the budget scale: whole units in a 0-place budget,
+	/// clamped to what To Budget holds, as Actual's `transferAvailable`
+	/// moves it. 0 means nothing would be budgeted.
+	pub principal_funding: i64,
+	/// v12. `principal_funding` before the clamp to To Budget, on the same
+	/// scale. When `principal_funding` is smaller, show "Funded {funded} of
+	/// {asked}" (DEBT-6 A.6).
+	pub principal_funding_asked: i64,
 }
 
 /// DEBT-3's pre-fill. Every field may be empty; fees are never pre-filled.
@@ -145,7 +198,12 @@ pub struct LoanPaymentDefaults {
 
 /// What the wizard saves (DEBT-6). Amounts are positive cents. `id` names the
 /// payment to replace when it is an existing split; otherwise it picks the
-/// new payment's id, and `nil` lets the core pick.
+/// new payment's id, and `nil` lets the core pick. v12: a part's category is
+/// needed only when the part isn't 0, interest's included, and
+/// `fund_principal` also budgets the principal from To Budget into the
+/// principal line's envelope in the payment's month, exactly
+/// `LoanPaymentPreview.principal_funding` (A.6). It is `Invalid` on a draft
+/// that replaces a payment.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct LoanPaymentDraft {
 	pub id: Option<String>,
@@ -157,11 +215,13 @@ pub struct LoanPaymentDraft {
 	pub escrow: i64,
 	pub fees: i64,
 	pub principal_category_id: String,
-	pub interest_category_id: String,
+	pub interest_category_id: Option<String>,
 	pub escrow_category_id: Option<String>,
 	pub fees_category_id: Option<String>,
 	pub notes: Option<String>,
 	pub cleared: bool,
+	#[uniffi(default = false)]
+	pub fund_principal: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -217,11 +277,12 @@ pub(crate) fn record_loan_payment(
 		date: civil_date(&draft.date)?,
 		parts: parts(draft.total, draft.interest, draft.escrow, draft.fees),
 		principal_category: CategoryId::new(draft.principal_category_id.as_str()),
-		interest_category: CategoryId::new(draft.interest_category_id.as_str()),
+		interest_category: draft.interest_category_id.as_deref().map(CategoryId::new),
 		escrow_category: draft.escrow_category_id.as_deref().map(CategoryId::new),
 		fees_category: draft.fees_category_id.as_deref().map(CategoryId::new),
 		notes: draft.notes.clone(),
 		cleared: draft.cleared,
+		fund_principal: draft.fund_principal,
 	};
 	loans::record_payment(data, &core, &RuleBook::new(data), now_ms).map(|(rows, _)| rows)
 }
@@ -287,7 +348,8 @@ impl Session {
 	}
 
 	/// v9. CLS-4.1: the visible categories of `kind`, which must be
-	/// `debtPrincipal` or `savings`.
+	/// `debtPrincipal` or `savings`; v12 adds the hidden and archived ones
+	/// when none is visible.
 	pub fn kind_target(&self, kind: CategoryKind) -> Result<KindTarget, FfiError> {
 		self.core.call(|session| {
 			Ok(match kinds::kind_target(session.data()?, kind.into())? {
@@ -297,6 +359,15 @@ impl Session {
 				},
 				CoreKindTarget::Several(ids) => KindTarget::Several {
 					category_ids: ids.iter().map(ToString::to_string).collect(),
+				},
+				CoreKindTarget::OneHidden(found) => KindTarget::OneHidden {
+					category: found.into(),
+				},
+				CoreKindTarget::OneArchived(found) => KindTarget::OneArchived {
+					category: found.into(),
+				},
+				CoreKindTarget::SeveralHidden(all) => KindTarget::SeveralHidden {
+					categories: all.into_iter().map(Into::into).collect(),
 				},
 			})
 		})
@@ -365,9 +436,11 @@ impl Session {
 				outstanding: preview.outstanding.minor(),
 				estimate: preview.estimate.map(Money::minor),
 				rate_bps: preview.rate_bps,
+				principal_funding: preview.principal_funding.minor(),
+				principal_funding_asked: preview.principal_funding_asked.minor(),
 				problem: preview.problem.map(|problem| match problem {
-					loans::PaymentProblem::InterestAbovePayment { short_by } => {
-						LoanPaymentProblem::InterestAbovePayment {
+					loans::PaymentProblem::PaymentTooSmall { short_by } => {
+						LoanPaymentProblem::PaymentTooSmall {
 							short_by: short_by.minor(),
 						}
 					}
