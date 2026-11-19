@@ -45,8 +45,7 @@ public final class FoundationModelsAssistant: AssistantAnswering {
 			for try await snapshot in session.streamResponse(to: question) {
 				continuation.yield(snapshot.content)
 			}
-		} catch let error as LanguageModelError {
-			guard retrying, case .contextSizeExceeded = error else { throw error }
+		} catch let error where retrying && ModelFailure.isContextOverflow(error) {
 			self.session = nil
 			try await stream(question, into: continuation, retrying: false)
 		}
@@ -80,22 +79,62 @@ public struct AssistantFailure: Error, Hashable, LocalizedError {
 	public var errorDescription: String? { message }
 
 	private static func message(for error: any Error) -> String {
+		if let message = ModelFailure.message(for: error) { return message }
+		if let error = error as? LanguageModelSession.ToolCallError {
+			return "Couldn't read the budget. \(ErrorPresentation.coreMessage(error.underlyingError))"
+		}
+		return error.localizedDescription
+	}
+}
+
+/// The macOS 27 SDK replaced `LanguageModelSession.GenerationError` with
+/// `LanguageModelError` and `SystemLanguageModel.Error`, and Swift 6.4 is the
+/// first compiler to ship with it. The swift CI job still builds on the macOS 26 SDK.
+private enum ModelFailure {
+	static let wouldNotAnswer = "The model wouldn't answer that question."
+	static let tooLong = "That question is too long for the model."
+	static let unsupportedLanguage = "The model doesn't support this language."
+	static let busy = "The model is busy. Ask again in a moment."
+	static let timedOut = "The model took too long to answer."
+	static let unavailable = "The Apple Intelligence model isn't available right now."
+
+	#if compiler(>=6.4)
+	static func isContextOverflow(_ error: any Error) -> Bool {
+		guard case .contextSizeExceeded? = error as? LanguageModelError else { return false }
+		return true
+	}
+
+	static func message(for error: any Error) -> String? {
 		switch error {
 		case let error as LanguageModelError:
 			switch error {
-			case .guardrailViolation, .refusal: "The model wouldn't answer that question."
-			case .contextSizeExceeded: "That question is too long for the model."
-			case .unsupportedLanguageOrLocale: "The model doesn't support this language."
-			case .rateLimited: "The model is busy. Ask again in a moment."
-			case .timeout: "The model took too long to answer."
+			case .guardrailViolation, .refusal: wouldNotAnswer
+			case .contextSizeExceeded: tooLong
+			case .unsupportedLanguageOrLocale: unsupportedLanguage
+			case .rateLimited: busy
+			case .timeout: timedOut
 			default: error.localizedDescription
 			}
-		case is SystemLanguageModel.Error:
-			"The Apple Intelligence model isn't available right now."
-		case let error as LanguageModelSession.ToolCallError:
-			"Couldn't read the budget. \(ErrorPresentation.coreMessage(error.underlyingError))"
-		default:
-			error.localizedDescription
+		case is SystemLanguageModel.Error: unavailable
+		default: nil
 		}
 	}
+	#else
+	static func isContextOverflow(_ error: any Error) -> Bool {
+		guard case .exceededContextWindowSize? = error as? LanguageModelSession.GenerationError else { return false }
+		return true
+	}
+
+	static func message(for error: any Error) -> String? {
+		guard let error = error as? LanguageModelSession.GenerationError else { return nil }
+		return switch error {
+		case .guardrailViolation, .refusal: wouldNotAnswer
+		case .exceededContextWindowSize: tooLong
+		case .unsupportedLanguageOrLocale: unsupportedLanguage
+		case .rateLimited: busy
+		case .assetsUnavailable: unavailable
+		default: error.localizedDescription
+		}
+	}
+	#endif
 }
