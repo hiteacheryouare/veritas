@@ -1,0 +1,185 @@
+import Foundation
+import Observation
+import VeritasCore
+
+/// The What-ifs page (R-FC-2): named overlays and their events. Each change
+/// is one command and one undo step, and writes only `veritas_scenario*`.
+@MainActor
+@Observable
+public final class WhatIfsModel {
+	public private(set) var scenarios: [ScenarioSummary] = []
+	public private(set) var names = BudgetNames.empty
+	public private(set) var goals: [GoalSummary] = []
+
+	@ObservationIgnored let workspace: WorkspaceModel
+	@ObservationIgnored public let today: String
+	@ObservationIgnored public let thisMonth: Month
+	@ObservationIgnored private var loadGeneration = 0
+
+	public init(workspace: WorkspaceModel, today: String? = nil) {
+		self.workspace = workspace
+		let today = today ?? WorkspaceModel.today()
+		self.today = today
+		thisMonth = Month(date: today) ?? Month(year: 2026, month: 1)
+	}
+
+	public var format: MoneyFormat { workspace.format }
+	public var numberStyle: NumberStyle { workspace.numberStyle }
+	public var isReadOnly: Bool { workspace.readOnly != nil }
+	public var words: ForecastWords { ForecastWords(names: names, goals: goals, format: format) }
+
+	/// Register amounts read at 2 places; a goal contribution reads at the budget's (D63).
+	public func reader(_ scale: MoneyFormat.Scale) -> any AmountReader {
+		scale == .budget ? workspace.budgetAmountReader : CoreAmountReader()
+	}
+
+	public func load() async {
+		loadGeneration += 1
+		let generation = loadGeneration
+		let today = today
+		async let names = workspace.budgetNames()
+		async let goals = workspace.goals()
+		let scenarios = await workspace.report { try await $0.scenarios(today: today) }
+		let (loadedNames, loadedGoals) = await (names, goals)
+		guard generation == loadGeneration else { return }
+		self.names = loadedNames
+		self.goals = loadedGoals
+		if let scenarios { self.scenarios = scenarios }
+	}
+
+	// MARK: Choices
+
+	public var accounts: [AccountDetail] { names.openAccounts }
+
+	public var expenseCategories: [EnvelopeGroup] { categoryGroups(income: false) }
+	public var incomeCategories: [EnvelopeGroup] { categoryGroups(income: true) }
+
+	private func categoryGroups(income: Bool) -> [EnvelopeGroup] {
+		names.categoryGroups
+			.filter { $0.isIncome == income && !$0.hidden }
+			.map { group in
+				var group = group
+				group.envelopes = group.envelopes.filter { !$0.hidden }
+				return group
+			}
+			.filter { !$0.envelopes.isEmpty }
+	}
+
+	public var activeGoals: [GoalSummary] { goals.filter { $0.state == .active } }
+
+	/// This month and the 24 after it, the months a what-if can start or end in.
+	public var months: [Month] {
+		(0...24).map { thisMonth.adding(months: $0) }
+	}
+
+	public func newDraft() -> ScenarioDraft {
+		ScenarioDraft(today: today, accountID: accounts.first { !$0.offBudget }?.id)
+	}
+
+	// MARK: Compare
+
+	public func isCompared(_ id: String) -> Bool {
+		workspace.comparedScenarios.contains(id)
+	}
+
+	public var canCompareMore: Bool {
+		workspace.comparedScenarios.count < ForecastModel.maxCompared
+	}
+
+	public func setCompared(_ id: String, _ isOn: Bool) {
+		workspace.setCompared(id, isOn)
+	}
+
+	// MARK: Commands
+
+	/// The new what-if's id, or `nil` with the core's reason passed to `inline`.
+	public func create(named name: String, inline: (String) -> Void) async -> String? {
+		let id = await workspace.change({ try await $0.createScenario(named: name) }, inline: inline)
+		if id != nil { await load() }
+		return id
+	}
+
+	public func rename(_ id: String, to name: String, inline: (String) -> Void) async -> Bool {
+		await run(.renameScenario(scenarioId: id, name: name), inline: inline)
+	}
+
+	public func delete(_ id: String) async -> Bool {
+		workspace.setCompared(id, false)
+		return await run(.deleteScenario(scenarioId: id))
+	}
+
+	public func add(_ change: ScenarioChange, to scenarioID: String, inline: (String) -> Void) async -> Bool {
+		await run(.addScenarioEvent(scenarioId: scenarioID, change: change, today: today), inline: inline)
+	}
+
+	public func edit(_ eventID: String, in scenarioID: String, to change: ScenarioChange, inline: (String) -> Void) async -> Bool {
+		await run(.editScenarioEvent(scenarioId: scenarioID, eventId: eventID, change: change, today: today), inline: inline)
+	}
+
+	public func remove(_ eventID: String, from scenarioID: String) async -> Bool {
+		await run(.removeScenarioEvent(scenarioId: scenarioID, eventId: eventID))
+	}
+
+	private func run(_ command: Command, inline: (String) -> Void) async -> Bool {
+		let done = await workspace.perform(command, inline: inline)
+		if done { await load() }
+		return done
+	}
+
+	private func run(_ command: Command) async -> Bool {
+		let done = await workspace.perform(command)
+		if done { await load() }
+		return done
+	}
+}
+
+/// "Add what-if": a name and its first event, saved as two steps. If the
+/// event is refused, the what-if made for it is kept for the next try and
+/// deleted on Cancel, so a retry never trips over its own name.
+@MainActor
+@Observable
+public final class NewWhatIf {
+	public var name = ""
+	public private(set) var problem: String?
+
+	@ObservationIgnored let model: WhatIfsModel
+	@ObservationIgnored private var created: (id: String, name: String)?
+
+	public init(model: WhatIfsModel) {
+		self.model = model
+	}
+
+	public var trimmedName: String { name.trimmingCharacters(in: .whitespaces) }
+
+	public func show(_ problem: String?) {
+		self.problem = problem
+	}
+
+	/// The what-if's id once it and its event are saved.
+	public func save(_ change: ScenarioChange) async -> String? {
+		problem = nil
+		let name = trimmedName
+		let id: String
+		if let created {
+			if created.name != name {
+				guard await model.rename(created.id, to: name, inline: show) else { return nil }
+				self.created = (created.id, name)
+			}
+			id = created.id
+		} else {
+			guard let made = await model.create(named: name, inline: show) else { return nil }
+			created = (made, name)
+			id = made
+		}
+		guard await model.add(change, to: id, inline: show) else { return nil }
+		created = nil
+		model.setCompared(id, true)
+		return id
+	}
+
+	public func cancel() async {
+		guard let created else { return }
+		self.created = nil
+		_ = await model.delete(created.id)
+	}
+}

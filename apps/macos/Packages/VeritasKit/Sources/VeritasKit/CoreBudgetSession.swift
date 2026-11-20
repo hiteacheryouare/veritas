@@ -296,6 +296,25 @@ final class CoreBudgetSession: BudgetSession {
 		return try await Core.run { try session.registerRow(transactionId: id) }
 	}
 
+	func forecast(today: String, scenarioIDs: [String]) async throws -> Forecast {
+		let session = session
+		return try await Core.cancellable { try await session.forecast(today: today, scenarioIds: scenarioIDs, cancel: $0) }
+	}
+
+	func budgetSuggestions(today: String) async throws -> SuggestionList {
+		let session = session
+		return try await Core.cancellable { try await session.budgetSuggestions(today: today, cancel: $0) }
+	}
+
+	func scenarios(today: String) async throws -> [ScenarioSummary] {
+		let session = session
+		return try await Core.run { try session.scenarios(today: today) }
+	}
+
+	func createScenario(named name: String) async throws -> String {
+		try await created(.scenario, by: .createScenario(name: name))
+	}
+
 	/// Runs a command that makes one row and returns that row's id.
 	private func created(_ kind: EntityKind, by command: Command) async throws -> String {
 		let session = session

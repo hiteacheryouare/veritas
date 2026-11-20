@@ -22,6 +22,10 @@ struct WorkspaceView: View {
 					RulesScreen(workspace: model)
 				} else if model.destination == .screen(.statements) {
 					StatementsScreen(workspace: model)
+				} else if model.destination == .screen(.forecast) {
+					ForecastScreen(workspace: model)
+				} else if model.destination == .screen(.whatIfs) {
+					WhatIfsScreen(workspace: model)
 				} else if model.destination == .screen(.tax) {
 					TaxScreen(workspace: model)
 				} else if model.destination == .screen(.goals) {
