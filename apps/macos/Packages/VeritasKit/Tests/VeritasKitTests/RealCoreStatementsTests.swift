@@ -182,6 +182,25 @@ struct RealCoreStatementsTests {
 		}
 	}
 
+	/// Architect's call: a period that runs past today ends every statement
+	/// in the set today, so closing equity meets net worth (ST-3).
+	@Test func aSetThatRunsPastTodayEndsEveryStatementToday() async throws {
+		try await RealBudget.with { budget in
+			let model = StatementsModel(workspace: budget.workspace, today: Self.today)
+			await model.setCustom(first: Month(year: 2026, month: 10), last: Month(year: 2026, month: 12))
+			let documents = try #require(await model.statementSet())
+			let equity = try #require(await budget.workspace.report { try await $0.ownersEquity(first: "2026-10-01", last: Self.today) })
+			let flow = try #require(await budget.workspace.report { try await $0.cashFlowStatement(first: "2026-10-01", last: Self.today) })
+			#expect(Self.amounts(documents[1])["closing"] == equity.closing)
+			#expect(Self.amounts(documents[1])["closing"] == Self.amounts(documents[2])["netWorth"], "closing equity is the balance sheet's net worth")
+			#expect(Self.amounts(documents[3])["closing"] == flow.closing)
+			#expect(documents[2].basis == "As of November 16, 2026")
+			for document in [documents[0], documents[1], documents[3]] {
+				#expect(document.basis == "October 1, 2026 to November 16, 2026", "\(document.title)")
+			}
+		}
+	}
+
 	static func amounts(_ document: StatementDocument) -> [String: Int64] {
 		Dictionary(document.lines.compactMap { line in line.amount.map { (line.id, $0) } }, uniquingKeysWith: { first, _ in first })
 	}

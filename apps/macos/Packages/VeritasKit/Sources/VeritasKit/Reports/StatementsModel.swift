@@ -254,20 +254,22 @@ public final class StatementsModel {
 
 	/// The four statements for the chosen months in one file, in the order
 	/// they build on each other: the income statement, owner's equity, the
-	/// balance sheet on the last day of the months (or today, if sooner) and
-	/// the cash flow statement. `nil` if any read fails.
+	/// balance sheet and the cash flow statement. All four end on the same
+	/// day, the months' last day or today if sooner, so closing equity meets
+	/// the balance sheet's net worth (ST-3). `nil` if any read fails.
 	public func statementSet() async -> [StatementDocument]? {
 		let period = period
-		let first = period.first.firstDay, last = period.last.lastDay
-		let asOf = min(last, today)
+		let first = period.first.firstDay
+		let end = min(period.last.lastDay, today)
 		guard let entity = await workspace.report({ try await $0.statementEntity() }),
-			let income = await workspace.report({ try await $0.incomeStatement(first: first, last: last) }),
-			let equity = await workspace.report({ try await $0.ownersEquity(first: first, last: last) }),
-			let sheet = await workspace.report({ try await $0.balanceSheet(asOf: asOf) }),
-			let flow = await workspace.report({ try await $0.cashFlowStatement(first: first, last: last) })
+			let income = await workspace.report({ try await $0.incomeStatement(first: first, last: end) }),
+			let equity = await workspace.report({ try await $0.ownersEquity(first: first, last: end) }),
+			let sheet = await workspace.report({ try await $0.balanceSheet(asOf: end) }),
+			let flow = await workspace.report({ try await $0.cashFlowStatement(first: first, last: end) })
 		else { return nil }
+		let range = end == period.last.lastDay ? nil : "\(Self.date(first, style: .wide)) to \(Self.date(end, style: .wide))"
 		func document(_ kind: StatementKind, _ lines: [StatementLine], unexplained: Int64? = nil) -> StatementDocument {
-			StatementDocument(kind: kind, entity: entity.name, basis: basis(kind, asOf: asOf, period: period), lines: lines, unexplained: unexplained)
+			StatementDocument(kind: kind, entity: entity.name, basis: basis(kind, asOf: end, period: period, range: range), lines: lines, unexplained: unexplained)
 		}
 		return [
 			document(.incomeStatement, Self.lines(income)),
@@ -281,8 +283,9 @@ public final class StatementsModel {
 		equity.unexplained == 0 ? nil : equity.unexplained
 	}
 
-	private func basis(_ kind: StatementKind, asOf: String, period: ReportPeriod) -> String {
-		let when = kind.isDated ? "As of \(Self.date(asOf, style: .wide))" : period.title
+	/// `range` stands in for the months' title when a period stops short of its last day.
+	private func basis(_ kind: StatementKind, asOf: String, period: ReportPeriod, range: String? = nil) -> String {
+		let when = kind.isDated ? "As of \(Self.date(asOf, style: .wide))" : range ?? period.title
 		guard let code = workspace.overview?.currencyCode else { return when }
 		return "\(when), in \(code)"
 	}
