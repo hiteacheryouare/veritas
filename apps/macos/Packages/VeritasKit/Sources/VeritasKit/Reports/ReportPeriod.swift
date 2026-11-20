@@ -40,8 +40,9 @@ extension Month: Comparable {
 		self.init(year: year, month: month)
 	}
 
-	func date(calendar: Calendar = .current) -> Date? {
-		calendar.date(from: DateComponents(year: Int(year), month: Int(month), day: 1))
+	/// The month's first day at local midnight, read as the Gregorian month it is.
+	public func date(calendar: Calendar = .current) -> Date? {
+		calendar.civil.date(from: DateComponents(year: Int(year), month: Int(month), day: 1))
 	}
 }
 
@@ -92,8 +93,7 @@ public struct ReportPeriod: Hashable, Sendable {
 		switch parts.count {
 		case 2: return Month(year: Int32(parts[0]), month: UInt32(parts[1])).date().map { $0.formatted(.dateTime.month(.abbreviated)) } ?? text
 		case 3:
-			let date = Calendar.current.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
-			return date?.formatted(.dateTime.month(.abbreviated).day()) ?? text
+			return CivilDate.date(text)?.formatted(.dateTime.month(.abbreviated).day()) ?? text
 		default: return text
 		}
 	}

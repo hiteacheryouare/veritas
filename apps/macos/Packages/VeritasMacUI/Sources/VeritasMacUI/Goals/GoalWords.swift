@@ -68,8 +68,7 @@ struct GoalWords {
 	}
 
 	static func currentMonth(_ date: Date = .now, calendar: Calendar = .current) -> Month {
-		let parts = calendar.dateComponents([.year, .month], from: date)
-		return Month(year: Int32(parts.year ?? 2000), month: UInt32(parts.month ?? 1))
+		CivilDate.month(date, calendar: calendar)
 	}
 
 	static func monthYear(_ month: Month) -> String {
@@ -77,10 +76,6 @@ struct GoalWords {
 	}
 
 	static func date(_ month: Month) -> Date? {
-		var parts = DateComponents()
-		parts.year = Int(month.year)
-		parts.month = Int(month.month)
-		parts.day = 1
-		return Calendar.current.date(from: parts)
+		month.date()
 	}
 }

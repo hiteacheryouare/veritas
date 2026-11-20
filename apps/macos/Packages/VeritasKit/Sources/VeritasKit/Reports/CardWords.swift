@@ -142,8 +142,7 @@ public enum CardWords {
 
 	/// "November 30, 2026" for a day, "November 2026" for a month.
 	public static func day(_ text: String) -> String {
-		let parts = text.split(separator: "-").compactMap { Int($0) }
-		if parts.count == 3, let date = Calendar.current.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2])) {
+		if let date = CivilDate.date(text) {
 			return date.formatted(.dateTime.month(.wide).day().year())
 		}
 		return Month(date: text).map(ReportPeriod.monthYear) ?? text
