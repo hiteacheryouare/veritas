@@ -296,9 +296,10 @@ public final class WorkspaceModel {
 		}
 	}
 
-	/// The local civil date (PLAN §9 #14): time zones never shift it.
+	/// The local civil date (PLAN §9 #14): time zones never shift it, and it
+	/// is Gregorian whatever calendar `calendar` reads dates in.
 	public nonisolated static func today(_ now: Date = .now, calendar: Calendar = .current) -> String {
-		let parts = calendar.dateComponents([.year, .month, .day], from: now)
+		let parts = calendar.civil.dateComponents([.year, .month, .day], from: now)
 		return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 1, parts.day ?? 1)
 	}
 

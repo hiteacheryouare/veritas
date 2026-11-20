@@ -1278,7 +1278,10 @@ impl Session {
 				return Err(FfiError::Cancelled);
 			}
 			let today = civil_date(&today)?;
-			core.call(|session| session_dashboards(session, today, Some(cancel)))
+			core.call(|session| {
+				session.set_today(today);
+				session_dashboards(session, today, Some(cancel))
+			})
 		})
 		.await
 	}

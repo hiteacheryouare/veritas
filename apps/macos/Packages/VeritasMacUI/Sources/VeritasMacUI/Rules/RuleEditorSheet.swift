@@ -422,9 +422,7 @@ struct RuleValueEditor: View {
 	}
 
 	static func date(_ day: String) -> Date? {
-		let parts = day.split(separator: "-").compactMap { Int($0) }
-		guard parts.count == 3 else { return nil }
-		return Calendar.current.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
+		CivilDate.date(day)
 	}
 }
 

@@ -31,7 +31,9 @@ pub use dashboard::{
 };
 pub use filter::TransactionFilter;
 pub use json::Json;
-pub use net_profit::{CategoryLabels, CategoryLine, Line, NetProfit, Section, net_profit};
+pub use net_profit::{
+	CategoryLabels, CategoryLine, Line, NetProfit, Section, labels as category_labels, net_profit,
+};
 pub use period::{Period, months};
 pub use report_eval::{
 	Balances, IntervalBalances, ReportData, ReportGroup, ReportInterval, Uncategorized,
@@ -41,12 +43,12 @@ pub use report_query::{QueryRow, report_range, report_rows, transaction_date_bou
 pub use sankey::{Flow, Node, NodeKind, Sankey, sankey};
 pub use standard::{NetWorthPoint, net_profit_by_month, net_worth_by_month};
 pub use statements::{
-	AccountGroupSection, BalanceSheet, CashFlow, OwnersEquity, SheetLine, balance_sheet, cash_flow,
-	cash_flow_by_month, owners_equity,
+	AccountGroupSection, BalanceSheet, CashFlow, IncomeStatement, OwnersEquity, SheetLine,
+	StatementGroup, balance_sheet, cash_flow, cash_flow_by_month, income_statement, owners_equity,
 };
 pub use tax::{
-	Bucket, BucketTotal, Direction, Source, TaxRow, TaxSummary, detail_csv, extract_tags,
-	summary_csv, tax_summary,
+	Bucket, BucketTotal, Direction, Source, TaxRow, TaxRowText, TaxSummary, detail_csv,
+	extract_tags, row_text, summary_csv, tax_summary,
 };
 pub use widget_meta::{
 	DEFAULT_MARKDOWN, TimeFrame, WidgetSettings, add_widget, check_conditions, condition,

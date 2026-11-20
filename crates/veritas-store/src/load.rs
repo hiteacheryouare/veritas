@@ -2,14 +2,16 @@ use std::collections::BTreeMap;
 
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OptionalExtension, Row};
+use veritas_domain::SettingKey;
 use veritas_domain::{
 	Account, AccountGroup, AccountGroupId, AccountId, AccountKind, AccountMeta, BudgetCell,
-	BudgetData, BudgetType, Category, CategoryGroup, CategoryGroupId, CategoryId, CategoryKind,
-	CategoryMeta, CivilDate, ConditionsOp, CoreError, CustomReportId, CustomReportRow,
-	DashboardPage, DashboardPageId, FormatPrefs, Goal, GoalId, GoalStatus, LoanPart,
-	LoanPaymentPart, LoanPaymentPartId, Money, Payee, PayeeId, Rule, RuleId, RuleStage, Schedule,
+	BudgetData, BudgetType, Cadence, Category, CategoryGroup, CategoryGroupId, CategoryId,
+	CategoryKind, CategoryMeta, CivilDate, ConditionsOp, CoreError, CustomReportId,
+	CustomReportRow, DashboardPage, DashboardPageId, FormatPrefs, Goal, GoalId, GoalStatus,
+	IncomeDelta, LoanPart, LoanPaymentPart, LoanPaymentPartId, Money, Payee, PayeeId, Rule, RuleId,
+	RuleStage, Scenario, ScenarioChange, ScenarioEvent, ScenarioEventId, ScenarioId, Schedule,
 	ScheduleId, ScheduleJsonPaths, ScheduleMeta, SplitRole, Tag, TagId, Transaction, TransactionId,
-	TransactionMeta, Widget, WidgetId,
+	TransactionMeta, Widget, WidgetId, YearMonth,
 };
 
 use crate::cells::{
@@ -824,6 +826,23 @@ fn load_veritas_tables(
 		)?;
 	}
 
+	if table_exists(conn, "veritas_meta")? {
+		each_row(
+			conn,
+			"veritas_meta",
+			"SELECT key, value FROM veritas_meta",
+			skipped,
+			|row| {
+				let key = required_text(at(row, 0)?, "the row has no key")?;
+				if let Some(key) = SettingKey::parse(&key) {
+					let value = required_text(at(row, 1)?, "the setting has no value")?;
+					data.settings.insert(key, value);
+				}
+				Ok(())
+			},
+		)?;
+	}
+
 	if table_exists(conn, "veritas_goal")? {
 		each_row(
 			conn,
@@ -868,5 +887,130 @@ fn load_veritas_tables(
 			},
 		)?;
 	}
-	Ok(())
+	load_scenarios(conn, data, skipped)
+}
+
+/// D50: scenarios and their events. An event row that doesn't describe one
+/// change, or names a scenario that doesn't exist, is skipped and reported.
+fn load_scenarios(
+	conn: &Connection,
+	data: &mut BudgetData,
+	skipped: &mut Vec<SkippedRow>,
+) -> Result<(), CoreError> {
+	if !table_exists(conn, "veritas_scenario")? {
+		return Ok(());
+	}
+	each_row(
+		conn,
+		"veritas_scenario",
+		"SELECT id, name, sort_order, created_at FROM veritas_scenario",
+		skipped,
+		|row| {
+			let id = ScenarioId::new(id(row, 0)?);
+			let scenario = Scenario {
+				id: id.clone(),
+				name: required_text(at(row, 1)?, "the scenario has no name")?,
+				sort_order: sort_order(at(row, 2)?)?,
+				created_at: integer(at(row, 3)?)?.ok_or("the scenario has no created_at")?,
+				events: Vec::new(),
+			};
+			data.scenarios.insert(id, scenario);
+			Ok(())
+		},
+	)?;
+	if !table_exists(conn, "veritas_scenario_event")? {
+		return Ok(());
+	}
+	each_row(
+		conn,
+		"veritas_scenario_event",
+		"SELECT id, scenario_id, kind, account_id, category_id, goal_id, amount, percent_bp, \
+		 on_date, start_month, end_month, every_months, every_weeks \
+		 FROM veritas_scenario_event ORDER BY id",
+		skipped,
+		|row| {
+			let event = ScenarioEventId::new(id(row, 0)?);
+			let scenario =
+				ScenarioId::new(required_text(at(row, 1)?, "the event has no scenario")?);
+			let change = scenario_change(row)?;
+			let found = data
+				.scenarios
+				.get_mut(&scenario)
+				.ok_or("the event's scenario doesn't exist")?;
+			found.events.push(ScenarioEvent { id: event, change });
+			Ok(())
+		},
+	)
+}
+
+fn scenario_change(row: &Row<'_>) -> Cell<ScenarioChange> {
+	let account = text(at(row, 3)?)?.map(AccountId::new);
+	let category = text(at(row, 4)?)?.map(CategoryId::new);
+	let goal = text(at(row, 5)?)?.map(GoalId::new);
+	let amount = money(at(row, 6)?)?;
+	let percent_bp = integer(at(row, 7)?)?;
+	let on_date = date(at(row, 8)?)?;
+	let start_month =
+		YearMonth::parse(&required_text(at(row, 9)?, "the event has no start month")?)
+			.map_err(|_| "a month isn't YYYY-MM")?;
+	let end_month = text_month(at(row, 10)?)?;
+	let every = |value: Option<i64>| -> Cell<Option<u32>> {
+		value
+			.map(|n| {
+				u32::try_from(n)
+					.ok()
+					.filter(|n| *n > 0)
+					.ok_or("a cadence isn't a positive count")
+			})
+			.transpose()
+	};
+	let (every_months, every_weeks) = (
+		every(integer(at(row, 11)?)?)?,
+		every(integer(at(row, 12)?)?)?,
+	);
+	let kind = required_text(at(row, 2)?, "the event has no kind")?;
+	Ok(match kind.as_str() {
+		"one_time" => ScenarioChange::OneTime {
+			date: on_date.ok_or("a one-time event has no date")?,
+			account: account.ok_or("a one-time event has no account")?,
+			category,
+			amount: amount.ok_or("a one-time event has no amount")?,
+		},
+		"recurring" => ScenarioChange::Recurring {
+			start: on_date.ok_or("a recurring event has no start date")?,
+			end_month,
+			cadence: match (every_months, every_weeks) {
+				(Some(n), None) => Cadence::EveryMonths(n),
+				(None, Some(n)) => Cadence::EveryWeeks(n),
+				_ => return Err("a recurring event needs exactly one cadence"),
+			},
+			account: account.ok_or("a recurring event has no account")?,
+			category,
+			amount: amount.ok_or("a recurring event has no amount")?,
+		},
+		"category_percent" => ScenarioChange::CategoryPercent {
+			category: category.ok_or("a percent change has no category")?,
+			percent_bp: percent_bp.ok_or("a percent change has no percent")?,
+			start_month,
+			end_month,
+		},
+		"income_change" => ScenarioChange::IncomeChange {
+			account: account.ok_or("an income change has no account")?,
+			category,
+			change: match (amount, percent_bp) {
+				(Some(amount), None) => IncomeDelta::Amount(amount),
+				(None, Some(bp)) => IncomeDelta::Percent(bp),
+				_ => return Err("an income change needs an amount or a percent"),
+			},
+			start_month,
+			end_month,
+		},
+		"goal_contribution" => ScenarioChange::GoalContribution {
+			goal: goal.ok_or("a goal contribution has no goal")?,
+			amount: amount.ok_or("a goal contribution has no amount")?,
+			start_month,
+			end_month,
+		},
+		_ => return Err("unknown scenario event kind"),
+	})
 }

@@ -5,8 +5,8 @@
 mod support;
 
 use support::*;
-use veritas_domain::{CategoryKind, PayeeId};
-use veritas_forecast::{Change, Streak, Wrapped, wrapped};
+use veritas_domain::{CategoryGroupId, CategoryId, CategoryKind, GoalId, PayeeId};
+use veritas_forecast::{Change, FunFact, Measure, Streak, Wrapped, wrapped};
 use veritas_reports::classify;
 
 fn wrap(book: &Book, year: i32, today: &str) -> Wrapped {
@@ -284,6 +284,10 @@ fn w_10_goals_count_in_the_year_they_were_reached() {
 	book.goal("old", "New laptop", 1000, None).reached_month = Some(ym("2026-11"));
 	book.spend("New laptop", "2027-04-02", -148000);
 	assert_eq!(wrap(&book, 2027, "2028-01-01").goals_completed, 1);
+	assert_eq!(
+		wrap(&book, 2027, "2028-01-01").completed_goals,
+		[GoalId::new("laptop")]
+	);
 	assert_eq!(wrap(&book, 2028, "2028-06-01").goals_completed, 0);
 }
 
@@ -365,5 +369,187 @@ fn savings_and_debt_are_separate_cards_not_out() {
 	assert_eq!(
 		(result.total_out, result.savings),
 		(cents(1000), cents(50000))
+	);
+}
+
+fn card_book() -> Book {
+	let mut book = Book::household();
+	book.group("Saving", false)
+		.category("Emergency fund", "Saving")
+		.kind("Emergency fund", CategoryKind::Savings);
+	book.spend("Paycheck", "2027-02-01", 100000);
+	book.spend("Groceries", "2027-02-03", -43000);
+	book.spend("Electric", "2027-03-03", -7000);
+	book.transfer("CHK", "SAV", "2027-03-04", -20000)
+		.in_category("Emergency fund");
+	book
+}
+
+#[test]
+fn fc_8_redaction_covers_every_card_as_a_share() {
+	let redacted = wrap(&card_book(), 2027, "2027-12-31").redacted();
+	assert_eq!(redacted.out_vs_in, Some(500));
+	assert_eq!(redacted.net, Some(500), "out and net add up to 1000");
+	assert_eq!(redacted.savings, Some(200));
+	assert_eq!(redacted.debt_paydown, Some(0));
+	assert_eq!(
+		redacted.biggest_month,
+		Some(860),
+		"February's 43000 of 50000"
+	);
+	assert_eq!(
+		redacted.groups,
+		[
+			(Some(CategoryGroupId::new("Everyday")), 860),
+			(Some(CategoryGroupId::new("Bills")), 140),
+		]
+	);
+}
+
+#[test]
+fn fc_8_a_negative_out_share_rounds_half_away_from_zero() {
+	let mut book = Book::household();
+	book.spend("Paycheck", "2027-02-01", 400000);
+	book.spend("Fun", "2027-02-02", 1000);
+	let result = wrap(&book, 2027, "2027-12-31");
+	assert_eq!(result.total_out, cents(-1000));
+	let redacted = result.redacted();
+	assert_eq!(redacted.out_vs_in, Some(-3), "-2.5 tenths rounds to -3");
+	assert_eq!(redacted.net, Some(1003));
+	assert_eq!(redacted.biggest_month, None, "no spending to divide by");
+}
+
+#[test]
+fn fc_8_shares_are_n_a_without_income() {
+	let mut book = Book::household();
+	book.spend("Groceries", "2027-02-03", -43000);
+	let redacted = wrap(&book, 2027, "2027-12-31").redacted();
+	assert_eq!(
+		(
+			redacted.out_vs_in,
+			redacted.net,
+			redacted.savings,
+			redacted.debt_paydown
+		),
+		(None, None, None, None)
+	);
+	assert_eq!(redacted.biggest_month, Some(1000));
+}
+
+#[test]
+fn fc_8_fun_facts_use_only_the_users_own_numbers() {
+	let facts = wrap(&w_1_book(), 2027, "2027-01-10").fun_facts();
+	assert_eq!(
+		facts,
+		[
+			FunFact::BiggestMonthVsTypical {
+				month: ym("2027-01"),
+				basis_points: 0
+			},
+			FunFact::TopCategoryShare {
+				category: CategoryId::new("Rent"),
+				tenths: 943
+			},
+			FunFact::NoSpendShare {
+				days: 6,
+				evaluated_days: 10,
+				tenths: 600
+			},
+		],
+		"no prior year to compare with, so no prior-year facts"
+	);
+}
+
+#[test]
+fn fc_8_prior_year_facts_skip_new_and_partial_years() {
+	let mut book = Book::household();
+	book.opening("CHK", "2025-12-31", 100000);
+	book.spend("Groceries", "2026-05-01", -400000);
+	book.spend("Groceries", "2027-05-01", -430000);
+	book.spend("Paycheck", "2027-05-01", 860000);
+	let prior: Vec<FunFact> = wrap(&book, 2027, "2027-12-31")
+		.fun_facts()
+		.into_iter()
+		.filter(|fact| matches!(fact, FunFact::PriorYear { .. }))
+		.collect();
+	assert_eq!(
+		prior,
+		[
+			FunFact::PriorYear {
+				measure: Measure::TotalOut,
+				basis_points: 750
+			},
+			FunFact::PriorYear {
+				measure: Measure::Net,
+				basis_points: 20750
+			},
+		],
+		"total in was 0 last year, so it's new this year and not compared"
+	);
+
+	let mut late = Book::household();
+	late.spend("Groceries", "2026-09-01", -20000);
+	late.spend("Groceries", "2027-09-01", -30000);
+	assert!(
+		wrap(&late, 2027, "2027-12-31")
+			.fun_facts()
+			.iter()
+			.all(|fact| !matches!(fact, FunFact::PriorYear { .. })),
+		"a prior year that starts late is labeled, not compared"
+	);
+}
+
+#[test]
+fn w_18_top_category_share_rounds_half_away_from_zero() {
+	// Categorized spending 10000, top category 3335: 333.5 rounds to 334.
+	// The redaction's largest remainder gives the same row 333, because the
+	// three smaller rows have bigger remainders, so the fact rounds alone.
+	let mut book = Book::household();
+	nets(
+		&mut book,
+		&[
+			("Groceries", 3335),
+			("Dining", 3329),
+			("Fuel", 3319),
+			("Fun", 17),
+		],
+	);
+	book.row("CHK", "2027-04-01", -5000);
+	let result = wrap(&book, 2027, "2027-12-31");
+	assert_eq!(result.redacted().categories[0].1, 333);
+	let top = result
+		.fun_facts()
+		.into_iter()
+		.find(|fact| matches!(fact, FunFact::TopCategoryShare { .. }));
+	assert_eq!(
+		top,
+		Some(FunFact::TopCategoryShare {
+			category: CategoryId::new("Groceries"),
+			tenths: 334
+		}),
+		"of categorized spending: the uncategorized 5000 isn't in the base"
+	);
+}
+
+#[test]
+fn w_19_no_spend_share_rounds_half_away_from_zero() {
+	// 16 evaluated days, 5 of them no-spend: 312.5 rounds to 313.
+	let mut book = Book::household();
+	for day in 1..=16 {
+		if ![3, 5, 8, 12, 14].contains(&day) {
+			book.spend("Dining", &format!("2027-01-{day:02}"), -1000);
+		}
+	}
+	let share = wrap(&book, 2027, "2027-01-16")
+		.fun_facts()
+		.into_iter()
+		.find(|fact| matches!(fact, FunFact::NoSpendShare { .. }));
+	assert_eq!(
+		share,
+		Some(FunFact::NoSpendShare {
+			days: 5,
+			evaluated_days: 16,
+			tenths: 313
+		})
 	);
 }

@@ -5,6 +5,11 @@ public enum TaxBuckets {
 	/// TAX-4: a negative bucket total stays negative, with this neutral note.
 	public static let negativeNote = "Refunds or reversals exceed what was counted."
 
+	/// The note under a bucket's total, when the core says it's due (contract v16's `negative`).
+	public static func note(for total: TaxBucketTotal) -> String? {
+		total.negative ? negativeNote : nil
+	}
+
 	/// The bucket's TAX-2 id, as the CSVs and `CategoryHistory.taxBucket` spell it.
 	public static func id(_ bucket: TaxBucket) -> String {
 		switch bucket {
