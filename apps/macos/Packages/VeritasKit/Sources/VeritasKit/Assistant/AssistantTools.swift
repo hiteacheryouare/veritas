@@ -289,7 +289,7 @@ struct TaxSummaryTool: Tool {
 		var text = ["Tax summary for \(summary.year)"]
 		text += summary.buckets.map { bucket in
 			let line = "\(TaxBuckets.name(bucket.bucket)): \(format.amount(bucket.total, on: .register)) from \(bucket.count) \(bucket.count == 1 ? "transaction" : "transactions")"
-			return bucket.total < 0 ? "\(line). \(TaxBuckets.negativeNote)" : line
+			return TaxBuckets.note(for: bucket).map { "\(line). \($0)" } ?? line
 		}
 		if summary.buckets.isEmpty { text.append("No transactions are in a tax bucket this year.") }
 		if summary.conflicts > 0 { text.append("Transactions whose tags name more than one bucket: \(summary.conflicts)") }
