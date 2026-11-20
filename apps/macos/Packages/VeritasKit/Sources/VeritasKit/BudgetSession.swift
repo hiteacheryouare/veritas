@@ -42,6 +42,8 @@ public struct BudgetOverview: Hashable, Sendable {
 	/// with the overview so they are set before any screen shows the budget.
 	/// `nil` until the core reads the budget's own format.
 	public let format: MoneyFormat?
+	/// The budget currency's ISO 4217 code, `nil` when it has none.
+	public let currencyCode: String?
 	/// How amount fields read what's typed: the budget's separators.
 	public let numberStyle: NumberStyle
 	/// Why the last daily bill run failed, until one works.
@@ -58,6 +60,7 @@ public struct BudgetOverview: Hashable, Sendable {
 		isChecking: Bool = false,
 		accountGroups: [SidebarGroup],
 		format: MoneyFormat? = nil,
+		currencyCode: String? = nil,
 		numberStyle: NumberStyle = .commaDot,
 		scheduleProblem: String? = nil,
 		snapshotProblem: String? = nil
@@ -70,6 +73,7 @@ public struct BudgetOverview: Hashable, Sendable {
 		self.isChecking = isChecking
 		self.accountGroups = accountGroups
 		self.format = format
+		self.currencyCode = currencyCode
 		self.numberStyle = numberStyle
 		self.scheduleProblem = scheduleProblem
 		self.snapshotProblem = snapshotProblem
@@ -125,9 +129,9 @@ public protocol BudgetSession: AnyObject, Sendable {
 	func netProfit(first: Month, last: Month) async throws -> NetProfitReport
 	/// Assets, liabilities and net worth at each month's end (R-REP-5).
 	func netWorth(first: Month, last: Month) async throws -> [NetWorthMonth]
-	/// One Cash Flow Statement per month (R-REP-5).
+	/// One cash flow statement per month (R-REP-5).
 	func cashFlow(first: Month, last: Month) async throws -> [CashFlowColumn]
-	/// One Cash Flow Statement for an inclusive date range (R-REP-7).
+	/// One cash flow statement for an inclusive date range (R-REP-7).
 	func cashFlowStatement(first: String, last: String) async throws -> CashFlowColumn
 	/// Inclusive `YYYY-MM-DD` dates (R-REP-6).
 	func sankey(first: String, last: String) async throws -> SankeyReport
@@ -213,6 +217,12 @@ public protocol BudgetSession: AnyObject, Sendable {
 	func rules() async throws -> [RuleSentence]
 	/// The rows "Apply to existing" would change, newest first.
 	func rulePreview(_ source: RuleSource) async throws -> [RuleMatch]
+	/// The balance sheet at the end of `asOf`, `YYYY-MM-DD` (R-REP-7).
+	func balanceSheet(asOf: String) async throws -> BalanceSheet
+	/// Owner's equity over inclusive `YYYY-MM-DD` dates (R-REP-7).
+	func ownersEquity(first: String, last: String) async throws -> OwnersEquity
+	/// One tax year's buckets, detail, conflicts and CSVs (R-REP-8).
+	func taxSummary(year: Int32) async throws -> TaxSummary
 }
 
 /// The budgets in the app's budgets folder: new ones, Actual imports and reopened ones.

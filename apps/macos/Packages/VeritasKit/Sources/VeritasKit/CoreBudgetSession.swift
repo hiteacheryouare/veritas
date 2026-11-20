@@ -28,6 +28,7 @@ final class CoreBudgetSession: BudgetSession {
 				})
 			},
 			format: overview.numberFormat.map { MoneyFormat($0, currency: currency) },
+			currencyCode: currency.flatMap { $0.code.isEmpty ? nil : $0.code },
 			numberStyle: overview.numberFormat?.style ?? .commaDot,
 			scheduleProblem: state.scheduleProblem,
 			snapshotProblem: state.snapshotProblem
@@ -369,6 +370,21 @@ final class CoreBudgetSession: BudgetSession {
 	func rulePreview(_ source: RuleSource) async throws -> [RuleMatch] {
 		let session = session
 		return try await Core.cancellable { try await session.rulePreview(source: source, cancel: $0) }
+	}
+
+	func balanceSheet(asOf: String) async throws -> BalanceSheet {
+		let session = session
+		return try await Core.cancellable { try await session.balanceSheet(asOf: asOf, cancel: $0) }
+	}
+
+	func ownersEquity(first: String, last: String) async throws -> OwnersEquity {
+		let session = session
+		return try await Core.cancellable { try await session.ownersEquity(first: first, last: last, cancel: $0) }
+	}
+
+	func taxSummary(year: Int32) async throws -> TaxSummary {
+		let session = session
+		return try await Core.cancellable { try await session.taxSummary(year: year, cancel: $0) }
 	}
 
 	/// Runs a command that makes one row and returns that row's id.

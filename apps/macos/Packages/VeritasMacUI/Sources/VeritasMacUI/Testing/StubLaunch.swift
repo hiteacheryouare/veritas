@@ -160,7 +160,8 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 	func overview() async throws -> BudgetOverview {
 		BudgetOverview(
 			name: name, directory: StubLaunch.budgetDirectory, readOnly: readOnly, accountGroups: name == "Stub" ? accountStore.sidebar() : accountGroups,
-			format: hidesDecimals ? MoneyFormat(Self.hiddenDecimals, currency: Self.dollar) : nil
+			format: hidesDecimals ? MoneyFormat(Self.hiddenDecimals, currency: Self.dollar) : nil,
+			currencyCode: Self.dollar.code
 		)
 	}
 
@@ -365,6 +366,9 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 	func upcoming(days: UInt32, today: String) async throws -> [UpcomingBill] { billStore.upcoming(days: days) }
 	func rules() async throws -> [RuleSentence] { ruleStore.rules() }
 	func rulePreview(_ source: RuleSource) async throws -> [RuleMatch] { try ruleStore.preview(source) }
+	func balanceSheet(asOf: String) async throws -> BalanceSheet { try StubStatements.balanceSheet(asOf: asOf) }
+	func ownersEquity(first: String, last: String) async throws -> OwnersEquity { try StubStatements.ownersEquity(first: first, last: last) }
+	func taxSummary(year: Int32) async throws -> TaxSummary { try StubTax.summary(year: year) }
 
 	private func writable() throws {
 		if let readOnly { throw FfiError.ReadOnly(reason: readOnly) }
