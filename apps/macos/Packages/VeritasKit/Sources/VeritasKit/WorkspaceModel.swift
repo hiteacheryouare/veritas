@@ -187,6 +187,51 @@ public final class WorkspaceModel {
 		}
 	}
 
+	/// A report read against the open budget. A failure is shown here and
+	/// comes back as `nil`; a cancelled read, as a screen moves on, is quiet.
+	public func report<T: Sendable>(_ read: @Sendable (any BudgetSession) async throws -> T) async -> T? {
+		guard let session else { return nil }
+		do {
+			return try await read(session)
+		} catch FfiError.Cancelled {
+			return nil
+		} catch {
+			present(error, isRefresh: true)
+			return nil
+		}
+	}
+
+	/// A read whose error the caller shows where it happened, such as the
+	/// report editor's preview. Nil when no budget is open or it was cancelled.
+	public func attempt<T: Sendable>(_ read: @Sendable (any BudgetSession) async throws -> T) async -> Result<T, any Error>? {
+		guard let session else { return nil }
+		do {
+			return .success(try await read(session))
+		} catch FfiError.Cancelled {
+			return nil
+		} catch {
+			return .failure(error)
+		}
+	}
+
+	/// A write that isn't a `Command`, such as a dashboard edit. Like
+	/// `perform`, it shows its own error and refreshes on success.
+	@discardableResult
+	public func change<T: Sendable>(_ write: @Sendable (any BudgetSession) async throws -> T) async -> T? {
+		guard let session else { return nil }
+		do {
+			let result = try await write(session)
+			changeCount += 1
+			await refresh()
+			return result
+		} catch {
+			present(error)
+			return nil
+		}
+	}
+
+	public var canEditDashboards: Bool { session?.canEditDashboards ?? false }
+
 	/// The budget currency's decimal places (D63): budget cells and goal
 	/// amounts use them; the register always uses two. They arrive with the
 	/// overview, so they are never another budget's.
@@ -225,9 +270,10 @@ public final class WorkspaceModel {
 		}
 	}
 
-	/// The local civil date (PLAN §9 #14): time zones never shift it.
+	/// The local civil date (PLAN §9 #14): time zones never shift it, and it
+	/// is Gregorian whatever calendar `calendar` reads dates in.
 	public nonisolated static func today(_ now: Date = .now, calendar: Calendar = .current) -> String {
-		let parts = calendar.dateComponents([.year, .month, .day], from: now)
+		let parts = calendar.civil.dateComponents([.year, .month, .day], from: now)
 		return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 1, parts.day ?? 1)
 	}
 

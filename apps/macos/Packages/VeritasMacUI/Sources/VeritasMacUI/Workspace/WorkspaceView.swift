@@ -18,6 +18,14 @@ struct WorkspaceView: View {
 					BudgetScreen(workspace: model)
 				} else if model.destination == .screen(.goals) {
 					GoalsScreen(workspace: model)
+				} else if model.destination == .screen(.reports) || model.destination == .screen(.dashboard) {
+					DashboardScreen(workspace: model)
+				} else if model.destination == .screen(.netProfit) {
+					NetProfitScreen(workspace: model)
+				} else if model.destination == .screen(.sankey) {
+					SankeyScreen(workspace: model)
+				} else if model.destination == .screen(.customReports) {
+					CustomReportsScreen(workspace: model)
 				} else {
 					ScreenView(destination: model.destination, title: model.title(of: model.destination))
 				}

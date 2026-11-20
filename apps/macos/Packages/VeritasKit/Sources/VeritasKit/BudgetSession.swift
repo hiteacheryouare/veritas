@@ -112,6 +112,50 @@ public protocol BudgetSession: AnyObject, Sendable {
 	func goalClosePreview(_ goalID: String, releaseTo: String?, today: String) async throws -> GoalClosePreview
 	/// Whether a category has history, which turns delete into Archive (R-BUD-5).
 	func categoryHistory(_ categoryID: String) async throws -> CategoryHistory
+
+	/// Net Profit for each month in the range and for the whole range (R-REP-2).
+	func netProfit(first: Month, last: Month) async throws -> NetProfitReport
+	/// Assets, liabilities and net worth at each month's end (R-REP-5).
+	func netWorth(first: Month, last: Month) async throws -> [NetWorthMonth]
+	/// One Cash Flow Statement per month (R-REP-5).
+	func cashFlow(first: Month, last: Month) async throws -> [CashFlowColumn]
+	/// One Cash Flow Statement for an inclusive date range (R-REP-7).
+	func cashFlowStatement(first: String, last: String) async throws -> CashFlowColumn
+	/// Inclusive `YYYY-MM-DD` dates (R-REP-6).
+	func sankey(first: String, last: String) async throws -> SankeyReport
+	/// The rows behind one report number.
+	func reportTransactions(_ drill: ReportDrill) async throws -> [ReportTransaction]
+	func customReports() async throws -> [CustomReportItem]
+	func customReport(_ id: String, today: String) async throws -> CustomReportView
+	/// What edited settings would show, without saving.
+	func previewCustomReport(_ settings: CustomReportSettings, today: String) async throws -> CustomReportView
+	func dashboards(today: String) async throws -> [DashboardPage]
+	/// Names for the filter editors' pickers.
+	func accounts() async throws -> AccountList
+	func payees() async throws -> [PayeeDetail]
+
+	/// Whether the core can add, remove and configure widgets and dashboards,
+	/// and save report filters. Until it can, those actions stay hidden.
+	var canEditDashboards: Bool { get }
+	/// Every dashboard with each card's numbers as of `today`.
+	func dashboardSheets(today: String) async throws -> [DashboardSheet]
+	/// Returns the new widget's id.
+	@discardableResult
+	func addWidget(page: String, kind: WidgetKind, x: Int64, y: Int64, width: Int64, height: Int64, config: WidgetConfig) async throws -> String
+	func removeWidget(_ id: String) async throws
+	func setWidgetConfig(_ id: String, _ config: WidgetConfig) async throws
+	/// Returns the new dashboard's id.
+	@discardableResult
+	func createDashboard(named name: String) async throws -> String
+	func renameDashboard(_ id: String, to name: String) async throws
+	func deleteDashboard(_ id: String) async throws
+	/// A saved report's settings with its filters.
+	func reportDraft(_ id: String) async throws -> ReportDraft
+	func previewReport(_ draft: ReportDraft, today: String) async throws -> CustomReportView
+	func saveReport(_ draft: ReportDraft) async throws
+	/// Returns the new report's id.
+	@discardableResult
+	func createReport(_ draft: ReportDraft) async throws -> String
 }
 
 /// The budgets in the app's budgets folder: new ones, Actual imports and reopened ones.

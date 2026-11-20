@@ -22,6 +22,15 @@ struct MoneyFormatTests {
 		#expect(format.amount(minorUnits, on: .budget) == expected, "a 2-place currency has one scale")
 	}
 
+	@Test func chartsScaleEachAmountByItsOwnPlaces() {
+		let yen = MoneyFormat(NumberFormat(currency: "JPY", style: .commaDot, hideDecimals: false), currency: Currency(code: "JPY", name: "Yen", symbol: "¥", decimalPlaces: 0, numberFormat: .commaDot, symbolFirst: true))
+		#expect(yen.chartValue(Int64(12_000), on: .budget) == 12_000, "a 0-place budget amount is already whole yen")
+		#expect(yen.chartValue(Int64(12_000), on: .register) == 120, "register amounts always carry 2 places")
+		#expect(yen.axisLabel(12_000) == "¥12k")
+		#expect(yen.axisLabel(-800) == "\u{2212}¥800")
+		#expect(format.chartValue(Int64(123_456), on: .register) == 1_234.56)
+	}
+
 	@Test func currencyPutsTheMinusBeforeTheSymbol() {
 		#expect(format.currency(31_240, on: .budget) == "$312.40")
 		#expect(format.currency(-3_475, on: .budget) == "\u{2212}$34.75")

@@ -125,6 +125,8 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 	]
 	private var keep = Retention(hourly: 48, daily: 30, monthly: 12, operationDays: 30)
 	private let budget = StubBudget()
+	private let reports = StubReports()
+	private lazy var dashboardStore = StubDashboards(reports: reports)
 
 	init(readOnly: ReadOnlyKind?, hasFindings: Bool = false, backupFails: Bool = false, hidesDecimals: Bool = false) {
 		self.readOnly = readOnly
@@ -229,7 +231,75 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 
 	func perform(_ command: Command) async throws {
 		if let readOnly { throw FfiError.ReadOnly(reason: readOnly) }
-		try budget.perform(command)
+		switch command {
+		case .saveCustomReport(let settings): try reports.save(settings)
+		case .placeWidget(let id, let x, let y, let width, let height): try dashboardStore.place(id, x: x, y: y, width: width, height: height)
+		default: try budget.perform(command)
+		}
+	}
+
+	func netProfit(first: Month, last: Month) async throws -> NetProfitReport { reports.netProfit(first: first, last: last) }
+	func netWorth(first: Month, last: Month) async throws -> [NetWorthMonth] { reports.netWorth(first: first, last: last) }
+	func cashFlow(first: Month, last: Month) async throws -> [CashFlowColumn] { reports.cashFlow(first: first, last: last) }
+	func cashFlowStatement(first: String, last: String) async throws -> CashFlowColumn { reports.cashFlowStatement(first: first, last: last) }
+	func sankey(first: String, last: String) async throws -> SankeyReport { reports.sankey(first: first, last: last) }
+	func reportTransactions(_ drill: ReportDrill) async throws -> [ReportTransaction] { reports.transactions(drill) }
+	func customReports() async throws -> [CustomReportItem] { reports.customReports() }
+	func customReport(_ id: String, today: String) async throws -> CustomReportView { try reports.customReport(id) }
+	func previewCustomReport(_ settings: CustomReportSettings, today: String) async throws -> CustomReportView { StubReports.view(settings) }
+	func dashboards(today: String) async throws -> [DashboardPage] { [] }
+
+	func accounts() async throws -> AccountList {
+		let accounts = accountGroups.flatMap(\.accounts).map {
+			AccountDetail(id: $0.id, name: $0.name, offBudget: false, closed: $0.isInactive, groupId: nil, cleared: $0.balance, uncleared: 0, total: $0.balance, note: nil, lastReconciled: nil)
+		}
+		return AccountList(accounts: accounts, groups: [])
+	}
+
+	func payees() async throws -> [PayeeDetail] {
+		["Corner Market", "Employer", "Landlord", "Power Co."].enumerated().map { index, name in
+			PayeeDetail(id: "payee-\(index)", name: name, transferAccountId: nil, favorite: false, learnCategories: true, transactions: 4)
+		}
+	}
+	let canEditDashboards = true
+	func dashboardSheets(today: String) async throws -> [DashboardSheet] { dashboardStore.all() }
+	func addWidget(page: String, kind: WidgetKind, x: Int64, y: Int64, width: Int64, height: Int64, config: WidgetConfig) async throws -> String {
+		try writable()
+		return try dashboardStore.add(page: page, kind: kind, frame: (x, y, width, height), config: config)
+	}
+	func removeWidget(_ id: String) async throws {
+		try writable()
+		try dashboardStore.remove(id)
+	}
+	func setWidgetConfig(_ id: String, _ config: WidgetConfig) async throws {
+		try writable()
+		try dashboardStore.configure(id, config)
+	}
+	func createDashboard(named name: String) async throws -> String {
+		try writable()
+		return dashboardStore.createDashboard(name)
+	}
+	func renameDashboard(_ id: String, to name: String) async throws {
+		try writable()
+		dashboardStore.renameDashboard(id, name)
+	}
+	func deleteDashboard(_ id: String) async throws {
+		try writable()
+		dashboardStore.deleteDashboard(id)
+	}
+	func reportDraft(_ id: String) async throws -> ReportDraft { try reports.draft(id) }
+	func previewReport(_ draft: ReportDraft, today: String) async throws -> CustomReportView { StubReports.view(draft.settings) }
+	func saveReport(_ draft: ReportDraft) async throws {
+		try writable()
+		try reports.save(draft)
+	}
+	func createReport(_ draft: ReportDraft) async throws -> String {
+		try writable()
+		return try reports.create(draft)
+	}
+
+	private func writable() throws {
+		if let readOnly { throw FfiError.ReadOnly(reason: readOnly) }
 	}
 }
 #endif

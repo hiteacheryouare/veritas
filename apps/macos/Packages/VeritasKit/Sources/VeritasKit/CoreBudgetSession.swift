@@ -158,6 +158,106 @@ final class CoreBudgetSession: BudgetSession {
 		return try await Core.run { try session.categoryHistory(categoryId: categoryID) }
 	}
 
+	func netProfit(first: Month, last: Month) async throws -> NetProfitReport {
+		let session = session
+		return try await Core.cancellable { try await session.netProfit(first: first, last: last, cancel: $0) }
+	}
+
+	func netWorth(first: Month, last: Month) async throws -> [NetWorthMonth] {
+		let session = session
+		return try await Core.cancellable { try await session.netWorth(first: first, last: last, cancel: $0) }
+	}
+
+	func cashFlow(first: Month, last: Month) async throws -> [CashFlowColumn] {
+		let session = session
+		return try await Core.cancellable { try await session.cashFlow(first: first, last: last, cancel: $0) }
+	}
+
+	func cashFlowStatement(first: String, last: String) async throws -> CashFlowColumn {
+		let session = session
+		return try await Core.cancellable { try await session.cashFlowStatement(first: first, last: last, cancel: $0) }
+	}
+
+	func sankey(first: String, last: String) async throws -> SankeyReport {
+		let session = session
+		return try await Core.cancellable { try await session.sankey(first: first, last: last, cancel: $0) }
+	}
+
+	func reportTransactions(_ drill: ReportDrill) async throws -> [ReportTransaction] {
+		let session = session
+		return try await Core.cancellable { try await session.reportTransactions(drill: drill, cancel: $0) }
+	}
+
+	func customReports() async throws -> [CustomReportItem] {
+		let session = session
+		return try await Core.run { try session.customReports() }
+	}
+
+	func customReport(_ id: String, today: String) async throws -> CustomReportView {
+		let session = session
+		return try await Core.cancellable { try await session.customReport(id: id, today: today, cancel: $0) }
+	}
+
+	func previewCustomReport(_ settings: CustomReportSettings, today: String) async throws -> CustomReportView {
+		let session = session
+		return try await Core.cancellable { try await session.previewCustomReport(settings: settings, today: today, cancel: $0) }
+	}
+
+	func dashboards(today: String) async throws -> [DashboardPage] {
+		let session = session
+		return try await Core.cancellable { try await session.dashboards(today: today, cancel: $0) }
+	}
+
+	func accounts() async throws -> AccountList {
+		let session = session
+		return try await Core.run { try session.accounts() }
+	}
+
+	func payees() async throws -> [PayeeDetail] {
+		let session = session
+		return try await Core.run { try session.payees() }
+	}
+
+	/// Contract v7: dashboards, widgets and report filters are editable.
+	let canEditDashboards = true
+
+	func dashboardSheets(today: String) async throws -> [DashboardSheet] {
+		try await dashboards(today: today).map(DashboardSheet.init)
+	}
+
+	func addWidget(page: String, kind: WidgetKind, x: Int64, y: Int64, width: Int64, height: Int64, config: WidgetConfig) async throws -> String {
+		try await created(.widget, by: .addWidget(pageId: page, kind: kind.rawValue, x: x, y: y, width: width, height: height, config: config))
+	}
+
+	func removeWidget(_ id: String) async throws { try await perform(.removeWidget(widgetId: id)) }
+	func setWidgetConfig(_ id: String, _ config: WidgetConfig) async throws { try await perform(.setWidgetConfig(widgetId: id, config: config)) }
+	func createDashboard(named name: String) async throws -> String { try await created(.dashboardPage, by: .createDashboard(name: name)) }
+	func renameDashboard(_ id: String, to name: String) async throws { try await perform(.renameDashboard(pageId: id, name: name)) }
+	func deleteDashboard(_ id: String) async throws { try await perform(.deleteDashboard(pageId: id)) }
+	func createReport(_ draft: ReportDraft) async throws -> String { try await created(.customReport, by: .createCustomReport(settings: draft.settings)) }
+
+	func reportDraft(_ id: String) async throws -> ReportDraft {
+		ReportDraft(settings: try await customReport(id, today: WorkspaceModel.today()).settings)
+	}
+
+	func previewReport(_ draft: ReportDraft, today: String) async throws -> CustomReportView {
+		try await previewCustomReport(draft.settings, today: today)
+	}
+
+	func saveReport(_ draft: ReportDraft) async throws {
+		try await perform(.saveCustomReport(settings: draft.settings))
+	}
+
+	/// Runs a command that makes one row and returns that row's id.
+	private func created(_ kind: EntityKind, by command: Command) async throws -> String {
+		let session = session
+		let change = try await Core.run { try session.perform(command: command) }
+		guard let id = change.entities.first(where: { $0.kind == kind })?.id else {
+			throw FfiError.Invalid(message: "The core saved it but didn't name it. Reopen the budget to see it.")
+		}
+		return id
+	}
+
 	func perform(_ command: Command) async throws {
 		let session = session
 		_ = try await Core.run { try session.perform(command: command) }

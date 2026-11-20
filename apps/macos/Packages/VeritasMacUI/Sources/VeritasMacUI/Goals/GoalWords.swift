@@ -13,20 +13,21 @@ struct GoalWords {
 		tone = goal.tone.design
 		switch goal.state {
 		case .active:
-			let suggestion = goal.suggestedMonthly.map { "Budget \(format.wholeCurrency($0, on: .budget)) a month" }
+			// DEBT-8.1: suggestions stay in minor units, so they show at the currency's places, never rounded to whole units.
+			let suggestion = goal.suggestedMonthly.map { "Budget \(format.currency($0, on: .budget)) a month" }
 			switch goal.pace {
 			case .onTrack(let eta):
 				note = "On track for \(GoalWords.etaName(eta, from: thisMonth))"
 				detail = suggestion
 			case .behind(let needed):
-				note = "Behind, needs \(format.wholeCurrency(needed, on: .budget)) a month"
+				note = "Behind, needs \(format.currency(needed, on: .budget)) a month"
 				detail = nil
 			case .noHistory(let needed):
-				note = "Budget \(format.wholeCurrency(needed, on: .budget)) a month"
+				note = "Budget \(format.currency(needed, on: .budget)) a month"
 				detail = "No ETA yet"
 			case .notAdding(let needed):
 				note = "Nothing is being added"
-				detail = "Budget \(format.wholeCurrency(needed, on: .budget)) a month"
+				detail = "Budget \(format.currency(needed, on: .budget)) a month"
 			case .spendingRecorded:
 				note = "No ETA: spending recorded"
 				detail = nil
@@ -70,8 +71,7 @@ struct GoalWords {
 	}
 
 	static func currentMonth(_ date: Date = .now, calendar: Calendar = .current) -> Month {
-		let parts = calendar.dateComponents([.year, .month], from: date)
-		return Month(year: Int32(parts.year ?? 2000), month: UInt32(parts.month ?? 1))
+		CivilDate.month(date, calendar: calendar)
 	}
 
 	static func monthYear(_ month: Month) -> String {
@@ -79,10 +79,6 @@ struct GoalWords {
 	}
 
 	static func date(_ month: Month) -> Date? {
-		var parts = DateComponents()
-		parts.year = Int(month.year)
-		parts.month = Int(month.month)
-		parts.day = 1
-		return Calendar.current.date(from: parts)
+		month.date()
 	}
 }
