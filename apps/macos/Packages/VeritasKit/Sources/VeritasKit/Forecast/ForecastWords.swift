@@ -25,11 +25,11 @@ public struct ForecastWords: Sendable {
 			let span = endMonth.map { "from \(Self.day(start)) through \(ReportPeriod.monthYear($0))" } ?? "from \(Self.day(start))"
 			return labeled(category(categoryID), "\(signed(amount, on: .register)) \(Self.cadence(cadence)) \(span), \(account(accountID))")
 		case .categoryPercent(let categoryID, let percentBp, let startMonth, let endMonth):
-			return labeled(category(categoryID) ?? Self.missingCategory, "\(Self.percent(percentBp)) \(Self.span(startMonth, endMonth))")
+			return labeled(category(categoryID) ?? Self.missingCategory, "\(percent(percentBp)) \(Self.span(startMonth, endMonth))")
 		case .incomeChange(let accountID, let categoryID, let change, let startMonth, let endMonth):
 			let size = switch change {
 			case .amount(let amount): "\(signed(amount, on: .register)) a month"
-			case .percent(let percentBp): Self.percent(percentBp)
+			case .percent(let percentBp): percent(percentBp)
 			}
 			let name = categoryID == nil ? "All income" : category(categoryID) ?? Self.missingCategory
 			return labeled(name, "\(size) \(Self.span(startMonth, endMonth)), \(account(accountID))")
@@ -73,10 +73,21 @@ public struct ForecastWords: Sendable {
 		return "from \(ReportPeriod.monthYear(start)) through \(ReportPeriod.monthYear(end))"
 	}
 
-	/// `+10%`, `−2.5%`.
-	public static func percent(_ basisPoints: Int64) -> String {
+	/// `+10%`, `−2.5%`, `+2,5%` in a comma-decimal budget.
+	public func percent(_ basisPoints: Int64) -> String {
 		let sign = basisPoints < 0 ? MoneyFormat.minus : "+"
-		return "\(sign)\(ScenarioDraft.percentText(basisPoints))%"
+		return "\(sign)\(Self.percentDigits(basisPoints, decimalSeparator: format.decimalSeparator))%"
+	}
+
+	/// `1000` reads `10` and `250` reads `2.5`, unsigned, with no trailing
+	/// zeros: the digits a percent shows and its field opens on.
+	public static func percentDigits(_ basisPoints: Int64, decimalSeparator: String) -> String {
+		let magnitude = basisPoints.magnitude
+		let whole = magnitude / 100
+		let fraction = magnitude % 100
+		guard fraction > 0 else { return "\(whole)" }
+		let digits = fraction % 10 == 0 ? "\(fraction / 10)" : String(format: "%02d", fraction)
+		return "\(whole)\(decimalSeparator)\(digits)"
 	}
 
 	/// "March 10, 2027".
@@ -114,7 +125,7 @@ public struct ForecastWords: Sendable {
 			"It widens faster than it would if each month's miss were independent, because a miss partly repeats."
 		]
 		case .range: [
-			"With fewer than 6 past forecasts to check, the range is the spread of the monthly flow so far.",
+			"With fewer than 6 past forecasts to check, the range runs from the lowest to the highest month so far, each measured against the median month.",
 			"It widens faster than it would if each month's miss were independent, because a miss partly repeats."
 		]
 		case .noHistory: []
@@ -123,7 +134,10 @@ public struct ForecastWords: Sendable {
 			"It covers category baselines only. Bills and income schedules count at their expected amount, About and Between amounts included.",
 			"Yearly costs such as gifts or insurance can fall outside it unless a yearly bill makes them known."
 		]
-		return range + covers + ["Revaluations, adjustments and starting balances are taken as zero."]
+		return range + covers + [
+			"Revaluations, adjustments and starting balances are taken as zero.",
+			"No market return or inflation is assumed unless a what-if adds it."
+		]
 	}
 
 	/// "$30,100 to $33,900", the band at a horizon. `nil` with no history.

@@ -10,7 +10,7 @@ import VeritasKit
 /// target/screenshots/forecast.
 @MainActor
 struct ForecastScreenshotTests {
-	static let today = "2026-11-19"
+	nonisolated static let today = "2026-11-19"
 	static let output = URL(filePath: #filePath)
 		.deletingLastPathComponent()
 		.appending(path: "../../../../../../target/screenshots/forecast")
@@ -24,7 +24,7 @@ struct ForecastScreenshotTests {
 
 	/// A what-if with a trip next March and one with a raise, both compared.
 	private func withWhatIfs(_ workspace: WorkspaceModel) async throws -> WhatIfsModel {
-		let whatIfs = WhatIfsModel(workspace: workspace, today: Self.today)
+		let whatIfs = WhatIfsModel(workspace: workspace, today: { Self.today })
 		await whatIfs.load()
 		let trip = NewWhatIf(model: whatIfs)
 		trip.name = "Japan in March"
@@ -39,7 +39,7 @@ struct ForecastScreenshotTests {
 
 	@Test func theBaseline() async throws {
 		let workspace = await workspace()
-		let model = ForecastModel(workspace: workspace, today: Self.today)
+		let model = ForecastModel(workspace: workspace, today: { Self.today })
 		await model.load()
 		#expect(model.forecast?.baseline.horizons.map(\.months) == [3, 6, 10, 12])
 		try render(ForecastScreen(workspace: workspace, model: model), named: "forecast", size: CGSize(width: 1000, height: 2100))
@@ -48,7 +48,7 @@ struct ForecastScreenshotTests {
 	@Test func comparingTwoWhatIfsAtSixMonths() async throws {
 		let workspace = await workspace()
 		_ = try await withWhatIfs(workspace)
-		let model = ForecastModel(workspace: workspace, today: Self.today)
+		let model = ForecastModel(workspace: workspace, today: { Self.today })
 		model.horizon = 6
 		await model.load()
 		#expect(model.projections.count == 3)
@@ -63,7 +63,7 @@ struct ForecastScreenshotTests {
 
 	@Test func theNewWhatIfSheet() async throws {
 		let workspace = await workspace()
-		let whatIfs = WhatIfsModel(workspace: workspace, today: Self.today)
+		let whatIfs = WhatIfsModel(workspace: workspace, today: { Self.today })
 		await whatIfs.load()
 		try render(NewWhatIfSheet(model: whatIfs), named: "new-what-if", size: CGSize(width: 520, height: 520))
 	}

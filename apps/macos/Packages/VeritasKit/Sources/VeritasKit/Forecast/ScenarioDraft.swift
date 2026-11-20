@@ -75,8 +75,9 @@ public struct ScenarioDraft: Hashable, Sendable {
 		magnitude = 0
 	}
 
-	/// The editor for an event that exists.
-	public init(_ change: ScenarioChange, today: String) {
+	/// The editor for an event that exists. A percent opens in the budget's
+	/// decimal separator, so the core reads it back the same way.
+	public init(_ change: ScenarioChange, today: String, decimalSeparator: String = ".") {
 		self.init(today: today)
 		switch change {
 		case .oneTime(let date, let accountID, let categoryID, let amount):
@@ -99,7 +100,7 @@ public struct ScenarioDraft: Hashable, Sendable {
 		case .categoryPercent(let categoryID, let percentBp, let startMonth, let endMonth):
 			kind = .categoryPercent
 			self.categoryID = categoryID
-			setPercent(percentBp)
+			setPercent(percentBp, decimalSeparator)
 			self.startMonth = startMonth
 			self.endMonth = endMonth
 		case .incomeChange(let accountID, let categoryID, let change, let startMonth, let endMonth):
@@ -112,7 +113,7 @@ public struct ScenarioDraft: Hashable, Sendable {
 				setSigned(amount)
 			case .percent(let percentBp):
 				incomeByPercent = true
-				setPercent(percentBp)
+				setPercent(percentBp, decimalSeparator)
 			}
 			self.startMonth = startMonth
 			self.endMonth = endMonth
@@ -141,9 +142,12 @@ public struct ScenarioDraft: Hashable, Sendable {
 		}
 	}
 
+	public static let percentMissing = "Enter a percent, such as 10 or 2.5."
+
 	/// The change to send, with `magnitude` on `kind.scale` when the kind takes
-	/// an amount. Throws the line to show when a choice is missing.
-	public func change(magnitude: Int64) throws(Problem) -> ScenarioChange {
+	/// an amount, and `percent` in basis points, as the core read the percent
+	/// field, when it takes one. Throws the line to show when a choice is missing.
+	public func change(magnitude: Int64, percent: Int64? = nil) throws(Problem) -> ScenarioChange {
 		let signed = direction == .down ? -magnitude : magnitude
 		switch kind {
 		case .oneTime:
@@ -153,9 +157,9 @@ public struct ScenarioDraft: Hashable, Sendable {
 			return .recurring(start: date, endMonth: endMonth, cadence: cadence, accountId: try account(), categoryId: categoryID, amount: signed)
 		case .categoryPercent:
 			guard let categoryID else { throw Problem(message: "Choose a category.") }
-			return .categoryPercent(categoryId: categoryID, percentBp: try percent(), startMonth: startMonth, endMonth: endMonth)
+			return .categoryPercent(categoryId: categoryID, percentBp: try signedPercent(percent), startMonth: startMonth, endMonth: endMonth)
 		case .incomeChange:
-			let change: IncomeChangeAmount = incomeByPercent ? .percent(percentBp: try percent()) : .amount(amount: signed)
+			let change: IncomeChangeAmount = incomeByPercent ? .percent(percentBp: try signedPercent(percent)) : .amount(amount: signed)
 			return .incomeChange(accountId: try account(), categoryId: categoryID, change: change, startMonth: startMonth, endMonth: endMonth)
 		case .goalContribution:
 			guard let goalID else { throw Problem(message: "Choose a goal.") }
@@ -168,34 +172,9 @@ public struct ScenarioDraft: Hashable, Sendable {
 		return accountID
 	}
 
-	private func percent() throws(Problem) -> Int64 {
-		guard let points = Self.basisPoints(percentText) else {
-			throw Problem(message: "Enter a percent, such as 10 or 2.5.")
-		}
-		return direction == .down ? -points : points
-	}
-
-	/// `10` is 1000 basis points and `2.5` is 250. A comma reads as the
-	/// decimal point. More than two decimals can't be stored, so it's refused.
-	public static func basisPoints(_ text: String) -> Int64? {
-		let plain = text.replacingOccurrences(of: "%", with: "")
-			.replacingOccurrences(of: ",", with: ".")
-			.trimmingCharacters(in: .whitespaces)
-		guard plain.wholeMatch(of: /\d{1,7}(\.\d{0,2})?|\.\d{1,2}/) != nil else { return nil }
-		let parts = plain.split(separator: ".", omittingEmptySubsequences: false)
-		let whole = Int64(parts[0]) ?? 0
-		let fraction = parts.count > 1 ? String(parts[1]).padding(toLength: 2, withPad: "0", startingAt: 0) : "00"
-		return whole * 100 + (Int64(fraction) ?? 0)
-	}
-
-	/// `1000` reads `10`, `250` reads `2.5`: the text a percent field opens on.
-	public static func percentText(_ basisPoints: Int64) -> String {
-		let magnitude = basisPoints.magnitude
-		let whole = magnitude / 100
-		let fraction = magnitude % 100
-		guard fraction > 0 else { return "\(whole)" }
-		let digits = fraction % 10 == 0 ? "\(fraction / 10)" : String(format: "%02d", fraction)
-		return "\(whole).\(digits)"
+	private func signedPercent(_ percent: Int64?) throws(Problem) -> Int64 {
+		guard let percent else { throw Problem(message: Self.percentMissing) }
+		return direction == .down ? -percent : percent
 	}
 
 	private mutating func setSigned(_ amount: Int64) {
@@ -203,8 +182,8 @@ public struct ScenarioDraft: Hashable, Sendable {
 		magnitude = Int64(amount.magnitude)
 	}
 
-	private mutating func setPercent(_ basisPoints: Int64) {
+	private mutating func setPercent(_ basisPoints: Int64, _ decimalSeparator: String) {
 		direction = basisPoints < 0 ? .down : .up
-		percentText = Self.percentText(basisPoints)
+		percentText = ForecastWords.percentDigits(basisPoints, decimalSeparator: decimalSeparator)
 	}
 }

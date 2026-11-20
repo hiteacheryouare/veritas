@@ -79,33 +79,29 @@ struct ForecastWordsTests {
 		let residuals = ForecastWords.method(.residuals)
 		#expect(residuals.first?.contains("10th to the 90th percentile") == true)
 		#expect(ForecastWords.method(.range).first?.hasPrefix("With fewer than 6 past forecasts") == true)
-		#expect(ForecastWords.method(.noHistory) == ["Revaluations, adjustments and starting balances are taken as zero."], "no range, so nothing about one")
+		#expect(ForecastWords.method(.range).first?.contains("lowest to the highest month so far, each measured against the median month") == true, "FC-4.3")
+		let assumptions = [
+			"Revaluations, adjustments and starting balances are taken as zero.",
+			"No market return or inflation is assumed unless a what-if adds it."
+		]
+		#expect(ForecastWords.method(.noHistory) == assumptions, "no range, so nothing about one")
 		for band in [ForecastBandMethod.residuals, .range] {
 			#expect(ForecastWords.method(band).contains { $0.hasPrefix("It covers category baselines only") })
-			#expect(ForecastWords.method(band).last == "Revaluations, adjustments and starting balances are taken as zero.")
+			#expect(Array(ForecastWords.method(band).suffix(2)) == assumptions)
 		}
+	}
+
+	@Test func aPercentShowsInTheBudgetsDecimalSeparator() {
+		#expect(words.percent(1_000) == "+10%")
+		#expect(words.percent(-250) == "\u{2212}2.5%")
+		#expect(ForecastWords(format: MoneyFormat(groupingSeparator: ".", decimalSeparator: ",")).percent(1_234) == "+12,34%")
+		#expect(ForecastWords.percentDigits(5, decimalSeparator: ".") == "0.05")
+		#expect(ForecastWords.percentDigits(-250, decimalSeparator: ",") == "2,5")
 	}
 }
 
 struct ScenarioDraftTests {
 	let today = "2026-11-19"
-
-	@Test func percentTextReadsAsBasisPoints() {
-		#expect(ScenarioDraft.basisPoints("10") == 1_000)
-		#expect(ScenarioDraft.basisPoints("2.5") == 250)
-		#expect(ScenarioDraft.basisPoints("2,5") == 250)
-		#expect(ScenarioDraft.basisPoints("0.01") == 1)
-		#expect(ScenarioDraft.basisPoints(".5") == 50)
-		#expect(ScenarioDraft.basisPoints(" 12 % ") == 1_200)
-		#expect(ScenarioDraft.basisPoints("2.555") == nil, "three decimals can't be stored")
-		#expect(ScenarioDraft.basisPoints("-5") == nil, "the direction carries the sign")
-		#expect(ScenarioDraft.basisPoints("") == nil)
-		#expect(ScenarioDraft.basisPoints("ten") == nil)
-		#expect(ScenarioDraft.percentText(1_000) == "10")
-		#expect(ScenarioDraft.percentText(-250) == "2.5")
-		#expect(ScenarioDraft.percentText(1_234) == "12.34")
-		#expect(ScenarioDraft.percentText(5) == "0.05")
-	}
 
 	@Test func everyKindRoundTripsThroughTheEditor() throws {
 		let june = Month(year: 2027, month: 6)
@@ -117,10 +113,12 @@ struct ScenarioDraftTests {
 			.incomeChange(accountId: "checking", categoryId: "salary", change: .amount(amount: -50_000), startMonth: june, endMonth: june),
 			.goalContribution(goalId: "laptop", amount: 25_000, startMonth: june, endMonth: nil)
 		]
-		for change in changes {
+		let percents: [Int64?] = [nil, nil, 1_050, 250, nil, nil]
+		for (change, percent) in zip(changes, percents) {
 			let draft = ScenarioDraft(change, today: today)
-			#expect(try draft.change(magnitude: draft.magnitude) == change, "\(change)")
+			#expect(try draft.change(magnitude: draft.magnitude, percent: percent) == change, "\(change)")
 		}
+		#expect(ScenarioDraft(changes[2], today: today, decimalSeparator: ",").percentText == "10,5", "a percent opens in the budget's separator")
 	}
 
 	@Test func aMissingChoiceSaysWhatToChoose() throws {

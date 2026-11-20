@@ -402,8 +402,8 @@ final class CoreBudgetSession: BudgetSession {
 		return try await Core.run { try session.scenarios(today: today) }
 	}
 
-	func createScenario(named name: String) async throws -> String {
-		try await created(.scenario, by: .createScenario(name: name))
+	func createScenario(named name: String, firstEvent: ScenarioChange?, today: String) async throws -> String {
+		try await created(.scenario, by: .createScenario(name: name, firstEvent: firstEvent, today: today))
 	}
 
 	/// Runs a command that makes one row and returns that row's id.

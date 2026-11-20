@@ -239,18 +239,25 @@ private struct EventForm {
 		budgetAmount = AmountFieldModel(amount: budget, style: model.numberStyle, reader: model.reader(.budget))
 	}
 
-	/// The change to send, or the line to show under the fields.
-	func change() async -> Result<ScenarioChange, ScenarioDraft.Problem> {
+	/// The change to send, or the line to show under the fields. Amounts and
+	/// percents are read by the core.
+	func change(model: WhatIfsModel) async -> Result<ScenarioChange, ScenarioDraft.Problem> {
 		var magnitude: Int64 = 0
+		var percent: Int64?
 		if draft.usesAmountField {
 			let field = draft.kind.scale == .budget ? budgetAmount : registerAmount
 			guard let amount = await field.commit() else {
 				return .failure(ScenarioDraft.Problem(message: field.problem ?? "Enter an amount."))
 			}
 			magnitude = amount
+		} else {
+			switch await model.basisPoints(draft.percentText) {
+			case .success(let points): percent = points
+			case .failure(let problem): return .failure(problem)
+			}
 		}
 		do {
-			return .success(try draft.change(magnitude: magnitude))
+			return .success(try draft.change(magnitude: magnitude, percent: percent))
 		} catch {
 			return .failure(error)
 		}
@@ -269,7 +276,7 @@ struct EventSheet: View {
 	init(model: WhatIfsModel, editing: EventEditing) {
 		self.model = model
 		self.editing = editing
-		let draft = editing.event.map { ScenarioDraft($0.change, today: model.today) } ?? model.newDraft()
+		let draft = editing.event.map { ScenarioDraft($0.change, today: model.today, decimalSeparator: model.format.decimalSeparator) } ?? model.newDraft()
 		_form = State(initialValue: EventForm(model: model, draft: draft))
 	}
 
@@ -303,7 +310,7 @@ struct EventSheet: View {
 	private func save() {
 		Task {
 			problem = nil
-			switch await form.change() {
+			switch await form.change(model: model) {
 			case .failure(let failure):
 				problem = failure.message
 			case .success(let change):
@@ -319,8 +326,9 @@ struct EventSheet: View {
 	}
 }
 
-/// "Add what-if": a name and its first event. A what-if with no events
-/// would draw on top of the baseline, so it starts with one.
+/// "Add what-if": a name and its first event, saved as one undo step. A
+/// what-if with no events would draw on top of the baseline, so it starts
+/// with one.
 struct NewWhatIfSheet: View {
 	let model: WhatIfsModel
 	@State private var newWhatIf: NewWhatIf
@@ -348,13 +356,13 @@ struct NewWhatIfSheet: View {
 						.accessibilityIdentifier("whatIf.name")
 				}
 			}
-			EventFields(model: model, draft: $form.draft, registerAmount: form.registerAmount, budgetAmount: form.budgetAmount) { close() }
+			EventFields(model: model, draft: $form.draft, registerAmount: form.registerAmount, budgetAmount: form.budgetAmount) { dismiss() }
 			if let problem = newWhatIf.problem {
 				ProblemNote(text: problem).accessibilityIdentifier("whatIf.problem")
 			}
 			HStack {
 				Spacer()
-				Button("Cancel", role: .cancel, action: close)
+				Button("Cancel", role: .cancel) { dismiss() }
 					.keyboardShortcut(.cancelAction)
 				Button("Add what-if", action: save)
 					.buttonStyle(.borderedProminent)
@@ -373,19 +381,12 @@ struct NewWhatIfSheet: View {
 	private func save() {
 		Task {
 			newWhatIf.show(nil)
-			switch await form.change() {
+			switch await form.change(model: model) {
 			case .failure(let failure):
 				newWhatIf.show(failure.message)
 			case .success(let change):
 				if await newWhatIf.save(change) != nil { dismiss() }
 			}
-		}
-	}
-
-	private func close() {
-		Task {
-			await newWhatIf.cancel()
-			dismiss()
 		}
 	}
 }

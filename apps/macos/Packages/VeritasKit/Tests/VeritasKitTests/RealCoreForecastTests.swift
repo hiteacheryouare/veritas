@@ -13,13 +13,13 @@ struct RealCoreForecastTests {
 	static let trip = ScenarioChange.oneTime(date: "2027-03-10", accountId: AllFeatures.checking, categoryId: AllFeatures.groceries, amount: -200_000)
 
 	private func forecastModel(_ budget: RealBudget, today: String = today) async -> ForecastModel {
-		let model = ForecastModel(workspace: budget.workspace, today: today)
+		let model = ForecastModel(workspace: budget.workspace, today: { today })
 		await model.load()
 		return model
 	}
 
 	private func whatIfs(_ budget: RealBudget, today: String = today) async -> WhatIfsModel {
-		let model = WhatIfsModel(workspace: budget.workspace, today: today)
+		let model = WhatIfsModel(workspace: budget.workspace, today: { today })
 		await model.load()
 		return model
 	}
@@ -119,9 +119,15 @@ struct RealCoreForecastTests {
 		}
 	}
 
-	@Test func theCoreRefusesADuplicateNameAndADateBeforeToday() async throws {
+	@Test func addWhatIfIsOneUndoStepAndARefusedEventLeavesNothing() async throws {
 		try await RealBudget.with { budget in
 			let model = await whatIfs(budget)
+			_ = try await addTrip(model)
+			#expect(model.scenarios.first?.events.map(\.change) == [Self.trip])
+			await budget.workspace.undo()
+			await model.load()
+			#expect(model.scenarios.isEmpty, "one undo takes the what-if and its event (v17)")
+
 			_ = try await addTrip(model)
 			let duplicate = NewWhatIf(model: model)
 			duplicate.name = "vacation"
@@ -132,8 +138,23 @@ struct RealCoreForecastTests {
 			past.name = "Last month"
 			#expect(await past.save(.oneTime(date: "2026-10-01", accountId: AllFeatures.checking, categoryId: nil, amount: -100)) == nil)
 			#expect(past.problem?.isEmpty == false)
-			await past.cancel()
-			#expect(model.scenarios.map(\.name) == ["Vacation"], "Cancel deletes the what-if made for the refused event")
+			#expect(model.scenarios.map(\.name) == ["Vacation"], "a refused event makes no what-if")
+			#expect(try budget.sqlite("SELECT COUNT(*) FROM veritas_scenario") == [["1"]])
+		}
+	}
+
+	@Test func aPercentIsReadByTheCore() async throws {
+		try await RealBudget.with { budget in
+			let model = await whatIfs(budget)
+			#expect(await model.basisPoints("10") == .success(1_000))
+			#expect(await model.basisPoints("2.5%") == .success(250))
+			#expect(await model.basisPoints("5+5") == .success(1_000), "arithmetic works as in an amount field")
+			#expect(await model.basisPoints("-5") == .failure(ScenarioDraft.Problem(message: "A rate can't be negative.")))
+			let id = try await addTrip(model)
+			let points = try #require(try? await model.basisPoints("12.5").get())
+			let cut = ScenarioChange.categoryPercent(categoryId: AllFeatures.groceries, percentBp: -points, startMonth: Month(year: 2027, month: 1), endMonth: nil)
+			#expect(await model.add(cut, to: id, inline: { Issue.record("\($0)") }))
+			#expect(model.words.sentence(cut) == "Groceries: \u{2212}12.5% from January 2027")
 		}
 	}
 

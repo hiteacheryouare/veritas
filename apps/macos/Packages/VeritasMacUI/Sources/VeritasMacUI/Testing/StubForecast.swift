@@ -30,16 +30,22 @@ final class StubForecast: @unchecked Sendable {
 		}
 	}
 
-	func create(named name: String) throws -> String {
+	func create(named name: String, firstEvent: ScenarioChange?, today: String) throws -> String {
 		try lock.withLock {
 			let trimmed = name.trimmingCharacters(in: .whitespaces)
 			guard !trimmed.isEmpty else { throw FfiError.Invalid(message: "Give the what-if a name.") }
 			guard !scenarioList.contains(where: { $0.name.lowercased() == trimmed.lowercased() }) else {
 				throw FfiError.Invalid(message: "Another what-if is already called \(trimmed). Pick another name.")
 			}
+			if let firstEvent { try Self.check(firstEvent, today: today) }
 			made += 1
 			let id = "what-if-\(made)"
-			scenarioList.append(ScenarioSummary(id: id, name: trimmed, events: []))
+			var events: [ScenarioEventItem] = []
+			if let firstEvent {
+				made += 1
+				events.append(ScenarioEventItem(id: "event-\(made)", change: firstEvent, inThePast: false))
+			}
+			scenarioList.append(ScenarioSummary(id: id, name: trimmed, events: events))
 			return id
 		}
 	}

@@ -1048,6 +1048,8 @@ mod tests {
 		let change = core
 			.perform(Command::CreateScenario {
 				name: name.to_owned(),
+				first_event: None,
+				today: None,
 			})
 			.unwrap();
 		assert_eq!(change.entities.len(), 1);
@@ -1196,9 +1198,13 @@ mod tests {
 		assert!(matches!(
 			core.perform(Command::CreateScenario {
 				name: " vacation ".to_owned(),
+				first_event: None,
+				today: None,
 			})
 			.and_then(|_| core.perform(Command::CreateScenario {
 				name: "VACATION".to_owned(),
+				first_event: None,
+				today: None,
 			})),
 			Err(FfiError::Invalid { .. })
 		));
@@ -1634,6 +1640,8 @@ mod tests {
 			let scenario = core
 				.perform(Command::CreateScenario {
 					name: "Save more".to_owned(),
+					first_event: None,
+					today: None,
 				})
 				.unwrap()
 				.entities[0]

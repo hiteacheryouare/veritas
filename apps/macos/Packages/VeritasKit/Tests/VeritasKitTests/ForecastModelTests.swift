@@ -10,7 +10,9 @@ final class ForecastFakeSession: BudgetSession, @unchecked Sendable {
 	var readOnly: ReadOnlyKind?
 	var commands: [Command] = []
 	var asked: [[String]] = []
-	var created: [String] = []
+	var created: [CreatedScenario] = []
+	var rateTexts: [String] = []
+	var rates: [String: Int64] = ["10": 1_000, "2,5": 250]
 	var scenarioList: [ScenarioSummary] = ["a", "b", "c", "d"].map { ScenarioSummary(id: $0, name: $0.uppercased(), events: []) }
 	var suggestionItems = [
 		BudgetSuggestion(categoryId: "rent", name: "Rent", amount: 165_000, basis: .bills, reason: "Rent $1,650, scheduled: Rent"),
@@ -29,19 +31,28 @@ final class ForecastFakeSession: BudgetSession, @unchecked Sendable {
 	func close() async {}
 
 	func perform(_ command: Command) async throws {
-		if case .addScenarioEvent = command, let invalidAdd { throw FfiError.Invalid(message: invalidAdd) }
 		commands.append(command)
 		if case .deleteScenario(let id) = command { scenarioList.removeAll { $0.id == id } }
 	}
 
 	func scenarios(today: String) async throws -> [ScenarioSummary] { scenarioList }
 
-	func createScenario(named name: String) async throws -> String {
+	/// One command, as the core's v17 `createScenario`: a refused first
+	/// event makes nothing.
+	func createScenario(named name: String, firstEvent: ScenarioChange?, today: String) async throws -> String {
 		guard !scenarioList.contains(where: { $0.name == name }) else { throw FfiError.Invalid(message: "Another what-if is already called \(name).") }
-		created.append(name)
+		if firstEvent != nil, let invalidAdd { throw FfiError.Invalid(message: invalidAdd) }
+		created.append(CreatedScenario(name: name, firstEvent: firstEvent, today: today))
 		let id = "new-\(created.count)"
-		scenarioList.append(ScenarioSummary(id: id, name: name, events: []))
+		let events = firstEvent.map { [ScenarioEventItem(id: "event-\(created.count)", change: $0, inThePast: false)] } ?? []
+		scenarioList.append(ScenarioSummary(id: id, name: name, events: events))
 		return id
+	}
+
+	func evaluateRate(_ text: String, style: NumberStyle) async throws -> Int64 {
+		rateTexts.append(text)
+		guard let points = rates[text] else { throw FfiError.Invalid(message: "Can't read \(text) as a rate.") }
+		return points
 	}
 
 	func forecast(today: String, scenarioIDs: [String]) async throws -> Forecast {
@@ -54,6 +65,12 @@ final class ForecastFakeSession: BudgetSession, @unchecked Sendable {
 	func budgetSuggestions(today: String) async throws -> SuggestionList {
 		SuggestionList(month: Month(year: 2026, month: 12), items: suggestionItems, expectedIncome: 500_000, exceedsIncomeBy: nil, notice: nil)
 	}
+}
+
+struct CreatedScenario: Equatable {
+	let name: String
+	let firstEvent: ScenarioChange?
+	let today: String
 }
 
 final class ForecastFakeLibrary: BudgetLibrary, @unchecked Sendable {
@@ -105,7 +122,7 @@ struct ForecastModelTests {
 	func open() async -> ForecastModel {
 		let workspace = WorkspaceModel(library: ForecastFakeLibrary(session: session), format: MoneyFormat())
 		await workspace.reopen(directory: URL(filePath: "/tmp/budget"))
-		let model = ForecastModel(workspace: workspace, today: "2026-11-19")
+		let model = ForecastModel(workspace: workspace, today: { "2026-11-19" })
 		await model.load()
 		return model
 	}
@@ -184,7 +201,7 @@ struct ForecastModelTests {
 		other.readOnly = .openElsewhere
 		let workspace = WorkspaceModel(library: ForecastFakeLibrary(session: other), format: MoneyFormat())
 		await workspace.reopen(directory: URL(filePath: "/tmp/budget"))
-		let readOnly = ForecastModel(workspace: workspace, today: "2026-11-19")
+		let readOnly = ForecastModel(workspace: workspace, today: { "2026-11-19" })
 		await readOnly.load()
 		#expect(!readOnly.canApplySuggestions)
 	}
@@ -198,36 +215,33 @@ struct NewWhatIfTests {
 	func open() async -> WhatIfsModel {
 		let workspace = WorkspaceModel(library: ForecastFakeLibrary(session: session), format: MoneyFormat())
 		await workspace.reopen(directory: URL(filePath: "/tmp/budget"))
-		return WhatIfsModel(workspace: workspace, today: "2026-11-19")
+		return WhatIfsModel(workspace: workspace, today: { "2026-11-19" })
 	}
 
-	@Test func savingMakesTheWhatIfAddsItsEventAndComparesIt() async throws {
+	@Test func savingMakesTheWhatIfWithItsEventInOneCommandAndComparesIt() async throws {
 		let model = await open()
 		let new = NewWhatIf(model: model)
 		new.name = " Vacation "
 		let id = try #require(await new.save(trip))
-		#expect(session.created == ["Vacation"])
-		#expect(session.commands == [.addScenarioEvent(scenarioId: id, change: trip, today: "2026-11-19")])
+		#expect(session.created == [CreatedScenario(name: "Vacation", firstEvent: trip, today: "2026-11-19")])
+		#expect(session.commands.isEmpty, "no second command, so one undo step")
 		#expect(model.isCompared(id))
+		#expect(model.scenarios.first { $0.id == id }?.events.map(\.change) == [trip])
 	}
 
-	@Test func aRefusedEventKeepsTheWhatIfForTheNextTryAndCancelDeletesIt() async throws {
+	@Test func aRefusedEventMakesNothingAndTheRetryIsAFreshCommand() async throws {
 		let model = await open()
 		let new = NewWhatIf(model: model)
 		new.name = "Vacation"
 		session.invalidAdd = "Pick today or a later date."
 		#expect(await new.save(trip) == nil)
 		#expect(new.problem == "Pick today or a later date.")
-		#expect(session.created == ["Vacation"])
+		#expect(session.created.isEmpty)
+		#expect(model.scenarios.isEmpty)
 
-		new.name = "Longer vacation"
-		#expect(await new.save(trip) == nil)
-		#expect(session.created == ["Vacation"], "the retry reuses the what-if it made")
-		#expect(session.commands == [.renameScenario(scenarioId: "new-1", name: "Longer vacation")])
-
-		await new.cancel()
-		#expect(session.commands.last == .deleteScenario(scenarioId: "new-1"))
-		#expect(!session.scenarioList.contains { $0.id == "new-1" })
+		session.invalidAdd = nil
+		#expect(await new.save(trip) != nil)
+		#expect(session.created.map(\.name) == ["Vacation"], "the same name works, because nothing was left behind")
 	}
 
 	@Test func aDuplicateNameShowsTheCoresLine() async throws {
@@ -236,7 +250,35 @@ struct NewWhatIfTests {
 		new.name = "A"
 		#expect(await new.save(trip) == nil)
 		#expect(new.problem == "Another what-if is already called A.")
-		await new.cancel()
-		#expect(session.commands.isEmpty, "nothing was made, so nothing is deleted")
+		#expect(session.created.isEmpty)
+	}
+
+	@Test func todayIsReadWhenItIsUsed() async throws {
+		let workspace = WorkspaceModel(library: ForecastFakeLibrary(session: session), format: MoneyFormat())
+		await workspace.reopen(directory: URL(filePath: "/tmp/budget"))
+		let clock = Clock(day: "2026-11-30")
+		let model = WhatIfsModel(workspace: workspace, today: { clock.day })
+		#expect(model.thisMonth == Month(year: 2026, month: 11))
+		clock.day = "2026-12-01"
+		#expect(model.thisMonth == Month(year: 2026, month: 12), "past midnight the page works as of the new day")
+		#expect(model.newDraft().date == "2026-12-01")
+		_ = await model.create(named: "Later", firstEvent: trip, inline: { Issue.record("\($0)") })
+		#expect(session.created.last?.today == "2026-12-01")
+	}
+
+	@Test func aPercentIsReadByTheCoreInTheBudgetsStyle() async throws {
+		let model = await open()
+		#expect(await model.basisPoints("2,5") == .success(250))
+		#expect(session.rateTexts == ["2,5"], "Swift passes the text through as typed")
+		#expect(await model.basisPoints("  ") == .failure(ScenarioDraft.Problem(message: ScenarioDraft.percentMissing)), "an empty field never reaches the core")
+		#expect(await model.basisPoints("ten") == .failure(ScenarioDraft.Problem(message: "Can't read ten as a rate.")))
+	}
+}
+
+final class Clock: @unchecked Sendable {
+	var day: String
+
+	init(day: String) {
+		self.day = day
 	}
 }

@@ -203,18 +203,23 @@ private struct CompareRow: View {
 	var body: some View {
 		let point = model.point(projection)
 		HStack(spacing: Spacing.s3) {
-			SeriesSwatch(series: series)
-			VStack(alignment: .leading, spacing: 2) {
-				Text(name).font(.text(.body, weight: .medium))
-				if let inThePast {
-					Text(inThePast).font(.text(.caption)).foregroundStyle(.textSecondary)
+			// Only the row's text combines, so Remove stays a button of its own.
+			HStack(spacing: Spacing.s3) {
+				SeriesSwatch(series: series)
+				VStack(alignment: .leading, spacing: 2) {
+					Text(name).font(.text(.body, weight: .medium))
+					if let inThePast {
+						Text(inThePast).font(.text(.caption)).foregroundStyle(.textSecondary)
+					}
+				}
+				Spacer(minLength: Spacing.s4)
+				if let point {
+					Text(model.format.wholeCurrency(point.netWorth, on: .register))
+						.font(.figures(.body, weight: .semibold))
 				}
 			}
-			Spacer(minLength: Spacing.s4)
-			if let point {
-				Text(model.format.wholeCurrency(point.netWorth, on: .register))
-					.font(.figures(.body, weight: .semibold))
-			}
+			.accessibilityElement(children: .combine)
+			.accessibilityIdentifier("forecast.compare.\(projection.scenarioId ?? "baseline")")
 			if let id = projection.scenarioId {
 				Button("Remove") { model.setCompared(id, false) }
 					.controlSize(.small)
@@ -223,8 +228,6 @@ private struct CompareRow: View {
 		}
 		.padding(.horizontal, Spacing.s4)
 		.frame(minHeight: 48)
-		.accessibilityElement(children: .combine)
-		.accessibilityIdentifier("forecast.compare.\(projection.scenarioId ?? "baseline")")
 	}
 }
 

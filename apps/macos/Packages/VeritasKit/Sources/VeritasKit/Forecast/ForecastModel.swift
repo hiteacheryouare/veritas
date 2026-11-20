@@ -18,13 +18,17 @@ public final class ForecastModel {
 	public var horizon: UInt32 = 12
 
 	@ObservationIgnored let workspace: WorkspaceModel
-	@ObservationIgnored public let today: String
+	@ObservationIgnored private let clock: @Sendable () -> String
 	@ObservationIgnored private var loadGeneration = 0
 
-	public init(workspace: WorkspaceModel, today: String? = nil) {
+	/// `today` is read each time it's used, so a screen left open past
+	/// midnight loads as of the new day. Tests pass a fixed clock.
+	public init(workspace: WorkspaceModel, today: @escaping @Sendable () -> String = { WorkspaceModel.today() }) {
 		self.workspace = workspace
-		self.today = today ?? WorkspaceModel.today()
+		clock = today
 	}
+
+	public var today: String { clock() }
 
 	public var format: MoneyFormat { workspace.format }
 	public var isReadOnly: Bool { workspace.readOnly != nil }
@@ -123,6 +127,7 @@ public final class ForecastModel {
 	@discardableResult
 	public func applySuggestions() async -> Bool {
 		guard canApplySuggestions else { return false }
+		let today = today
 		return await workspace.perform(.applySuggestions(today: today))
 	}
 }

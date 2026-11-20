@@ -229,9 +229,10 @@ public protocol BudgetSession: AnyObject, Sendable {
 	func budgetSuggestions(today: String) async throws -> SuggestionList
 	/// Every what-if in the order it was made, with its events (R-FC-2).
 	func scenarios(today: String) async throws -> [ScenarioSummary]
-	/// Returns the new what-if's id.
+	/// Returns the new what-if's id. With `firstEvent`, the what-if and its
+	/// first line are one undo step, and a refused line makes nothing (v17).
 	@discardableResult
-	func createScenario(named name: String) async throws -> String
+	func createScenario(named name: String, firstEvent: ScenarioChange?, today: String) async throws -> String
 }
 
 /// The budgets in the app's budgets folder: new ones, Actual imports and reopened ones.

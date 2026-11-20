@@ -12,16 +12,18 @@ public final class WhatIfsModel {
 	public private(set) var goals: [GoalSummary] = []
 
 	@ObservationIgnored let workspace: WorkspaceModel
-	@ObservationIgnored public let today: String
-	@ObservationIgnored public let thisMonth: Month
+	@ObservationIgnored private let clock: @Sendable () -> String
 	@ObservationIgnored private var loadGeneration = 0
 
-	public init(workspace: WorkspaceModel, today: String? = nil) {
+	/// `today` is read each time it's used, so a page left open past
+	/// midnight works as of the new day. Tests pass a fixed clock.
+	public init(workspace: WorkspaceModel, today: @escaping @Sendable () -> String = { WorkspaceModel.today() }) {
 		self.workspace = workspace
-		let today = today ?? WorkspaceModel.today()
-		self.today = today
-		thisMonth = Month(date: today) ?? Month(year: 2026, month: 1)
+		clock = today
 	}
+
+	public var today: String { clock() }
+	public var thisMonth: Month { Month(date: today) ?? Month(year: 2026, month: 1) }
 
 	public var format: MoneyFormat { workspace.format }
 	public var numberStyle: NumberStyle { workspace.numberStyle }
@@ -69,7 +71,24 @@ public final class WhatIfsModel {
 
 	/// This month and the 24 after it, the months a what-if can start or end in.
 	public var months: [Month] {
-		(0...24).map { thisMonth.adding(months: $0) }
+		let thisMonth = thisMonth
+		return (0...24).map { thisMonth.adding(months: $0) }
+	}
+
+	/// What's typed in a percent field, in basis points, read by the core
+	/// with the budget's number style. `nil` with the reason to show.
+	public func basisPoints(_ text: String) async -> Result<Int64, ScenarioDraft.Problem> {
+		guard !text.trimmingCharacters(in: .whitespaces).isEmpty else {
+			return .failure(ScenarioDraft.Problem(message: ScenarioDraft.percentMissing))
+		}
+		let style = numberStyle
+		switch await workspace.attempt({ try await $0.evaluateRate(text, style: style) }) {
+		case .success(let points): return .success(points)
+		case .failure(let error):
+			if case .inline(let message) = ErrorPresentation(error) { return .failure(ScenarioDraft.Problem(message: message)) }
+			return .failure(ScenarioDraft.Problem(message: ScenarioDraft.percentMissing))
+		case nil: return .failure(ScenarioDraft.Problem(message: ScenarioDraft.percentMissing))
+		}
 	}
 
 	public func newDraft() -> ScenarioDraft {
@@ -92,9 +111,12 @@ public final class WhatIfsModel {
 
 	// MARK: Commands
 
-	/// The new what-if's id, or `nil` with the core's reason passed to `inline`.
-	public func create(named name: String, inline: (String) -> Void) async -> String? {
-		let id = await workspace.change({ try await $0.createScenario(named: name) }, inline: inline)
+	/// The new what-if's id, or `nil` with the core's reason passed to
+	/// `inline`. With `firstEvent` it is one undo step, and a refused event
+	/// makes nothing (v17).
+	public func create(named name: String, firstEvent: ScenarioChange? = nil, inline: (String) -> Void) async -> String? {
+		let today = today
+		let id = await workspace.change({ try await $0.createScenario(named: name, firstEvent: firstEvent, today: today) }, inline: inline)
 		if id != nil { await load() }
 		return id
 	}
@@ -133,9 +155,8 @@ public final class WhatIfsModel {
 	}
 }
 
-/// "Add what-if": a name and its first event, saved as two steps. If the
-/// event is refused, the what-if made for it is kept for the next try and
-/// deleted on Cancel, so a retry never trips over its own name.
+/// "Add what-if": a name and its first event, made in one command (v17),
+/// so one ⌘Z takes both away and a refused event leaves nothing behind.
 @MainActor
 @Observable
 public final class NewWhatIf {
@@ -143,7 +164,6 @@ public final class NewWhatIf {
 	public private(set) var problem: String?
 
 	@ObservationIgnored let model: WhatIfsModel
-	@ObservationIgnored private var created: (id: String, name: String)?
 
 	public init(model: WhatIfsModel) {
 		self.model = model
@@ -155,31 +175,11 @@ public final class NewWhatIf {
 		self.problem = problem
 	}
 
-	/// The what-if's id once it and its event are saved.
+	/// The what-if's id once it and its event are saved. It joins the compare.
 	public func save(_ change: ScenarioChange) async -> String? {
 		problem = nil
-		let name = trimmedName
-		let id: String
-		if let created {
-			if created.name != name {
-				guard await model.rename(created.id, to: name, inline: show) else { return nil }
-				self.created = (created.id, name)
-			}
-			id = created.id
-		} else {
-			guard let made = await model.create(named: name, inline: show) else { return nil }
-			created = (made, name)
-			id = made
-		}
-		guard await model.add(change, to: id, inline: show) else { return nil }
-		created = nil
+		guard let id = await model.create(named: trimmedName, firstEvent: change, inline: show) else { return nil }
 		model.setCompared(id, true)
 		return id
-	}
-
-	public func cancel() async {
-		guard let created else { return }
-		self.created = nil
-		_ = await model.delete(created.id)
 	}
 }

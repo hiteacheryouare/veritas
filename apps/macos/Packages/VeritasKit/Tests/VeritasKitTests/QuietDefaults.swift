@@ -60,7 +60,7 @@ extension BudgetSession {
 	func forecast(today: String, scenarioIDs: [String]) async throws -> Forecast { throw FfiError.Invalid(message: "no forecast in this fake") }
 	func budgetSuggestions(today: String) async throws -> SuggestionList { throw FfiError.Invalid(message: "no suggestions in this fake") }
 	func scenarios(today: String) async throws -> [ScenarioSummary] { [] }
-	func createScenario(named name: String) async throws -> String { "" }
+	func createScenario(named name: String, firstEvent: ScenarioChange?, today: String) async throws -> String { "" }
 	var canPlanTransfers: Bool { false }
 	func transferPreview(from: String, to: String, amount: Int64) async throws -> TransferPreview { throw FfiError.Cancelled }
 	func kindTarget(_ kind: CategoryKind) async throws -> KindTarget { .none }

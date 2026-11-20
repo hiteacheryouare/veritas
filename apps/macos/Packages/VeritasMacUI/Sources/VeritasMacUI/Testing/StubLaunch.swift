@@ -383,9 +383,9 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 	func forecast(today: String, scenarioIDs: [String]) async throws -> Forecast { try forecastStore.forecast(today: today, scenarioIDs: scenarioIDs) }
 	func budgetSuggestions(today: String) async throws -> SuggestionList { forecastStore.suggestions(today: today) }
 	func scenarios(today: String) async throws -> [ScenarioSummary] { forecastStore.scenarios(today: today) }
-	func createScenario(named name: String) async throws -> String {
+	func createScenario(named name: String, firstEvent: ScenarioChange?, today: String) async throws -> String {
 		try writable()
-		return try forecastStore.create(named: name)
+		return try forecastStore.create(named: name, firstEvent: firstEvent, today: today)
 	}
 
 	private func writable() throws {
