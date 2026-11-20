@@ -23,7 +23,7 @@ struct AssistantSettingsView: View {
 			VStack(alignment: .leading, spacing: Spacing.s1) {
 				Text(Self.scope)
 					.foregroundStyle(.textSecondary)
-				if let explanation = settings.availability.explanation {
+				if let explanation = settings.availability?.explanation {
 					Text(explanation)
 						.foregroundStyle(.textPrimary)
 						.accessibilityIdentifier("settings.assistant.unavailable")

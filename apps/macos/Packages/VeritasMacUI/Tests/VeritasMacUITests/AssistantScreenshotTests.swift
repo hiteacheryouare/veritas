@@ -31,8 +31,8 @@ struct AssistantScreenshotTests {
 		for (name, availability, on) in [
 			("settings-off", AssistantAvailability.available, false),
 			("settings-on", .available, true),
-			("settings-unavailable", .unavailable(.appleIntelligenceNotEnabled), false),
-			("settings-not-downloaded", .unavailable(.modelNotReady), false)
+			("settings-unavailable", .unavailable(.appleIntelligenceNotEnabled), true),
+			("settings-not-downloaded", .unavailable(.modelNotReady), true)
 		] {
 			let (settings, defaults, suite) = self.settings(availability, on: on)
 			defer { defaults.removePersistentDomain(forName: suite) }
@@ -41,7 +41,7 @@ struct AssistantScreenshotTests {
 	}
 
 	@Test func settingsSayWhyTheModelCantBeUsed() async throws {
-		let (settings, defaults, suite) = self.settings(.unavailable(.deviceNotEligible))
+		let (settings, defaults, suite) = self.settings(.unavailable(.deviceNotEligible), on: true)
 		defer { defaults.removePersistentDomain(forName: suite) }
 		let texts = try await DashboardOnRealBudgetTests.texts(in: AssistantSettingsView(settings: settings), size: CGSize(width: 760, height: 160))
 		#expect(texts.contains { $0.contains("This Mac doesn't support Apple Intelligence") }, "\(texts)")

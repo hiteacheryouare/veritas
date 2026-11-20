@@ -8,7 +8,9 @@ import Observation
 public final class AssistantSettings {
 	public static let storageKey = "assistantEnabled"
 
-	public private(set) var availability: AssistantAvailability
+	/// Nil until the model is first asked about. With the setting off it is
+	/// never asked, so nothing in FoundationModels loads (QA §10 D5).
+	public private(set) var availability: AssistantAvailability?
 	private var stored: Bool
 
 	@ObservationIgnored private let defaults: UserDefaults
@@ -23,16 +25,21 @@ public final class AssistantSettings {
 		self.defaults = defaults
 		self.checker = checker
 		self.makeAnswerer = makeAnswerer
-		availability = checker.availability
 		stored = defaults.bool(forKey: Self.storageKey)
+		availability = stored ? checker.availability : nil
 	}
 
-	public var canTurnOn: Bool { availability.isAvailable }
+	/// Until the model has been asked, turning it on is offered; the attempt asks.
+	public var canTurnOn: Bool { availability?.isAvailable ?? true }
 
 	public var isOn: Bool {
-		get { stored && availability.isAvailable }
+		get { stored && availability?.isAvailable == true }
 		set {
-			guard availability.isAvailable else { return }
+			if newValue {
+				let current = checker.availability
+				availability = current
+				guard current.isAvailable else { return }
+			}
 			stored = newValue
 			defaults.set(newValue, forKey: Self.storageKey)
 		}
@@ -41,9 +48,10 @@ public final class AssistantSettings {
 	/// The panel's toolbar button shows only while this is true.
 	public var offersPanel: Bool { isOn }
 
-	/// The model can finish downloading, or Apple Intelligence be turned on, while the app runs.
+	/// The model can finish downloading, or Apple Intelligence be turned on,
+	/// while the app runs. Asks again only once the model has been asked before.
 	public func refresh() {
-		availability = checker.availability
 		stored = defaults.bool(forKey: Self.storageKey)
+		if stored || availability != nil { availability = checker.availability }
 	}
 }
