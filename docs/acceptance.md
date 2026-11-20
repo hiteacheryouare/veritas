@@ -9,6 +9,24 @@ Each criterion from PLAN §10, with the evidence for it. Last checked on dev at 
 | **gap** | Nothing proves it, or the app contradicts it today. |
 | **needs Ryan** | Only Ryan's data or hands can prove it. The row says what to do. |
 
+## Open items
+
+Of the 25 criteria, 16 are proven (D4 once #85 lands), 4 are partial, 2 are gaps and 3 need Ryan. Perf is partly proven (see [Performance](#performance)). Six tests fail on purpose until their bugs are fixed (see [Failing tests](#failing-tests)).
+
+Still to build:
+- **A8:** a snapshot before moving a category's history and before applying suggestions.
+- **D2:** bill editor wording free of "rule".
+- **D3:** the Forecast and What-ifs screens.
+- **Perf in CI:** an Apple Silicon runner with a release step.
+
+For Ryan to decide:
+- **A9:** a failed backup shows a banner and no alert, but §10 says "alert". Which one is right?
+- **C1:** does the report drill-down table count as a register? It shows a transfer's payee without an arrow.
+- **D2:** the Paid and Post messages say "N rules couldn't run here". Are those part of "creating or editing a bill"?
+- **D5:** with AI off, the app still asks the system whether the model is available at launch. Does that count as AI loading?
+
+Not covered here: PLAN §8 Phase 3's accessibility pass and the shadow run with Ryan's export.
+
 ## What CI runs
 
 - **Rust:** `cargo test --workspace` with `VERITAS_REQUIRE_ORACLE=1`, so an oracle test fails rather than skips. Two harnesses run small in CI and full size by hand (see [Full-size runs](#full-size-runs)).
