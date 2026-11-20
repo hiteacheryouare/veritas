@@ -58,15 +58,43 @@ final class StatementsJourneyTests: XCTestCase {
 	@MainActor
 	func testExportOpensASavePanel() {
 		let app = openStatements()
-		let export = app.buttons["statements.export"]
-		XCTAssertTrue(export.waitForExistence(timeout: 5))
-		XCTAssertTrue(waitUntil { export.isEnabled })
-		export.click()
-		let panel = app.sheets.firstMatch
-		XCTAssertTrue(panel.waitForExistence(timeout: 10), "the save panel opens on the window")
-		attachScreenshot(of: app, named: "export-panel")
+		export("Balance sheet…", in: app)
+		assertSavePanel(named: "export-panel", in: app)
+	}
+
+	@MainActor
+	func testTheFourStatementPDFOpensASavePanel() {
+		let app = openStatements()
+		export("All four statements…", in: app)
+		let panel = assertSavePanel(named: "export-all-panel", in: app, keepOpen: true)
+		let field = panel.textFields["saveAsNameTextField"]
+		XCTAssertTrue((field.value as? String)?.hasPrefix("Stub Statements ") == true, String(describing: field.value))
 		panel.buttons["Cancel"].click()
 		XCTAssertTrue(panel.waitForDisappearance())
+	}
+
+	@MainActor
+	private func export(_ item: String, in app: XCUIApplication) {
+		let menu = app.descendants(matching: .any)["statements.export"]
+		XCTAssertTrue(menu.waitForExistence(timeout: 5))
+		XCTAssertTrue(waitUntil { menu.isEnabled })
+		menu.click()
+		let choice = app.menuItems[item]
+		XCTAssertTrue(choice.waitForExistence(timeout: 5))
+		choice.click()
+	}
+
+	@MainActor
+	@discardableResult
+	private func assertSavePanel(named name: String, in app: XCUIApplication, keepOpen: Bool = false) -> XCUIElement {
+		let panel = app.sheets.firstMatch
+		XCTAssertTrue(panel.waitForExistence(timeout: 10), "the save panel opens on the window")
+		attachScreenshot(of: app, named: name)
+		if !keepOpen {
+			panel.buttons["Cancel"].click()
+			XCTAssertTrue(panel.waitForDisappearance())
+		}
+		return panel
 	}
 
 	@MainActor

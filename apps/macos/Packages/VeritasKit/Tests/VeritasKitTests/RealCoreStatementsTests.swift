@@ -128,6 +128,60 @@ struct RealCoreStatementsTests {
 		}
 	}
 
+	@Test func theIncomeStatementIsTheCoresStatementGroupByGroup() async throws {
+		try await RealBudget.with { budget in
+			let model = StatementsModel(workspace: budget.workspace, today: Self.today)
+			await model.show(.incomeStatement)
+			await model.setCustom(first: Month(year: 2026, month: 1), last: Month(year: 2026, month: 10))
+			let statement = try #require(await budget.workspace.report { try await $0.incomeStatement(first: "2026-01-01", last: "2026-10-31") })
+			let document = try #require(model.document)
+			let amounts = Self.amounts(document)
+			#expect(amounts["revenue.total"] == statement.totalRevenue.total)
+			#expect(amounts["expenses.total"] == statement.totalExpenses.total)
+			#expect(amounts["netIncome"] == statement.netIncome.total)
+			for category in (statement.revenue + statement.expenses).flatMap(\.categories) {
+				#expect(document.lines.contains { $0.amount == category.total && $0.title == ReportWords.category(category.name, labels: category.labels) }, "\(category.name)")
+			}
+			let groups = document.lines.filter { $0.style == .group }.map(\.title)
+			#expect(groups == (statement.revenue + statement.expenses).compactMap(\.groupName), "the core's groups, in its order")
+		}
+	}
+
+	@Test func everyHeaderCarriesTheEntityNameTheUserSet() async throws {
+		try await RealBudget.with { budget in
+			let model = StatementsModel(workspace: budget.workspace, today: Self.today)
+			await model.load()
+			let budgetName = try #require(await budget.workspace.report { try await $0.statementEntity() }).name
+			#expect(model.document?.entity == budgetName, "the budget's name until one is set")
+			#expect(await budget.workspace.perform(.setEntityName(name: "Household, LLC")))
+			await model.load()
+			#expect(model.document?.entity == "Household, LLC")
+			#expect(model.document?.fileName(period: model.periodFileName) == "Household, LLC Balance sheet 2026-11-16.pdf")
+			let tax = TaxSummaryModel(workspace: budget.workspace, thisYear: 2026)
+			await tax.load()
+			#expect(tax.document?.entity == "Household, LLC", "the tax summary uses the same name (ST-3)")
+		}
+	}
+
+	@Test func theFourStatementSetIsTheCoresStatementsForTheMonths() async throws {
+		try await RealBudget.with { budget in
+			let model = StatementsModel(workspace: budget.workspace, today: Self.today)
+			await model.setCustom(first: Month(year: 2025, month: 9), last: Month(year: 2026, month: 2))
+			let documents = try #require(await model.statementSet())
+			#expect(documents.map(\.kind) == [.incomeStatement, .ownersEquity, .balanceSheet, .cashFlow])
+			#expect(documents.allSatisfy { $0.entity == documents[0].entity })
+			let sheet = try #require(await budget.workspace.report { try await $0.balanceSheet(asOf: "2026-02-28") })
+			let equity = try #require(await budget.workspace.report { try await $0.ownersEquity(first: "2025-09-01", last: "2026-02-28") })
+			let income = try #require(await budget.workspace.report { try await $0.incomeStatement(first: "2025-09-01", last: "2026-02-28") })
+			#expect(Self.amounts(documents[0])["netIncome"] == income.netIncome.total)
+			#expect(Self.amounts(documents[1])["closing"] == equity.closing)
+			#expect(Self.amounts(documents[2])["netWorth"] == sheet.netWorth)
+			#expect(documents[2].basis == "As of February 28, 2026")
+			#expect(documents[0].basis == "September 2025 to February 2026")
+			#expect(model.setFileName == "\(documents[0].entity) Statements 2025-09 to 2026-02.pdf")
+		}
+	}
+
 	static func amounts(_ document: StatementDocument) -> [String: Int64] {
 		Dictionary(document.lines.compactMap { line in line.amount.map { (line.id, $0) } }, uniquingKeysWith: { first, _ in first })
 	}

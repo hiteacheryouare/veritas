@@ -64,7 +64,7 @@ public struct StatementDocument: Hashable, Sendable {
 	public static let unaudited = "Unaudited. Obviously."
 
 	public let kind: StatementKind
-	/// The budget's name, standing in for the entity name.
+	/// `statementEntity()`'s name: the one the user set, else the budget's.
 	public let entity: String
 	/// "As of November 9, 2026, in USD", "June to November 2026, in USD".
 	public let basis: String
@@ -94,6 +94,15 @@ public struct StatementDocument: Hashable, Sendable {
 
 	/// "Household Balance sheet 2026-11-09.pdf".
 	public func fileName(period: String) -> String {
+		Self.fileName(entity, title, period)
+	}
+
+	/// "Household Statements 2026-07 to 2026-09.pdf": the four statements in one file.
+	public static func setFileName(entity: String, period: String) -> String {
+		fileName(entity, "Statements", period)
+	}
+
+	private static func fileName(_ entity: String, _ title: String, _ period: String) -> String {
 		"\(entity) \(title) \(period).pdf".replacingOccurrences(of: "/", with: "-")
 	}
 }
@@ -110,8 +119,9 @@ public final class StatementsModel {
 	public private(set) var asOf: String
 	public private(set) var span: SankeySpan = .month
 	public private(set) var period: ReportPeriod
+	public private(set) var entity: StatementEntity?
 	public private(set) var balanceSheet: BalanceSheet?
-	public private(set) var netProfit: NetProfitReport?
+	public private(set) var incomeStatement: IncomeStatement?
 	public private(set) var ownersEquity: OwnersEquity?
 	public private(set) var cashFlow: CashFlowColumn?
 
@@ -137,6 +147,9 @@ public final class StatementsModel {
 	}
 
 	public func load() async {
+		if let entity = await workspace.report({ try await $0.statementEntity() }) {
+			self.entity = entity
+		}
 		switch kind {
 		case .balanceSheet:
 			let asOf = asOf
@@ -144,8 +157,8 @@ public final class StatementsModel {
 			balanceSheet = sheet
 		case .incomeStatement:
 			let period = period
-			guard let report = await workspace.report({ try await $0.netProfit(first: period.first, last: period.last) }), period == self.period else { return }
-			netProfit = report
+			guard let statement = await workspace.report({ try await $0.incomeStatement(first: period.first.firstDay, last: period.last.lastDay) }), period == self.period else { return }
+			incomeStatement = statement
 		case .ownersEquity:
 			let period = period
 			guard let equity = await workspace.report({ try await $0.ownersEquity(first: period.first.firstDay, last: period.last.lastDay) }), period == self.period else { return }
@@ -212,7 +225,16 @@ public final class StatementsModel {
 
 	/// What a saved PDF is named after: the date or the months it covers.
 	public var periodFileName: String {
-		kind.isDated ? asOf : (period.first == period.last ? String(period.first.firstDay.prefix(7)) : "\(period.first.firstDay.prefix(7)) to \(period.last.firstDay.prefix(7))")
+		kind.isDated ? asOf : Self.fileName(period)
+	}
+
+	/// The months the four-statement PDF covers, as its file name gives them.
+	public var setFileName: String? {
+		entity.map { StatementDocument.setFileName(entity: $0.name, period: Self.fileName(period)) }
+	}
+
+	private static func fileName(_ period: ReportPeriod) -> String {
+		period.first == period.last ? String(period.first.firstDay.prefix(7)) : "\(period.first.firstDay.prefix(7)) to \(period.last.firstDay.prefix(7))"
 	}
 
 	// MARK: Document
@@ -221,16 +243,45 @@ public final class StatementsModel {
 	public var document: StatementDocument? {
 		let lines: [StatementLine]? = switch kind {
 		case .balanceSheet: balanceSheet.map(Self.lines)
-		case .incomeStatement: netProfit.map { Self.lines($0.total) }
+		case .incomeStatement: incomeStatement.map(Self.lines)
 		case .ownersEquity: ownersEquity.map(Self.lines)
 		case .cashFlow: cashFlow.map(Self.lines)
 		}
-		guard let lines else { return nil }
-		let unexplained = kind == .ownersEquity ? ownersEquity.flatMap { $0.unexplained == 0 ? nil : $0.unexplained } : nil
-		return StatementDocument(kind: kind, entity: workspace.overview?.name ?? "Budget", basis: basis, lines: lines, unexplained: unexplained)
+		guard let lines, let entity else { return nil }
+		let unexplained = kind == .ownersEquity ? ownersEquity.flatMap(Self.unexplained) : nil
+		return StatementDocument(kind: kind, entity: entity.name, basis: basis(kind, asOf: asOf, period: period), lines: lines, unexplained: unexplained)
 	}
 
-	private var basis: String {
+	/// The four statements for the chosen months in one file, in the order
+	/// they build on each other: the income statement, owner's equity, the
+	/// balance sheet on the last day of the months (or today, if sooner) and
+	/// the cash flow statement. `nil` if any read fails.
+	public func statementSet() async -> [StatementDocument]? {
+		let period = period
+		let first = period.first.firstDay, last = period.last.lastDay
+		let asOf = min(last, today)
+		guard let entity = await workspace.report({ try await $0.statementEntity() }),
+			let income = await workspace.report({ try await $0.incomeStatement(first: first, last: last) }),
+			let equity = await workspace.report({ try await $0.ownersEquity(first: first, last: last) }),
+			let sheet = await workspace.report({ try await $0.balanceSheet(asOf: asOf) }),
+			let flow = await workspace.report({ try await $0.cashFlowStatement(first: first, last: last) })
+		else { return nil }
+		func document(_ kind: StatementKind, _ lines: [StatementLine], unexplained: Int64? = nil) -> StatementDocument {
+			StatementDocument(kind: kind, entity: entity.name, basis: basis(kind, asOf: asOf, period: period), lines: lines, unexplained: unexplained)
+		}
+		return [
+			document(.incomeStatement, Self.lines(income)),
+			document(.ownersEquity, Self.lines(equity), unexplained: Self.unexplained(equity)),
+			document(.balanceSheet, Self.lines(sheet)),
+			document(.cashFlow, Self.lines(flow))
+		]
+	}
+
+	private static func unexplained(_ equity: OwnersEquity) -> Int64? {
+		equity.unexplained == 0 ? nil : equity.unexplained
+	}
+
+	private func basis(_ kind: StatementKind, asOf: String, period: ReportPeriod) -> String {
 		let when = kind.isDated ? "As of \(Self.date(asOf, style: .wide))" : period.title
 		guard let code = workspace.overview?.currencyCode else { return when }
 		return "\(when), in \(code)"
@@ -280,29 +331,29 @@ public final class StatementsModel {
 	}
 
 	/// ST-3's income statement: revenue and expenses by category group then
-	/// category, and Net income, which is Net Profit (ST-1).
-	static func lines(_ column: NetProfitColumn) -> [StatementLine] {
-		func section(_ id: String, _ title: String, _ section: ReportSection, totalTitle: String) -> [StatementLine] {
+	/// category, as the core groups them, and Net income, which is Net Profit (ST-1).
+	static func lines(_ statement: IncomeStatement) -> [StatementLine] {
+		func section(_ id: String, _ title: String, _ groups: [StatementGroup], total: ReportLine, totalTitle: String) -> [StatementLine] {
 			var lines = [StatementLine(id: id, title: title, style: .section)]
-			var group: String??
-			for category in section.categories {
-				if category.groupId != group, let name = category.groupName {
-					lines.append(StatementLine(id: "\(id).group.\(category.groupId ?? "none")", title: name, style: .group))
+			for group in groups {
+				if let name = group.groupName {
+					lines.append(StatementLine(id: "\(id).group.\(group.groupId ?? "none")", title: name, style: .group))
 				}
-				group = category.groupId
-				lines.append(StatementLine(
-					id: "\(id).category.\(category.categoryId ?? "uncategorized")",
-					title: ReportWords.category(category.name, labels: category.labels),
-					amount: category.total,
-					style: .line
-				))
+				for category in group.categories {
+					lines.append(StatementLine(
+						id: "\(id).category.\(category.categoryId ?? "uncategorized")",
+						title: ReportWords.category(category.name, labels: category.labels),
+						amount: category.total,
+						style: .line
+					))
+				}
 			}
-			lines.append(StatementLine(id: "\(id).total", title: totalTitle, amount: section.total, style: .total))
+			lines.append(StatementLine(id: "\(id).total", title: totalTitle, amount: total.total, style: .total))
 			return lines
 		}
-		return section("revenue", "Revenue", column.income, totalTitle: "Total revenue")
-			+ section("expenses", "Expenses", column.expenses, totalTitle: "Total expenses")
-			+ [StatementLine(id: "netIncome", title: "Net income", amount: column.netProfit.total, style: .grand)]
+		return section("revenue", "Revenue", statement.revenue, total: statement.totalRevenue, totalTitle: "Total revenue")
+			+ section("expenses", "Expenses", statement.expenses, total: statement.totalExpenses, totalTitle: "Total expenses")
+			+ [StatementLine(id: "netIncome", title: "Net income", amount: statement.netIncome.total, style: .grand)]
 	}
 
 	/// ST-4: opening equity, the seven reconciling lines and closing equity.
