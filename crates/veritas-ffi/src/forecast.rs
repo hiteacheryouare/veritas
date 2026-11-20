@@ -155,7 +155,8 @@ pub struct ForecastFlow {
 	pub certainty: FlowCertainty,
 }
 
-/// FC-2's notes for a loan whose payment the forecast splits.
+/// A loan whose payment the forecast splits, with FC-2's notes. A cleanly
+/// mapped loan with no fee has no notes and both flags false.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct LoanForecast {
 	pub account_id: String,
@@ -690,16 +691,11 @@ fn flow(data: &BudgetData, today: CivilDate, flow: &KnownFlow) -> ForecastFlow {
 	}
 }
 
-/// FC-2's notes, one entry per loan the flows mention, in account order.
+/// Every loan the forecast splits into flows, in account order, with FC-2's
+/// notes; a clean loan has none.
 fn loans(data: &BudgetData, view: &ForecastView) -> Vec<LoanForecast> {
 	let flows = &view.flows;
-	let mut ids: Vec<&AccountId> = flows
-		.estimated_splits
-		.iter()
-		.chain(&flows.interest_assumed_zero)
-		.chain(flows.escrow_sources.iter().map(|source| &source.loan))
-		.chain(flows.not_repeated.iter().map(|part| &part.loan))
-		.collect();
+	let mut ids: Vec<&AccountId> = flows.loans.iter().collect();
 	ids.sort_by(|a, b| {
 		let order = |id: &AccountId| data.accounts.get(id).map_or(f64::MAX, |a| a.sort_order);
 		order(a).total_cmp(&order(b)).then_with(|| a.cmp(b))

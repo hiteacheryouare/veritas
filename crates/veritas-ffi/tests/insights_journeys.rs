@@ -1218,7 +1218,7 @@ fn a_car_loan_built_in_the_app_is_forecast_payment_by_payment_as_fc_2_and_actual
 		.find(|l| l.account_id == loan)
 		.unwrap_or_else(|| {
 			panic!(
-				"the car loan carries a note, so it is listed: {:?}",
+				"the car loan is forecast, so it is listed: {:?}",
 				forecast.loans
 			)
 		});
@@ -1349,5 +1349,125 @@ fn a_car_loan_built_in_the_app_is_forecast_payment_by_payment_as_fc_2_and_actual
 	assert_eq!(
 		ours, theirs,
 		"the same payment dates and amounts as Actual's forecast"
+	);
+}
+
+#[test]
+fn every_forecast_loan_is_listed_and_a_clean_one_has_no_notes() {
+	// Architect, #83: forecast.loans lists every loan the forecast splits,
+	// in Actual's account order, so the screen can show which loans are
+	// forecast. Two loans with terms and a last payment the wizard mapped
+	// with interest and principal only, no escrow and no fee, carry no
+	// notes and neither flag. A loan with no payment to read from stays in
+	// unforecast.
+	use veritas_ffi::{CategoryKind, LoanPaymentDraft, LoanTerms};
+	let (_scratch, session) = fresh("clean-loans", "USD");
+	let checking = new_account(
+		&session,
+		"Checking",
+		veritas_ffi::NewAccountKind::Checking,
+		5_000_000,
+		None,
+	);
+	let terms = || {
+		Some(LoanTerms {
+			rate_bps: Some(600),
+			payment: Some(30_000),
+			payment_day: Some(15),
+			lender: None,
+		})
+	};
+	let car = new_account(
+		&session,
+		"Car loan",
+		veritas_ffi::NewAccountKind::Loan,
+		1_200_000,
+		terms(),
+	);
+	let boat = new_account(
+		&session,
+		"Boat loan",
+		veritas_ffi::NewAccountKind::Loan,
+		1_200_000,
+		terms(),
+	);
+	let unpaid = new_account(
+		&session,
+		"Unpaid loan",
+		veritas_ffi::NewAccountKind::Loan,
+		1_200_000,
+		terms(),
+	);
+	let veritas_ffi::KindTarget::One {
+		category_id: principal,
+	} = session.kind_target(CategoryKind::DebtPrincipal).unwrap()
+	else {
+		panic!("the starter set has one principal category");
+	};
+	let interest = session
+		.budget_month(NOVEMBER, TODAY.to_owned())
+		.unwrap()
+		.groups
+		.iter()
+		.flat_map(|g| &g.envelopes)
+		.find(|e| e.name == "Miscellaneous")
+		.unwrap()
+		.id
+		.clone();
+	for loan in [&car, &boat] {
+		perform(
+			&session,
+			Command::RecordLoanPayment {
+				payment: LoanPaymentDraft {
+					id: Some(format!("october-{loan}")),
+					from_account_id: checking.clone(),
+					loan_account_id: loan.clone(),
+					date: "2026-10-15".to_owned(),
+					total: 30_000,
+					interest: 6_000,
+					escrow: 0,
+					fees: 0,
+					principal_category_id: principal.clone(),
+					interest_category_id: Some(interest.clone()),
+					escrow_category_id: None,
+					fees_category_id: None,
+					notes: None,
+					cleared: true,
+					fund_principal: false,
+				},
+			},
+		);
+	}
+
+	let forecast =
+		block_on(session.forecast(TODAY.to_owned(), Vec::new(), CancelToken::new())).unwrap();
+	let listed: Vec<(&str, &str, bool, bool, usize)> = forecast
+		.loans
+		.iter()
+		.map(|l| {
+			(
+				l.account_id.as_str(),
+				l.name.as_str(),
+				l.estimated_from_amounts,
+				l.interest_assumed_zero,
+				l.notes.len(),
+			)
+		})
+		.collect();
+	assert_eq!(
+		listed,
+		[
+			(car.as_str(), "Car loan", false, false, 0),
+			(boat.as_str(), "Boat loan", false, false, 0),
+		],
+		"both clean loans, in account order, with no notes"
+	);
+	assert!(
+		forecast
+			.unforecast
+			.iter()
+			.any(|item| item.loan_account_id.as_deref() == Some(unpaid.as_str())),
+		"a loan the forecast can't use stays in unforecast: {:?}",
+		forecast.unforecast
 	);
 }

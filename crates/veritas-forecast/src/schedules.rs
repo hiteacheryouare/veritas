@@ -48,6 +48,9 @@ pub struct ScheduledFlows {
 	/// taken as 0 (FC-2): "No interest line on the last payment, interest
 	/// taken as 0". The flag is the core's, so the screen never infers it.
 	pub interest_assumed_zero: Vec<AccountId>,
+	/// Every loan whose payment the forecast splits into flows (FC-2), with
+	/// or without a note.
+	pub loans: Vec<AccountId>,
 }
 
 /// FC-2's label for a loan in `interest_assumed_zero`.
@@ -206,6 +209,7 @@ impl Forecaster<'_> {
 			escrow_sources: Vec::new(),
 			estimated_splits: Vec::new(),
 			interest_assumed_zero: Vec::new(),
+			loans: Vec::new(),
 		};
 		for schedule in self.budget.schedules.values() {
 			if schedule.tombstone || schedule.completed {
@@ -301,6 +305,7 @@ impl Forecaster<'_> {
 				..loan_payment
 			};
 			let split = loan_payment.split_from(&dates, so_far)?;
+			result.loans.push(loan_payment.loan.clone());
 			result.not_repeated.extend(not_repeated);
 			result.escrow_sources.extend(escrow_source);
 			if !known {
@@ -679,6 +684,7 @@ impl Forecaster<'_> {
 				month = month.offset(1)?;
 			}
 			let split = loan_payment.split_from(&dates, so_far)?;
+			result.loans.push(loan_payment.loan.clone());
 			result.not_repeated.extend(not_repeated);
 			result.escrow_sources.extend(escrow_source);
 			if zero_interest {
