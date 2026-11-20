@@ -308,7 +308,6 @@ public enum WrappedWords {
 		return (tenths < 0 ? minus : "") + "\(grouped(magnitude / 10, format: format))\(format.decimalSeparator)\(magnitude % 10)%"
 	}
 
-	/// 1111 is "1,111" in the budget's own grouping.
 	/// 1111 is "1,111" in the budget's own grouping; 123456 is "1,23,456"
 	/// where groups go in twos after the thousands.
 	static func grouped(_ value: UInt64, format: MoneyFormat) -> String {

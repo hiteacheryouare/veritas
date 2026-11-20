@@ -37,9 +37,8 @@ public final class WrappedModel {
 		if let first = await workspace.report({ try await $0.budgetMonth(month, today: today).firstMonth }), first.year < thisYear {
 			years = Array(first.year...thisYear).reversed()
 		}
-		if let goals = await workspace.report({ try await $0.goals(today: today) }) {
-			goalNames = Dictionary(goals.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
-		}
+		let goals = await workspace.goals()
+		goalNames = Dictionary(goals.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
 		await loadReport()
 	}
 
