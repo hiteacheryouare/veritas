@@ -24,7 +24,7 @@ enum StubTax {
 	static let y2026 = TaxSummary(
 		year: 2026,
 		buckets: [
-			TaxBucketTotal(bucket: .businessExpense, inflow: false, total: -1_500, count: 1),
+			TaxBucketTotal(bucket: .businessExpense, inflow: false, total: -1_500, count: 1, negative: true),
 			TaxBucketTotal(bucket: .charitable, inflow: false, total: 13_000, count: 3),
 			TaxBucketTotal(bucket: .hsa, inflow: false, total: 40_000, count: 2),
 			TaxBucketTotal(bucket: .interestIncome, inflow: true, total: 3_810, count: 3),
