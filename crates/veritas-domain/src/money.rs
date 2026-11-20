@@ -36,6 +36,10 @@ impl Money {
 		self.0.checked_neg().map(Money).ok_or(CoreError::Overflow)
 	}
 
+	pub fn checked_abs(self) -> Result<Money, CoreError> {
+		self.0.checked_abs().map(Money).ok_or(CoreError::Overflow)
+	}
+
 	pub fn checked_sum(amounts: impl IntoIterator<Item = Money>) -> Result<Money, CoreError> {
 		amounts
 			.into_iter()
