@@ -132,7 +132,7 @@ private struct RegisterFilters: View {
 		}
 
 		func bounds(today: Date = .now) -> (String?, String?) {
-			let calendar = Calendar.current
+			let calendar = Calendar.current.civil
 			let civil = TransactionEditorModel.civilDate
 			switch self {
 			case .all: return (nil, nil)
@@ -255,7 +255,7 @@ private struct BalanceGraph: View {
 extension RegisterRow {
 	static func short(_ date: String) -> String {
 		let parts = date.split(separator: "-").compactMap { Int($0) }
-		guard parts.count == 3, let value = Calendar.current.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2])) else { return date }
+		guard parts.count == 3, let value = CivilDate.date(date) else { return date }
 		return value.formatted(.dateTime.month(.abbreviated).day())
 	}
 }

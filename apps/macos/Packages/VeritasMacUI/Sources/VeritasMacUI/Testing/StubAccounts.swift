@@ -68,8 +68,9 @@ final class StubAccounts: @unchecked Sendable {
 			txns.append(Txn(id: b, account: to, date: date, amount: amount, payee: "to-\(from)", category: nil, notes: notes, cleared: cleared, reconciled: false, transfer: from, counterpart: a))
 		}
 		// Three years of history before the mockup's month and a half.
-		var day = Calendar.current.date(from: DateComponents(year: 2023, month: 10, day: 1)) ?? .now
-		let end = Calendar.current.date(from: DateComponents(year: 2026, month: 10, day: 9)) ?? .now
+		let calendar = Calendar.current.civil
+		var day = calendar.date(from: DateComponents(year: 2023, month: 10, day: 1)) ?? .now
+		let end = calendar.date(from: DateComponents(year: 2026, month: 10, day: 9)) ?? .now
 		var seed: UInt64 = 7
 		func random(_ bound: Int64) -> Int64 {
 			seed = seed &* 6364136223846793005 &+ 1442695040888963407
@@ -78,7 +79,7 @@ final class StubAccounts: @unchecked Sendable {
 		let gigs: [(String, String, Int64)] = [("fernwood", "groceries", 9_000), ("bistro", "dining", 6_500), ("quickfuel", "gas", 5_000), ("bookshop", "hobbies", 3_800), ("pharmacy", "household", 3_000)]
 		while day < end {
 			let text = TransactionEditorModel.civilDate(day)
-			let dayOfMonth = Calendar.current.component(.day, from: day)
+			let dayOfMonth = calendar.component(.day, from: day)
 			if dayOfMonth == 1 { add("checking", text, -165_000, "maple", "rent", reconciled: true) }
 			if dayOfMonth == 3 || dayOfMonth == 20 { add("checking", text, 193_720, "payroll", "paycheck", reconciled: true) }
 			if dayOfMonth == 10 { add("checking", text, -(7_000 + random(3_000)), "harbor", "electric", reconciled: true) }
@@ -87,7 +88,7 @@ final class StubAccounts: @unchecked Sendable {
 				let gig = gigs[Int(random(Int64(gigs.count)))]
 				add(random(4) == 0 ? "visa" : "checking", text, -(gig.2 / 2 + random(gig.2)), gig.0, gig.1, reconciled: true)
 			}
-			day = Calendar.current.date(byAdding: .day, value: 1, to: day) ?? end
+			day = calendar.date(byAdding: .day, value: 1, to: day) ?? end
 		}
 		add("checking", "2026-10-10", -8_836, "harbor", "electric")
 		transfer("checking", "carloan", "2026-10-12", 41_200, category: "principal", notes: "Debt paydown 331.80, interest 80.20")

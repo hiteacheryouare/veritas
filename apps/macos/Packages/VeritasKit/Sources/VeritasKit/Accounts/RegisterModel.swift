@@ -39,7 +39,7 @@ public extension RegisterRow {
 	/// "Nov 9" this year, "Nov 9, 2025" otherwise.
 	func shortDate(thisYear: Int32) -> String {
 		let parts = date.split(separator: "-").compactMap { Int($0) }
-		guard parts.count == 3, let value = Calendar.current.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2])) else { return date }
+		guard parts.count == 3, let value = CivilDate.date(date) else { return date }
 		return parts[0] == Int(thisYear)
 			? value.formatted(.dateTime.month(.abbreviated).day())
 			: value.formatted(.dateTime.month(.abbreviated).day().year())
