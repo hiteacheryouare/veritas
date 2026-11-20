@@ -33,8 +33,8 @@ enum StubStatements {
 			],
 			totalAssets: worth.assets,
 			liabilities: [
-				SheetSection(groupId: "credit", groupName: "Credit", accounts: [account("card", "Visa", visa)], total: visa),
-				SheetSection(groupId: "loans", groupName: "Loans", accounts: [account("car-loan", "Car loan", carLoan)], total: carLoan)
+				SheetSection(groupId: "credit", groupName: "Credit", accounts: [account("visa", "Visa", visa)], total: visa),
+				SheetSection(groupId: "loans", groupName: "Loans", accounts: [account("carloan", "Car loan", carLoan)], total: carLoan)
 			],
 			totalLiabilities: worth.liabilities,
 			netWorth: worth.netWorth
