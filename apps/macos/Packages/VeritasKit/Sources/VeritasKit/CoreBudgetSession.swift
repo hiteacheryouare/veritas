@@ -211,6 +211,112 @@ final class CoreBudgetSession: BudgetSession {
 		return try await Core.cancellable { try await session.dashboards(today: today, cancel: $0) }
 	}
 
+	func accounts() async throws -> AccountList {
+		let session = session
+		return try await Core.run { try session.accounts() }
+	}
+
+	func register(_ scope: RegisterScope, filter: RegisterFilter, sort: RegisterSort, offset: UInt64, limit: UInt64) async throws -> RegisterPage {
+		let session = session
+		return try await Core.run { try session.register(scope: scope, filter: filter, sort: sort, offset: offset, limit: limit) }
+	}
+
+	func registerRow(_ id: String) async throws -> RegisterRow {
+		let session = session
+		return try await Core.run { try session.registerRow(transactionId: id) }
+	}
+
+	func payees() async throws -> [PayeeDetail] {
+		let session = session
+		return try await Core.run { try session.payees() }
+	}
+
+	func payeeMemory(_ payeeID: String) async throws -> PayeeMemory? {
+		let session = session
+		return try await Core.run { try session.payeeMemory(payeeId: payeeID) }
+	}
+
+	func reconciliation(_ accountID: String, statementBalance: Int64) async throws -> Reconciliation {
+		let session = session
+		return try await Core.run { try session.reconciliation(accountId: accountID, statementBalance: statementBalance) }
+	}
+
+	/// Contract v9: Move money, category kinds and loans.
+	let canPlanTransfers = true
+
+	func transferPreview(from: String, to: String, amount: Int64) async throws -> TransferPreview {
+		let session = session
+		return try await Core.run { try session.transferPreview(fromAccountId: from, toAccountId: to, amount: amount) }
+	}
+
+	func kindTarget(_ kind: CategoryKind) async throws -> KindTarget {
+		let session = session
+		return try await Core.run { try session.kindTarget(kind: kind) }
+	}
+
+	func kindCategoryPlan(_ kind: CategoryKind) async throws -> KindCategoryPlan {
+		let session = session
+		return try await Core.run { try session.kindCategoryPlan(kind: kind) }
+	}
+
+	func kindChangePreview(_ categoryID: String, kind: CategoryKind) async throws -> UInt64 {
+		let session = session
+		return try await Core.run { try session.kindChangePreview(categoryId: categoryID, kind: kind) }
+	}
+
+	func setCategoryKind(_ categoryID: String, kind: CategoryKind) async throws {
+		try await perform(.setCategoryKind(categoryId: categoryID, kind: kind))
+	}
+
+	func createKindCategory(kind: CategoryKind, name: String, unhideGroup: Bool) async throws -> String {
+		try await created(.category, by: .createKindCategory(kind: kind, name: name, unhideGroup: unhideGroup))
+	}
+
+	func loanTerms(_ accountID: String) async throws -> LoanTerms? {
+		let session = session
+		return try await Core.run { try session.loanTerms(accountId: accountID) }
+	}
+
+	func setLoanTerms(_ accountID: String, _ terms: LoanTerms) async throws {
+		try await perform(.setLoanTerms(accountId: accountID, terms: terms))
+	}
+
+	func loanPaymentDefaults(_ loanAccountID: String, today: String) async throws -> LoanPaymentDefaults {
+		let session = session
+		return try await Core.run { try session.loanPaymentDefaults(loanAccountId: loanAccountID, today: today) }
+	}
+
+	func loanPaymentPreview(_ loanAccountID: String, date: String, total: Int64, interest: Int64, escrow: Int64, fees: Int64) async throws -> LoanPaymentPreview {
+		let session = session
+		return try await Core.run {
+			try session.loanPaymentPreview(loanAccountId: loanAccountID, date: date, total: total, interest: interest, escrow: escrow, fees: fees)
+		}
+	}
+
+	func recordLoanPayment(_ payment: LoanPaymentDraft) async throws {
+		try await perform(.recordLoanPayment(payment: payment))
+	}
+
+	func evaluateRate(_ text: String, style: NumberStyle) async throws -> Int64 {
+		try await Core.run { try VeritasCore.evaluateRate(text: text, style: style) }
+	}
+
+	func balanceHistory(_ accountID: String, from: String, to: String) async throws -> BalanceHistory {
+		let session = session
+		return try await Core.run { try session.balanceHistory(accountId: accountID, from: from, to: to) }
+	}
+
+	func tags() async throws -> [TagSummary] {
+		let session = session
+		return try await Core.run { try session.tags() }
+	}
+
+	func createAccount(_ account: NewAccount, loan: LoanTerms?) async throws -> String {
+		var account = account
+		account.loan = loan
+		return try await created(.account, by: .createAccount(account: account))
+	}
+
 	/// Contract v7: dashboards, widgets and report filters are editable.
 	let canEditDashboards = true
 
@@ -266,16 +372,6 @@ final class CoreBudgetSession: BudgetSession {
 		return try await Core.cancellable { try await session.rulePreview(source: source, cancel: $0) }
 	}
 
-	func payees() async throws -> [PayeeDetail] {
-		let session = session
-		return try await Core.run { try session.payees() }
-	}
-
-	func accounts() async throws -> AccountList {
-		let session = session
-		return try await Core.run { try session.accounts() }
-	}
-
 	func statementEntity() async throws -> StatementEntity {
 		let session = session
 		return try await Core.run { try session.statementEntity() }
@@ -304,11 +400,6 @@ final class CoreBudgetSession: BudgetSession {
 	func taxSummary(year: Int32) async throws -> TaxSummary {
 		let session = session
 		return try await Core.cancellable { try await session.taxSummary(year: year, cancel: $0) }
-	}
-
-	func registerRow(_ id: String) async throws -> RegisterRow {
-		let session = session
-		return try await Core.run { try session.registerRow(transactionId: id) }
 	}
 
 	/// Runs a command that makes one row and returns that row's id.

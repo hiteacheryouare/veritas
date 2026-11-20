@@ -28,6 +28,11 @@ struct WorkspaceView: View {
 					WrappedScreen(workspace: model)
 				} else if model.destination == .screen(.goals) {
 					GoalsScreen(workspace: model)
+				} else if model.destination == .screen(.accounts) {
+					AccountsScreen(workspace: model)
+				} else if case .account(let id) = model.destination {
+					AccountRegisterScreen(workspace: model, accountID: id)
+						.id(id)
 				} else if model.destination == .screen(.reports) || model.destination == .screen(.dashboard) {
 					DashboardScreen(workspace: model)
 				} else if model.destination == .screen(.netProfit) {

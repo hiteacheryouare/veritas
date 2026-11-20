@@ -130,6 +130,11 @@ struct GoalsScreen: View {
 	}
 
 	@ViewBuilder private func menu(for goal: GoalSummary) -> some View {
+		Group { goalMenu(for: goal) }
+			.disabled(goals.isReadOnly)
+	}
+
+	@ViewBuilder private func goalMenu(for goal: GoalSummary) -> some View {
 		if goal.isOpen {
 			Button("Close Goal…") { closing = goal }
 			if goal.canRetarget {

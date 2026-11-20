@@ -143,6 +143,48 @@ public protocol BudgetSession: AnyObject, Sendable {
 	func previewCustomReport(_ settings: CustomReportSettings, today: String) async throws -> CustomReportView
 	func dashboards(today: String) async throws -> [DashboardPage]
 
+	/// Every account with its balances, and the account groups (R-ACC-1).
+	func accounts() async throws -> AccountList
+	/// One page of a register, in the session's order (R-ACC-2, R-PERF-3).
+	func register(_ scope: RegisterScope, filter: RegisterFilter, sort: RegisterSort, offset: UInt64, limit: UInt64) async throws -> RegisterPage
+	func registerRow(_ id: String) async throws -> RegisterRow
+	/// Every payee by name (R-ACC-5).
+	func payees() async throws -> [PayeeDetail]
+	/// The payee's last category and amount, for quick entry (R-ACC-4).
+	func payeeMemory(_ payeeID: String) async throws -> PayeeMemory?
+	/// What's cleared and how far it is from the statement (R-ACC-3).
+	func reconciliation(_ accountID: String, statementBalance: Int64) async throws -> Reconciliation
+
+	/// Whether the core has the transfer, category-kind and loan calls below.
+	/// Until it does, Move money is a plain transfer with no previews.
+	var canPlanTransfers: Bool { get }
+	/// Both balances before and after a move, and whether Veritas asks what it's for (R-XFER-1, R-XFER-4).
+	func transferPreview(from: String, to: String, amount: Int64) async throws -> TransferPreview
+	func kindTarget(_ kind: CategoryKind) async throws -> KindTarget
+	/// How many transactions a kind change reclassifies (CLS-3.3).
+	func kindChangePreview(_ categoryID: String, kind: CategoryKind) async throws -> UInt64
+	func setCategoryKind(_ categoryID: String, kind: CategoryKind) async throws
+	/// Where a new envelope of the kind would go, and whether its group is hidden (CLS-4.1).
+	func kindCategoryPlan(_ kind: CategoryKind) async throws -> KindCategoryPlan
+	/// Returns the new envelope's id. `unhideGroup` is the user's yes to showing a hidden group again.
+	@discardableResult
+	func createKindCategory(kind: CategoryKind, name: String, unhideGroup: Bool) async throws -> String
+	/// `nil` when the account isn't a loan.
+	func loanTerms(_ accountID: String) async throws -> LoanTerms?
+	func setLoanTerms(_ accountID: String, _ terms: LoanTerms) async throws
+	/// Returns the new account's id.
+	@discardableResult
+	func createAccount(_ account: NewAccount, loan: LoanTerms?) async throws -> String
+	func loanPaymentDefaults(_ loanAccountID: String, today: String) async throws -> LoanPaymentDefaults
+	func loanPaymentPreview(_ loanAccountID: String, date: String, total: Int64, interest: Int64, escrow: Int64, fees: Int64) async throws -> LoanPaymentPreview
+	func recordLoanPayment(_ payment: LoanPaymentDraft) async throws
+	/// Basis points: "9.80%" is 980.
+	func evaluateRate(_ text: String, style: NumberStyle) async throws -> Int64
+	/// End-of-day balances for the register's chart, and the change over the range.
+	func balanceHistory(_ accountID: String, from: String, to: String) async throws -> BalanceHistory
+	/// Every tag, most used first.
+	func tags() async throws -> [TagSummary]
+
 	/// Whether the core can add, remove and configure widgets and dashboards,
 	/// and save report filters. Until it can, those actions stay hidden.
 	var canEditDashboards: Bool { get }
@@ -175,10 +217,6 @@ public protocol BudgetSession: AnyObject, Sendable {
 	func rules() async throws -> [RuleSentence]
 	/// The rows "Apply to existing" would change, newest first.
 	func rulePreview(_ source: RuleSource) async throws -> [RuleMatch]
-	/// Every live payee by name.
-	func payees() async throws -> [PayeeDetail]
-	func accounts() async throws -> AccountList
-	func registerRow(_ id: String) async throws -> RegisterRow
 	/// The name on every statement's header and on the tax summary (ST-3).
 	func statementEntity() async throws -> StatementEntity
 	/// Revenue and expenses by category group over inclusive `YYYY-MM-DD` dates (R-REP-7, ST-3).
