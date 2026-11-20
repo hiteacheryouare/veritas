@@ -22,8 +22,7 @@ public final class BudgetScreenModel {
 	}
 
 	public static func currentMonth(_ now: Date = .now, calendar: Calendar = .current) -> Month {
-		let parts = calendar.dateComponents([.year, .month], from: now)
-		return Month(year: Int32(parts.year ?? 2026), month: UInt32(parts.month ?? 1))
+		CivilDate.month(now, calendar: calendar)
 	}
 
 	public var format: MoneyFormat { workspace.format }

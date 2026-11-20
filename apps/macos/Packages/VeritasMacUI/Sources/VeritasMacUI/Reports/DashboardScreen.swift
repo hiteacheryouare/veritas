@@ -963,7 +963,7 @@ private struct CalendarGrid: View {
 
 extension Month {
 	var dateValue: Date? {
-		Calendar.current.date(from: DateComponents(year: Int(year), month: Int(month), day: 1))
+		date()
 	}
 }
 
