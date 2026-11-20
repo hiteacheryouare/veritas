@@ -16,6 +16,10 @@ struct WorkspaceView: View {
 					SettingsView(model: model)
 				} else if model.destination == .screen(.budget) {
 					BudgetScreen(workspace: model)
+				} else if model.destination == .screen(.bills) {
+					BillsScreen(workspace: model)
+				} else if model.destination == .screen(.rules) {
+					RulesScreen(workspace: model)
 				} else if model.destination == .screen(.goals) {
 					GoalsScreen(workspace: model)
 				} else if model.destination == .screen(.accounts) {
@@ -50,6 +54,18 @@ struct WorkspaceView: View {
 								model.go(to: .screen(.settings))
 							}
 							.accessibilityIdentifier("backupBanner")
+						}
+						if let problem = model.overview?.scheduleProblem {
+							NoticeBanner(symbol: "calendar.badge.exclamationmark", message: "Bills didn't post today. \(problem)", actionTitle: "Show bills") {
+								model.go(to: .screen(.bills))
+							}
+							.accessibilityIdentifier("scheduleBanner")
+						}
+						if let problem = model.overview?.snapshotProblem {
+							NoticeBanner(symbol: "clock.badge.exclamationmark", message: "The last snapshot failed. \(problem)", actionTitle: "Show settings") {
+								model.go(to: .screen(.settings))
+							}
+							.accessibilityIdentifier("snapshotBanner")
 						}
 						FindBar(isShown: $model.isFindShown)
 					}

@@ -18,7 +18,7 @@ struct SidebarView: View {
 			ForEach(model.overview?.accountGroups ?? []) { group in
 				SidebarGroupRows(group: group, format: model.format)
 			}
-			SectionRow(screen: .bills)
+			SectionWithPages(section: .bills, current: model.destination)
 			SectionRow(screen: .goals)
 			SectionWithPages(section: .reports, current: model.destination)
 			SectionWithPages(section: .insights, current: model.destination)

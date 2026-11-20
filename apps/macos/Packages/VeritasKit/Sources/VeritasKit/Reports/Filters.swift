@@ -24,7 +24,7 @@ public enum FilterChoices {
 	/// The core's rule editor choices, less `isBetween`, which Actual's filter
 	/// editor drops. Reconciled and transfer aren't rule editor fields; as
 	/// flags they take only `is`.
-	public static func make(from rules: RuleChoices) -> [FilterChoice] {
+	public static func make(from rules: VeritasCore.RuleChoices) -> [FilterChoice] {
 		order.map { field in
 			let ops = rules.conditionFields.first { $0.field == field }?.ops.filter { $0.op != .isBetween }
 			return FilterChoice(field: field, ops: ops ?? [RuleOpChoice(op: .is, value: .bool)])
