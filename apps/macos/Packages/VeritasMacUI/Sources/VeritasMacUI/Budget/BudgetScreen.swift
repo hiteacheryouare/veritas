@@ -141,11 +141,7 @@ struct BudgetScreen: View {
 	}
 
 	static func title(_ month: Month) -> String {
-		var parts = DateComponents()
-		parts.year = Int(month.year)
-		parts.month = Int(month.month)
-		parts.day = 1
-		guard let date = Calendar.current.date(from: parts) else { return "Budget" }
+		guard let date = month.date() else { return "Budget" }
 		return date.formatted(.dateTime.month(.wide).year())
 	}
 }
