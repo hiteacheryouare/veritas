@@ -1821,6 +1821,25 @@ fn formula_card_evaluates_its_default_and_refuses_half_a_character() {
 	);
 }
 
+/// A chain of operators parses in a loop but nests one node per operator, so
+/// a long one is refused before evaluating it could overflow the stack.
+#[test]
+fn a_formula_chaining_operators_past_the_limit_is_refused_not_a_crash() {
+	let budget = fixture("all-features");
+	let sheet = EnvelopeSheet::compute(&budget, CivilDate::from(today())).unwrap();
+	let chained = |terms: usize| {
+		let text = format!("={}1", "1+".repeat(terms - 1));
+		formula_card(
+			&budget,
+			&sheet,
+			meta(&json!({ "formula": text })).as_ref(),
+			today(),
+		)
+	};
+	assert_eq!(chained(150).unwrap().value, FormulaValue::Number(150.0));
+	assert!(matches!(chained(200_000), Err(CoreError::Invalid(_))));
+}
+
 /// Black-box probes of the clean-room engine (D75) at the edges HyperFormula's
 /// docs leave open, each compared with Actual's card.
 #[test]
