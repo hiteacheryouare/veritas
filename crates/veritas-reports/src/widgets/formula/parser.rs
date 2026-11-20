@@ -232,10 +232,17 @@ fn is_r1c1(word: &str) -> bool {
 /// Past this depth Veritas refuses rather than risk its stack.
 const MAX_DEPTH: usize = 200;
 
+/// The tallest tree Veritas keeps, on the same stack budget. A chain of
+/// operators parses in a loop but nests one node per operator, and evaluating
+/// or dropping the tree recurses once per level.
+const MAX_HEIGHT: usize = MAX_DEPTH;
+
 struct Parser {
 	tokens: Vec<Token>,
 	at: usize,
 	depth: usize,
+	/// The height of the node the last parse step returned.
+	height: usize,
 }
 
 pub(super) fn parse(text: &str) -> Result<Node, ParseError> {
@@ -243,6 +250,7 @@ pub(super) fn parse(text: &str) -> Result<Node, ParseError> {
 		tokens: tokenize(text)?,
 		at: 0,
 		depth: 0,
+		height: 0,
 	};
 	let node = parser.expression()?;
 	if parser.at == parser.tokens.len() {
@@ -279,6 +287,29 @@ impl Parser {
 		}
 	}
 
+	fn grown(&mut self, height: usize) -> Result<(), ParseError> {
+		if height > MAX_HEIGHT {
+			return Err(ParseError::Refuse(unsupported(
+				"a formula this long".to_owned(),
+			)));
+		}
+		self.height = height;
+		Ok(())
+	}
+
+	/// A binary node over `left`, whose height is `left_height`, and the
+	/// node the last step returned.
+	fn joined(
+		&mut self,
+		operator: Operator,
+		left: Node,
+		left_height: usize,
+		right: Node,
+	) -> Result<Node, ParseError> {
+		self.grown(1 + left_height.max(self.height))?;
+		Ok(Node::Binary(operator, Box::new(left), Box::new(right)))
+	}
+
 	fn expression(&mut self) -> Result<Node, ParseError> {
 		self.depth += 1;
 		if self.depth > MAX_DEPTH {
@@ -304,20 +335,18 @@ impl Parser {
 				_ => return Ok(node),
 			};
 			self.at += 1;
+			let left_height = self.height;
 			let right = self.concatenation()?;
-			node = Node::Binary(
-				Operator::Compare(comparison),
-				Box::new(node),
-				Box::new(right),
-			);
+			node = self.joined(Operator::Compare(comparison), node, left_height, right)?;
 		}
 	}
 
 	fn concatenation(&mut self) -> Result<Node, ParseError> {
 		let mut node = self.additive()?;
 		while self.eat("&") {
+			let left_height = self.height;
 			let right = self.additive()?;
-			node = Node::Binary(Operator::Concat, Box::new(node), Box::new(right));
+			node = self.joined(Operator::Concat, node, left_height, right)?;
 		}
 		Ok(node)
 	}
@@ -332,8 +361,9 @@ impl Parser {
 			} else {
 				return Ok(node);
 			};
+			let left_height = self.height;
 			let right = self.multiplicative()?;
-			node = Node::Binary(operator, Box::new(node), Box::new(right));
+			node = self.joined(operator, node, left_height, right)?;
 		}
 	}
 
@@ -347,8 +377,9 @@ impl Parser {
 			} else {
 				return Ok(node);
 			};
+			let left_height = self.height;
 			let right = self.power()?;
-			node = Node::Binary(operator, Box::new(node), Box::new(right));
+			node = self.joined(operator, node, left_height, right)?;
 		}
 	}
 
@@ -357,20 +388,26 @@ impl Parser {
 	fn power(&mut self) -> Result<Node, ParseError> {
 		let mut node = self.prefix()?;
 		while self.eat("^") {
+			let left_height = self.height;
 			let right = self.prefix()?;
-			node = Node::Binary(Operator::Power, Box::new(node), Box::new(right));
+			node = self.joined(Operator::Power, node, left_height, right)?;
 		}
 		Ok(node)
 	}
 
 	fn prefix(&mut self) -> Result<Node, ParseError> {
 		if self.eat("+") {
-			Ok(Node::Plus(Box::new(self.nested_prefix()?)))
+			let operand = self.nested_prefix()?;
+			self.grown(self.height + 1)?;
+			Ok(Node::Plus(Box::new(operand)))
 		} else if self.eat("-") {
-			Ok(Node::Minus(Box::new(self.nested_prefix()?)))
+			let operand = self.nested_prefix()?;
+			self.grown(self.height + 1)?;
+			Ok(Node::Minus(Box::new(operand)))
 		} else {
 			let node = self.primary()?;
 			if self.eat("%") {
+				self.grown(self.height + 1)?;
 				Ok(Node::Percent(Box::new(node)))
 			} else {
 				Ok(node)
@@ -391,6 +428,7 @@ impl Parser {
 	}
 
 	fn primary(&mut self) -> Result<Node, ParseError> {
+		self.height = 1;
 		match self.next() {
 			Some(Token::Number(value, integer)) => {
 				if integer && self.peek() == Some(&Token::Symbol(":")) {
@@ -466,6 +504,7 @@ impl Parser {
 			return Err(ParseError::Syntax);
 		}
 		let mut arguments = Vec::new();
+		let mut tallest = 0;
 		if self.eat(")") {
 			return Ok(Node::Call(name, arguments));
 		}
@@ -474,9 +513,12 @@ impl Parser {
 			arguments.push(if empty {
 				None
 			} else {
-				Some(self.expression()?)
+				let argument = self.expression()?;
+				tallest = tallest.max(self.height);
+				Some(argument)
 			});
 			if self.eat(")") {
+				self.grown(tallest + 1)?;
 				return Ok(Node::Call(name, arguments));
 			}
 			self.expect(",")?;
@@ -485,6 +527,7 @@ impl Parser {
 
 	fn array(&mut self) -> Result<Node, ParseError> {
 		let mut rows = vec![vec![self.expression()?]];
+		let mut tallest = self.height;
 		loop {
 			if self.eat("}") {
 				break;
@@ -495,12 +538,14 @@ impl Parser {
 				self.expect(",")?;
 			}
 			let element = self.expression()?;
+			tallest = tallest.max(self.height);
 			if let Some(row) = rows.last_mut() {
 				row.push(element);
 			}
 		}
 		let width = rows.first().map_or(0, Vec::len);
 		if rows.iter().all(|row| row.len() == width) {
+			self.grown(tallest + 1)?;
 			Ok(Node::Array(rows))
 		} else {
 			Err(ParseError::Syntax)
