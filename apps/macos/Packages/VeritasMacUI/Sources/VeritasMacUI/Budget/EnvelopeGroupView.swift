@@ -29,11 +29,14 @@ struct EnvelopeGroupView: View {
 			.background(dense ? AnyShapeStyle(.surfaceHover) : AnyShapeStyle(.clear))
 			.contentShape(.rect)
 			.contextMenu {
-				if !group.isIncome {
-					Button("New Envelope…") { isAdding = true }
+				Group {
+					if !group.isIncome {
+						Button("New Envelope…") { isAdding = true }
+					}
+					Button("Rename Group…") { isRenaming = true }
+					Button(group.hidden ? "Show Group" : "Hide Group") { Task { await screen.setGroupHidden(group.id, !group.hidden) } }
 				}
-				Button("Rename Group…") { isRenaming = true }
-				Button(group.hidden ? "Show Group" : "Hide Group") { Task { await screen.setGroupHidden(group.id, !group.hidden) } }
+				.disabled(screen.isReadOnly)
 			}
 			.popover(isPresented: $isAdding, arrowEdge: .bottom) {
 				NamePrompt(title: "New envelope in \(group.name)", action: "Add envelope") { name in
