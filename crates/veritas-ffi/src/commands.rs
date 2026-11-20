@@ -937,8 +937,7 @@ impl Command {
 	pub(crate) fn local_today(&self) -> Option<&str> {
 		match self {
 			Command::CreateScenario {
-				today: Some(today),
-				..
+				today: Some(today), ..
 			}
 			| Command::AddScenarioEvent { today, .. }
 			| Command::EditScenarioEvent { today, .. }

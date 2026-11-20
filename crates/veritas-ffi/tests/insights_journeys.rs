@@ -1126,10 +1126,8 @@ fn v17_add_what_if_with_its_first_event_is_one_undo_step_and_a_refusal_leaves_no
 	let listed = session.scenarios(TODAY.to_owned()).unwrap();
 	assert_eq!(listed.len(), 1);
 	assert_eq!(listed[0].id, id);
-	assert_eq!(
-		listed[0].events.iter().map(|event| event.change.clone()).collect::<Vec<_>>(),
-		[repair.clone()]
-	);
+	assert_eq!(listed[0].events.len(), 1);
+	assert_eq!(listed[0].events[0].change, repair);
 	let forecast =
 		block_on(session.forecast(TODAY.to_owned(), vec![id.clone()], CancelToken::new())).unwrap();
 	assert_ne!(
@@ -1189,7 +1187,11 @@ fn v17_add_what_if_with_its_first_event_is_one_undo_step_and_a_refusal_leaves_no
 		.into_iter()
 		.map(|scenario| scenario.name)
 		.collect();
-	assert_eq!(names, ["Roof repair"], "a refused line leaves no what-if behind");
+	assert_eq!(
+		names,
+		["Roof repair"],
+		"a refused line leaves no what-if behind"
+	);
 	session.undo().unwrap();
 	assert!(
 		session.scenarios(TODAY.to_owned()).unwrap().is_empty(),

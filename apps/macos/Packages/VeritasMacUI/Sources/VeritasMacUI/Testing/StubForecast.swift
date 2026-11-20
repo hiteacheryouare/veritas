@@ -122,7 +122,7 @@ final class StubForecast: @unchecked Sendable {
 				ForecastBaseline(categoryId: "gifts", name: "Gifts", isIncome: false, level: 0, label: "No history yet", seasonal: false)
 			],
 			knownFlows: Self.flows(thisMonth: thisMonth, today: today),
-			loans: [LoanForecast(accountId: "car-loan", name: "Car loan", estimatedFromAmounts: true, interestAssumedZero: false, notes: ["Estimated from the amounts", "Not repeated: Fees $25.00"])],
+			loans: [LoanForecast(accountId: "carloan", name: "Car loan", estimatedFromAmounts: true, interestAssumedZero: false, notes: ["Estimated from the amounts", "Not repeated: Fees $25.00"])],
 			unforecast: [UnforecastItem(billId: "gym", loanAccountId: nil, name: "Gym", reason: "its rule matches any condition, not all of them")],
 			shortfalls: [],
 			possibleDoubleCounts: [ForecastCategory(categoryId: "internet", name: "Internet")],
@@ -134,9 +134,9 @@ final class StubForecast: @unchecked Sendable {
 	private static func accounts(growth: Int64) -> [ForecastAccount] {
 		[
 			ForecastAccount(accountId: "checking", name: "Checking", offBudget: false, balance: 412_000 + growth),
-			ForecastAccount(accountId: "card", name: "Visa", offBudget: false, balance: -61_340),
+			ForecastAccount(accountId: "visa", name: "Visa", offBudget: false, balance: -61_340),
 			ForecastAccount(accountId: "savings", name: "Savings", offBudget: false, balance: 3_271_340),
-			ForecastAccount(accountId: "car-loan", name: "Car loan", offBudget: true, balance: -1_204_000)
+			ForecastAccount(accountId: "carloan", name: "Car loan", offBudget: true, balance: -1_204_000)
 		]
 	}
 
@@ -221,7 +221,7 @@ final class StubForecast: @unchecked Sendable {
 			ForecastFlow(date: day(next, 1), dueNow: false, accountId: "checking", accountName: "Checking", amount: -165_000, kind: .expense, counterpartAccountId: nil, categoryId: "rent", categoryName: "Rent", billId: "rent", name: "Rent", certainty: .known),
 			ForecastFlow(date: day(next, 1), dueNow: false, accountId: "checking", accountName: "Checking", amount: 256_320, kind: .income, counterpartAccountId: nil, categoryId: "paycheck", categoryName: "Paycheck", billId: "pay", name: "Paycheck", certainty: .known),
 			ForecastFlow(date: day(next, 12), dueNow: false, accountId: "checking", accountName: "Checking", amount: -9_050, kind: .expense, counterpartAccountId: nil, categoryId: "electric", categoryName: "Electric", billId: "electric", name: "Electric", certainty: .estimated),
-			ForecastFlow(date: day(next, 15), dueNow: false, accountId: "checking", accountName: "Checking", amount: -28_000, kind: .transfer, counterpartAccountId: "car-loan", categoryId: nil, categoryName: nil, billId: "car", name: "Car loan", certainty: .estimated)
+			ForecastFlow(date: day(next, 15), dueNow: false, accountId: "checking", accountName: "Checking", amount: -28_000, kind: .transfer, counterpartAccountId: "carloan", categoryId: nil, categoryName: nil, billId: "car", name: "Car loan", certainty: .estimated)
 		]
 	}
 
