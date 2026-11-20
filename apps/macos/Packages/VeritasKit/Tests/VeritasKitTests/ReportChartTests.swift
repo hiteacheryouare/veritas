@@ -177,3 +177,22 @@ struct CardOpeningTests {
 		#expect(!card(.problem(message: "No budget")).opensFullSize)
 	}
 }
+
+struct SankeyCardReadoutTests {
+	/// The card sends no node amount, so a node shows the core's percentage
+	/// text and nothing summed on the Mac; a flow shows the core's link value.
+	@Test func aCardNodeShowsTheCoresPercentageAndAFlowItsValue() {
+		let nodes = [
+			SankeyCardNode(key: "accounts", label: .allAccounts, percentage: "100%", color: .blue),
+			SankeyCardNode(key: "housing", label: .name(name: "Housing"), percentage: "55.1%", color: .palette(index: 1)),
+			SankeyCardNode(key: "spacer", label: .hidden, percentage: "", color: .gray)
+		]
+		let links = [
+			SankeyCardLink(source: 0, target: 1, value: 5510, folded: [], color: nil),
+			SankeyCardLink(source: 0, target: 2, value: -1, folded: [], color: nil)
+		]
+		#expect(SankeyCardNode.readout(.node(1), nodes: nodes, links: links) == SankeyReadout(title: "Housing", percentage: "55.1%"))
+		#expect(SankeyCardNode.readout(.flow(0), nodes: nodes, links: links) == SankeyReadout(title: "All accounts → Housing", amount: 5510))
+		#expect(SankeyCardNode.readout(.node(2), nodes: nodes, links: links) == nil, "a hidden node has no words")
+	}
+}

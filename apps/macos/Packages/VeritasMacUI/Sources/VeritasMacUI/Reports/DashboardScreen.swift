@@ -1137,7 +1137,12 @@ struct SankeyReadoutView: View {
 	var body: some View {
 		VStack(alignment: .leading, spacing: 2) {
 			Text(readout.title).font(.text(.caption, weight: .semibold))
-			Text(format.amount(readout.amount, on: .register)).font(.figures(.caption))
+			switch readout.figure {
+			case .amount(let amount):
+				Text(format.amount(amount, on: .register)).font(.figures(.caption))
+			case .percentage(let text):
+				if !text.isEmpty { Text(text).font(.figures(.caption)) }
+			}
 			ForEach(detail.prefix(8), id: \.self) { line in
 				Text(line).font(.text(.caption)).foregroundStyle(.textSecondary)
 			}

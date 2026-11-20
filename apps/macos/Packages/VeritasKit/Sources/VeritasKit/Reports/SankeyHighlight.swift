@@ -133,10 +133,27 @@ extension SankeyCardLayout {
 	}
 }
 
-/// What the hover readout shows for a node or flow: its words and amount.
+/// What the hover readout shows for a node or flow: its words and the
+/// core's figure for it, an amount or the card's percentage text.
 public struct SankeyReadout: Equatable, Sendable {
+	public enum Figure: Equatable, Sendable {
+		case amount(Int64)
+		/// Actual's own text, such as "12.5%"; empty shows nothing.
+		case percentage(String)
+	}
+
 	public let title: String
-	public let amount: Int64
+	public let figure: Figure
+
+	public init(title: String, amount: Int64) {
+		self.title = title
+		figure = .amount(amount)
+	}
+
+	public init(title: String, percentage: String) {
+		self.title = title
+		figure = .percentage(percentage)
+	}
 }
 
 extension SankeyReport {
@@ -169,14 +186,13 @@ extension SankeyReport {
 }
 
 extension SankeyCardNode {
-	/// The node's words, with the Other node's contents under it.
+	/// A node shows its words and the core's percentage, since the card
+	/// carries no node amount; a flow shows the core's link value.
 	public static func readout(_ target: SankeyTarget, nodes: [SankeyCardNode], links: [SankeyCardLink]) -> SankeyReadout? {
 		switch target {
 		case .node(let index):
 			guard nodes.indices.contains(index), let words = CardWords.sankey(nodes[index].label) else { return nil }
-			let into = links.filter { $0.target.map(Int.init) == index && $0.value > 0 }.reduce(Int64(0)) { $0 + $1.value }
-			let out = links.filter { Int($0.source) == index && $0.value > 0 }.reduce(Int64(0)) { $0 + $1.value }
-			return SankeyReadout(title: words, amount: max(into, out))
+			return SankeyReadout(title: words, percentage: nodes[index].percentage)
 		case .flow(let index):
 			guard links.indices.contains(index), let target = links[index].target.map(Int.init), nodes.indices.contains(target),
 				let from = CardWords.sankey(nodes[Int(links[index].source)].label), let to = CardWords.sankey(nodes[target].label) else { return nil }

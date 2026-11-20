@@ -92,11 +92,15 @@ struct SankeyCanvas: View {
 	@State private var hovered: SankeyTarget?
 	@State private var pointer: CGPoint = .zero
 	@State private var explaining: Int?
+	@FocusState private var focused: Int?
+
+	/// The pointer wins; without it, the node with keyboard focus is lit.
+	private var shown: SankeyTarget? { hovered ?? focused.map(SankeyTarget.node) }
 
 	var body: some View {
 		GeometryReader { proxy in
 			let layout = SankeyLayout(report: report, size: proxy.size)
-			let lit = hovered.map { SankeyHighlight($0, links: layout.links) }
+			let lit = shown.map { SankeyHighlight($0, links: layout.links) }
 			ZStack(alignment: .topLeading) {
 				Canvas { context, _ in
 					for ribbon in layout.ribbons {
@@ -107,7 +111,7 @@ struct SankeyCanvas: View {
 						let shape = Path(roundedRect: node.rect, cornerRadius: 3)
 						let isLit = lit?.nodes.contains(node.index) ?? false
 						let dimmed = lit != nil && !isLit
-						context.fill(shape, with: .color(isLit && hovered == .node(node.index) ? .textPrimary : color(report.nodes[node.index]).opacity(dimmed ? 0.45 : 1)))
+						context.fill(shape, with: .color(isLit && shown == .node(node.index) ? .textPrimary : color(report.nodes[node.index]).opacity(dimmed ? 0.45 : 1)))
 					}
 				}
 				ForEach(layout.nodes, id: \.index) { placed in
@@ -120,9 +124,10 @@ struct SankeyCanvas: View {
 				ForEach(layout.ribbons, id: \.flow) { ribbon in
 					flowElement(ribbon)
 				}
-				if let hovered, let readout = report.readout(hovered) {
+				if let shown, let readout = report.readout(shown) {
+					let anchor = hovered == nil ? focusAnchor(layout) : pointer
 					SankeyReadoutView(readout: readout, format: format)
-						.position(x: min(max(pointer.x, 120), proxy.size.width - 120), y: max(pointer.y - 36, 20))
+						.position(x: min(max(anchor.x, 120), proxy.size.width - 120), y: max(anchor.y - 36, 20))
 						.allowsHitTesting(false)
 				}
 				if let explaining, layout.nodes.indices.contains(explaining) {
@@ -162,20 +167,29 @@ struct SankeyCanvas: View {
 		}
 	}
 
-	/// The node's accessibility element and UI-test handle. Clicks fall
-	/// through to the canvas, which finds what's under the pointer.
+	private func focusAnchor(_ layout: SankeyLayout) -> CGPoint {
+		guard let focused, let node = layout.nodes.first(where: { $0.index == focused }) else { return .zero }
+		return CGPoint(x: node.rect.midX, y: node.rect.minY)
+	}
+
+	/// The node's button: Tab reaches it with keyboard navigation on, and
+	/// Space or a click opens it. Hover stays with the canvas underneath.
 	private func nodeElement(_ node: SankeyNode, _ placed: SankeyLayout.Node) -> some View {
 		let height = max(placed.rect.height, 12)
-		return Color.clear
-			.frame(width: placed.rect.width + 10, height: height)
-			.position(x: placed.rect.midX, y: placed.rect.midY)
-			.allowsHitTesting(false)
-			.accessibilityElement()
-			.accessibilityAddTraits(.isButton)
-			.accessibilityLabel("\(ReportWords.node(node)), \(format.amount(node.value, on: .register))")
-			.accessibilityHint(ReportWords.drillAction(for: node) ?? ReportWords.shortfallCaption)
-			.accessibilityAction { activate(.node(placed.index)) }
-			.accessibilityIdentifier("sankey.node.\(Self.identifier(node.key))")
+		return Button {
+			activate(.node(placed.index))
+		} label: {
+			Color.clear
+				.frame(width: placed.rect.width + 10, height: height)
+				.contentShape(.rect)
+		}
+		.buttonStyle(.plain)
+		.focused($focused, equals: placed.index)
+		.position(x: placed.rect.midX, y: placed.rect.midY)
+		.help(ReportWords.drillAction(for: node) ?? ReportWords.shortfallCaption)
+		.accessibilityLabel("\(ReportWords.node(node)), \(format.amount(node.value, on: .register))")
+		.accessibilityHint(ReportWords.drillAction(for: node) ?? ReportWords.shortfallCaption)
+		.accessibilityIdentifier("sankey.node.\(Self.identifier(node.key))")
 	}
 
 	/// A handle in the middle of a ribbon, where its two curves are furthest from the nodes.
