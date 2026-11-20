@@ -1,9 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use veritas_domain::{
-	AccountId, BudgetData, CategoryId, CivilDate, CoreError, IncomeDelta, Money, Scenario,
-	ScenarioEventId, ScenarioId, ScheduleId, TransactionKind, YearMonth,
+	AccountId, BudgetData, CategoryId, CivilDate, CoreError, FormatPrefs, IncomeDelta, Money,
+	Scenario, ScenarioEventId, ScenarioId, ScheduleId, TransactionKind, YearMonth,
 };
+use veritas_engine::currency_text_at;
 use veritas_reports::{Classification, Decision, Period, classify, net_worth};
 
 use crate::band::{Band, band};
@@ -73,14 +74,10 @@ pub struct Projection {
 }
 
 impl Projection {
-	/// "N asset purchase(s) excluded: $X", omitted when there are none.
-	pub fn asset_purchase_note(&self) -> Option<String> {
-		let dollars = whole_dollars(self.asset_purchase_total);
-		let total = if dollars < 0 {
-			format!("-${}", -dollars)
-		} else {
-			format!("${dollars}")
-		};
+	/// "N asset purchase(s) excluded: $X", omitted when there are none. `$`
+	/// is the budget's currency (CLS-12.3).
+	pub fn asset_purchase_note(&self, prefs: &FormatPrefs) -> Option<String> {
+		let total = whole_text(self.asset_purchase_total, prefs);
 		match self.asset_purchases {
 			0 => None,
 			1 => Some(format!("1 asset purchase excluded: {total}")),
@@ -90,12 +87,21 @@ impl Projection {
 
 	/// "Not forecast: $X a month in uncategorized or hidden spending", in
 	/// whole dollars rounded half up, omitted when that rounds to $0.
-	pub fn not_forecast_note(&self) -> Option<String> {
-		let dollars = whole_dollars(self.not_forecast);
-		(dollars > 0).then(|| {
-			format!("Not forecast: ${dollars} a month in uncategorized or hidden spending")
+	pub fn not_forecast_note(&self, prefs: &FormatPrefs) -> Option<String> {
+		(whole_dollars(self.not_forecast) > 0).then(|| {
+			format!(
+				"Not forecast: {} a month in uncategorized or hidden spending",
+				whole_text(self.not_forecast, prefs)
+			)
 		})
 	}
+}
+
+/// A register amount rounded half up to whole units, in the budget's
+/// currency. A rounded i64 still fits once multiplied back by 100.
+fn whole_text(amount: Money, prefs: &FormatPrefs) -> String {
+	let rounded = i64::try_from(whole_dollars(amount) * 100).unwrap_or(amount.minor());
+	currency_text_at(Money::from_minor(rounded), prefs, 2, true)
 }
 
 /// Each schedule's most common category over the classified rows it posted

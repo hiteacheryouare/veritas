@@ -4,7 +4,7 @@
 
 use veritas_domain::{
 	BudgetData, CategoryGroupId, CategoryId, CivilDate, CoreError, Goal, GoalId, GoalStatus, Money,
-	Row, TransactionKind, YearMonth,
+	Row, YearMonth,
 };
 use veritas_engine::goals::{self as engine, Suggestion};
 use veritas_engine::{BudgetEditor, BudgetWrites, Envelope, EnvelopeSheet};
@@ -38,6 +38,9 @@ pub enum GoalPace {
 	NoHistory { needed_monthly: Money },
 	/// Nothing added at the median pace lately, so no ETA.
 	NotAdding { needed_monthly: Money },
+	/// D77: outside a 2-place budget, spending is recorded, so `available`
+	/// mixes scales: "No ETA: spending recorded", with no needed figure.
+	SpendingRecorded,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -90,7 +93,8 @@ pub fn goals(
 			continue;
 		};
 		let available = available(sheet, &goal.category, month);
-		let spent = spending_to_date(classification, &goal.category, sheet.today())?;
+		let spent =
+			veritas_forecast::spending_to_date(classification, &goal.category, sheet.today())?;
 		let state = match goal.status {
 			GoalStatus::Active => GoalState::Active,
 			GoalStatus::Reached if available < goal.target => GoalState::ReachedSpent,
@@ -103,9 +107,17 @@ pub fn goals(
 			GoalState::Active => engine::suggestion(sheet, goal, month)?,
 			GoalState::Reached | GoalState::ReachedSpent | GoalState::Closed => None,
 		};
-		let pace = match suggestion {
-			Some(suggestion) => Some(pace(data, goal, month, available, suggestion)?),
-			None => None,
+		// D77: no ETA and no needed figure once spending exists outside a
+		// 2-place budget, so the Goals screen agrees with the forecast.
+		let spending_recorded = state == GoalState::Active
+			&& veritas_forecast::spending_recorded(data, classification, &goal.category, month)?;
+		let (suggestion, pace) = match suggestion {
+			Some(_) if spending_recorded => (None, Some(GoalPace::SpendingRecorded)),
+			Some(suggestion) => (
+				Some(suggestion),
+				Some(pace(data, goal, month, available, suggestion)?),
+			),
+			None => (None, None),
 		};
 		let (later_budget, new_activity) = match (goal.status, goal.closed_month) {
 			(GoalStatus::Closed, Some(closed)) => (
@@ -154,7 +166,7 @@ fn pace(
 	suggestion: Suggestion,
 ) -> Result<GoalPace, CoreError> {
 	use veritas_forecast::EtaStatus;
-	let eta = veritas_forecast::goal_eta(data, &goal.id, month, available, None)?;
+	let eta = veritas_forecast::goal_eta(data, &goal.id, month, available, false, None)?;
 	let needed_monthly = suggestion.monthly;
 	Ok(match (eta.on_track, eta.status) {
 		(_, EtaStatus::NoHistory) => GoalPace::NoHistory { needed_monthly },
@@ -427,26 +439,6 @@ fn available(sheet: &EnvelopeSheet, category: &CategoryId, month: YearMonth) -> 
 	sheet
 		.category(month, category)
 		.map_or(Money::ZERO, |cell| cell.balance)
-}
-
-/// CLS-6 `expense_total` for one category, every row through `today`, read
-/// from the classification every report uses so the figures agree (DEBT-8).
-/// Never clamped: a refund bigger than the spending makes it negative.
-pub fn spending_to_date(
-	classification: &Classification,
-	category: &CategoryId,
-	today: CivilDate,
-) -> Result<Money, CoreError> {
-	let mut total = Money::ZERO;
-	for row in classification.through(today) {
-		if row.is_primary()
-			&& row.kind() == TransactionKind::Expense
-			&& row.category.as_ref() == Some(category)
-		{
-			total = total.checked_sub(row.amount)?;
-		}
-	}
-	Ok(total)
 }
 
 /// Rounds down, and stops at 99 until the goal is reached, so the ring never

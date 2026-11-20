@@ -306,10 +306,12 @@ fn fc_3_ap_1_an_asset_purchase_is_not_spending() {
 	assert_eq!(projection.months[1].net_income, cents(-20000));
 	assert_eq!(projection.asset_purchases, 1);
 	assert_eq!(
-		projection.asset_purchase_note().as_deref(),
+		projection
+			.asset_purchase_note(&book.budget.format)
+			.as_deref(),
 		Some("1 asset purchase excluded: $500")
 	);
-	assert_eq!(projection.not_forecast_note(), None);
+	assert_eq!(projection.not_forecast_note(&book.budget.format), None);
 }
 
 #[test]
@@ -805,12 +807,12 @@ fn fc_3_spending_no_baseline_covers_is_noted_not_projected() {
 	let projection = project(&book, &[], None);
 	assert_eq!(projection.not_forecast, cents(3050));
 	assert_eq!(
-		projection.not_forecast_note().as_deref(),
+		projection.not_forecast_note(&book.budget.format).as_deref(),
 		Some("Not forecast: $31 a month in uncategorized or hidden spending")
 	);
 	assert_eq!(projection.months[1].baselined_net_flow, cents(-43000));
 	let clean = project(&groceries_book(43000), &[], None);
-	assert_eq!(clean.not_forecast_note(), None);
+	assert_eq!(clean.not_forecast_note(&book.budget.format), None);
 }
 
 #[test]
@@ -840,22 +842,27 @@ fn fc_3_not_forecast_skips_asset_purchases_and_misfiled_rows() {
 
 #[test]
 fn fc_3_notes_round_half_up_without_overflow() {
-	let mut projection = project(&groceries_book(43000), &[], None);
+	let book = groceries_book(43000);
+	let mut projection = project(&book, &[], None);
 	projection.not_forecast = cents(i64::MAX);
 	assert_eq!(
-		projection.not_forecast_note().as_deref(),
-		Some("Not forecast: $92233720368547758 a month in uncategorized or hidden spending")
+		projection.not_forecast_note(&book.budget.format).as_deref(),
+		Some("Not forecast: $92,233,720,368,547,758 a month in uncategorized or hidden spending")
 	);
 	projection.asset_purchases = 2;
 	projection.asset_purchase_total = cents(-250);
 	assert_eq!(
-		projection.asset_purchase_note().as_deref(),
-		Some("2 asset purchases excluded: -$2"),
+		projection
+			.asset_purchase_note(&book.budget.format)
+			.as_deref(),
+		Some("2 asset purchases excluded: −$2"),
 		"half up, not away"
 	);
 	projection.asset_purchase_total = cents(250);
 	assert_eq!(
-		projection.asset_purchase_note().as_deref(),
+		projection
+			.asset_purchase_note(&book.budget.format)
+			.as_deref(),
 		Some("2 asset purchases excluded: $3")
 	);
 }
