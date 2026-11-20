@@ -3,10 +3,14 @@ use veritas_domain::{
 	Note, Row,
 };
 use veritas_domain::{AccountGroupId, PayeeId, ScheduleId, TransactionId};
+use veritas_domain::{ScenarioEventId, ScenarioId};
 use veritas_rules::RuleBook;
 use veritas_session::{
-	SnapshotReason, accounts, bills, categories, goals, payees, transactions, writes,
+	SnapshotReason, accounts, bills, categories, forecast, goals, payees, scenarios, transactions,
+	writes,
 };
+
+use crate::forecast::{ScenarioChange, core_change};
 
 use crate::accounts::TransactionDraft;
 use crate::bills::BillDraft;
@@ -439,6 +443,67 @@ pub enum Command {
 	CreateCustomReport {
 		settings: CustomReportSettings,
 	},
+	/// v16. The name on every statement's header and on the tax summary
+	/// (ST-3): trimmed, one line, at most 100 characters. Blank clears it, so
+	/// the budget's name shows again. A `veritas_meta` row; the `setting`
+	/// entity.
+	SetEntityName {
+		name: String,
+	},
+	/// v16. A category's TAX-2 bucket, or `nil` to clear it. Every bucket is
+	/// allowed on every kind of category (`TaxCategoryBucket.oppositeDirection`
+	/// says when its rows count as negative). The `categoryMeta` entity.
+	SetCategoryTaxBucket {
+		category_id: String,
+		bucket: Option<crate::reports::TaxBucket>,
+	},
+	/// v16. What a tag means on the tax summary, or `nil` to unmap it. One
+	/// leading `#` is dropped; a blank tag, or one with whitespace or another
+	/// `#` in it, is `Invalid` (TAX-1). Case-sensitive. The `taxTag` entity.
+	SetTaxTag {
+		tag: String,
+		meaning: Option<crate::tax_setup::TaxTagMeaning>,
+	},
+	/// v16. A new, empty what-if (R-FC-2). Its id comes back as the
+	/// `scenario` entity. A blank name, or one another what-if has
+	/// (case-insensitively), is `Invalid`.
+	CreateScenario {
+		name: String,
+	},
+	RenameScenario {
+		scenario_id: String,
+		name: String,
+	},
+	/// Deletes the what-if and its events. Real data is never touched.
+	DeleteScenario {
+		scenario_id: String,
+	},
+	/// A new line in a what-if. A line dated before `today` is `Invalid`
+	/// (D67), and so are unknown or deleted accounts, categories and goals
+	/// (`NotFound`).
+	AddScenarioEvent {
+		scenario_id: String,
+		change: ScenarioChange,
+		today: String,
+	},
+	/// Replaces a line, checked as a new one, so a line "in the past" can be
+	/// re-dated to today or later.
+	EditScenarioEvent {
+		scenario_id: String,
+		event_id: String,
+		change: ScenarioChange,
+		today: String,
+	},
+	RemoveScenarioEvent {
+		scenario_id: String,
+		event_id: String,
+	},
+	/// R-FC-3: sets next month's budget to every amount
+	/// `Session.budgetSuggestions(today:)` suggests, on the budget scale
+	/// (CLS-12.11). One undo step; "keeping" lines write nothing.
+	ApplySuggestions {
+		today: String,
+	},
 }
 
 impl veritas_session::Command for Command {
@@ -490,6 +555,7 @@ impl veritas_session::Command for Command {
 				| Command::ResumeBill { .. }
 				| Command::PayBill { .. }
 				| Command::PostBillNow { .. }
+				| Command::ApplySuggestions { .. }
 		)
 	}
 
@@ -767,6 +833,9 @@ impl veritas_session::Command for Command {
 				dated_today.then(|| sheet.today()),
 				now_ms(),
 			),
+			Command::ApplySuggestions { today } => {
+				forecast::apply_suggestions(data, sheet, civil_date(today)?)
+			}
 			_ => self.plan_plain(data),
 		}
 	}
@@ -857,6 +926,18 @@ fn date(text: &Option<String>) -> Result<Option<CivilDate>, CoreError> {
 }
 
 impl Command {
+	/// The shell's local date a command carries. `Core::perform` pins the
+	/// session's date to it before planning, as every call carrying `today`
+	/// does (v15), so the sheet the plan reads is that day's too.
+	pub(crate) fn local_today(&self) -> Option<&str> {
+		match self {
+			Command::AddScenarioEvent { today, .. }
+			| Command::EditScenarioEvent { today, .. }
+			| Command::ApplySuggestions { today } => Some(today),
+			_ => None,
+		}
+	}
+
 	/// Commands that don't read the envelope sheet.
 	fn plan_plain(&self, data: &BudgetData) -> Result<Vec<Row>, CoreError> {
 		let category = |id: &String| CategoryId::new(id.as_str());
@@ -1079,12 +1160,69 @@ impl Command {
 			Command::CreateDashboard { name } => dashboards::create_dashboard(data, name),
 			Command::RenameDashboard { page_id, name } => reports::rename_page(data, page_id, name),
 			Command::DeleteDashboard { page_id } => reports::delete_page(data, page_id),
+			Command::CreateScenario { name } => scenarios::create_scenario(
+				data,
+				ScenarioId::new(veritas_store::new_id()),
+				name,
+				now_ms() as i64,
+			),
+			Command::RenameScenario { scenario_id, name } => {
+				scenarios::rename_scenario(data, &ScenarioId::new(scenario_id.as_str()), name)
+			}
+			Command::DeleteScenario { scenario_id } => {
+				scenarios::delete_scenario(data, &ScenarioId::new(scenario_id.as_str()))
+			}
+			Command::AddScenarioEvent {
+				scenario_id,
+				change,
+				today,
+			} => scenarios::add_scenario_event(
+				data,
+				&ScenarioId::new(scenario_id.as_str()),
+				ScenarioEventId::new(veritas_store::new_id()),
+				core_change(change)?,
+				civil_date(today)?,
+			),
+			Command::EditScenarioEvent {
+				scenario_id,
+				event_id,
+				change,
+				today,
+			} => scenarios::edit_scenario_event(
+				data,
+				&ScenarioId::new(scenario_id.as_str()),
+				&ScenarioEventId::new(event_id.as_str()),
+				core_change(change)?,
+				civil_date(today)?,
+			),
+			Command::RemoveScenarioEvent {
+				scenario_id,
+				event_id,
+			} => scenarios::remove_scenario_event(
+				data,
+				&ScenarioId::new(scenario_id.as_str()),
+				&ScenarioEventId::new(event_id.as_str()),
+			),
 			Command::CreateCustomReport { settings } => {
 				Ok(vec![custom_reports::create_custom_report(
 					data,
 					veritas_domain::CustomReportId::new(veritas_store::new_id()),
 					settings,
 				)?])
+			}
+			Command::SetEntityName { name } => {
+				veritas_session::settings::set_entity_name(data, name)
+			}
+			Command::SetCategoryTaxBucket {
+				category_id,
+				bucket,
+			} => veritas_session::tax::set_category_tax_bucket(
+				data,
+				&category(category_id),
+				bucket.map(Into::into),
+			),
+			Command::SetTaxTag { tag, meaning } => {
+				veritas_session::tax::set_tax_tag(data, tag, meaning.map(Into::into))
 			}
 			_ => Err(CoreError::Internal(
 				"a budget command was planned without the envelope sheet".to_owned(),

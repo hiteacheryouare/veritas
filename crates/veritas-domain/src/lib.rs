@@ -15,8 +15,8 @@ mod text;
 
 pub use change::{
 	AccountMetaRow, CategoryMapping, CategoryMetaRow, Change, Delta, EntityRef, Hold,
-	NextDateReset, Note, PayeeMapping, Record, Retired, Row, ScheduleJsonPathsRow, ScheduleMetaRow,
-	TaxTag, TransactionMetaRow,
+	NextDateReset, Note, PayeeMapping, Record, Retired, Row, ScenarioRow, ScheduleJsonPathsRow,
+	ScheduleMetaRow, Setting, TaxTag, TransactionMetaRow,
 };
 pub use currency::{CURRENCIES, Currency, currency};
 pub use date::{CivilDate, YearMonth};

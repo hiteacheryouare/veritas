@@ -25,7 +25,9 @@ pub use baseline::{Baseline, INDEX_ACTIVE_MIN, INDEX_MAX, INDEX_MIN, SEASON_MIN,
 pub use flows::{
 	Certainty, FlowKind, KnownFlow, LoanPayment, LoanSplit, MonthSoFar, ScheduleAmount, Shortfall,
 };
-pub use goal::{EtaStatus, GoalEta, goal_eta, goal_etas, month_name};
+pub use goal::{
+	EtaStatus, GoalEta, goal_eta, goal_etas, month_name, spending_recorded, spending_to_date,
+};
 pub use history::Side;
 pub use projection::{
 	Comparison, Forecaster, HORIZONS, HorizonForecast, MonthForecast, Projection,
@@ -38,6 +40,6 @@ pub use schedules::{
 };
 pub use suggest::{Basis, Envelope, Suggestion, Suggestions, next_month_envelopes};
 pub use wrapped::{
-	CategoryRank, Change, GroupRank, NoSpend, PayeeRank, PriorYear, Redacted, Streak, Wrapped,
-	wrapped,
+	CategoryRank, Change, FunFact, GroupRank, Measure, NoSpend, PayeeRank, PriorYear, Redacted,
+	Streak, Wrapped, wrapped,
 };
