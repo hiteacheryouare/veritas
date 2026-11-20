@@ -83,9 +83,10 @@ struct WrappedStoryTests {
 		#expect(cards[.categories]?.rows.last?.label == "Everything else")
 		#expect(cards[.categories]?.rows[4].label == "Old Books (hidden)")
 		#expect(cards[.categories]?.detail == "of categorized spending")
-		#expect(cards[.totals]?.rows.map(\.value) == ["+7.5% vs 2026", "115.0% of what came in", "\u{2212}15.0% of what came in"])
+		#expect(cards[.totals]?.rows.map(\.value) == ["+7.5% vs 2026", "115.0% of what came in", "15.0% of what came in"])
+		#expect(cards[.totals]?.rows.map(\.label) == ["Came in", "Went out", "Came up short"], "a deficit says so in words")
 		#expect(cards[.groups]?.rows.map(\.value) == ["63.5%", "36.5%"], "no Everything else when the core has none")
-		#expect(cards[.payees]?.detail == "of what went to payees, across 12 payments")
+		#expect(cards[.payees]?.detail == "of what went to payees", "each row carries its own payee's count")
 		#expect(cards[.biggestMonth]?.figure == "26.1%")
 		#expect(cards[.biggestMonth]?.detail == "of the year's spending, 56% more than your typical month")
 		#expect(cards[.debtAndSavings]?.rows.map(\.value) == ["12.0% of what came in"])
@@ -96,7 +97,8 @@ struct WrappedStoryTests {
 	@Test func amountsShowTheCoresFigures() {
 		let cards = Dictionary(uniqueKeysWithValues: Self.story().cards(redacted: false).map { ($0.kind, $0) })
 		#expect(cards[.totals]?.title == "Your 2027")
-		#expect(cards[.totals]?.rows.map(\.value) == ["$1,000.00", "$1,150.00", "\u{2212}$150.00"])
+		#expect(cards[.totals]?.rows.map(\.value) == ["$1,000.00", "$1,150.00", "$150.00"])
+		#expect(cards[.totals]?.rows.last?.label == "Came up short")
 		#expect(cards[.totals]?.rows.map(\.note) == ["+7.5% vs 2026", "New this year", "+150% vs 2026"])
 		#expect(cards[.categories]?.title == "Groceries topped your spending.")
 		#expect(cards[.categories]?.figure == "$430.00")
@@ -138,6 +140,8 @@ struct WrappedStoryTests {
 		#expect(totals.title == "Your 2027 so far")
 		#expect(totals.detail == "January 1 to March 10")
 		#expect(totals.rows[0].note == "+7.5% vs this point in 2026")
+		let month = story.cards(redacted: true).first { $0.kind == .biggestMonth }
+		#expect(month?.detail == "of spending so far, 56% more than your typical month")
 	}
 
 	@Test func aLateStartCarriesThePriorYearLabel() {
@@ -182,5 +186,8 @@ struct WrappedStoryTests {
 		var comma = format
 		comma.decimalSeparator = ","
 		#expect(WrappedWords.percent(430, format: comma) == "43,0%")
+		var lakh = format
+		lakh.groupsInTwosAfterThousands = true
+		#expect(WrappedWords.basisPoints(12_345_600, format: lakh) == "1,23,456%")
 	}
 }

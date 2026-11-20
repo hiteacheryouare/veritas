@@ -99,12 +99,12 @@ public struct WrappedStory: Sendable {
 			? [
 				WrappedCard.Row(id: "in", label: "Came in", value: change(prior.totalIn)),
 				WrappedCard.Row(id: "out", label: "Went out", value: ofIncome(report.shares.outVsIn), note: change(prior.totalOut)),
-				WrappedCard.Row(id: "net", label: "Left over", value: ofIncome(report.shares.net), note: change(prior.net))
+				WrappedCard.Row(id: "net", label: netLabel, value: ofIncome(report.shares.net.map(abs)), note: change(prior.net))
 			]
 			: [
 				WrappedCard.Row(id: "in", label: "Came in", value: money(report.totalIn), note: change(prior.totalIn)),
 				WrappedCard.Row(id: "out", label: "Went out", value: money(report.totalOut), note: change(prior.totalOut)),
-				WrappedCard.Row(id: "net", label: "Left over", value: money(report.net), note: change(prior.net))
+				WrappedCard.Row(id: "net", label: netLabel, value: format.currencyMagnitude(report.net, on: .register), note: change(prior.net))
 			]
 		return WrappedCard(
 			kind: .totals,
@@ -112,6 +112,11 @@ public struct WrappedStory: Sendable {
 			detail: isYearToDate ? "\(WrappedWords.day(report.first)) to \(WrappedWords.day(report.last))" : nil,
 			rows: rows
 		)
+	}
+
+	/// A deficit year says so in words, and its figure drops the sign.
+	private var netLabel: String {
+		report.net < 0 ? "Came up short" : "Left over"
 	}
 
 	private func categories(_ redacted: Bool) -> WrappedCard? {
@@ -166,7 +171,7 @@ public struct WrappedStory: Sendable {
 			kind: .payees,
 			title: "You paid \(top.name) the most.",
 			figure: redacted ? WrappedWords.percent(top.share, format: format) : money(top.total),
-			detail: redacted ? "of what went to payees, across \(payments)" : "across \(payments)",
+			detail: redacted ? "of what went to payees" : "across \(payments)",
 			rows: rows
 		)
 	}
@@ -175,7 +180,7 @@ public struct WrappedStory: Sendable {
 		guard let month = report.biggestMonth else { return nil }
 		let typical = report.biggestVsTypical.map { "\(WrappedWords.basisPoints($0, format: format)) more than your typical month" }
 		let detail: String? = redacted
-			? (["of the year's spending", typical].compactMap { $0 }.joined(separator: ", "))
+			? ([isYearToDate ? "of spending so far" : "of the year's spending", typical].compactMap { $0 }.joined(separator: ", "))
 			: typical
 		return WrappedCard(
 			kind: .biggestMonth,
@@ -304,12 +309,14 @@ public enum WrappedWords {
 	}
 
 	/// 1111 is "1,111" in the budget's own grouping.
+	/// 1111 is "1,111" in the budget's own grouping; 123456 is "1,23,456"
+	/// where groups go in twos after the thousands.
 	static func grouped(_ value: UInt64, format: MoneyFormat) -> String {
 		var digits = Array(String(value))
 		var index = digits.count - 3
 		while index > 0 {
 			digits.insert(contentsOf: format.groupingSeparator, at: index)
-			index -= 3
+			index -= format.groupsInTwosAfterThousands ? 2 : 3
 		}
 		return String(digits)
 	}
