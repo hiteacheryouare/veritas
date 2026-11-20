@@ -24,6 +24,8 @@ struct WorkspaceView: View {
 					StatementsScreen(workspace: model)
 				} else if model.destination == .screen(.tax) {
 					TaxScreen(workspace: model)
+				} else if model.destination == .screen(.wrapped) {
+					WrappedScreen(workspace: model)
 				} else if model.destination == .screen(.goals) {
 					GoalsScreen(workspace: model)
 				} else if model.destination == .screen(.reports) || model.destination == .screen(.dashboard) {
