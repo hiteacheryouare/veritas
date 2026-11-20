@@ -1388,6 +1388,7 @@ dependencies = [
  "veritas-interop",
  "veritas-rules",
  "veritas-store",
+ "zip",
 ]
 
 [[package]]
