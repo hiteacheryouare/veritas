@@ -204,6 +204,13 @@ public final class WorkspaceModel {
 		}
 	}
 
+	/// A read whose failure the caller shows itself, next to the field that
+	/// caused it, so no alert repeats it.
+	public func quietly<T: Sendable>(_ read: @Sendable (any BudgetSession) async throws -> T) async throws -> T? {
+		guard let session else { return nil }
+		return try await read(session)
+	}
+
 	/// A read whose error the caller shows where it happened, such as the
 	/// report editor's preview. Nil when no budget is open or it was cancelled.
 	public func attempt<T: Sendable>(_ read: @Sendable (any BudgetSession) async throws -> T) async -> Result<T, any Error>? {
@@ -254,6 +261,13 @@ public final class WorkspaceModel {
 	}
 
 	public var canEditDashboards: Bool { session?.canEditDashboards ?? false }
+	public var canPlanTransfers: Bool { session?.canPlanTransfers ?? false }
+
+	/// Where ⌘N adds a transaction: the account on screen, else the first in the sidebar.
+	public var currentAccountID: String {
+		if case .account(let id) = destination { return id }
+		return overview?.accounts.first { !$0.isInactive }?.id ?? ""
+	}
 
 	/// The budget currency's decimal places (D63): budget cells and goal
 	/// amounts use them; the register always uses two. They arrive with the
