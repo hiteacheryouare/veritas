@@ -237,8 +237,7 @@ public final class StatementsModel {
 	}
 
 	static func date(_ text: String, style: Date.FormatStyle.Symbol.Month) -> String {
-		let parts = text.split(separator: "-").compactMap { Int($0) }
-		guard parts.count == 3, let date = Calendar.current.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2])) else { return text }
+		guard let date = CivilDate.date(text) else { return text }
 		return date.formatted(.dateTime.month(style).day().year())
 	}
 
