@@ -24,11 +24,13 @@ final class StubAccounts: @unchecked Sendable {
 	}
 
 	private let lock = NSLock()
-	private(set) var accounts: [AccountDetail] = [
+	/// The stub budget's accounts, which the Bills and Rules stubs name too.
+	static let seed: [AccountDetail] = [
 		StubAccounts.account("checking", "Checking"), StubAccounts.account("savings", "Savings"), StubAccounts.account("visa", "Visa"),
 		StubAccounts.account("brokerage", "Brokerage", offBudget: true), StubAccounts.account("carloan", "Car loan", offBudget: true),
 		StubAccounts.account("oldcard", "Old store card", closed: true)
 	]
+	private(set) var accounts: [AccountDetail] = StubAccounts.seed
 	private var payees: [String: PayeeDetail] = [:]
 	private var txns: [Txn] = []
 	private var notes: [String: String] = ["checking": "Joint with Sam. Statement closes on the 9th."]

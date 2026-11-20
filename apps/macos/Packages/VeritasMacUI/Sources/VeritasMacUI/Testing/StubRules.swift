@@ -49,7 +49,7 @@ final class StubRules: @unchecked Sendable {
 			),
 			RuleSentence(
 				id: "templated", stage: .post, conditionsOp: .and,
-				conditions: [RuleCondition(field: .account, op: .is, value: .id(id: "card"))],
+				conditions: [RuleCondition(field: .account, op: .is, value: .id(id: "visa"))],
 				actions: [set(.notes, .raw(json: "\"{{imported_payee}} via card\""))],
 				access: .editInActual(reasons: ["a template action"]), runsInVeritas: false
 			)
@@ -71,7 +71,7 @@ final class StubRules: @unchecked Sendable {
 		let category = rule.actions.first { $0.field == .category && $0.splitIndex == 0 }?.value ?? .id(id: "household")
 		func row(_ id: String, _ date: String, _ amount: Int64, from: String?, notes: String?) -> RuleMatch {
 			RuleMatch(
-				transactionId: id, parentId: nil, date: date, accountId: "card", amount: amount, payeeId: "amazon", categoryId: from, notes: notes,
+				transactionId: id, parentId: nil, date: date, accountId: "visa", amount: amount, payeeId: "amazon", categoryId: from, notes: notes,
 				changes: [
 					RuleFieldChange(field: .category, before: .id(id: from), after: category),
 					id == Self.reconciledRow ? RuleFieldChange(field: .amount, before: .amount(amount: amount), after: .amount(amount: -2_499)) : nil
@@ -86,9 +86,11 @@ final class StubRules: @unchecked Sendable {
 		]
 	}
 
+	/// Only the preview's own rows; any other id is NotFound, as the core answers.
 	func registerRow(_ id: String) throws -> RegisterRow {
-		RegisterRow(
-			id: id, accountId: "card", accountName: "Visa", date: "2026-09-14", amount: -2_999, payeeId: "amazon", payeeName: "Amazon",
+		guard ["tx-1", "tx-2", Self.reconciledRow].contains(id) else { throw FfiError.NotFound(entity: "transaction", id: id) }
+		return RegisterRow(
+			id: id, accountId: "visa", accountName: "Visa", date: "2026-09-14", amount: -2_999, payeeId: "amazon", payeeName: "Amazon",
 			categoryId: nil, categoryName: nil, notes: nil, tags: [], cleared: true, reconciled: id == Self.reconciledRow,
 			transferAccountId: nil, counterpartId: nil, counterpartParentId: nil, lines: [], splitDifference: nil, startingBalance: false,
 			scheduleId: nil, needsActual: nil, runningBalance: nil
