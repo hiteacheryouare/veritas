@@ -586,6 +586,7 @@ impl Session {
 	) -> Result<CustomReportView, FfiError> {
 		let core = self.core.clone();
 		run(&cancel, move |cancel| {
+			core.pin_today(&today)?;
 			core.report(cancel, |budget, _| {
 				view(budget, &stored(budget, &id)?, civil_date(&today)?)
 			})
@@ -603,6 +604,7 @@ impl Session {
 	) -> Result<CustomReportView, FfiError> {
 		let core = self.core.clone();
 		run(&cancel, move |cancel| {
+			core.pin_today(&today)?;
 			core.report(cancel, |budget, _| {
 				view(budget, &previewed(budget, &settings)?, civil_date(&today)?)
 			})

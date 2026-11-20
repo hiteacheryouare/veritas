@@ -37,6 +37,9 @@ pub enum GoalPace {
 	NotAdding {
 		needed_monthly: i64,
 	},
+	/// v16, D77: "No ETA: spending recorded", with no needed figure, in a
+	/// neutral tone. Agrees with `GoalEtaStatus.spendingRecorded`.
+	SpendingRecorded,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -162,6 +165,7 @@ fn tone(view: &GoalView, zero_places: bool) -> MoneyTone {
 		CoreState::Active => match view.pace {
 			None | Some(CorePace::OnTrack { .. }) => MoneyTone::Available,
 			Some(CorePace::Behind { .. } | CorePace::NotAdding { .. }) => MoneyTone::Low,
+			Some(CorePace::SpendingRecorded) => MoneyTone::Neutral,
 			Some(CorePace::NoHistory { .. }) => MoneyTone::Neutral,
 		},
 		CoreState::Reached => MoneyTone::Available,
@@ -211,6 +215,7 @@ fn summary(view: GoalView, zero_places: bool) -> GoalSummary {
 			CorePace::NotAdding { needed_monthly } => GoalPace::NotAdding {
 				needed_monthly: needed_monthly.minor(),
 			},
+			CorePace::SpendingRecorded => GoalPace::SpendingRecorded,
 		}),
 		reached_month: goal.reached_month.map(Month::from),
 		closed_month: goal.closed_month.map(Month::from),

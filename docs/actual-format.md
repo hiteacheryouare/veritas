@@ -719,7 +719,7 @@ Veritas keeps what Actual can't express in its own tables in the same `db.sqlite
 
 | Table | Holds |
 |---|---|
-| `veritas_meta` | `schema_version` |
+| `veritas_meta` | `(key, value)` rows. `schema_version`: the Veritas schema the file was adopted at, written once by veritas-store and never set by a command. `entity_name`: the statements' entity name (ST-3), the trimmed text, one line of at most 100 Unicode scalar values; the row is deleted when the name is cleared, and setting it is one undo step. These are the only keys: `SettingKey` (veritas-domain) lists the settable ones, and a row with any other key is left alone and never read |
 | `veritas_category_meta` | a category's kind, tax bucket and archive date (CLS-3, TAX-2, R-BUD-5) |
 | `veritas_account_meta` | an account's kind and loan terms (ST-2, R-DEBT-1) |
 | `veritas_goal` | goals (DEBT-8) |

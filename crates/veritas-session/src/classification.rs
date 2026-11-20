@@ -40,6 +40,7 @@ fn affects_classification(entity: &EntityRef) -> bool {
 			| EntityRef::Schedule(_)
 			| EntityRef::Tag(_)
 			| EntityRef::TaxTag(_)
+			| EntityRef::Setting(_)
 			| EntityRef::Goal(_)
 			| EntityRef::CustomReport(_)
 			| EntityRef::DashboardPage(_)

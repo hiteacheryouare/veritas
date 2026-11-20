@@ -136,6 +136,11 @@ fn tax7_t4_two_buckets_is_a_conflict() {
 	assert_eq!(conflicts.len(), 1);
 	assert_eq!(conflicts[0].counted, None);
 	assert_eq!(conflicts[0].bucket_id(), "conflict");
+	assert_eq!(
+		conflicts[0].conflicting,
+		[Bucket::Education, Bucket::Medical],
+		"TAX-3.3.2: the PDF lists them under Needs a decision, by bucket id"
+	);
 }
 
 #[test]
