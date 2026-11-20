@@ -236,6 +236,7 @@ struct GoalsTool: Tool {
 	/// The goal card's figures: whole units on the budget scale, spending on the register's.
 	static func lines(_ goal: GoalSummary, format: MoneyFormat, zeroPlaces: Bool) -> [String] {
 		func whole(_ value: Int64) -> String { format.wholeCurrency(value, on: .budget) }
+		func monthly(_ value: Int64) -> String { format.currency(value, on: .budget) }
 		var parts: [String]
 		if zeroPlaces {
 			parts = goal.state == .reachedSpent
@@ -249,10 +250,11 @@ struct GoalsTool: Tool {
 		case .active:
 			switch goal.pace {
 			case .onTrack(let eta): parts.append("on track to reach it in \(ReportPeriod.monthYear(eta))")
-			case .behind(let needed): parts.append("behind, needs \(whole(needed)) a month")
-			case .noHistory(let needed): parts.append("needs \(whole(needed)) a month")
-			case .notAdding(let needed): parts.append("nothing is being added, needs \(whole(needed)) a month")
-			case nil: if let suggested = goal.suggestedMonthly { parts.append("budget \(whole(suggested)) a month") }
+			case .behind(let needed): parts.append("behind, needs \(monthly(needed)) a month")
+			case .noHistory(let needed): parts.append("needs \(monthly(needed)) a month")
+			case .notAdding(let needed): parts.append("nothing is being added, needs \(monthly(needed)) a month")
+			case .spendingRecorded: parts.append("no ETA, spending recorded")
+			case nil: if let suggested = goal.suggestedMonthly { parts.append("budget \(monthly(suggested)) a month") }
 			}
 		case .reached:
 			parts.append(goal.reachedMonth.map { "reached in \(ReportPeriod.monthYear($0))" } ?? "reached")

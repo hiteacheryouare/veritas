@@ -24,7 +24,7 @@ struct AssistantRulesTests {
 			year: 2026,
 			buckets: [
 				TaxBucketTotal(bucket: .charitable, inflow: false, total: 13_000, count: 2),
-				TaxBucketTotal(bucket: .medical, inflow: false, total: -2_300, count: 1)
+				TaxBucketTotal(bucket: .medical, inflow: false, total: -2_300, count: 1, negative: true)
 			],
 			detail: [], conflicts: 0, summaryCsv: "", detailCsv: ""
 		)
