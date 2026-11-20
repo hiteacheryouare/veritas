@@ -59,6 +59,30 @@ enum StubStatements {
 		)
 	}
 
+	/// Net Profit's column for the months, grouped the way the core groups it.
+	static func incomeStatement(first: String, last: String) throws -> IncomeStatement {
+		guard let from = Month(date: first), let to = Month(date: last) else { throw FfiError.Invalid(message: "\(first) to \(last) isn't a range.") }
+		let column = StubReports.column(ReportPeriod(first: from, last: to).months)
+		func groups(_ categories: [ReportCategory]) -> [StatementGroup] {
+			var groups: [StatementGroup] = []
+			for category in categories {
+				if let index = groups.lastIndex(where: { $0.groupId == category.groupId }) {
+					groups[index].categories.append(category)
+					groups[index].total += category.total
+				} else {
+					groups.append(StatementGroup(groupId: category.groupId, groupName: category.groupName, categories: [category], total: category.total))
+				}
+			}
+			return groups
+		}
+		return IncomeStatement(
+			first: first, last: last,
+			revenue: groups(column.income.categories), totalRevenue: ReportLine(total: column.income.total, count: column.income.count),
+			expenses: groups(column.expenses.categories), totalExpenses: ReportLine(total: column.expenses.total, count: column.expenses.count),
+			netIncome: column.netProfit
+		)
+	}
+
 	private static func netWorth(endOf month: Month) -> NetWorthMonth {
 		StubReports().netWorth(first: month, last: month)[0]
 	}

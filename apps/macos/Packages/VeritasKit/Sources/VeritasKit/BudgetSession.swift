@@ -179,6 +179,12 @@ public protocol BudgetSession: AnyObject, Sendable {
 	func payees() async throws -> [PayeeDetail]
 	func accounts() async throws -> AccountList
 	func registerRow(_ id: String) async throws -> RegisterRow
+	/// The name on every statement's header and on the tax summary (ST-3).
+	func statementEntity() async throws -> StatementEntity
+	/// Revenue and expenses by category group over inclusive `YYYY-MM-DD` dates (R-REP-7, ST-3).
+	func incomeStatement(first: String, last: String) async throws -> IncomeStatement
+	/// One year's Wrapped, or this year's to `today` (R-WRAP-1, FC-8).
+	func wrapped(year: Int32, today: String) async throws -> WrappedReport
 	/// The balance sheet at the end of `asOf`, `YYYY-MM-DD` (R-REP-7).
 	func balanceSheet(asOf: String) async throws -> BalanceSheet
 	/// Owner's equity over inclusive `YYYY-MM-DD` dates (R-REP-7).
