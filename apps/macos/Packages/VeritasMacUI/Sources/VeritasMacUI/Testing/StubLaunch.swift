@@ -140,7 +140,7 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 		name = "Stub"
 		accountGroups = [
 			SidebarGroup(name: "Cash", accounts: [SidebarAccount(id: "checking", name: "Checking", balance: 0)]),
-			SidebarGroup(name: "Credit", accounts: [SidebarAccount(id: "card", name: "Card", balance: 0)])
+			SidebarGroup(name: "Credit", accounts: [SidebarAccount(id: "visa", name: "Visa", balance: 0)])
 		]
 	}
 
@@ -251,20 +251,16 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 		}
 	}
 
-	/// The Accounts stub's accounts, then the Bills stub's own (`card`, `car-loan`), which its bills and rules name.
-	func accounts() async throws -> AccountList {
-		let list = accountStore.list()
-		let known = Set(list.accounts.map(\.id))
-		return AccountList(accounts: list.accounts + StubBills.accounts.accounts.filter { !known.contains($0.id) }, groups: list.groups)
-	}
+	func accounts() async throws -> AccountList { accountStore.list() }
 	func register(_ scope: RegisterScope, filter: RegisterFilter, sort: RegisterSort, offset: UInt64, limit: UInt64) async throws -> RegisterPage {
 		accountStore.register(scope, filter: filter, sort: sort, offset: offset, limit: limit)
 	}
-	/// A row the Accounts stub doesn't hold is one of the Rules stub's preview rows.
+	/// A row the Accounts stub doesn't hold may be one of the Rules stub's preview rows; any other id is NotFound.
 	func registerRow(_ id: String) async throws -> RegisterRow {
 		if let row = try? accountStore.registerRow(id) { return row }
 		return try ruleStore.registerRow(id)
 	}
+	/// The Accounts stub's payees, then the Bills stub's own; one they share, such as `to-carloan`, is listed once.
 	func payees() async throws -> [PayeeDetail] {
 		let payees = accountStore.payeeList()
 		let known = Set(payees.map(\.id))
