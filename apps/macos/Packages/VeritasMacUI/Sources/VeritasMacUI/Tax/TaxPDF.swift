@@ -51,6 +51,9 @@ enum TaxPDF {
 		let height: CGFloat
 		/// A heading moves to the next page with the block under it.
 		let keepsWithNext: Bool
+		/// What goes above this block when it starts a page partway through a
+		/// table: the table's name, continued, and its column header.
+		var continuation: [Block] = []
 		let draw: (CGFloat) -> Void
 	}
 
@@ -74,6 +77,10 @@ enum TaxPDF {
 					pages.append([])
 					y = top + headerHeight
 				}
+				if pages[pages.count - 1].isEmpty, pages.count > 1 {
+					pages[pages.count - 1] += block.continuation
+					y += block.continuation.reduce(0) { $0 + $1.height }
+				}
 				pages[pages.count - 1].append(block)
 				y += block.height
 			}
@@ -95,12 +102,12 @@ enum TaxPDF {
 			blocks.append(section(TaxDocument.conflictsTitle))
 			blocks.append(paragraph(TaxDocument.conflictsNote, color: secondary, keepsWithNext: true))
 			blocks.append(detailHeader())
-			blocks += document.conflicts.map(detailRow)
+			blocks += document.conflicts.map { detailRow($0, continuing: TaxDocument.conflictsTitle) }
 		}
 		for bucket in document.buckets {
 			blocks.append(bucketHeading(bucket))
 			blocks.append(detailHeader())
-			blocks += bucket.rows.map(detailRow)
+			blocks += bucket.rows.map { detailRow($0, continuing: bucket.name) }
 		}
 		blocks.append(section(TaxDocument.limitsTitle))
 		blocks += TaxDocument.limits.map { paragraph($0, color: ink, bullet: true) }
@@ -163,11 +170,19 @@ enum TaxPDF {
 		}
 	}
 
-	private static func detailRow(_ row: TaxDocument.Row) -> Block {
+	/// "Medical, continued" above a table that runs onto a new page.
+	private static func continued(_ title: String) -> Block {
+		let font = StatementPDF.font(12, .bold)
+		return Block(height: 4 + lineHeight(font) + 4, keepsWithNext: true) { y in
+			text(TaxDocument.continued(title), font: font, color: ink, in: CGRect(x: side, y: y + 4, width: contentWidth, height: lineHeight(font)))
+		}
+	}
+
+	private static func detailRow(_ row: TaxDocument.Row, continuing title: String) -> Block {
 		let font = StatementPDF.font(9.5)
 		let noteFont = StatementPDF.font(8.5, italic: true)
 		let noteHeight = row.note == nil ? 0 : lineHeight(noteFont)
-		return Block(height: lineHeight(font) + noteHeight + 4, keepsWithNext: false) { y in
+		return Block(height: lineHeight(font) + noteHeight + 4, keepsWithNext: false, continuation: [continued(title), detailHeader()]) { y in
 			let top = y + 2
 			var x = side
 			for (value, columnWidth) in zip([row.date, row.payee, row.category, row.account], columns) {

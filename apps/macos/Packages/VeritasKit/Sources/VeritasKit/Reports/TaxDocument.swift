@@ -70,6 +70,11 @@ public struct TaxDocument: Hashable, Sendable {
 		conflicts = summary.detail.filter { $0.bucket == nil }.map { Self.row($0, amount: $0.amount, format: format) }
 	}
 
+	/// "Medical, continued", at the top of a page a table runs onto.
+	public static func continued(_ title: String) -> String {
+		"\(title), continued"
+	}
+
 	public var isEmpty: Bool { buckets.isEmpty && conflicts.isEmpty }
 
 	/// "No transactions in a tax bucket in 2026", as the screen says it.

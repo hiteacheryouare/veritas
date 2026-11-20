@@ -84,7 +84,12 @@ struct TaxPDFTests {
 			#expect(text.contains("Payee \(index)"), "every row, once")
 		}
 		for index in 0..<pdf.pageCount {
-			#expect(pdf.page(at: index)?.string?.contains("Page \(index + 1) of \(pdf.pageCount)") == true)
+			let page = try #require(pdf.page(at: index)?.string)
+			#expect(page.contains("Page \(index + 1) of \(pdf.pageCount)"))
+			#expect(page.contains("Amount"), "page \(index + 1) has the column header")
+			if index > 0 {
+				#expect(page.contains("Charitable giving, continued"), "page \(index + 1) names the table it continues")
+			}
 		}
 	}
 
