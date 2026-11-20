@@ -230,7 +230,7 @@ private struct IdPicker: View {
 			case .categoryGroup:
 				ForEach(names.categoryGroups, id: \.id) { Text($0.name).tag(String?.some($0.id)) }
 			default:
-				ForEach(names.payees, id: \.id) { Text($0.name).tag(String?.some($0.id)) }
+				ForEach(names.filterPayees, id: \.id) { Text($0.name).tag(String?.some($0.id)) }
 			}
 		}
 		.labelsHidden()
@@ -250,7 +250,7 @@ private struct IdList: View {
 		case .account: names.accounts.map { ($0.id, $0.name) }
 		case .category: names.categoryGroups.flatMap(\.envelopes).map { ($0.id, $0.name) }
 		case .categoryGroup: names.categoryGroups.map { ($0.id, $0.name) }
-		default: names.payees.map { ($0.id, $0.name) }
+		default: names.filterPayees.map { ($0.id, $0.name) }
 		}
 	}
 
@@ -351,3 +351,9 @@ private struct WrappingRow: Layout {
 		return frames
 	}
 }
+
+private extension BudgetNames {
+	/// A filter picks real payees; an account's transfer payee isn't offered.
+	var filterPayees: [PayeeDetail] { payees.filter { $0.transferAccountId == nil } }
+}
+

@@ -45,6 +45,12 @@ final class StubBudget: @unchecked Sendable {
 			Envelope(id: "hobbies", name: "Hobbies", budgeted: 7_500, spent: -1_299, carriedIn: 0),
 			Envelope(id: "gifts", name: "Gifts", budgeted: 4_000, spent: 0, carriedIn: 8_000, note: "Mom's birthday in December")
 		]),
+		Group(id: "savingsdebt", name: "Savings and debt", isIncome: false, envelopes: [
+			Envelope(id: "principal", name: "Car loan payment", budgeted: 0, spent: 0, carriedIn: 0),
+			Envelope(id: "interest", name: "Loan interest", budgeted: 0, spent: 0, carriedIn: 0),
+			Envelope(id: "savingsfund", name: "Savings", budgeted: 0, spent: 0, carriedIn: 0),
+			Envelope(id: "investing", name: "Investments", budgeted: 0, spent: 0, carriedIn: 0)
+		]),
 		Group(id: "income", name: "Income", isIncome: true, envelopes: [
 			Envelope(id: "paycheck", name: "Paycheck", budgeted: 0, spent: 512_640, carriedIn: 0)
 		])
@@ -61,6 +67,11 @@ final class StubBudget: @unchecked Sendable {
 	private let withHistory: Set<String> = ["groceries", "dining", "gas", "household", "rent", "electric", "internet", "hobbies", "gifts"]
 	/// Gifts is charitable, so moving its history elsewhere shows TAX-8's warning.
 	private let taxBuckets: [String: String] = ["gifts": "charitable"]
+
+	func createEnvelope(in groupID: String, name: String) throws -> String {
+		try perform(.createCategory(groupId: groupID, name: name))
+		return lock.withLock { "new-\(created)" }
+	}
 
 	/// The stub has one set of figures, shown for whichever 2026 month is asked.
 	static func clamped(_ month: Month) -> Month {

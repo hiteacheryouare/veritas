@@ -126,6 +126,7 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 	private var keep = Retention(hourly: 48, daily: 30, monthly: 12, operationDays: 30)
 	private let budget = StubBudget()
 	private let reports = StubReports()
+	private let accountStore = StubAccounts()
 	private lazy var dashboardStore = StubDashboards(reports: reports)
 	private let billStore = StubBills()
 	private let ruleStore = StubRules()
@@ -158,7 +159,7 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 
 	func overview() async throws -> BudgetOverview {
 		BudgetOverview(
-			name: name, directory: StubLaunch.budgetDirectory, readOnly: readOnly, accountGroups: accountGroups,
+			name: name, directory: StubLaunch.budgetDirectory, readOnly: readOnly, accountGroups: name == "Stub" ? accountStore.sidebar() : accountGroups,
 			format: hidesDecimals ? MoneyFormat(Self.hiddenDecimals, currency: Self.dollar) : nil
 		)
 	}
@@ -237,8 +238,83 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 		switch command {
 		case .saveCustomReport(let settings): try reports.save(settings)
 		case .placeWidget(let id, let x, let y, let width, let height): try dashboardStore.place(id, x: x, y: y, width: width, height: height)
-		default: try budget.perform(command)
+		default:
+			if try !accountStore.perform(command) { try budget.perform(command) }
 		}
+	}
+
+	/// The Accounts stub's accounts, then the Bills stub's own (`card`, `car-loan`), which its bills and rules name.
+	func accounts() async throws -> AccountList {
+		let list = accountStore.list()
+		let known = Set(list.accounts.map(\.id))
+		return AccountList(accounts: list.accounts + StubBills.accounts.accounts.filter { !known.contains($0.id) }, groups: list.groups)
+	}
+	func register(_ scope: RegisterScope, filter: RegisterFilter, sort: RegisterSort, offset: UInt64, limit: UInt64) async throws -> RegisterPage {
+		accountStore.register(scope, filter: filter, sort: sort, offset: offset, limit: limit)
+	}
+	/// A row the Accounts stub doesn't hold is one of the Rules stub's preview rows.
+	func registerRow(_ id: String) async throws -> RegisterRow {
+		if let row = try? accountStore.registerRow(id) { return row }
+		return try ruleStore.registerRow(id)
+	}
+	func payees() async throws -> [PayeeDetail] {
+		let payees = accountStore.payeeList()
+		let known = Set(payees.map(\.id))
+		return payees + StubBills.payees.filter { !known.contains($0.id) }
+	}
+	func payeeMemory(_ payeeID: String) async throws -> PayeeMemory? { accountStore.memory(payeeID) }
+	func reconciliation(_ accountID: String, statementBalance: Int64) async throws -> Reconciliation {
+		accountStore.reconciliation(accountID, statement: statementBalance)
+	}
+
+	let canPlanTransfers = true
+	func transferPreview(from: String, to: String, amount: Int64) async throws -> TransferPreview {
+		try accountStore.transferPreview(from: from, to: to, amount: amount)
+	}
+	func kindTarget(_ kind: CategoryKind) async throws -> KindTarget { accountStore.kindTarget(kind) }
+	func kindChangePreview(_ categoryID: String, kind: CategoryKind) async throws -> UInt64 { accountStore.kindChangePreview(categoryID) }
+	func setCategoryKind(_ categoryID: String, kind: CategoryKind) async throws {
+		try writable()
+		try accountStore.setKind(categoryID, kind)
+	}
+	func kindCategoryPlan(_ kind: CategoryKind) async throws -> KindCategoryPlan {
+		KindCategoryPlan(groupName: "Savings and debt", groupIsHidden: false)
+	}
+	func balanceHistory(_ accountID: String, from: String, to: String) async throws -> BalanceHistory {
+		accountStore.balanceHistory(accountID, from: from, to: to)
+	}
+	func tags() async throws -> [TagSummary] { accountStore.tagSummaries() }
+	func createKindCategory(kind: CategoryKind, name: String, unhideGroup: Bool) async throws -> String {
+		try writable()
+		let id = try budget.createEnvelope(in: "savingsdebt", name: name)
+		accountStore.named(id, name, kind: kind)
+		return id
+	}
+	func loanTerms(_ accountID: String) async throws -> LoanTerms? { accountStore.loanTerms(accountID) }
+	func setLoanTerms(_ accountID: String, _ terms: LoanTerms) async throws {
+		try writable()
+		accountStore.setLoanTerms(accountID, terms)
+	}
+	func createAccount(_ account: NewAccount, loan: LoanTerms?) async throws -> String {
+		try writable()
+		let before = Set(accountStore.list().accounts.map(\.id))
+		_ = try accountStore.perform(.createAccount(account: account))
+		guard let id = accountStore.list().accounts.map(\.id).first(where: { !before.contains($0) }) else { return "" }
+		if let loan { accountStore.setLoanTerms(id, loan) }
+		return id
+	}
+	func loanPaymentDefaults(_ loanAccountID: String, today: String) async throws -> LoanPaymentDefaults { accountStore.loanDefaults(loanAccountID) }
+	func loanPaymentPreview(_ loanAccountID: String, date: String, total: Int64, interest: Int64, escrow: Int64, fees: Int64) async throws -> LoanPaymentPreview {
+		accountStore.loanPreview(loanAccountID, total: total, interest: interest, escrow: escrow, fees: fees)
+	}
+	func recordLoanPayment(_ payment: LoanPaymentDraft) async throws {
+		try writable()
+		try accountStore.recordLoanPayment(payment)
+	}
+	func evaluateRate(_ text: String, style: NumberStyle) async throws -> Int64 {
+		let digits = text.replacingOccurrences(of: "%", with: "").trimmingCharacters(in: .whitespaces)
+		guard let value = Decimal(string: digits), value >= 0 else { throw FfiError.Invalid(message: "Can't read \(text) as a rate.") }
+		return NSDecimalNumber(decimal: value * 100).int64Value
 	}
 
 	func netProfit(first: Month, last: Month) async throws -> NetProfitReport { reports.netProfit(first: first, last: last) }
@@ -293,9 +369,6 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 	func upcoming(days: UInt32, today: String) async throws -> [UpcomingBill] { billStore.upcoming(days: days) }
 	func rules() async throws -> [RuleSentence] { ruleStore.rules() }
 	func rulePreview(_ source: RuleSource) async throws -> [RuleMatch] { try ruleStore.preview(source) }
-	func payees() async throws -> [PayeeDetail] { StubBills.payees }
-	func accounts() async throws -> AccountList { StubBills.accounts }
-	func registerRow(_ id: String) async throws -> RegisterRow { try ruleStore.registerRow(id) }
 
 	private func writable() throws {
 		if let readOnly { throw FfiError.ReadOnly(reason: readOnly) }
