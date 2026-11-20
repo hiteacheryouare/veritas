@@ -209,7 +209,7 @@ final class StubBudget: @unchecked Sendable {
 			switch goal.pace {
 			case nil, .onTrack: .available
 			case .behind, .notAdding: .low
-			case .noHistory: .neutral
+			case .noHistory, .spendingRecorded: .neutral
 			}
 		case .reached, .reachedSpent: .available
 		case .closed: .neutral
