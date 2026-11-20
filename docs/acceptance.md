@@ -1,0 +1,111 @@
+# Acceptance
+
+Each criterion from PLAN §10, with the evidence for it. Last checked on dev at `b12a8c2` (2026-11-20), plus open PRs #81 and #85 where a row names them.
+
+| Status | Meaning |
+|---|---|
+| **proven** | A test exercises the whole criterion and fails if it breaks. |
+| **partial** | Some clauses are proven. The row says which aren't. |
+| **gap** | Nothing proves it, or the app contradicts it today. |
+| **needs Ryan** | Only Ryan's data or hands can prove it. The row says what to do. |
+
+## What CI runs
+
+- **Rust:** `cargo test --workspace` with `VERITAS_REQUIRE_ORACLE=1`, so an oracle test fails rather than skips. Two harnesses run small in CI and full size by hand (see [Full-size runs](#full-size-runs)).
+- **Swift:** `swift test` for VeritasKit only. VeritasMacUI tests run in `cargo xtask ci` on a Mac, not on GitHub.
+- **XCUITests:** they don't run on hosted runners. Ryan runs them. The table marks them "UI test".
+- **Perf:** nothing in CI enforces an R-PERF budget. See [Performance](#performance).
+
+Paths below are relative to the repo. `plan_journeys` is `crates/veritas-ffi/tests/plan_journeys.rs`.
+
+## Interop and safety
+
+| # | Criterion | Evidence | Status |
+|---|---|---|---|
+| A1 | First launch offers New budget and Import from Actual equally, and a UI test walks both to an open budget. | UI tests in `apps/macos/VeritasUITests/NewBudgetJourneyTests.swift`: `testFirstLaunchOffersBothWaysInEqually`, `RealCoreNewBudgetTests.testANewBudgetIsCreatedByTheCoreWithItsAccounts`, and `testImportingAnActualExportOpensItThroughTheCore`, which picks `fixtures/synthetic/small.zip` in the open panel and imports it through the real core. | **needs Ryan.** Run the three UI tests. "Equally" is checked as both buttons enabled with neither the default; size and order aren't measured. |
+| A2 | A budget made in Veritas exports to a zip Actual imports with no errors, showing the same balances and budgets. | `plan_journeys::a_budget_started_in_veritas_and_used_for_a_month_reads_the_same_in_actual`: three accounts with starting balances (a card owing), the starter categories, budgets and a move, paychecks, card swipes, a split, a card payment and a savings transfer. Actual's `importBudget` reads the export, and every month's to-budget and every envelope's budgeted, spent and available, plus every balance, equal what Veritas showed. Also `crates/veritas-interop/tests/create.rs`. | **proven** |
+| A3 | Ryan's export imports and re-exports with an identical canonical dump. | `crates/veritas-interop/tests/private_round_trip.rs::ryans_export_round_trips_unchanged`. On synthetic files: `round_trip.rs` and `oracle_parity.rs` for small, all-features and perf-100k. | **needs Ryan.** `cargo xtask oracle setup`, then `VERITAS_PRIVATE_EXPORT=/path/to/export.zip cargo test -p veritas-interop --test private_round_trip -- --nocapture`. Without the variable the test skips. |
+| A4 | After a scripted session, Actual shows the same balances, budgets, schedules and report config. | `plan_journeys::a_scripted_session_of_every_kind_of_edit_reads_back_in_actual` on all-features, in one session: a budget set and moved, a transfer to a new account, a $400 loan payment split $320/$80 by the wizard, a new confirm-first bill, a goal funded, spent and closed, and a renamed custom report set to yearly. Actual computes every month and balance as Veritas did, schedules the bill on the same date with `posts_transaction` 0, reads the payment as a categorized split, and holds the report's new name and interval. | **proven** |
+| A5 | An unknown table and column survive import, edit and export. | `crates/veritas-interop/tests/edited_export.rs::an_unknown_table_and_column_survive_an_edit_of_the_same_row_r_io_5`, `round_trip.rs::an_unknown_table_and_column_survive_the_round_trip_r_io_5`, `passthrough.rs`. | **proven** |
+| A6 | A newer Actual file opens read-only with an explanation, and Veritas can't modify it. | `plan_journeys::a_newer_actual_file_opened_through_the_api_refuses_every_edit_and_is_never_written`: the session reports `NewerActualVersion`, each kind of edit is refused with it, and the file is byte-identical after close. `crates/veritas-interop/tests/import.rs::a_newer_actual_file_opens_read_only_and_is_never_written_r_io_7`. The banner's words: `VeritasKitTests/ErrorPresentationTests.swift`, and the UI test `ReadOnlyAndErrorTests.testEveryReadOnlyReasonShowsItsBanner` on stub data. | **proven** |
+| A7 | 1,000 random SIGKILLs during edits: no integrity or audit failure, and the last commit is always there. | `crates/veritas-session/tests/crash.rs`. Full run at `28ee97e`: 1,000 kills while editing (the budget reached edit 3,869), 1,000 during budget creation (3,461 made, 640 killed mid-build), and 1,000 rounds of a second window through a writer crash. All passed. CI runs 25 of each. | **proven.** The edits are an account rename and a budget cell, with undo, redo and snapshots. |
+| A8 | Every risky operation snapshots first, and restoring brings back the exact prior state. | Restore exactness: `crates/veritas-session/tests/snapshots.rs::restoring_after_a_bulk_edit_brings_back_every_row_and_schema_object`. Snapshots before import, export, bulk edits and rule apply: `crates/veritas-session/tests/session.rs`, and `plan_journeys::merging_payees_snapshots_the_budget_first`. | **gap.** `plan_journeys::moving_a_categorys_history_snapshots_the_budget_first` and `applying_next_months_suggestions_snapshots_the_budget_first` fail: neither bulk edit takes a snapshot (`Command::snapshot_first`, `crates/veritas-ffi/src/commands.rs`). `SnapshotKind::VersionChange` is never taken, because Veritas has no version-change path yet. |
+| A9 | The scheduled backup is a valid Actual zip in the chosen folder; removing the folder alerts and loses nothing. | `plan_journeys::a_backup_is_a_file_actual_opens_and_a_removed_folder_never_blocks_editing`: Actual imports the backup and shows the same numbers, no temporary file is left, a removed folder gives a typed error, and an edit made afterwards survives a reopen. Schedule and banner: `VeritasKitTests/SettingsAndReportTests.swift` (`aDueScheduleBacksUpOnOpenAndAnUnduOneDoesnt`, `schedulesFollowTheirInterval`, `aFailedBackupShowsTheCoresProblemAndNeverAlerts`). `crates/veritas-session/tests/backup.rs`. | **partial.** The hourly loop in `WorkspaceModel` is untested; only the check on open is. The app shows a banner, and its test asserts there is no alert, while §10 says "alert". Ryan to decide which. |
+
+## Budget and goals
+
+| # | Criterion | Evidence | Status |
+|---|---|---|---|
+| B1 | For every fixture and 10k random op sequences, to-budget and every category's budgeted, spent and available match Actual for every month. | Fixtures: `crates/veritas-engine/tests/oracle_fixtures.rs` (small, all-features, perf-100k). Random sequences: `oracle_sessions.rs`, with ops for budget actions, holds, carryover, averages, copies, transactions added, moved, deleted and recategorized, splits, and goal closes. Full run at `28ee97e`: 10,000 sequences on small and 10,000 on all-features, all matching Actual (seed 1, 778 s). CI runs 100 per fixture. | **proven.** Random sequences don't run on perf-100k. |
+| B2 | `100.00`, type `+12.34`, Return gives `112.34`, in budget cells and transaction amounts. | Engine: `crates/veritas-engine/tests/field_journeys.rs`, `amount_field.rs`. Budget cell on the real core: `VeritasKitTests/RealCoreBudgetJourneyTests.swift`. Transaction amount on the real core: `VeritasKitTests/RealCoreAccountsTests.swift::typingPlusAnAmountAfterATransactionsAmountAddsToIt` (100.00, then `+`, then `+12.34`, saves −112.34). Real text field: `VeritasMacUITests/AmountFieldTypingTests.swift`. UI test `BudgetJourneyTests.testAppendingToABudgetedAmountAndMovingToTheNextEnvelope`. | **proven** |
+| B3 | A $1,500 goal in 6 months suggests $250; the purchase makes it reached/spent; closing releases by a budget move, changes no transaction and hides the category; it still shows in last year's Net Profit and Wrapped. | `plan_journeys::a_goal_closed_this_year_keeps_its_transactions_and_still_shows_in_last_years_reports`: suggestion 25000 over 6 months, reached, then reached/spent at 2000 left, close adds 2000 to To Budget, every register row unchanged, envelope hidden; the next January, last year's Net Profit and Wrapped list it as a closed goal with 1,480.00, Wrapped counts it completed, and Actual agrees. Also `VeritasKitTests/RealCoreGoalJourneyTests.swift`. | **proven** |
+| B4 | Deleting a category with history defaults to Archive and changes no transaction. | `VeritasKitTests/RealCoreBudgetJourneyTests.swift::archivingAnEnvelopeWithHistoryHidesItAndChangesNoNumbers`, `onlyAnEnvelopeWithNoHistoryIsReallyDeleted`. UI test `GoalsAndEnvelopesJourneyTests.testDeletingAnEnvelopeWithHistoryArchivesItInstead`. | **proven.** No test checks that Archive is the default button. |
+
+## Transfers, debt and reports
+
+| # | Criterion | Evidence | Status |
+|---|---|---|---|
+| C1 | Every transfer row in every register shows `→ To X` or `← From X`. | `VeritasKitTests/AccountsTests.swift::transfersReadAsToAndFromNeverAsAPayee`. UI test `AccountsJourneyTests.testTransfersReadAsToAndFromInTheRegister`, on one account register with stub data. | **partial.** The All, On budget and Off budget registers aren't checked. The report drill-down table (`ReportParts.swift`) shows a transfer's payee bare, because `ReportTransaction` has no transfer flag. Whether a drill-down counts as a register is Ryan's call. |
+| C2 | A $400 payment entered in the wizard as $320 + $80 is an $80 expense and a $320 paydown, and a valid categorized split in Actual. | `crates/veritas-reports/tests/net_profit.rs::plan10_a_400_loan_payment_is_80_expense_and_320_paydown`. `crates/veritas-ffi/tests/money_journeys.rs::a_recorded_payment_is_the_split_actual_reads_and_prefills_the_next_one`. The A4 journey: paydown 32000 in Net Profit, and a split Actual reads. UI test `testPayingTheLoanSplitsPrincipalAndInterest` on stub data. | **proven** |
+| C3 | A $50 swipe on the on-budget card is $50 groceries in that month; the card payment never spends. | `net_profit.rs::plan10_a_50_card_swipe_is_groceries_in_the_swipe_month_and_the_payment_never_spends`. `classification.rs::cls8_master_february_card_payment_is_an_internal_transfer_on_both_legs`. On the Budget screen, the A2 journey checks the swipe counts in Groceries that month and the card payment spends nothing, and Actual agrees. | **proven** |
+| C4 | The month's Sankey sums to its income, and every outflow drills to its transactions. | `crates/veritas-reports/tests/standard_reports.rs::the_sankey_conserves_money_in_every_month_the_year_and_the_whole_history`. `properties.rs::sankey_invariants_hold_on_every_range`. `VeritasKitTests/RealCoreReportTests.swift::everySankeyNodeYouCanClickOpensTheRowsItWasDrawnFrom`. | **proven.** In a month that spends more than it earns, ST-8 adds a Shortfall source, so outflows sum to income plus shortfall. |
+| C5 | Ryan's custom reports and dashboard show Actual's numbers. | Synthetic equivalents against Actual's own code: `crates/veritas-reports/tests/custom_reports.rs::r_rep_4_query_rows_match_actuals_query_engine`, `widgets.rs` (`d73_*`), `crates/veritas-ffi/tests/widget_journeys.rs`. | **needs Ryan.** Open his export in both apps and compare each custom report and dashboard card. Reports with settings Veritas doesn't support show a placeholder (`r_rep_4_unsupported_settings_say_so_instead_of_guessing`). |
+| C6 | The Balance Sheet balances, and opening equity + net income ± adjustments = closing equity, on every fixture. | `crates/veritas-reports/tests/fixture_statements.rs` (small, all-features, perf-100k, every month). `properties.rs::statements_always_balance_and_reconcile`. | **proven** |
+| C7 | Tax CSV totals per bucket equal the sum of the year's tagged transactions. | `properties.rs::tax_totals_equal_their_detail_rows`. `tax.rs::tax5_summary_and_detail_csv`. `VeritasKitTests/RealCoreTaxTests.swift`. | **proven** |
+
+## Bills, forecast and insights
+
+| # | Criterion | Evidence | Status |
+|---|---|---|---|
+| D1 | An auto-post bill posts on its date; a confirm-first bill waits in Upcoming and Paid posts an edited amount; both round-trip with the right `posts_transaction`. | `crates/veritas-ffi/tests/bills_rules_journeys.rs`: `a_month_of_bills_posts_the_same_rows_whether_veritas_actual_or_both_open_the_budget`, `paid_with_an_edited_amount_and_date_writes_what_actual_writes_when_you_post_and_edit`, `paying_an_auto_post_bill_by_hand_never_lets_either_app_post_it_again`. The A4 journey checks `posts_transaction` 0 on a confirm-first bill in Actual. | **proven** |
+| D2 | Ryan never sees the word "rule" while creating or editing a bill. | None. | **gap.** The bill editor shows "Has extra rule parts" (`BillEditor.swift:43`, arriving with #73). The Paid and Post messages say "N rules couldn't run here" (`crates/veritas-rules/src/posting.rs`). A test that reads every string the bill editor can show should follow #73. |
+| D3 | Forecasts at 3, 6, 10 and 12 months render with confidence bands; a scenario changes only `veritas_scenario*` tables. | `crates/veritas-forecast/tests/projection.rs` (`r_fc_1_horizons_at_3_6_10_and_12_months`, `r_fc_1_band_is_net_worth_plus_scaled_offsets`). `crates/veritas-ffi/src/forecast.rs::r_fc_2_what_ifs_write_only_scenario_tables_one_undo_step_each`. | **partial.** The core is proven. Nothing renders: there is no Forecast or What-ifs screen yet. |
+| D4 | Wrapped renders for any full year and exports a redacted image with no amounts. | Core: `crates/veritas-forecast/tests/wrapped.rs` (including `fc_8_redaction_covers_every_card_as_a_share`), `crates/veritas-ffi/tests/insights_journeys.rs`. Screen and image, on #85 (3ddcdbf): `VeritasKitTests/RealCoreWrappedTests.swift::eachYearInTheDataRendersAndHidesItsAmounts` renders every year in all-features from the real core; `WrappedStoryTests.redactedCardsCarryNoMoneyAmount` checks the cards and the text read back from the rendered redacted image; UI tests `WrappedJourneyTests`. `WrappedRedactionWorstCaseTests.aBudgetThatHidesDecimalsShowsNoAmountOnARedactedCard` (saved in `veritas.wt/notes/pr85-wrapped-redaction-worst-case-test.patch`) covers the hardest case to spot: a budget that hides decimals and names no currency, where 1,480.00 reads "1,480". | **proven** once #85 lands. |
+| D5 | With AI off nothing AI-related loads; with it on, no network calls. | On #81 (f280a15): `AssistantSettingsTests.itIsOffUntilTurnedOn`, `AssistantReadOnlyTests`, and the read-only journey `AssistantLeavesTheBudgetAloneTests.everyToolAskedAnythingLeavesTheBudgetAsItWas` (saved in `veritas.wt/notes/pr81-assistant-read-only-test.patch`). That journey asks every tool for ordinary, odd and impossible things on the real core, then checks that every table, the undo history and the alerts are unchanged; a planted write fails it. The built Veritas.app is sandboxed with no `network.client` entitlement, so macOS refuses any outgoing connection, and the app's sources make none. | **partial.** No test watches for network traffic while the assistant answers; the evidence is the sandbox entitlement read off the built app. With AI off, the app still asks `SystemLanguageModel` for its availability at launch (`AssistantSettings()` in `VeritasScenes.swift`). Ryan to decide whether that counts as "loads". |
+
+## Performance
+
+Measured on an M3 Pro at `b12a8c2`, release build, perf-100k (100k transactions), 2026-11-20. The fuzz harnesses shared the machine for part of the run. Log: `veritas.wt/notes/qa/perf-100k.log`.
+
+| ID | Budget | Measured | Status |
+|---|---|---|---|
+| R-PERF-1 | Cold launch to an interactive budget ≤ 400 ms | Core: open until editable, 175 ms (`open_import_export` bench). | **partial.** The app's share of launch isn't measured. Ryan to time a cold launch, or add an `XCTApplicationLaunchMetric` test. |
+| R-PERF-2 | Cell edit to updated screen ≤ 16 ms | A budget cell edit until the month reads back takes 3.8 ms. The engine's recompute takes 0.2–0.7 ms, and one envelope set to its 3-month average takes 10.8 ms. | **partial.** The core is well inside the budget, but the redraw isn't measured. Setting every envelope to its average takes 3.8–6.8 s; that's a bulk action, not a cell edit, so no budget covers it. |
+| R-PERF-3 | Register scrolls at 120 Hz with no hitches | Next page while scrolling (47,479 rows): 181 µs. First page after a commit: 18.6 ms. First page of a search: 63.7 ms. | **partial.** The core fetch fits in a frame. Scrolling smoothness in the table is unmeasured; Ryan to check with Instruments. |
+| R-PERF-4 | Typical report ≤ 100 ms; year Sankey or forecast ≤ 500 ms | As the app calls it, right after an edit (`reports_perf.rs`, `dashboard_perf.rs`): net profit for 12 months 85 ms, net worth 62, cash flow 69, balance sheet 75, owner's equity 67, tax summary 67, a year's Sankey 100, a dashboard of 24 cards 73. | **proven** on the app's path. The margin is thin: net profit is at 85 of its 100 ms. With nothing cached (the first report after opening), the bench measures net profit for a year at 119 ms and the tax summary at 154 ms. |
+| R-PERF-5 | Import or export of a 100k zip ≤ 3 s | Import 1.33 s, export 2.12 s (upper estimate 2.5 s). | **proven** |
+
+Nothing in CI enforces these. The two R-PERF-4 tests are `#[ignore]` in debug builds, and CI never builds release or runs the benches, which only record times and never fail. Enforcing a budget needs an Apple Silicon runner and a release step.
+
+## Full-size runs
+
+| What | Command | Last run |
+|---|---|---|
+| 1,000 SIGKILLs | `VERITAS_CRASH_KILLS=1000 cargo test -p veritas-session --test crash -- --test-threads=1` | `28ee97e`, 2026-11-20: passed, 576 s |
+| 10k random sessions | `VERITAS_ORACLE_SESSIONS=10000 VERITAS_REQUIRE_ORACLE=1 cargo test -p veritas-engine --test oracle_sessions -- --test-threads=1` | `28ee97e`, 2026-11-20: passed, 778 s |
+| Perf on perf-100k | `cargo test --release -p veritas-ffi --test reports_perf --test dashboard_perf -- --include-ignored`, then `cargo bench -p veritas-session --bench open_import_export`, `-p veritas-engine --bench sheet`, `-p veritas-reports --bench perf` | `b12a8c2`, 2026-11-20 |
+
+## Fuzzing
+
+Every parser that reads what an Actual file carries, fed hostile input from seeded generators that start from real fixture shapes. Each loop has a fixed cap, and each case runs under a watchdog.
+
+| Harness | Cases | Checks |
+|---|---|---|
+| `crates/veritas-rules/tests/hostile_rules.rs` | 3,000 each for stored conditions, actions and recurrences; 1,000 hostile rule books; fixed edge tables | Each input parses or refuses with a gap. Parsed rules run on transactions, and recurrences give dates inside their window, increasing and within their count. A rule book built from hostile rows runs and plans bills. |
+| `crates/veritas-reports/tests/hostile_settings.rs` | 2,000 JSON texts, 600 widget settings, 2,000 formulas, 600 custom report rows | JSON that parses round-trips. Every card builder answers or refuses. Formulas give a value, an error or a refusal. Report rows load and evaluate, or are refused. |
+| `crates/veritas-reports/tests/hostile_import.rs` | 708 edited copies of small.zip (15 hostile SQL values across every column the loader reads, 17 hostile JSON texts in 9 JSON columns, 19 whole-file cases), 6 hostile metadata files | Each copy imports to a typed error, or to a budget that opens, audits, loads, runs its rules, schedules and every card and report. Nothing panics, hangs or returns Internal. A refused import leaves nothing behind, and a row the loader can't read is reported, never read as zero. |
+
+CI runs all three. Four tests in them fail today; see below.
+
+## Failing tests
+
+These tests fail on purpose. Each one is a bug, written as the smallest case that shows it.
+
+| Test | What breaks |
+|---|---|
+| `plan_journeys::moving_a_categorys_history_snapshots_the_budget_first` | Moving a category's history re-files every transaction in it with no snapshot first (R-REL-3). |
+| `plan_journeys::applying_next_months_suggestions_snapshots_the_budget_first` | Applying suggestions rewrites a month of budget cells with no snapshot first (R-REL-3). |
+| `hostile_settings.rs::settings_nested_past_the_stack_are_refused_without_crashing_the_app` | `Json::parse` (`crates/veritas-reports/src/json.rs`) recurses with no depth limit. A dashboard or custom report setting nested 100,000 deep overflows the stack and aborts the app, which the FFI guard can't catch (R-REL-7). |
+| `hostile_rules.rs::a_daily_bill_counted_from_long_ago_lists_five_years_of_dates_without_stalling` | A bill that ends after N occurrences re-walks its count from the start for every date it lists. A daily one started long ago takes minutes for the five years the bill detail asks for, and hits the 20 s watchdog in a debug build. |
+| `hostile_import.rs::the_calendar_card_refuses_a_day_spent_at_the_smallest_storable_amount` | The calendar card negates a day's total. At i64::MIN that panics in debug and wraps to a wrong figure in release. Actual never writes past 2^51, so only a damaged file reaches it. |
+| `hostile_import.rs::the_age_of_money_card_refuses_a_day_spent_at_the_smallest_storable_amount` | The same overflow in the age-of-money card. |

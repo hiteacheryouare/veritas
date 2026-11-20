@@ -359,7 +359,7 @@ fn assert_actual_shows_what_veritas_showed(session: &Session, dump: &Value, toda
 	let (mut envelopes, mut accounts) = (0, 0);
 	for (name, actual) in months {
 		let shown = session.budget_month(month(name), today.to_owned()).unwrap();
-		if Value::from(shown.to_budget) != actual["toBudget"] {
+		if actual["toBudget"] != shown.to_budget {
 			differences.push(format!(
 				"{name} to budget: Veritas {}, Actual {}",
 				shown.to_budget, actual["toBudget"]
@@ -374,7 +374,7 @@ fn assert_actual_shows_what_veritas_showed(session: &Session, dump: &Value, toda
 					("spent", row.spent, "spent"),
 					("available", row.available, "balance"),
 				] {
-					if Value::from(ours) != theirs[key] {
+					if theirs[key] != ours {
 						differences.push(format!(
 							"{name} {} {what}: Veritas {ours}, Actual {}",
 							row.name, theirs[key]
@@ -393,7 +393,7 @@ fn assert_actual_shows_what_veritas_showed(session: &Session, dump: &Value, toda
 	{
 		accounts += 1;
 		let theirs = &computed["accounts"][&account.id]["balance"];
-		if Value::from(account.total) != *theirs {
+		if *theirs != account.total {
 			differences.push(format!(
 				"{} balance: Veritas {}, Actual {theirs}",
 				account.name, account.total
