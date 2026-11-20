@@ -571,20 +571,56 @@ fn r_rep_4_dashboards_keep_unknown_widgets_as_placeholders() {
 fn r_rep_4_legend_names_and_stacks_match_actuals_spreadsheet() {
 	let budget = all_features();
 	let cases = [
-		("Category", "Payment", "desc", "Monthly", false, false, true, true, false),
-		("Category", "Payment", "desc", "Monthly", true, false, true, true, false),
-		("Category", "Net", "name", "Monthly", false, true, false, false, false),
-		("Category", "Net Payment", "asc", "Yearly", true, true, true, false, true),
-		("Category", "Deposit", "budget", "Monthly", false, false, true, true, true),
-		("Group", "Payment", "desc", "Monthly", false, false, true, true, false),
-		("Group", "Net Deposit", "budget", "Monthly", true, true, false, true, false),
-		("Account", "Net", "desc", "Monthly", false, false, true, true, false),
-		("Payee", "Payment", "desc", "Monthly", false, false, true, false, true),
+		(
+			"Category", "Payment", "desc", "Monthly", false, false, true, true, false,
+		),
+		(
+			"Category", "Payment", "desc", "Monthly", true, false, true, true, false,
+		),
+		(
+			"Category", "Net", "name", "Monthly", false, true, false, false, false,
+		),
+		(
+			"Category",
+			"Net Payment",
+			"asc",
+			"Yearly",
+			true,
+			true,
+			true,
+			false,
+			true,
+		),
+		(
+			"Category", "Deposit", "budget", "Monthly", false, false, true, true, true,
+		),
+		(
+			"Group", "Payment", "desc", "Monthly", false, false, true, true, false,
+		),
+		(
+			"Group",
+			"Net Deposit",
+			"budget",
+			"Monthly",
+			true,
+			true,
+			false,
+			true,
+			false,
+		),
+		(
+			"Account", "Net", "desc", "Monthly", false, false, true, true, false,
+		),
+		(
+			"Payee", "Payment", "desc", "Monthly", false, false, true, false, true,
+		),
 	];
 	let mut requests = Vec::new();
 	let mut ours = Vec::new();
-	for (index, (group_by, balance, sort, interval, hidden, empty, uncategorized, off_budget, trim)) in
-		cases.into_iter().enumerate()
+	for (
+		index,
+		(group_by, balance, sort, interval, hidden, empty, uncategorized, off_budget, trim),
+	) in cases.into_iter().enumerate()
 	{
 		let id = format!("legend-{index}");
 		let row = CustomReportRow {
@@ -632,7 +668,11 @@ fn r_rep_4_legend_names_and_stacks_match_actuals_spreadsheet() {
 			.groups
 			.iter()
 			.map(|group| {
-				let key = if group.id.is_empty() { &group.name } else { &group.id };
+				let key = if group.id.is_empty() {
+					&group.name
+				} else {
+					&group.id
+				};
 				json!({"dataKey": key, "id": group.id, "name": group.name})
 			})
 			.collect();
@@ -651,8 +691,12 @@ fn r_rep_4_legend_names_and_stacks_match_actuals_spreadsheet() {
 			.collect();
 		ours.push((id, json!({"legend": legend, "stacked": stacked})));
 	}
-	let Some(theirs) = oracle("widgets", "all-features", &Value::Array(requests), ORACLE_TODAY)
-	else {
+	let Some(theirs) = oracle(
+		"widgets",
+		"all-features",
+		&Value::Array(requests),
+		ORACLE_TODAY,
+	) else {
 		return;
 	};
 	for (id, ours) in ours {
