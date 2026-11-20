@@ -102,7 +102,28 @@ public struct ForecastWords: Sendable {
 	/// DEBT-2.2 and DEBT-2.6: the payment covers less than its interest and
 	/// escrow, and the difference isn't recorded.
 	public func shortfall(_ item: ForecastShortfall) -> String {
-		"\(item.loanName), \(Self.day(item.date)): the payment is \(format.currencyMagnitude(item.uncovered, on: .register)) less than its interest and escrow. The difference isn't recorded."
+		"\(item.loanName), \(Self.day(item.date)): \(format.currencyMagnitude(item.uncovered, on: .register)) short of interest and escrow, not recorded."
+	}
+
+	/// FC-4's method detail and FC-3's non-cash assumption, shown on request
+	/// beside the band label rather than as a caption.
+	public static func method(_ band: ForecastBandMethod) -> [String] {
+		let range: [String] = switch band {
+		case .residuals: [
+			"The range comes from how far past months' forecasts missed, from the 10th to the 90th percentile.",
+			"It widens faster than it would if each month's miss were independent, because a miss partly repeats."
+		]
+		case .range: [
+			"With fewer than 6 past forecasts to check, the range is the spread of the monthly flow so far.",
+			"It widens faster than it would if each month's miss were independent, because a miss partly repeats."
+		]
+		case .noHistory: []
+		}
+		let covers: [String] = band == .noHistory ? [] : [
+			"It covers category baselines only. Bills and income schedules count at their expected amount, About and Between amounts included.",
+			"Yearly costs such as gifts or insurance can fall outside it unless a yearly bill makes them known."
+		]
+		return range + covers + ["Revaluations, adjustments and starting balances are taken as zero."]
 	}
 
 	/// "$30,100 to $33,900", the band at a horizon. `nil` with no history.

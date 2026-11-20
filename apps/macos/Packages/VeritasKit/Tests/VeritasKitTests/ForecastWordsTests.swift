@@ -72,7 +72,18 @@ struct ForecastWordsTests {
 
 	@Test func aShortfallNamesTheLoanTheDateAndTheAmount() {
 		let item = ForecastShortfall(date: "2027-01-01", loanAccountId: "loan", loanName: "Mortgage", uncovered: 2_000)
-		#expect(words.shortfall(item) == "Mortgage, January 1, 2027: the payment is $20.00 less than its interest and escrow. The difference isn't recorded.")
+		#expect(words.shortfall(item) == "Mortgage, January 1, 2027: $20.00 short of interest and escrow, not recorded.")
+	}
+
+	@Test func theMethodNotesFollowTheBandMethod() {
+		let residuals = ForecastWords.method(.residuals)
+		#expect(residuals.first?.contains("10th to the 90th percentile") == true)
+		#expect(ForecastWords.method(.range).first?.hasPrefix("With fewer than 6 past forecasts") == true)
+		#expect(ForecastWords.method(.noHistory) == ["Revaluations, adjustments and starting balances are taken as zero."], "no range, so nothing about one")
+		for band in [ForecastBandMethod.residuals, .range] {
+			#expect(ForecastWords.method(band).contains { $0.hasPrefix("It covers category baselines only") })
+			#expect(ForecastWords.method(band).last == "Revaluations, adjustments and starting balances are taken as zero.")
+		}
 	}
 }
 

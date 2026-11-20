@@ -99,17 +99,46 @@ private struct ForecastHero: View {
 				.accessibilityElement(children: .combine)
 				.accessibilityIdentifier("forecast.hero")
 				HStack(alignment: .firstTextBaseline, spacing: Spacing.s2) {
-					if let band = ForecastWords(format: model.format).band(point) {
-						Text(band).font(.figures(.body, weight: .semibold))
+					HStack(alignment: .firstTextBaseline, spacing: Spacing.s2) {
+						if let band = ForecastWords(format: model.format).band(point) {
+							Text(band).font(.figures(.body, weight: .semibold))
+						}
+						Text(forecast.bandLabel).foregroundStyle(.textSecondary)
 					}
-					Text(forecast.bandLabel).foregroundStyle(.textSecondary)
+					.accessibilityElement(children: .combine)
+					.accessibilityIdentifier("forecast.band")
+					MethodInfo(notes: ForecastWords.method(forecast.bandMethod))
 				}
-				.accessibilityElement(children: .combine)
-				.accessibilityIdentifier("forecast.band")
 			}
 			ForEach([forecast.notForecastNote, forecast.assetPurchaseNote].compactMap { $0 }, id: \.self) { note in
 				Text(note).foregroundStyle(.textSecondary)
 			}
+		}
+	}
+}
+
+/// FC-4's method on request, as the dashboard cards show theirs.
+private struct MethodInfo: View {
+	let notes: [String]
+	@State private var isShown = false
+
+	var body: some View {
+		Button {
+			isShown.toggle()
+		} label: {
+			Image(systemName: "info.circle")
+				.foregroundStyle(.textTertiary)
+		}
+		.buttonStyle(.borderless)
+		.accessibilityLabel("How the range is made")
+		.accessibilityIdentifier("forecast.method")
+		.popover(isPresented: $isShown, arrowEdge: .bottom) {
+			VStack(alignment: .leading, spacing: Spacing.s2) {
+				ForEach(notes, id: \.self) { Text($0).fixedSize(horizontal: false, vertical: true) }
+			}
+			.frame(width: 300, alignment: .leading)
+			.padding(Spacing.s3)
+			.accessibilityIdentifier("forecast.method.notes")
 		}
 	}
 }

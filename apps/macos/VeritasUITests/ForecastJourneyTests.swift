@@ -27,6 +27,12 @@ final class ForecastJourneyTests: XCTestCase {
 		}
 		XCTAssertTrue(element(app, "forecast.chart").exists)
 		attachScreenshot(of: app, named: "forecast")
+
+		app.buttons["forecast.method"].click()
+		let notes = element(app, "forecast.method.notes")
+		XCTAssertTrue(notes.waitForExistence(timeout: 5), "FC-4's method opens on request")
+		XCTAssertTrue(app.staticTexts["Revaluations, adjustments and starting balances are taken as zero."].exists)
+		attachScreenshot(of: app, named: "forecast-method", wholeScreen: true)
 	}
 
 	@MainActor
