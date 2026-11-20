@@ -23,34 +23,7 @@ struct CustomReportsScreen: View {
 			ReportList(model: model)
 				.frame(width: 230)
 			Divider()
-			ScrollView {
-				VStack(alignment: .leading, spacing: Spacing.s4) {
-					switch model.isCreating ? .custom(id: "") : model.choice {
-					case .standard:
-						StandardReportView(model: model.standard) { drilldown = $0 }
-					case .custom:
-						if let view = model.shown {
-							CustomReportDetail(view: view, format: model.format)
-						} else if model.isEditing, let problem = model.previewProblem {
-							Text("Couldn't preview: \(problem)")
-								.foregroundStyle(.textSecondary)
-								.frame(maxWidth: .infinity, minHeight: 200)
-								.accessibilityIdentifier("customReport.previewProblem")
-						} else {
-							ProgressView().frame(maxWidth: .infinity, minHeight: 200)
-						}
-					}
-				}
-				.padding(.top, Spacing.s2)
-				.padding(.horizontal, Spacing.s5)
-				.padding(.bottom, Spacing.s6)
-				.frame(maxWidth: .infinity, alignment: .leading)
-			}
-			if let draft = model.draft {
-				Divider()
-				CustomReportEditor(model: model, draft: draft)
-					.frame(width: 340)
-			}
+			CustomReportPane(model: model) { drilldown = $0 }
 		}
 		.background(.surfaceWindow)
 		.navigationTitle(title)
@@ -89,16 +62,7 @@ struct CustomReportsScreen: View {
 				}
 			}
 		case .custom:
-			ToolbarItem(placement: .primaryAction) {
-				Button {
-					Task { await model.edit() }
-				} label: {
-					Label("Edit report", systemImage: "slider.horizontal.3")
-				}
-				.labelStyle(.titleAndIcon)
-				.disabled(model.isEditing || model.isReadOnly || model.view?.settings == nil)
-				.accessibilityIdentifier("customReport.edit")
-			}
+			ToolbarItem(placement: .primaryAction) { CustomReportEditButton(model: model) }
 		}
 		if model.canCreate {
 			ToolbarItem(placement: .primaryAction) {
@@ -169,6 +133,61 @@ private struct ReportList: View {
 	}
 }
 
+/// The report page itself: the standard report or the custom report the
+/// model shows, with the custom report's editor beside it while editing.
+struct CustomReportPane: View {
+	let model: CustomReportsModel
+	let open: (DrilldownModel) -> Void
+
+	var body: some View {
+		HStack(spacing: 0) {
+			ScrollView {
+				VStack(alignment: .leading, spacing: Spacing.s4) {
+					switch model.isCreating ? .custom(id: "") : model.choice {
+					case .standard:
+						StandardReportView(model: model.standard, open: open)
+					case .custom:
+						if let view = model.shown {
+							CustomReportDetail(view: view, format: model.format)
+						} else if model.isEditing, let problem = model.previewProblem {
+							Text("Couldn't preview: \(problem)")
+								.foregroundStyle(.textSecondary)
+								.frame(maxWidth: .infinity, minHeight: 200)
+								.accessibilityIdentifier("customReport.previewProblem")
+						} else {
+							ProgressView().frame(maxWidth: .infinity, minHeight: 200)
+						}
+					}
+				}
+				.padding(.top, Spacing.s2)
+				.padding(.horizontal, Spacing.s5)
+				.padding(.bottom, Spacing.s6)
+				.frame(maxWidth: .infinity, alignment: .leading)
+			}
+			if let draft = model.draft {
+				Divider()
+				CustomReportEditor(model: model, draft: draft)
+					.frame(width: 340)
+			}
+		}
+	}
+}
+
+struct CustomReportEditButton: View {
+	let model: CustomReportsModel
+
+	var body: some View {
+		Button {
+			Task { await model.edit() }
+		} label: {
+			Label("Edit report", systemImage: "slider.horizontal.3")
+		}
+		.labelStyle(.titleAndIcon)
+		.disabled(model.isEditing || model.isReadOnly || model.view?.settings == nil)
+		.accessibilityIdentifier("customReport.edit")
+	}
+}
+
 /// A custom report drawn the way its settings say: a graph, then the table.
 struct CustomReportDetail: View {
 	let view: CustomReportView
@@ -178,18 +197,20 @@ struct CustomReportDetail: View {
 	var body: some View {
 		VStack(alignment: .leading, spacing: Spacing.s4) {
 			if let data = view.data {
-				if !compact {
-					Hero(amount: data.total, caption: Self.range(view.settings), format: format)
-				}
 				if compact {
 					CustomReportChart(data: data, settings: view.settings, format: format)
 				} else {
+					Hero(amount: data.total, caption: Self.range(view.settings), format: format)
 					Card {
-						CustomReportChart(data: data, settings: view.settings, format: format)
-							.frame(height: 260)
+						HStack(alignment: .top, spacing: Spacing.s4) {
+							CustomReportChart(data: data, settings: view.settings, format: format, expanded: true)
+							if CustomReportChart.colorsGroups(view.settings) {
+								ReportLegend(series: ReportSeries.all(data, balance: view.settings.balanceType))
+									.frame(width: 200)
+							}
+						}
+						.frame(height: 300)
 					}
-				}
-				if !compact {
 					CustomReportTable(data: data, settings: view.settings, format: format)
 				}
 			} else if let problem = view.problem {
@@ -208,49 +229,72 @@ struct CustomReportDetail: View {
 	}
 }
 
+/// The graph draws the report's groups only, under the core's names, each
+/// colored by its place in the legend as Actual colors it. A card shows no
+/// legend, as Actual's card shows none.
 struct CustomReportChart: View {
 	let data: CustomReportData
 	let settings: CustomReportSettings
 	let format: MoneyFormat
+	var expanded = false
 
 	private var graph: ReportGraph { ReportGraph(settings.graphType) }
+	private var series: [ReportSeries] { ReportSeries.all(data, balance: settings.balanceType) }
 
-	/// Payments are stored negative; the graph draws them upward, as money spent.
-	private func plotted(_ amount: Int64) -> Double {
-		let spent = settings.balanceType == .payment || settings.balanceType == .netPayment
-		return Double(spent ? -amount : amount) / 100
+	/// Whether color tells the groups apart, so the page needs a legend.
+	static func colorsGroups(_ settings: CustomReportSettings) -> Bool {
+		let graph = ReportGraph(settings.graphType)
+		return graph == .donut || !(settings.totalMode || graph.drawsTotals)
 	}
 
 	private struct Point: Identifiable {
 		let id: String
 		let interval: String
-		let group: String
+		let series: String
 		let amount: Double
 	}
 
 	private var points: [Point] {
-		data.intervals.flatMap { interval in
-			interval.stacked.map { stack in
-				let name = data.groups.first { $0.id == stack.key || $0.name == stack.key }?.name ?? stack.key
-				return Point(id: "\(interval.interval.interval).\(stack.key)", interval: ReportPeriod.interval(interval.interval.interval), group: name, amount: plotted(stack.amount))
+		series.flatMap { group in
+			group.points.map { point in
+				Point(id: "\(point.interval).\(group.id)", interval: ReportPeriod.interval(point.interval), series: group.id, amount: format.chartValue(point.amount, on: .register))
 			}
 		}
 	}
 
 	var body: some View {
+		chart
+			.chartForegroundStyleScale(domain: series.map(\.id), range: series.map { CardPalette.color($0.color) })
+			.chartLegend(.hidden)
+			.chartYAxis {
+				if expanded {
+					AxisMarks(position: .leading) { value in
+						AxisGridLine().foregroundStyle(Color.chartGrid)
+						AxisValueLabel {
+							if let amount = value.as(Double.self) {
+								Text(format.axisLabel(amount)).font(.figures(.caption)).foregroundStyle(.textTertiary)
+							}
+						}
+					}
+				}
+			}
+			.accessibilityIdentifier("customReport.chart")
+	}
+
+	@ViewBuilder private var chart: some View {
 		if settings.totalMode || graph.drawsTotals {
 			switch graph {
 			case .donut:
-				Chart(data.groups) { group in
-					SectorMark(angle: .value("Amount", abs(Double(group.amount))), innerRadius: .ratio(0.6), angularInset: 1)
-						.foregroundStyle(by: .value("Group", group.name))
+				Chart(series) { group in
+					SectorMark(angle: .value("Amount", abs(Double(group.total))), innerRadius: .ratio(0.6), angularInset: 1)
+						.foregroundStyle(by: .value("Group", group.id))
 				}
 			case .table:
 				EmptyView()
 			default:
-				Chart(data.groups) { group in
-					BarMark(x: .value("Group", group.name), y: .value("Amount", plotted(group.amount)))
-						.foregroundStyle(Color.chartExpense)
+				Chart(series) { group in
+					BarMark(x: .value("Group", group.name), y: .value("Amount", format.chartValue(group.total, on: .register)))
+						.foregroundStyle(by: .value("Group", group.id))
 						.clipShape(.rect(cornerRadius: 3))
 				}
 			}
@@ -259,16 +303,41 @@ struct CustomReportChart: View {
 				switch graph {
 				case .line:
 					LineMark(x: .value("Interval", point.interval), y: .value("Amount", point.amount))
-						.foregroundStyle(by: .value("Group", point.group))
+						.foregroundStyle(by: .value("Group", point.series))
 				case .area:
 					AreaMark(x: .value("Interval", point.interval), y: .value("Amount", point.amount))
-						.foregroundStyle(by: .value("Group", point.group))
+						.foregroundStyle(by: .value("Group", point.series))
 				default:
 					BarMark(x: .value("Interval", point.interval), y: .value("Amount", point.amount))
-						.foregroundStyle(by: .value("Group", point.group))
+						.foregroundStyle(by: .value("Group", point.series))
 				}
 			}
 		}
+	}
+}
+
+/// Actual's legend beside the graph: every group with its color, scrolling
+/// when there are more than fit.
+struct ReportLegend: View {
+	let series: [ReportSeries]
+
+	var body: some View {
+		ScrollView {
+			VStack(alignment: .leading, spacing: Spacing.s2) {
+				ForEach(series) { group in
+					HStack(spacing: Spacing.s2) {
+						Circle().fill(CardPalette.color(group.color)).frame(width: 10, height: 10)
+						Text(group.name).lineLimit(1).truncationMode(.tail)
+					}
+					.font(.text(.caption))
+					.help(group.name)
+				}
+			}
+			.frame(maxWidth: .infinity, alignment: .leading)
+		}
+		.scrollIndicators(.automatic)
+		.accessibilityElement(children: .contain)
+		.accessibilityIdentifier("customReport.legend")
 	}
 }
 
@@ -321,7 +390,7 @@ private struct CustomReportTable: View {
 }
 
 /// Actual's report settings, previewed as they change.
-private struct CustomReportEditor: View {
+struct CustomReportEditor: View {
 	let model: CustomReportsModel
 	@State private var draft: ReportDraft
 	@State private var fixedFirst: Month

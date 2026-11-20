@@ -362,6 +362,53 @@ export const widgetData = async ({ internal }: ActualSession, requests: WidgetRe
 				}
 			};
 		},
+		// CustomReport.tsx's createCustomSpreadsheet call over a fixed range, with
+		// the categories, payees and accounts its hooks load. What comes back is
+		// what the graph and its legend draw: the legend's entries in order and the
+		// keys of each interval's stacked amounts.
+		'custom-report': async ({ meta, firstDayOfWeekIdx }) => {
+			const { createCustomSpreadsheet } = await loadSource(`${REPORTS}/spreadsheets/custom-spreadsheet.ts`);
+			const data: any = await run(
+				createCustomSpreadsheet({
+					startDate: meta.startDate,
+					endDate: meta.endDate,
+					interval: meta.interval,
+					categories: await internal.send('get-categories'),
+					conditions: meta.conditions ?? [],
+					conditionsOp: meta.conditionsOp ?? 'and',
+					showEmpty: meta.showEmpty,
+					showOffBudget: meta.showOffBudget,
+					showHiddenCategories: meta.showHiddenCategories,
+					showUncategorized: meta.showUncategorized,
+					trimIntervals: meta.trimIntervals,
+					groupBy: meta.groupBy,
+					balanceTypeOp: meta.balanceTypeOp,
+					sortByOp: meta.sortByOp,
+					payees: await internal.send('payees-get'),
+					accounts: await internal.send('accounts-get'),
+					graphType: meta.graphType,
+					firstDayOfWeekIdx: firstDayOfWeekIdx || '0',
+					dateFormat: 'yyyy-MM-dd'
+				})
+			);
+			const fixed = new Set([
+				'date',
+				'intervalStartDate',
+				'intervalEndDate',
+				'totalAssets',
+				'totalDebts',
+				'netAssets',
+				'netDebts',
+				'totalTotals',
+				'totalBudgeted'
+			]);
+			return {
+				legend: data.legend.map((entry: any) => ({ id: entry.id, name: entry.name, dataKey: entry.dataKey })),
+				stacked: data.intervalData.map((interval: any) =>
+					Object.fromEntries(Object.entries(interval).filter(([key]) => !fixed.has(key)))
+				)
+			};
+		},
 		// FormulaCard.tsx's defaults and useFormulaExecution's evaluation; see
 		// executeFormula below.
 		'formula-card': async ({ meta }) => {

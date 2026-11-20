@@ -80,25 +80,34 @@ struct SankeyScreen: View {
 	}
 }
 
+/// The Sankey drawn calm, with nothing lit. Hovering anywhere on a node or
+/// ribbon lights its path and shows its amount; clicking opens its
+/// transactions (a ribbon opens the node it carries money for), and
+/// Shortfall explains itself instead.
 struct SankeyCanvas: View {
 	let report: SankeyReport
 	let format: MoneyFormat
 	var compact = false
 	let open: (SankeyNode) -> Void
-	@State private var hovered: Int?
+	@State private var hovered: SankeyTarget?
+	@State private var pointer: CGPoint = .zero
+	@State private var explaining: Int?
 
 	var body: some View {
 		GeometryReader { proxy in
 			let layout = SankeyLayout(report: report, size: proxy.size)
+			let lit = hovered.map { SankeyHighlight($0, links: layout.links) }
 			ZStack(alignment: .topLeading) {
 				Canvas { context, _ in
 					for ribbon in layout.ribbons {
-						let touches = hovered == ribbon.from || hovered == ribbon.to
-						context.fill(Self.path(ribbon), with: .color(color(report.nodes[ribbon.to]).opacity(touches ? 0.55 : 0.28)))
+						let opacity = lit.map { $0.flows.contains(ribbon.flow) ? 0.55 : 0.12 } ?? 0.28
+						context.fill(Path(ribbon.outline), with: .color(color(report.nodes[ribbon.to]).opacity(opacity)))
 					}
 					for node in layout.nodes {
 						let shape = Path(roundedRect: node.rect, cornerRadius: 3)
-						context.fill(shape, with: .color(hovered == node.index ? .textPrimary : color(report.nodes[node.index])))
+						let isLit = lit?.nodes.contains(node.index) ?? false
+						let dimmed = lit != nil && !isLit
+						context.fill(shape, with: .color(isLit && hovered == .node(node.index) ? .textPrimary : color(report.nodes[node.index]).opacity(dimmed ? 0.45 : 1)))
 					}
 				}
 				ForEach(layout.nodes, id: \.index) { placed in
@@ -106,15 +115,91 @@ struct SankeyCanvas: View {
 					if !compact || placed.rect.height >= 9 || node.column < 3 {
 						label(node, placed)
 					}
-					SankeyNodeButton(node: node, rect: placed.rect, format: format, open: open) { isHovered in
-						hovered = isHovered ? placed.index : (hovered == placed.index ? nil : hovered)
-					}
+					nodeElement(node, placed)
 				}
+				ForEach(layout.ribbons, id: \.flow) { ribbon in
+					flowElement(ribbon)
+				}
+				if let hovered, let readout = report.readout(hovered) {
+					SankeyReadoutView(readout: readout, format: format)
+						.position(x: min(max(pointer.x, 120), proxy.size.width - 120), y: max(pointer.y - 36, 20))
+						.allowsHitTesting(false)
+				}
+				if let explaining, layout.nodes.indices.contains(explaining) {
+					let rect = layout.nodes[explaining].rect
+					Color.clear
+						.frame(width: rect.width, height: rect.height)
+						.position(x: rect.midX, y: rect.midY)
+						.popover(isPresented: Binding(get: { self.explaining != nil }, set: { if !$0 { self.explaining = nil } })) { explanation(report.nodes[explaining]) }
+						.allowsHitTesting(false)
+				}
+			}
+			.contentShape(.rect)
+			.onContinuousHover { phase in
+				switch phase {
+				case .active(let location):
+					pointer = location
+					hovered = layout.target(at: location)
+				case .ended:
+					hovered = nil
+				}
+			}
+			.onTapGesture(coordinateSpace: .local) { location in
+				if let target = layout.target(at: location) { activate(target) }
 			}
 		}
 		.accessibilityElement(children: .contain)
 		.accessibilityLabel("Where the income went")
 		.accessibilityIdentifier("sankey.canvas")
+	}
+
+	private func activate(_ target: SankeyTarget) {
+		guard let node = report.drillNode(target) else { return }
+		if node.key.kind == .shortfall {
+			explaining = report.nodes.firstIndex(of: node)
+		} else if ReportWords.drillAction(for: node) != nil {
+			open(node)
+		}
+	}
+
+	/// The node's accessibility element and UI-test handle. Clicks fall
+	/// through to the canvas, which finds what's under the pointer.
+	private func nodeElement(_ node: SankeyNode, _ placed: SankeyLayout.Node) -> some View {
+		let height = max(placed.rect.height, 12)
+		return Color.clear
+			.frame(width: placed.rect.width + 10, height: height)
+			.position(x: placed.rect.midX, y: placed.rect.midY)
+			.allowsHitTesting(false)
+			.accessibilityElement()
+			.accessibilityAddTraits(.isButton)
+			.accessibilityLabel("\(ReportWords.node(node)), \(format.amount(node.value, on: .register))")
+			.accessibilityHint(ReportWords.drillAction(for: node) ?? ReportWords.shortfallCaption)
+			.accessibilityAction { activate(.node(placed.index)) }
+			.accessibilityIdentifier("sankey.node.\(Self.identifier(node.key))")
+	}
+
+	/// A handle in the middle of a ribbon, where its two curves are furthest from the nodes.
+	private func flowElement(_ ribbon: SankeyLayout.Ribbon) -> some View {
+		let thickness = max(ribbon.source.upperBound - ribbon.source.lowerBound, 4)
+		let middle = CGPoint(x: (ribbon.sourceX + ribbon.targetX) / 2, y: (ribbon.source.lowerBound + ribbon.source.upperBound + ribbon.target.lowerBound + ribbon.target.upperBound) / 4)
+		let from = report.nodes[ribbon.from], to = report.nodes[ribbon.to]
+		return Color.clear
+			.frame(width: 12, height: thickness)
+			.position(middle)
+			.allowsHitTesting(false)
+			.accessibilityElement()
+			.accessibilityAddTraits(.isButton)
+			.accessibilityLabel("\(ReportWords.node(from)) → \(ReportWords.node(to)), \(format.amount(report.flows[ribbon.flow].value, on: .register))")
+			.accessibilityAction { activate(.flow(ribbon.flow)) }
+			.accessibilityIdentifier("sankey.flow.\(Self.identifier(from.key)).\(Self.identifier(to.key))")
+	}
+
+	private func explanation(_ node: SankeyNode) -> some View {
+		VStack(alignment: .leading, spacing: 4) {
+			Text("Shortfall \(format.amount(node.value, on: .register))").font(.text(.body, weight: .semibold))
+			Text(ReportWords.shortfallCaption).foregroundStyle(.textSecondary)
+		}
+		.padding(Spacing.s3)
 	}
 
 	@ViewBuilder private func label(_ node: SankeyNode, _ placed: SankeyLayout.Node) -> some View {
@@ -131,6 +216,7 @@ struct SankeyCanvas: View {
 			.frame(width: width)
 			.position(x: placed.rect.midX, y: placed.rect.minY - 16)
 			.allowsHitTesting(false)
+			.accessibilityHidden(true)
 		case .leading, .trailing:
 			let leading = placed.labelSide == .leading
 			Group {
@@ -150,6 +236,7 @@ struct SankeyCanvas: View {
 			.frame(width: width, alignment: leading ? .trailing : .leading)
 			.position(x: leading ? placed.rect.minX - 10 - width / 2 : placed.rect.maxX + 10 + width / 2, y: placed.rect.midY)
 			.allowsHitTesting(false)
+			.accessibilityHidden(true)
 		}
 	}
 
@@ -163,61 +250,7 @@ struct SankeyCanvas: View {
 		}
 	}
 
-	static func path(_ ribbon: SankeyLayout.Ribbon) -> Path {
-		var path = Path()
-		let middle = (ribbon.sourceX + ribbon.targetX) / 2
-		path.move(to: CGPoint(x: ribbon.sourceX, y: ribbon.source.lowerBound))
-		path.addCurve(to: CGPoint(x: ribbon.targetX, y: ribbon.target.lowerBound), control1: CGPoint(x: middle, y: ribbon.source.lowerBound), control2: CGPoint(x: middle, y: ribbon.target.lowerBound))
-		path.addLine(to: CGPoint(x: ribbon.targetX, y: ribbon.target.upperBound))
-		path.addCurve(to: CGPoint(x: ribbon.sourceX, y: ribbon.source.upperBound), control1: CGPoint(x: middle, y: ribbon.target.upperBound), control2: CGPoint(x: middle, y: ribbon.source.upperBound))
-		path.closeSubpath()
-		return path
-	}
-
 	static func identifier(_ key: SankeyNodeKey) -> String {
 		"\(key.kind)" + (key.id.map { ".\($0)" } ?? "")
-	}
-}
-
-/// A node's click target, a little larger than the node so thin ones can be hit.
-private struct SankeyNodeButton: View {
-	let node: SankeyNode
-	let rect: CGRect
-	let format: MoneyFormat
-	let open: (SankeyNode) -> Void
-	let hover: (Bool) -> Void
-	@State private var isExplaining = false
-
-	var body: some View {
-		let height = max(rect.height, 12)
-		Button(action: activate) {
-			Color.clear
-				.frame(width: rect.width + 10, height: height)
-				.contentShape(.rect)
-		}
-		.buttonStyle(.plain)
-		.offset(x: rect.minX - 5, y: rect.minY - (height - rect.height) / 2)
-		.onHover(perform: hover)
-		.help(ReportWords.drillAction(for: node) ?? ReportWords.shortfallCaption)
-		.popover(isPresented: $isExplaining) { explanation }
-		.accessibilityLabel("\(ReportWords.node(node)), \(format.amount(node.value, on: .register))")
-		.accessibilityHint(ReportWords.drillAction(for: node) ?? ReportWords.shortfallCaption)
-		.accessibilityIdentifier("sankey.node.\(SankeyCanvas.identifier(node.key))")
-	}
-
-	private var explanation: some View {
-		VStack(alignment: .leading, spacing: 4) {
-			Text("Shortfall \(format.amount(node.value, on: .register))").font(.text(.body, weight: .semibold))
-			Text(ReportWords.shortfallCaption).foregroundStyle(.textSecondary)
-		}
-		.padding(Spacing.s3)
-	}
-
-	private func activate() {
-		if node.key.kind == .shortfall {
-			isExplaining = true
-		} else if ReportWords.drillAction(for: node) != nil {
-			open(node)
-		}
 	}
 }

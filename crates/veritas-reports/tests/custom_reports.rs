@@ -561,3 +561,101 @@ fn r_rep_4_dashboards_keep_unknown_widgets_as_placeholders() {
 	let pulled_back = place_widget(placeholder, -2, -1, 1, 1).unwrap();
 	assert_eq!((pulled_back.x, pulled_back.y), (Some(0), Some(0)));
 }
+
+/// What a custom report's graph and legend draw, against Actual's own
+/// `createCustomSpreadsheet`. The legend is the report's groups, in order,
+/// under the names the core gives them. Actual's intervals also stack every
+/// empty or hidden category at zero, which its graph never draws, so a chart
+/// draws `groups` and never names a stacked key itself.
+#[test]
+fn r_rep_4_legend_names_and_stacks_match_actuals_spreadsheet() {
+	let budget = all_features();
+	let cases = [
+		("Category", "Payment", "desc", "Monthly", false, false, true, true, false),
+		("Category", "Payment", "desc", "Monthly", true, false, true, true, false),
+		("Category", "Net", "name", "Monthly", false, true, false, false, false),
+		("Category", "Net Payment", "asc", "Yearly", true, true, true, false, true),
+		("Category", "Deposit", "budget", "Monthly", false, false, true, true, true),
+		("Group", "Payment", "desc", "Monthly", false, false, true, true, false),
+		("Group", "Net Deposit", "budget", "Monthly", true, true, false, true, false),
+		("Account", "Net", "desc", "Monthly", false, false, true, true, false),
+		("Payee", "Payment", "desc", "Monthly", false, false, true, false, true),
+	];
+	let mut requests = Vec::new();
+	let mut ours = Vec::new();
+	for (index, (group_by, balance, sort, interval, hidden, empty, uncategorized, off_budget, trim)) in
+		cases.into_iter().enumerate()
+	{
+		let id = format!("legend-{index}");
+		let row = CustomReportRow {
+			id: CustomReportId::new(id.clone()),
+			start_date: Some("2025-11-01".to_owned()),
+			end_date: Some("2026-11-09".to_owned()),
+			date_static: Some(1),
+			mode: Some("time".to_owned()),
+			group_by: Some(group_by.to_owned()),
+			balance_type: Some(balance.to_owned()),
+			sort_by: Some(sort.to_owned()),
+			interval: Some(interval.to_owned()),
+			graph_type: Some("StackedBarGraph".to_owned()),
+			show_hidden: Some(i64::from(hidden)),
+			show_empty: Some(i64::from(empty)),
+			show_uncategorized: Some(i64::from(uncategorized)),
+			show_offbudget: Some(i64::from(off_budget)),
+			trim_intervals: Some(i64::from(trim)),
+			..blank_report()
+		};
+		let report = CustomReport::from_row(&row).unwrap();
+		let balance_op = match report.balance_type {
+			BalanceType::TotalDebts => "totalDebts",
+			BalanceType::TotalAssets => "totalAssets",
+			BalanceType::TotalTotals => "totalTotals",
+			BalanceType::NetDebts => "netDebts",
+			BalanceType::NetAssets => "netAssets",
+			BalanceType::TotalBudgeted => "totalBudgeted",
+		};
+		let data = evaluate_report(&budget, &report, today(), 0).unwrap();
+		assert!(!data.groups.is_empty(), "{id} draws something");
+		requests.push(json!({
+			"id": id,
+			"type": "custom-report",
+			"firstDayOfWeekIdx": "0",
+			"meta": {
+				"startDate": data.start, "endDate": data.end, "interval": interval,
+				"groupBy": group_by, "balanceTypeOp": balance_op, "sortByOp": sort,
+				"showHiddenCategories": hidden, "showEmpty": empty,
+				"showUncategorized": uncategorized, "showOffBudget": off_budget,
+				"trimIntervals": trim, "graphType": "StackedBarGraph",
+			},
+		}));
+		let legend: Vec<Value> = data
+			.groups
+			.iter()
+			.map(|group| {
+				let key = if group.id.is_empty() { &group.name } else { &group.id };
+				json!({"dataKey": key, "id": group.id, "name": group.name})
+			})
+			.collect();
+		let stacked: Vec<Value> = data
+			.intervals
+			.iter()
+			.map(|interval| {
+				Value::Object(
+					interval
+						.stacked
+						.iter()
+						.map(|(key, amount)| (key.clone(), json!(amount.minor())))
+						.collect(),
+				)
+			})
+			.collect();
+		ours.push((id, json!({"legend": legend, "stacked": stacked})));
+	}
+	let Some(theirs) = oracle("widgets", "all-features", &Value::Array(requests), ORACLE_TODAY)
+	else {
+		return;
+	};
+	for (id, ours) in ours {
+		assert_eq!(ours, theirs[id.as_str()], "{id}");
+	}
+}
