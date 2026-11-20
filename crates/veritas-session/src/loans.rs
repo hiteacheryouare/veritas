@@ -290,13 +290,15 @@ fn last_payment<'a>(data: &'a BudgetData, loan: &AccountId) -> Option<LastPaymen
 			.transactions
 			.get(leg.transfer.as_ref()?)
 			.filter(|line| alive(data, line))?;
-		let SplitRole::Child { parent } = &principal.split else {
-			return None;
-		};
 		if kind_of(data, principal) != Some(CategoryKind::DebtPrincipal) {
 			return None;
 		}
-		let parent = data.transactions.get(parent)?;
+		// A plain transfer is a principal-only payment, its own "split".
+		let parent = match &principal.split {
+			SplitRole::Child { parent } => data.transactions.get(parent)?,
+			SplitRole::None => principal,
+			SplitRole::Parent => return None,
+		};
 		let on_budget = data
 			.accounts
 			.get(&parent.account)
@@ -315,7 +317,9 @@ fn last_payment<'a>(data: &'a BudgetData, loan: &AccountId) -> Option<LastPaymen
 /// usable mapping (a payment made in Actual, imported or older) no expense
 /// line is read, never by position: the loan's payment is the total, with
 /// interest blank and escrow 0, and only the account and principal category
-/// come from the last payment. With no last payment, the loan's payment the
+/// come from the last payment. A last payment with no expense lines at all
+/// (principal only, however it was made) needs no mapping: its principal is
+/// the total, interest blank and escrow 0 (L-5e). With no last payment, the loan's payment the
 /// same way, else nothing. Then principal is capped at what is owed the day
 /// before `today`, a blank interest counting as 0, shrinking the total.
 pub fn payment_defaults(
@@ -345,7 +349,17 @@ pub fn payment_defaults(
 				principal_category: last.principal.category.clone(),
 				..PaymentDefaults::default()
 			};
-			if parts.is_empty() {
+			let expense_lines = children(data, &last.parent.id)
+				.into_iter()
+				.filter(|line| line.id != last.principal.id && line.transfer.is_none())
+				.any(|line| kind_of(data, line) == Some(CategoryKind::Expense));
+			if !expense_lines {
+				PaymentDefaults {
+					total: Some(last.principal.amount.checked_neg()?),
+					escrow: Some(Money::ZERO),
+					..known
+				}
+			} else if parts.is_empty() {
 				PaymentDefaults {
 					total: from_terms.total,
 					escrow: from_terms.escrow,

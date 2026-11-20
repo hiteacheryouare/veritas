@@ -12,6 +12,7 @@ struct UpcomingRow: View {
 	let isPaying: Bool
 	let openPay: () -> Void
 	let closePay: () -> Void
+	@State private var confirmsPostToday = false
 
 	private var bill: BillSummary? { model.bill(item.billId) }
 	private var name: String { item.name ?? item.payeeName ?? "Unnamed bill" }
@@ -78,6 +79,23 @@ struct UpcomingRow: View {
 		.accessibilityLabel("\(name), \(BillWords.day(item.date)), \(BillWords.status(item.status, isIncome: item.isIncome))")
 		.accessibilityAddTraits(isSelected ? .isSelected : [])
 		.accessibilityIdentifier("upcoming.\(item.billId)")
+		.confirmationDialog(BillWords.postTodayConfirm(item.date), isPresented: $confirmsPostToday, titleVisibility: .visible) {
+			Button("Post today") { postToday() }
+			Button("Cancel", role: .cancel) {}
+		}
+	}
+
+	/// Paying today counts the occurrence only when the core says so; otherwise ask first.
+	private func requestPostToday() {
+		if item.paidTodayCounts {
+			postToday()
+		} else {
+			confirmsPostToday = true
+		}
+	}
+
+	private func postToday() {
+		Task { await model.postNow(item.billId, datedToday: true) }
 	}
 
 	private var actions: some View {
@@ -86,7 +104,7 @@ struct UpcomingRow: View {
 			if item.date != model.today {
 				Button(BillWords.postFor(item.date)) { Task { await model.postNow(item.billId, datedToday: false) } }
 			}
-			Button("Post today") { Task { await model.postNow(item.billId, datedToday: true) } }
+			Button("Post today") { requestPostToday() }
 			Divider()
 			Button("Pause") { Task { await model.pause(item.billId) } }
 			Button("End") { Task { await model.end(item.billId) } }

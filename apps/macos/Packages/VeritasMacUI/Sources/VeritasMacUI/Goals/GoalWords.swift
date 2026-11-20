@@ -13,20 +13,21 @@ struct GoalWords {
 		tone = goal.tone.design
 		switch goal.state {
 		case .active:
-			let suggestion = goal.suggestedMonthly.map { "Budget \(format.wholeCurrency($0, on: .budget)) a month" }
+			// DEBT-8.1: suggestions stay in minor units, so they show at the currency's places, never rounded to whole units.
+			let suggestion = goal.suggestedMonthly.map { "Budget \(format.currency($0, on: .budget)) a month" }
 			switch goal.pace {
 			case .onTrack(let eta):
 				note = "On track for \(GoalWords.etaName(eta, from: thisMonth))"
 				detail = suggestion
 			case .behind(let needed):
-				note = "Behind, needs \(format.wholeCurrency(needed, on: .budget)) a month"
+				note = "Behind, needs \(format.currency(needed, on: .budget)) a month"
 				detail = nil
 			case .noHistory(let needed):
-				note = "Budget \(format.wholeCurrency(needed, on: .budget)) a month"
+				note = "Budget \(format.currency(needed, on: .budget)) a month"
 				detail = "No ETA yet"
 			case .notAdding(let needed):
 				note = "Nothing is being added"
-				detail = "Budget \(format.wholeCurrency(needed, on: .budget)) a month"
+				detail = "Budget \(format.currency(needed, on: .budget)) a month"
 			case nil:
 				if let suggestion, let month = goal.targetMonth {
 					note = suggestion
