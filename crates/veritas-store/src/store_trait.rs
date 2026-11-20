@@ -91,8 +91,13 @@ impl StoreTransaction for Writer<'_> {
 			),
 			Change::TaxTag(delta) => self.put_tax_tag(
 				&delta.key,
-				delta.before.as_ref().map(|row| row.bucket.as_str()),
-				delta.after.as_ref().map(|row| row.bucket.as_str()),
+				delta.before.as_ref().and_then(|row| row.bucket.as_deref()),
+				delta.after.as_ref().and_then(|row| row.bucket.as_deref()),
+			),
+			Change::Setting(delta) => self.put_setting(
+				delta.key,
+				delta.before.as_ref().and_then(|row| row.value.as_deref()),
+				delta.after.as_ref().and_then(|row| row.value.as_deref()),
 			),
 			Change::Goal(delta) => self.put_goal(delta.before.as_ref(), delta.after.as_ref()),
 			Change::CustomReport(delta) => {
@@ -102,6 +107,10 @@ impl StoreTransaction for Writer<'_> {
 				self.put_dashboard_page(delta.before.as_ref(), delta.after.as_ref())
 			}
 			Change::Widget(delta) => self.put_widget(delta.before.as_ref(), delta.after.as_ref()),
+			Change::Scenario(delta) => self.put_scenario(
+				delta.before.as_ref().and_then(|row| row.scenario.as_ref()),
+				delta.after.as_ref().and_then(|row| row.scenario.as_ref()),
+			),
 		}
 	}
 

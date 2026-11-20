@@ -297,8 +297,13 @@ impl<B: Backend> Core<B> {
 	}
 
 	pub(crate) fn perform(&self, command: Command) -> Result<Change, FfiError> {
-		self.call(|session| session.perform(&command))
-			.map(|changes| Change::from(&changes))
+		self.call(|session| {
+			if let Some(today) = command.local_today() {
+				session.set_today(crate::budget::civil_date(today)?);
+			}
+			session.perform(&command)
+		})
+		.map(|changes| Change::from(&changes))
 	}
 
 	pub(crate) fn undo(&self) -> Result<Change, FfiError> {
@@ -357,6 +362,15 @@ impl<B: Backend> Core<B> {
 	pub(crate) fn set_retention(&self, retention: Retention) -> Result<(), FfiError> {
 		self.call(|session| {
 			session.set_retention(retention.into());
+			Ok(())
+		})
+	}
+
+	/// Sets the session's local date from a call that carries the shell's
+	/// `today` (v15), for reads that don't otherwise pass through it.
+	pub(crate) fn pin_today(&self, today: &str) -> Result<(), FfiError> {
+		self.call(|session| {
+			session.set_today(crate::budget::civil_date(today)?);
 			Ok(())
 		})
 	}

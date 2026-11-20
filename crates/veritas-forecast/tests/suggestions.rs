@@ -81,7 +81,7 @@ fn fc_5_bills_only() {
 	let rent = item(&suggestions, "Rent");
 	assert_eq!(rent.amount, Some(cents(165000)));
 	assert_eq!(rent.basis, Basis::Bills);
-	assert_eq!(rent.reason, "Rent $1650, scheduled: Rent");
+	assert_eq!(rent.reason, "Rent $1,650, scheduled: Rent");
 }
 
 #[test]
@@ -219,7 +219,7 @@ fn fc_5_goal_category_uses_the_debt_8_1_suggestion() {
 	assert_eq!(laptop.amount, Some(cents(25000)));
 	assert_eq!(
 		laptop.reason,
-		"New laptop $250.00: $1500.00 left over 6 months"
+		"New laptop $250.00: $1,500.00 left over 6 months"
 	);
 
 	book.goal("laptop", "New laptop", 150000, Some("2027-07-15"));
@@ -247,7 +247,7 @@ fn fc_5_goal_carry_comes_from_the_envelope_sheet() {
 	assert_eq!(laptop.amount, Some(cents(25000)), "G-1b");
 	assert_eq!(
 		laptop.reason,
-		"New laptop $250.00: $1250.00 left over 5 months"
+		"New laptop $250.00: $1,250.00 left over 5 months"
 	);
 
 	let reached = BTreeMap::from([(
@@ -319,6 +319,7 @@ fn eta(book: &Book, available: i64, scenario: Option<&Scenario>) -> veritas_fore
 		&GoalId::new("laptop"),
 		ym("2027-01"),
 		cents(available),
+		false,
 		scenario,
 	)
 	.unwrap()
@@ -541,7 +542,7 @@ fn debt_8_1_carry_comes_from_actuals_envelope_math() {
 	.clone();
 	assert_eq!(
 		laptop.reason,
-		"New laptop $250.00: $1250.00 left over 5 months"
+		"New laptop $250.00: $1,250.00 left over 5 months"
 	);
 }
 
@@ -557,7 +558,8 @@ fn fc_6_goal_etas_read_available_from_the_sheet() {
 	book.goal("old", "Old goal", 1000, None).status = veritas_domain::GoalStatus::Closed;
 	let today = date("2027-01-20");
 	let sheet = EnvelopeSheet::compute(&book.budget, today).unwrap();
-	let etas = goal_etas(&book.budget, &sheet, today, None).unwrap();
+	let classification = veritas_reports::classify(&book.budget);
+	let etas = goal_etas(&book.budget, &sheet, &classification, today, None).unwrap();
 	assert_eq!(etas.len(), 1);
 	assert_eq!(etas[0].remaining, cents(38000));
 	assert!(
@@ -602,4 +604,228 @@ fn goal_10_a_re_targeted_goal_suggests_again() {
 	let laptop = item(&suggest(&book, "2027-01-20", &[]), "New laptop").clone();
 	assert_eq!(laptop.basis, Basis::Goal);
 	assert_eq!(laptop.amount, Some(cents(12000)));
+}
+
+fn yen(book: &mut Book) {
+	book.budget.format.currency_code = Some("JPY".to_owned());
+	book.budget.format.hide_fraction = true;
+}
+
+#[test]
+fn fc_5_a_yen_suggestion_is_written_on_the_budget_scale_cls_12_11() {
+	let mut book = Book::household();
+	yen(&mut book);
+	six("Groceries", &mut book, 43000);
+	let rent = known("2027-02-01", "Rent", -165000, FlowKind::Expense);
+	let suggestions = suggest(&book, "2027-01-15", &[rent]);
+	let groceries = item(&suggestions, "Groceries");
+	assert_eq!(
+		groceries.amount,
+		Some(cents(430)),
+		"¥430 on the budget scale"
+	);
+	assert_eq!(groceries.register_amount, Some(cents(43000)));
+	assert_eq!(groceries.reason, "Groceries ¥430, 6-month median");
+	assert_eq!(
+		item(&suggestions, "Rent").reason,
+		"Rent ¥1,650, scheduled: Rent"
+	);
+}
+
+#[test]
+fn fc_5_a_yen_keeping_line_shows_the_cells_own_integer() {
+	let mut book = Book::household();
+	yen(&mut book);
+	book.budgeted("2027-02", "Fun", 7550);
+	let fun = item(&suggest(&book, "2027-01-15", &[]), "Fun").clone();
+	assert_eq!(fun.amount, None);
+	assert_eq!(fun.reason, "Fun: no history yet, keeping ¥7,550");
+}
+
+#[test]
+fn fc_5_a_yen_debt_principal_rounds_then_converts() {
+	let mut book = Book::household();
+	yen(&mut book);
+	book.opening("LOAN", "2026-06-30", -980000);
+	book.row("CHK", "2026-12-10", -40000).split = veritas_domain::SplitRole::Parent;
+	let parent = book
+		.budget
+		.transactions
+		.keys()
+		.last()
+		.unwrap()
+		.as_str()
+		.to_owned();
+	book.transfer("CHK", "LOAN", "2026-12-10", -32050)
+		.in_category("Loan principal")
+		.child_of(&parent);
+	book.spend("Loan interest", "2026-12-10", -7950)
+		.child_of(&parent);
+	let principal = item(&suggest(&book, "2027-01-15", &[]), "Loan principal").clone();
+	assert_eq!(
+		principal.amount,
+		Some(cents(321)),
+		"32050 is ¥321 (Fred, Q4)"
+	);
+	assert_eq!(
+		principal.reason,
+		"Loan principal ¥321, principal of the last loan payment"
+	);
+}
+
+#[test]
+fn fc_5_a_yen_goal_stays_on_the_budget_scale_and_the_notice_compares_on_the_register() {
+	let mut book = Book::household();
+	yen(&mut book);
+	book.category("Trip", "Goals");
+	book.goal("trip", "Trip", 1500, Some("2027-08-15"));
+	let pay = known("2027-02-01", "Paycheck", 21400, FlowKind::Income);
+	let suggestions = suggest(&book, "2027-01-15", &[pay]);
+	let trip = item(&suggestions, "Trip");
+	assert_eq!(trip.amount, Some(cents(215)), "ceil(1500 / 7), whole yen");
+	assert_eq!(trip.register_amount, Some(cents(21500)));
+	assert_eq!(trip.reason, "Trip ¥215: ¥1,500 left over 7 months");
+	assert_eq!(suggestions.exceeds_income_by, Some(cents(100)));
+	assert_eq!(
+		suggestions.notice.as_deref(),
+		Some("Suggestions exceed expected income by ¥1")
+	);
+}
+
+/// SG-8: "New laptop", target 150000 by 2027-06-15, 10000 budgeted in the
+/// suggested month (February; January's 5000 is never the one shown), and a
+/// purchase of `spent` in its category.
+fn laptop_with_spending(book: &mut Book, spent: i64) {
+	book.category("New laptop", "Goals");
+	book.goal("laptop", "New laptop", 150000, Some("2027-06-15"));
+	book.budgeted("2027-01", "New laptop", 5000);
+	book.budgeted("2027-02", "New laptop", 10000);
+	book.spend("New laptop", "2027-01-10", -spent);
+}
+
+#[test]
+fn fc_5_sg_8_a_yen_goal_with_recorded_spending_keeps_its_budget_cls_12_14() {
+	// Ryan, 2026-11-18: the envelope's available would be 10000 + (-50000)
+	// = -40000, mixing ¥500 of spending with ¥10,000 of budget, so no
+	// monthly amount is built on it.
+	let mut book = Book::household();
+	yen(&mut book);
+	laptop_with_spending(&mut book, 50000);
+	let suggestions = suggest(&book, "2027-01-15", &[]);
+	let laptop = item(&suggestions, "New laptop");
+	assert_eq!(laptop.amount, None);
+	assert_eq!(laptop.register_amount, None);
+	assert_eq!(laptop.basis, Basis::GoalSpendingRecorded);
+	assert_eq!(
+		laptop.reason,
+		"New laptop: spending recorded, keeping ¥10,000"
+	);
+	assert_eq!(suggestions.exceeds_income_by, None, "nothing suggested");
+
+	let mut clean = Book::household();
+	yen(&mut clean);
+	laptop_with_spending(&mut clean, 0);
+	let laptop = item(&suggest(&clean, "2027-01-15", &[]), "New laptop").clone();
+	assert_eq!(laptop.basis, Basis::Goal, "no spending, DEBT-8.1 as usual");
+}
+
+#[test]
+fn fc_5_sg_8_a_usd_goal_with_a_purchase_still_gets_its_suggestion() {
+	let mut book = Book::household();
+	laptop_with_spending(&mut book, 500);
+	let laptop = item(&suggest(&book, "2027-01-15", &[]), "New laptop").clone();
+	assert_eq!(laptop.basis, Basis::Goal);
+	assert_eq!(laptop.amount, Some(cents(30000)), "ceil(150000 / 5)");
+	assert_eq!(
+		laptop.reason,
+		"New laptop $300.00: $1,500.00 left over 5 months"
+	);
+}
+
+#[test]
+fn fc_5_sg_8_the_trigger_runs_through_the_end_of_the_envelopes_month() {
+	// D77: Actual's available reads every row in the envelope's month, so a
+	// suggestion (the suggested month's envelope) trips on a purchase dated
+	// any time through February, while the ETA (January's envelope) trips
+	// only on one dated through January.
+	let today = date("2027-01-15");
+	let read = |on: &str| {
+		let mut book = Book::household();
+		yen(&mut book);
+		laptop_with_spending(&mut book, 0);
+		book.spend("New laptop", on, -50000);
+		let suggestion = item(&suggest(&book, "2027-01-15", &[]), "New laptop").clone();
+		let sheet = EnvelopeSheet::compute(&book.budget, today).unwrap();
+		let classification = veritas_reports::classify(&book.budget);
+		let etas = goal_etas(&book.budget, &sheet, &classification, today, None).unwrap();
+		(suggestion, etas[0].status)
+	};
+	let (later, eta) = read("2027-01-28");
+	assert_eq!(later.basis, Basis::GoalSpendingRecorded);
+	assert_eq!(
+		later.reason,
+		"New laptop: spending recorded, keeping ¥10,000"
+	);
+	assert_eq!(eta, EtaStatus::SpendingRecorded, "later this month");
+
+	let (next, eta) = read("2027-02-03");
+	assert_eq!(
+		next.basis,
+		Basis::GoalSpendingRecorded,
+		"inside the suggested month"
+	);
+	assert_ne!(
+		eta,
+		EtaStatus::SpendingRecorded,
+		"outside the current budget month"
+	);
+
+	let (after, _) = read("2027-03-01");
+	assert_eq!(after.basis, Basis::Goal, "after the suggested month");
+}
+
+#[test]
+fn fc_5_sg_9_spending_recorded_wins_over_no_target_date() {
+	let book = |status: veritas_domain::GoalStatus, spent: i64| {
+		let mut book = Book::household();
+		yen(&mut book);
+		book.category("New laptop", "Goals");
+		book.goal("laptop", "New laptop", 150000, None).status = status;
+		book.budgeted("2027-01", "New laptop", 5000);
+		book.budgeted("2027-02", "New laptop", 10000);
+		book.spend("New laptop", "2027-01-10", -spent);
+		book
+	};
+	let reason = |status, spent| {
+		let laptop = item(
+			&suggest(&book(status, spent), "2027-01-15", &[]),
+			"New laptop",
+		)
+		.clone();
+		(laptop.basis, laptop.reason)
+	};
+	use veritas_domain::GoalStatus::{Active, Reached};
+	assert_eq!(
+		reason(Active, 50000),
+		(
+			Basis::GoalSpendingRecorded,
+			"New laptop: spending recorded, keeping ¥10,000".to_owned()
+		)
+	);
+	assert_eq!(
+		reason(Active, 0),
+		(
+			Basis::NoTargetDate,
+			"New laptop: no target date, keeping ¥10,000".to_owned()
+		),
+		"SG-3 without the purchase"
+	);
+	assert_eq!(
+		reason(Reached, 50000),
+		(
+			Basis::GoalReached,
+			"New laptop: reached, keeping ¥10,000".to_owned()
+		),
+		"D77 covers active goals only"
+	);
 }

@@ -14,6 +14,7 @@ import { reportRows } from './reportRows.ts';
 import { widgetData } from './widgets.ts';
 import { dashboardReadback } from './dashboards.ts';
 import { billFacts, ruleChoices } from './bills.ts';
+import { forecastOccurrences } from './forecast.ts';
 import { fixtureSpecs } from './specs/index.ts';
 
 const USAGE = `Usage:
@@ -29,6 +30,7 @@ const USAGE = `Usage:
   node src/main.ts dashboards <zip> [--out <file>]
   node src/main.ts bill-facts <zip> <request.json> [--out <file>]
   node src/main.ts rule-choices [--out <file>]
+  node src/main.ts forecast-occurrences <zip> <end-date> [--out <file>]
 
 eval, arithmetic-vectors, widgets and rule-choices run Actual's own code from the pinned source in
 reference/actual (or ACTUAL_REFERENCE_DIR), because the bundle doesn't ship it.
@@ -256,6 +258,12 @@ const main = async () => {
 			return billFacts(session, request);
 		});
 		writeCanonicalTo(facts, values.out);
+	} else if (command === 'forecast-occurrences' && args.length === 2) {
+		const occurrences = await withActual(determinism, async session => {
+			await session.api.importBudget(readFileSync(args[0]));
+			return forecastOccurrences(session, args[1]);
+		});
+		writeCanonicalTo(occurrences, values.out);
 	} else if (command === 'rule-choices' && args.length === 0) {
 		writeCanonicalTo(await ruleChoices(), values.out);
 	} else if (command === 'dashboards' && args.length === 1) {

@@ -28,6 +28,9 @@ struct GoalWords {
 			case .notAdding(let needed):
 				note = "Nothing is being added"
 				detail = "Budget \(format.currency(needed, on: .budget)) a month"
+			case .spendingRecorded:
+				note = "No ETA: spending recorded"
+				detail = nil
 			case nil:
 				if let suggestion, let month = goal.targetMonth {
 					note = suggestion

@@ -100,6 +100,9 @@ pub struct TaxRow {
 	/// The classified row's category, after `category_mapping`.
 	pub category: Option<CategoryId>,
 	pub parent: Option<TransactionId>,
+	/// For a conflict, the buckets its tags name, by bucket id. Empty
+	/// otherwise.
+	pub conflicting: Vec<Bucket>,
 }
 
 impl TaxRow {
@@ -169,7 +172,7 @@ pub fn extract_tags(notes: &str) -> Vec<String> {
 
 enum Assignment {
 	Counted(Bucket, Source),
-	Conflict,
+	Conflict(Vec<Bucket>),
 	NotCounted,
 }
 
@@ -201,7 +204,11 @@ fn assign(budget: &BudgetData, row: &ClassifiedRow) -> Assignment {
 					Assignment::Counted(bucket, Source::Tag)
 				});
 		}
-		_ => return Assignment::Conflict,
+		_ => {
+			let mut buckets: Vec<Bucket> = tagged.into_iter().filter_map(Bucket::parse).collect();
+			buckets.sort_by_key(|bucket| bucket.id());
+			return Assignment::Conflict(buckets);
+		}
 	}
 	row.category
 		.as_ref()
@@ -238,9 +245,9 @@ pub fn tax_summary(
 		.iter()
 		.filter(|row| eligible(row))
 	{
-		let (bucket, source) = match assign(budget, row) {
-			Assignment::Counted(bucket, source) => (Some(bucket), source),
-			Assignment::Conflict => (None, Source::Tag),
+		let (bucket, source, conflicting) = match assign(budget, row) {
+			Assignment::Counted(bucket, source) => (Some(bucket), source, Vec::new()),
+			Assignment::Conflict(buckets) => (None, Source::Tag, buckets),
 			Assignment::NotCounted => continue,
 		};
 		detail.push(TaxRow {
@@ -254,6 +261,7 @@ pub fn tax_summary(
 				.transpose()?,
 			category: row.category.clone(),
 			parent: row.parent.clone(),
+			conflicting,
 		});
 	}
 	detail.sort_by(|a, b| {
@@ -328,30 +336,7 @@ pub fn detail_csv(budget: &BudgetData, summary: &TaxSummary) -> String {
 		"parent_id",
 	]);
 	for row in &summary.detail {
-		let transaction = budget.transactions.get(&row.row);
-		let account = transaction
-			.and_then(|transaction| budget.accounts.get(&transaction.account))
-			.map(|account| account.name.clone());
-		let payee = transaction
-			.and_then(|transaction| transaction.payee.as_ref())
-			.and_then(|payee| budget.resolve_payee(payee))
-			.and_then(|payee| budget.payees.get(payee))
-			.map(|payee| {
-				payee
-					.transfer_account
-					.as_ref()
-					.and_then(|account| budget.accounts.get(account))
-					.map_or_else(|| payee.name.clone(), |account| account.name.clone())
-			});
-		let category = row
-			.category
-			.as_ref()
-			.and_then(|category| budget.categories.get(category))
-			.map(|category| category.name.clone());
-		let status = row
-			.category
-			.as_ref()
-			.map_or("", |category| category_status(labels(budget, category)));
+		let text = row_text(budget, row);
 		let parent = row.parent.as_ref().map(ToString::to_string);
 		csv.row([
 			Cell::Number(summary.year.to_string()),
@@ -364,26 +349,71 @@ pub fn detail_csv(budget: &BudgetData, summary: &TaxSummary) -> String {
 				.to_owned(),
 			),
 			Cell::Text(row.date.to_string()),
-			Cell::Text(account.unwrap_or_default()),
-			Cell::Text(payee.unwrap_or_default()),
-			Cell::Text(category.unwrap_or_default()),
-			Cell::Text(status.to_owned()),
+			Cell::Text(text.account),
+			Cell::Text(text.payee),
+			Cell::Text(text.category),
+			Cell::Text(text.category_status.to_owned()),
 			Cell::Number(row.amount.minor().to_string()),
 			Cell::Number(
 				row.counted
 					.map(|counted| counted.minor().to_string())
 					.unwrap_or_default(),
 			),
-			Cell::Text(
-				transaction
-					.and_then(|transaction| transaction.notes.clone())
-					.unwrap_or_default(),
-			),
+			Cell::Text(text.notes),
 			Cell::Text(row.row.to_string()),
 			Cell::Text(parent.unwrap_or_default()),
 		]);
 	}
 	csv.finish()
+}
+
+/// The detail file's text columns for one row (TAX-5), so the PDF shows the
+/// same words as the CSV.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TaxRowText {
+	pub account: String,
+	/// After payee mapping; a transfer shows the other account's name.
+	pub payee: String,
+	/// The plain name, never prefixed or bracketed.
+	pub category: String,
+	/// Empty, `hidden`, `archived` or `deleted`.
+	pub category_status: &'static str,
+	pub notes: String,
+}
+
+pub fn row_text(budget: &BudgetData, row: &TaxRow) -> TaxRowText {
+	let transaction = budget.transactions.get(&row.row);
+	let account = transaction
+		.and_then(|transaction| budget.accounts.get(&transaction.account))
+		.map(|account| account.name.clone());
+	let payee = transaction
+		.and_then(|transaction| transaction.payee.as_ref())
+		.and_then(|payee| budget.resolve_payee(payee))
+		.and_then(|payee| budget.payees.get(payee))
+		.map(|payee| {
+			payee
+				.transfer_account
+				.as_ref()
+				.and_then(|account| budget.accounts.get(account))
+				.map_or_else(|| payee.name.clone(), |account| account.name.clone())
+		});
+	let category = row
+		.category
+		.as_ref()
+		.and_then(|category| budget.categories.get(category))
+		.map(|category| category.name.clone());
+	TaxRowText {
+		account: account.unwrap_or_default(),
+		payee: payee.unwrap_or_default(),
+		category: category.unwrap_or_default(),
+		category_status: row
+			.category
+			.as_ref()
+			.map_or("", |category| category_status(labels(budget, category))),
+		notes: transaction
+			.and_then(|transaction| transaction.notes.clone())
+			.unwrap_or_default(),
+	}
 }
 
 /// One word per category, the most serious first: a deleted category may

@@ -153,6 +153,29 @@ pub struct Tag {
 	pub tombstone: bool,
 }
 
+/// A Veritas setting kept as a `veritas_meta` row. Only these keys are ever
+/// read or written, so `schema_version` can't be touched.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SettingKey {
+	/// The name on every statement's header (ST-3). Unset falls back to the
+	/// budget's name.
+	EntityName,
+}
+
+impl SettingKey {
+	pub const ALL: [SettingKey; 1] = [SettingKey::EntityName];
+
+	pub fn id(self) -> &'static str {
+		match self {
+			SettingKey::EntityName => "entity_name",
+		}
+	}
+
+	pub fn parse(id: &str) -> Option<SettingKey> {
+		SettingKey::ALL.into_iter().find(|key| key.id() == id)
+	}
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct CategoryMeta {
 	pub kind: Option<CategoryKind>,
@@ -373,6 +396,8 @@ pub struct BudgetData {
 	pub loan_payment_parts: BTreeMap<LoanPaymentPartId, LoanPaymentPart>,
 	/// `veritas_tax_tag`: Actual tag name (without `#`) to TAX-2 bucket id.
 	pub tax_tags: BTreeMap<String, String>,
+	/// `veritas_meta` rows other than `schema_version`.
+	pub settings: BTreeMap<SettingKey, String>,
 	/// `schedules_json_paths`: where each schedule condition sits in its rule.
 	pub schedule_json_paths: BTreeMap<ScheduleId, ScheduleJsonPaths>,
 	/// `veritas_schedule_meta`: how Veritas labels a completed bill.
@@ -408,6 +433,7 @@ impl BudgetData {
 			transaction_meta: BTreeMap::new(),
 			loan_payment_parts: BTreeMap::new(),
 			tax_tags: BTreeMap::new(),
+			settings: BTreeMap::new(),
 			schedule_json_paths: BTreeMap::new(),
 			schedule_meta: BTreeMap::new(),
 			format: FormatPrefs::default(),

@@ -7,14 +7,18 @@ mod budget;
 mod commands;
 mod custom_reports;
 mod dashboards;
+mod forecast;
 mod goals;
 mod money;
 mod records;
 mod reports;
 mod rules;
 mod session;
+mod statements;
+mod tax_setup;
 #[cfg(test)]
 mod test_support;
+mod wrapped;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -47,6 +51,13 @@ pub use dashboards::{
 	SankeyCardColor, SankeyCardLink, SankeyCardMode, SankeyCardNode, SankeyFolded, SankeyLabel,
 	SpendingCardDay, SpendingCardMode, WidgetConfig, WidgetRange, WidgetTimeFrame, WidgetView,
 };
+pub use forecast::{
+	BudgetSuggestion, FlowCertainty, Forecast, ForecastAccount, ForecastBandMethod,
+	ForecastBaseline, ForecastCategory, ForecastFlow, ForecastFlowKind, ForecastHorizon,
+	ForecastMonth, ForecastProjection, ForecastShortfall, GoalEtaItem, GoalEtaStatus,
+	IncomeChangeAmount, LoanForecast, ScenarioCadence, ScenarioChange, ScenarioEventItem,
+	ScenarioSummary, SuggestionBasis, SuggestionList, UnforecastItem,
+};
 pub use goals::{GoalClosePreview, GoalList, GoalPace, GoalState, GoalSummary, MonthAmount};
 pub use money::{
 	BalanceAfter, BalanceHistory, BalancePoint, CategoryKind, HiddenCategoryMatch,
@@ -72,6 +83,12 @@ pub use rules::{
 	RuleSource, RuleSplitLine, RuleStage, RuleValue, RuleValueKind, rule_choices,
 };
 pub use session::{ChangeListener, Session};
+pub use statements::{IncomeStatement, StatementEntity, StatementGroup};
+pub use tax_setup::{TaxCategoryBucket, TaxSetup, TaxTagMapping, TaxTagMeaning};
+pub use wrapped::{
+	WrappedCategory, WrappedFact, WrappedGroup, WrappedMeasure, WrappedMonth, WrappedNoSpend,
+	WrappedPayee, WrappedPriorYear, WrappedReport, WrappedShares, WrappedStreak, YearChange,
+};
 
 uniffi::setup_scaffolding!();
 
