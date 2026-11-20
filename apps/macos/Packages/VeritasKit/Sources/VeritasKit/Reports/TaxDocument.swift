@@ -10,6 +10,10 @@ public struct TaxDocument: Hashable, Sendable {
 	/// TAX-5's PDF footer.
 	public static let footer = "Organized from your own categories and tags. Not tax advice."
 	public static let limitsTitle = "Known limits"
+	public static let conflictsTitle = "Needs a decision"
+	/// Under Needs a decision: these rows show the amount as recorded, where
+	/// a bucket's rows show what was counted (TAX-4).
+	public static let conflictsNote = "Not counted. Amounts as recorded."
 	/// TAX-8, in the order the spec lists them.
 	public static let limits = [
 		"Totals are only what was recorded. A paycheck that isn't split into gross pay and withholding counts as the deposit.",

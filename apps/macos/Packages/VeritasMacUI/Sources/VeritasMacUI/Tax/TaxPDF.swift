@@ -92,7 +92,8 @@ enum TaxPDF {
 			blocks += document.buckets.map(summaryRow)
 		}
 		if !document.conflicts.isEmpty {
-			blocks.append(section("Needs a decision"))
+			blocks.append(section(TaxDocument.conflictsTitle))
+			blocks.append(paragraph(TaxDocument.conflictsNote, color: secondary, keepsWithNext: true))
 			blocks.append(detailHeader())
 			blocks += document.conflicts.map(detailRow)
 		}
@@ -180,12 +181,12 @@ enum TaxPDF {
 		}
 	}
 
-	private static func paragraph(_ value: String, color: NSColor, bullet: Bool = false) -> Block {
+	private static func paragraph(_ value: String, color: NSColor, bullet: Bool = false, keepsWithNext: Bool = false) -> Block {
 		let font = StatementPDF.font(10)
 		let indent: CGFloat = bullet ? 12 : 0
 		let string = NSAttributedString(string: value, attributes: [.font: font, .foregroundColor: color])
 		let textHeight = ceil(string.boundingRect(with: CGSize(width: contentWidth - indent, height: .greatestFiniteMagnitude), options: .usesLineFragmentOrigin).height)
-		return Block(height: textHeight + 6, keepsWithNext: false) { y in
+		return Block(height: textHeight + 6, keepsWithNext: keepsWithNext) { y in
 			if bullet {
 				text("\u{2022}", font: font, color: color, in: CGRect(x: side, y: y + 2, width: indent, height: lineHeight(font)))
 			}

@@ -26,7 +26,7 @@ struct TaxPDFTests {
 		for expected in [
 			"Stub", "Tax summary", "Tax year 2026, in USD", "Summary", "Charitable giving", "130.00",
 			"Business expenses", "\u{2212}15.00", "Refunds or reversals exceed what was counted.",
-			"Needs a decision", "Tags name Medical and Education", "Known limits"
+			"Needs a decision", "Not counted. Amounts as recorded.", "Tags name Medical and Education", "Known limits"
 		] + TaxDocument.limits {
 			#expect(text.contains(expected), "\(expected)")
 		}
