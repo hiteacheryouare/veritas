@@ -178,6 +178,9 @@ impl Recurrence {
 			}
 			let found = match (rule.count, rule.end) {
 				(None, Some(end)) => rule.last_on_or_before(end),
+				(Some(count), _) if rule.pattern == Pattern::EveryPeriod => {
+					rule.last_of_every_period(count)
+				}
 				_ => {
 					let mut occurrences = Occurrences::new(rule, None);
 					let mut found = None;
@@ -439,6 +442,76 @@ impl RRule {
 		Err(RecurError::NoOccurrence)
 	}
 
+	/// How many dates the walk from the start yields before `date`, without
+	/// walking them. `None` for weekday patterns, whose dates depend on where
+	/// the walk starts. Every other pattern yields each period's dates in
+	/// order, and the walk's 400-empty-period refusal can't trigger on one
+	/// that has yielded a date, because which periods are empty repeats
+	/// within 400 of them.
+	fn occurrences_before(&self, date: NaiveDate) -> Option<u64> {
+		if date <= self.start {
+			return Some(0);
+		}
+		match (&self.pattern, self.frequency) {
+			(Pattern::MonthWeekdays(_), _) => None,
+			(Pattern::EveryPeriod, frequency) => {
+				let days_per_step = match frequency {
+					Frequency::Weekly => self.interval.checked_mul(7)?,
+					_ => self.interval,
+				};
+				let elapsed = (date - self.start).num_days();
+				u64::try_from((elapsed - 1) / days_per_step + 1).ok()
+			}
+			(Pattern::MonthDays(days), _) => {
+				let last = self.period_of(date.pred_opt()?);
+				if last == 0 {
+					return self.dates_in_period_before(0, date);
+				}
+				let per_length = [28, 29, 30, 31].map(|length| {
+					let mut taken = [false; 32];
+					for day in days.iter().filter(|day| length >= day.abs()) {
+						let day = if *day > 0 { *day } else { length + day + 1 };
+						taken[day as usize] = true;
+					}
+					taken.iter().filter(|taken| **taken).count() as u64
+				});
+				let mut before = self.dates_in_period_before(0, date)?
+					+ self.dates_in_period_before(last, date)?;
+				let mut month = add_months(self.start.with_day(1)?, self.interval)?;
+				for _ in 1..last {
+					before += per_length[usize::try_from(days_in_month(month) - 28).ok()?];
+					month = add_months(month, self.interval)?;
+				}
+				Some(before)
+			}
+			(Pattern::YearDay { .. }, _) => (0..=self.period_of(date.pred_opt()?))
+				.map(|period| self.dates_in_period_before(period, date))
+				.sum(),
+		}
+	}
+
+	fn dates_in_period_before(&self, period: i64, date: NaiveDate) -> Option<u64> {
+		let dates = self.period_dates(period)?;
+		Some(
+			dates
+				.iter()
+				.filter(|day| **day >= self.start && **day < date)
+				.count() as u64,
+		)
+	}
+
+	/// The `count`th date of a daily or weekly rule, or its last date before
+	/// the calendar runs out, as the walk would find it.
+	fn last_of_every_period(&self, count: u64) -> Option<NaiveDate> {
+		let days_per_step = match self.frequency {
+			Frequency::Weekly => self.interval.checked_mul(7)?,
+			_ => self.interval,
+		};
+		let last_step = i64::try_from(count.checked_sub(1)?).unwrap_or(i64::MAX);
+		let calendar_steps = (NaiveDate::MAX - self.start).num_days() / days_per_step;
+		add_days(self.start, last_step.min(calendar_steps) * days_per_step)
+	}
+
 	/// The last date on or before `end` from the plain set of dates, which is
 	/// what rschedule's reverse pipes walk (they never see spilled weekdays).
 	fn last_on_or_before(&self, end: NaiveDate) -> Option<NaiveDate> {
@@ -471,8 +544,9 @@ fn nth_weekday(first: NaiveDate, weekday: Weekday, nth: i64) -> Option<NaiveDate
 }
 
 /// One rrule's occurrences in order. A rule without a count starts at the
-/// window; one with a count walks from its own start, because the count
-/// always runs from there (rschedule's `iterateWithCount`).
+/// window; one with a count counts from its own start (rschedule's
+/// `iterateWithCount`), so it skips ahead by the dates before the window
+/// when the pattern allows and walks from the start when it doesn't.
 struct Occurrences<'a> {
 	rule: &'a RRule,
 	from: Option<NaiveDate>,
@@ -483,15 +557,19 @@ struct Occurrences<'a> {
 
 impl<'a> Occurrences<'a> {
 	fn new(rule: &'a RRule, from: Option<NaiveDate>) -> Self {
-		let cursor = match (rule.count, from) {
-			(None, Some(from)) => from.max(rule.start),
-			_ => rule.start,
+		let (cursor, counted) = match (rule.count, from) {
+			(None, Some(from)) => (from.max(rule.start), 0),
+			(Some(_), Some(from)) => match rule.occurrences_before(from) {
+				Some(before) if before > 0 => (from, before),
+				_ => (rule.start, 0),
+			},
+			_ => (rule.start, 0),
 		};
 		Occurrences {
 			rule,
 			from,
 			cursor,
-			counted: 0,
+			counted,
 			done: rule.count == Some(0),
 		}
 	}
@@ -669,6 +747,61 @@ mod tests {
 			recurrence.first_on_or_after(date("2024-03-11")).unwrap(),
 			None
 		);
+	}
+
+	#[test]
+	fn a_counted_rule_skipping_ahead_finds_what_walking_from_the_start_finds() {
+		let walked = |rule: &RRule, from: NaiveDate| {
+			let mut all = Occurrences::new(rule, None);
+			while let Some(date) = all.next_date().unwrap() {
+				if date >= from {
+					return Some(date);
+				}
+			}
+			None
+		};
+		let last_walked = |rule: &RRule| {
+			let mut all = Occurrences::new(rule, None);
+			let mut last = None;
+			while let Some(date) = all.next_date().unwrap() {
+				last = Some(date);
+			}
+			last
+		};
+		for config in [
+			json!({"frequency": "daily", "start": "2024-01-01"}),
+			json!({"frequency": "daily", "interval": 3, "start": "2024-01-02"}),
+			json!({"frequency": "weekly", "interval": 2, "start": "2024-01-03"}),
+			json!({"frequency": "monthly", "start": "2024-01-31"}),
+			json!({"frequency": "monthly", "interval": 2, "start": "2024-01-15",
+				"patterns": [{"type": "day", "value": 1}, {"type": "day", "value": -1}, {"type": "day", "value": 31}]}),
+			json!({"frequency": "yearly", "start": "2024-02-29"}),
+		] {
+			for occurrences in [0, 1, 7, 40] {
+				let mut config = config.clone();
+				config["endMode"] = json!("after_n_occurrences");
+				config["endOccurrences"] = json!(occurrences);
+				let recurrence = Recurrence::parse(&config).unwrap();
+				for rule in &recurrence.rules {
+					if rule.pattern == Pattern::EveryPeriod {
+						assert_eq!(
+							rule.last_of_every_period(occurrences),
+							last_walked(rule),
+							"{config}"
+						);
+					}
+					let mut from = date("2023-12-01");
+					while from < date("2028-06-01") {
+						assert_eq!(
+							Occurrences::new(rule, Some(from)).next_date().unwrap(),
+							walked(rule, from),
+							"{config} from {from}"
+						);
+						from = from.succ_opt().unwrap();
+					}
+				}
+			}
+		}
 	}
 
 	#[test]
