@@ -66,6 +66,13 @@ final class TaxJourneyTests: XCTestCase {
 		assertSavePanel(named: "veritas-tax-detail-2026.csv", in: app)
 	}
 
+	@MainActor
+	func testThePDFExportOpensASavePanel() {
+		let app = openTax()
+		export("PDF…", in: app)
+		assertSavePanel(named: "Stub Tax summary 2026.pdf", in: app)
+	}
+
 	/// The stub's tax data is 2026's, so each journey starts there whatever today is.
 	@MainActor
 	private func openTax() -> XCUIApplication {
