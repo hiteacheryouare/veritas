@@ -571,7 +571,8 @@ fn perf() -> Result {
 			"nested_calls_evaluate_up_to_64_levels_on_a_small_stack",
 		],
 	)?;
-	run(
+	// R-PERF-4 asserts its own budgets; a failure is reported with the benches below.
+	let reports = run(
 		&root,
 		"cargo",
 		&[
@@ -588,7 +589,7 @@ fn perf() -> Result {
 			"--nocapture",
 			"--test-threads=1",
 		],
-	)?;
+	);
 	run(
 		&root,
 		"cargo",
@@ -635,6 +636,12 @@ fn perf() -> Result {
 		std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| root.join("target"), PathBuf::from);
 	let medians = criterion_medians(&target.join("criterion"));
 	let mut over = Vec::new();
+	if reports.is_err() {
+		over.push(
+			"R-PERF-4: reports_perf or dashboard_perf is over budget (see its output above)"
+				.to_owned(),
+		);
+	}
 	for budget in &BUDGETS {
 		let found: Vec<&(String, f64)> = medians
 			.iter()
