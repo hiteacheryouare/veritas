@@ -16,6 +16,13 @@ struct BillAndRuleWordsTests {
 		#expect(BillWords.status(.due, isIncome: true) == "Due")
 	}
 
+	@Test func aBillWithMoreThanTheEditorShowsNeverSaysRule() {
+		// PLAN §10: Ryan never sees the word "rule" while creating or editing a bill.
+		#expect(BillWords.customParts == "Has settings only Actual shows")
+		let words = [BillWords.customParts] + [BillAmountKind.about, .between].compactMap(BillWords.estimate)
+		#expect(!words.contains { $0.localizedCaseInsensitiveContains("rule") })
+	}
+
 	@Test func postForNamesTheOccurrenceDate() {
 		#expect(BillWords.postFor("2026-11-12") == "Post for \(BillWords.day("2026-11-12"))")
 	}

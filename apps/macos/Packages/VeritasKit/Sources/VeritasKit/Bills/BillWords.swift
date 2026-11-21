@@ -112,6 +112,10 @@ public enum BillWords {
 		"This won't pay the \(day(date)) bill. Post today anyway?"
 	}
 
+	/// Beside the editor's title when the bill matches or sets more than the
+	/// editor shows (`BillSummary.customRule`). Saving keeps those parts.
+	public static let customParts = "Has settings only Actual shows"
+
 	/// The editor's line under Auto-post for an estimated amount. Nil for an exact one.
 	public static func estimate(_ kind: BillAmountKind) -> String? {
 		switch kind {

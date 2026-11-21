@@ -40,7 +40,7 @@ struct BillEditor: View {
 				Text(title)
 					.font(.text(.title, weight: .semibold))
 				if customRule {
-					Text("Has extra rule parts")
+					Text(BillWords.customParts)
 						.font(.text(.caption))
 						.foregroundStyle(.textSecondary)
 						.padding(.horizontal, Spacing.s2)
