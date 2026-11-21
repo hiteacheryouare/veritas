@@ -135,7 +135,7 @@ Cards are on-budget liability accounts. Spending counts at swipe date.
 
 These are the finance rules for goals (R-GOAL-1, R-GOAL-4, edge case 8). Envelope math is Actual's.
 
-A goal may carry an optional icon, one emoji stored in `veritas_goal.icon`. It is a label only: setting or clearing it moves no money and changes no status, ETA, suggestion or report, and closing a goal keeps it.
+A goal may carry an optional icon, an SF Symbol name or one emoji, stored in `veritas_goal.icon`. It is a label only: setting or clearing it moves no money and changes no status, ETA, suggestion or report, and closing a goal keeps it.
 
 ### Definitions
 
