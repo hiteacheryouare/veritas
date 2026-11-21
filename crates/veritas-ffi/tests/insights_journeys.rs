@@ -455,6 +455,123 @@ fn wrapped_years_lists_exactly_the_years_with_data_and_pins_today() {
 	assert!(!savings.is_empty());
 }
 
+fn actual_tables(dump: &Value) -> Value {
+	let mut dump = dump.clone();
+	if let Some(tables) = dump["tables"].as_object_mut() {
+		tables.retain(|name, _| !name.starts_with("veritas_"));
+	}
+	dump
+}
+
+#[test]
+fn a_goal_icon_is_one_emoji_one_undo_step_and_never_reaches_actuals_tables() {
+	let (scratch, session) = fresh("goal-icon", "USD");
+	let goal = created_id(
+		&session,
+		Command::CreateGoal {
+			name: "Trip".to_owned(),
+			target: 50_000,
+			target_date: None,
+			icon: None,
+			color: None,
+		},
+		veritas_ffi::EntityKind::Goal,
+	);
+	let icon = |session: &Session| {
+		session
+			.goals(TODAY.to_owned())
+			.unwrap()
+			.goals
+			.into_iter()
+			.find(|summary| summary.id == goal)
+			.unwrap()
+			.icon
+	};
+	let set = |session: &Session, icon: Option<&str>| {
+		session.perform(Command::SetGoalIcon {
+			goal_id: goal.clone(),
+			icon: icon.map(str::to_owned),
+		})
+	};
+	let before_zip = scratch.join("before.zip");
+	export(&session, &before_zip);
+	let month_before = session.budget_month(NOVEMBER, TODAY.to_owned()).unwrap();
+
+	let change = set(&session, Some("✈️")).unwrap();
+	assert!(
+		change
+			.entities
+			.iter()
+			.any(|entity| entity.kind == veritas_ffi::EntityKind::Goal
+				&& entity.id.as_deref() == Some(goal.as_str()))
+	);
+	assert_eq!(icon(&session).as_deref(), Some("✈️"));
+	assert_eq!(
+		session.budget_month(NOVEMBER, TODAY.to_owned()).unwrap(),
+		month_before,
+		"an icon moves no money"
+	);
+	for refused in ["ab", "🎯🎯", "✈️ ", "laptopcomputer", "👨‍👩‍👧", "🇯", "1"] {
+		assert!(
+			matches!(set(&session, Some(refused)), Err(FfiError::Invalid { .. })),
+			"{refused:?}"
+		);
+	}
+	assert_eq!(icon(&session).as_deref(), Some("✈️"), "a refusal changes nothing");
+	assert!(set(&session, Some("✈️")).unwrap().entities.is_empty(), "the same icon writes nothing");
+
+	set(&session, Some("👩🏽‍💻")).unwrap();
+	session.undo().unwrap();
+	assert_eq!(icon(&session).as_deref(), Some("✈️"), "one undo step");
+	session.undo().unwrap();
+	assert_eq!(icon(&session), None);
+	session.redo().unwrap();
+	assert_eq!(icon(&session).as_deref(), Some("✈️"));
+
+	perform(
+		&session,
+		Command::CloseGoal {
+			goal_id: goal.clone(),
+			release_to_category_id: None,
+			also_move_later: false,
+		},
+	);
+	assert_eq!(icon(&session).as_deref(), Some("✈️"), "closing keeps it");
+	set(&session, Some("🇯🇵")).unwrap();
+	assert_eq!(icon(&session).as_deref(), Some("🇯🇵"), "a closed goal can change it");
+	let session = reopen(&scratch, session);
+	assert_eq!(icon(&session).as_deref(), Some("🇯🇵"));
+	set(&session, Some("")).unwrap();
+	assert_eq!(icon(&session), None, "empty clears, like nil");
+	set(&session, Some("🎯")).unwrap();
+	set(&session, None).unwrap();
+	assert_eq!(icon(&session), None);
+	assert!(matches!(
+		session.perform(Command::SetGoalIcon {
+			goal_id: "no-such-goal".to_owned(),
+			icon: Some("🎯".to_owned()),
+		}),
+		Err(FfiError::NotFound { .. })
+	));
+
+	let Some(oracle) = oracle() else {
+		return;
+	};
+	session.undo().unwrap();
+	assert_eq!(icon(&session).as_deref(), Some("🎯"));
+	let after_zip = scratch.join("after.zip");
+	export(&session, &after_zip);
+	let before = node(&oracle, &["dump", &before_zip]);
+	let after = node(&oracle, &["dump", &after_zip]);
+	assert!(
+		after["tables"]["veritas_goal"].to_string().contains("🎯"),
+		"the icon is in veritas_goal"
+	);
+	let holds_icon = |dump: &Value| dump.to_string().contains("🎯");
+	assert!(!holds_icon(&actual_tables(&after)), "no Actual table holds the icon");
+	assert!(!holds_icon(&before));
+}
+
 #[test]
 fn the_entity_name_is_one_undo_step_survives_a_reopen_and_actual_reads_the_file() {
 	let scratch = Scratch::new("entity");

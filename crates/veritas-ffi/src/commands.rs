@@ -165,6 +165,12 @@ pub enum Command {
 		target: i64,
 		target_date: Option<String>,
 	},
+	/// v18: the goal's icon, exactly one emoji of at most 16 bytes, kept only
+	/// in Veritas's goal table; `None` or empty clears it. Moves no money.
+	SetGoalIcon {
+		goal_id: String,
+		icon: Option<String>,
+	},
 	/// A new account at the end of its list, with its transfer payee and, for
 	/// a non-zero balance, a starting-balance row (R-ACC-1, §4.8). The id is
 	/// the `account` entity in the `Change`.
@@ -544,6 +550,7 @@ impl veritas_session::Command for Command {
 				| Command::ReopenGoal { .. }
 				| Command::DismissGoalActivity { .. }
 				| Command::RetargetGoal { .. }
+				| Command::SetGoalIcon { .. }
 				| Command::CreateAccount { .. }
 				| Command::CloseAccount { .. }
 				| Command::AddTransaction { .. }
@@ -697,6 +704,9 @@ impl veritas_session::Command for Command {
 			}
 			Command::DismissGoalActivity { goal_id } => {
 				goals::dismiss_goal_activity(data, sheet, &GoalId::new(goal_id.as_str()))
+			}
+			Command::SetGoalIcon { goal_id, icon } => {
+				goals::set_goal_icon(data, &GoalId::new(goal_id.as_str()), icon.as_deref())
 			}
 			Command::RetargetGoal {
 				goal_id,

@@ -4,7 +4,7 @@
 
 use veritas_domain::{
 	BudgetData, CategoryGroupId, CategoryId, CivilDate, CoreError, Goal, GoalId, GoalStatus, Money,
-	Row, YearMonth,
+	Row, YearMonth, is_single_emoji,
 };
 use veritas_engine::goals::{self as engine, Suggestion};
 use veritas_engine::{BudgetEditor, BudgetWrites, Envelope, EnvelopeSheet};
@@ -389,6 +389,29 @@ fn goals_group(data: &BudgetData) -> Option<CategoryGroupId> {
 		.filter(|g| !g.tombstone && !g.is_income)
 		.find(|g| g.name.trim().eq_ignore_ascii_case(GOALS_GROUP))
 		.map(|g| g.id.clone())
+}
+
+/// A goal's icon, one emoji, stored only in `veritas_goal`; `None` or blank
+/// clears it. A label (DEBT-8): it moves no money, changes no status, ETA or
+/// suggestion, and a closed goal keeps it and can still change it.
+pub fn set_goal_icon(
+	data: &BudgetData,
+	id: &GoalId,
+	icon: Option<&str>,
+) -> Result<Vec<Row>, CoreError> {
+	let goal = live_goal(data, id)?;
+	let icon = icon.filter(|icon| !icon.is_empty());
+	if icon.is_some_and(|icon| !is_single_emoji(icon)) {
+		return Err(CoreError::Invalid("Choose one emoji.".to_owned()));
+	}
+	let icon = icon.map(str::to_owned);
+	if goal.icon == icon {
+		return Ok(Vec::new());
+	}
+	Ok(vec![Row::Goal(Goal {
+		icon,
+		..goal.clone()
+	})])
 }
 
 fn live_goal<'a>(data: &'a BudgetData, id: &GoalId) -> Result<&'a Goal, CoreError> {
