@@ -158,7 +158,12 @@ public final class WorkspaceModel {
 		}
 	}
 
-	public func goals() async -> GoalList {
+	public func goals() async -> [GoalSummary] {
+		await goalList().goals
+	}
+
+	/// The goals with the core's 0-place note, for the Goals screen.
+	public func goalList() async -> GoalList {
 		let none = GoalList(goals: [], mixedScaleNote: nil, zeroPlaces: false)
 		guard let session else { return none }
 		do {

@@ -39,7 +39,7 @@ public final class GoalsScreenModel {
 	public func load() async {
 		loadGeneration += 1
 		let generation = loadGeneration
-		let loaded = await workspace.goals()
+		let loaded = await workspace.goalList()
 		guard generation == loadGeneration else { return }
 		goals = loaded.goals
 		mixedScaleNote = loaded.mixedScaleNote
