@@ -1205,10 +1205,70 @@ fn a_what_if_moves_its_horizons_by_its_amount_and_every_horizon_adds_up() {
 			base_horizon.months
 		);
 	}
+	// v18: each horizon carries the what-if's difference from the baseline,
+	// in net worth and per account (FC-3); the baseline's is nil.
+	for (base_horizon, scenario_horizon) in forecast.baseline.horizons.iter().zip(&what_if.horizons)
+	{
+		let shift = base_horizon.net_worth - scenario_horizon.net_worth;
+		assert_eq!(scenario_horizon.net_worth_difference, Some(-shift));
+		assert_eq!(base_horizon.net_worth_difference, None);
+		assert!(base_horizon.accounts.iter().all(|account| account.difference.is_none()));
+		for account in &scenario_horizon.accounts {
+			let expected = if account.account_id == CHECKING { -shift } else { 0 };
+			assert_eq!(account.difference, Some(expected), "{}", account.name);
+		}
+	}
+	assert!(forecast.accounts_today.iter().all(|account| account.difference.is_none()));
+	// v18: the band at every projected month (FC-4.2 step 5), none for the
+	// current month's remainder, and the horizons are points of that series.
+	for projection in [&forecast.baseline, what_if] {
+		assert_eq!((projection.months[0].band_low, projection.months[0].band_high), (None, None));
+		assert!(projection.months.iter().skip(1).all(|month| month.band_low.is_some()));
+		for horizon in &projection.horizons {
+			let month = &projection.months[horizon.months as usize];
+			assert_eq!(month.month, horizon.month);
+			assert_eq!(
+				(month.band_low, month.band_high),
+				(horizon.band_low, horizon.band_high)
+			);
+		}
+		for (base_month, month) in forecast.baseline.months.iter().zip(&projection.months) {
+			assert_eq!(
+				month.band_high.zip(month.band_low).map(|(high, low)| high - low),
+				base_month.band_high.zip(base_month.band_low).map(|(high, low)| high - low),
+				"a what-if never widens the band"
+			);
+		}
+	}
+	// v18: net worth before today is the net worth report's, to the cent.
+	assert_eq!(forecast.history.len(), 12);
+	let report = block_on(session.net_worth(
+		forecast.history[0].month,
+		forecast.history[11].month,
+		CancelToken::new(),
+	))
+	.unwrap();
+	assert_eq!(forecast.history, report);
+	assert_eq!(
+		forecast.history[11].month,
+		Month {
+			year: 2026,
+			month: 10
+		},
+		"the last complete month before today's"
+	);
+
 	session.undo().unwrap();
 	let undone =
 		block_on(session.forecast(TODAY.to_owned(), vec![scenario.clone()], CancelToken::new()))
 			.unwrap();
+	assert!(
+		undone.scenarios[0]
+			.horizons
+			.iter()
+			.all(|horizon| horizon.net_worth_difference == Some(0)),
+		"an empty what-if differs by nothing"
+	);
 	assert_eq!(
 		horizons(&undone.scenarios[0]),
 		base,

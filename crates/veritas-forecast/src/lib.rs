@@ -30,7 +30,7 @@ pub use goal::{
 };
 pub use history::Side;
 pub use projection::{
-	Comparison, Forecaster, HORIZONS, HorizonForecast, MonthForecast, Projection,
+	Comparison, Forecaster, HORIZONS, HorizonDifference, HorizonForecast, MonthForecast, Projection,
 };
 pub use scenario::{
 	MAX_COMPARED, cadence_dates, in_the_past, validate as validate_scenario, validate_new,

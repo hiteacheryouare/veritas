@@ -5,6 +5,7 @@
 
 use veritas_domain::{BudgetData, CivilDate, CoreError, Row, Scenario, ScenarioId};
 use veritas_engine::{BudgetEditor, BudgetWrites, EnvelopeSheet};
+use veritas_reports::NetWorthPoint;
 use veritas_forecast::{
 	Comparison, Forecaster, GoalEta, MAX_COMPARED, ScheduledFlows, Suggestions, goal_etas,
 	next_month_envelopes,
@@ -20,6 +21,8 @@ pub struct ForecastView {
 	pub scenarios: Vec<Scenario>,
 	pub flows: ScheduledFlows,
 	pub goal_etas: Vec<Vec<GoalEta>>,
+	/// FC-3's net worth history before today's month (ST-2).
+	pub history: Vec<NetWorthPoint>,
 }
 
 pub fn forecast(
@@ -68,6 +71,7 @@ pub fn forecast(
 			Some(scenario),
 		)?);
 	}
+	let history = forecaster.net_worth_history(today)?;
 	cancel.check()?;
 	Ok(ForecastView {
 		comparison: Comparison {
@@ -77,6 +81,7 @@ pub fn forecast(
 		scenarios,
 		flows,
 		goal_etas: etas,
+		history,
 	})
 }
 
