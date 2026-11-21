@@ -476,15 +476,15 @@ private struct WidgetBody: View {
 		case .crossover(_, _, let points, let crossover, _, _, _, _, _, _, _):
 			Chart {
 				ForEach(Array(points.enumerated()), id: \.offset) { index, point in
-					LineMark(x: .value("Month", index), y: .value("Amount", format.chartValue(point.expenses, on: .register)), series: .value("Line", card.isFiltered ? "Selected categories" : "All non-income categories"))
+					LineMark(x: .value("Month", index), y: .value("Amount", format.chartValue(point.expenses, on: .register)), series: .value("Line", CardWords.crossoverCategories(filtered: card.isFiltered)))
 						.foregroundStyle(Color.chartExpense)
-					LineMark(x: .value("Month", index), y: .value("Amount", format.chartValue(point.investmentIncome, on: .register)), series: .value("Line", "Investment income"))
+					LineMark(x: .value("Month", index), y: .value("Amount", format.chartValue(point.investmentIncome, on: .register)), series: .value("Line", CardWords.projectedReturn))
 						.foregroundStyle(Color.chartSavings)
 				}
 			}
 			.chartXAxis(.hidden)
 			.chartYAxis(.hidden)
-			.accessibilityLabel(crossover.map { "Investment income covers expenses from \(ReportPeriod.monthYear($0))" } ?? "Investment income against expenses")
+			.accessibilityLabel(CardWords.crossoverChart(crossover: crossover, filtered: card.isFiltered))
 		case .budgetAnalysis(_, _, let months, _, _, _, _):
 			Chart {
 				ForEach(months, id: \.month) { point in

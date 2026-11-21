@@ -62,6 +62,21 @@ public enum CardWords {
 		filtered ? "Selected rows" : "Everything except income categories"
 	}
 
+	// MARK: Crossover
+
+	public static let projectedReturn = "Projected investment return"
+
+	public static func crossoverCategories(filtered: Bool) -> String {
+		filtered ? "Selected categories" : "All non-income categories"
+	}
+
+	/// The chart's VoiceOver label, in the series' own words.
+	public static func crossoverChart(crossover: Month?, filtered: Bool) -> String {
+		let categories = crossoverCategories(filtered: filtered).lowercased()
+		guard let crossover else { return "\(projectedReturn) against \(categories)" }
+		return "\(projectedReturn) passes \(categories) in \(ReportPeriod.monthYear(crossover))"
+	}
+
 	// MARK: Sankey
 
 	/// A node's words, or `nil` for a hidden spacer node, which is never drawn.
