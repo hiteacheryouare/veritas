@@ -120,8 +120,9 @@ public final class CustomReportsModel {
 	@ObservationIgnored let workspace: WorkspaceModel
 	@ObservationIgnored public let standard: StandardReportModel
 
-	public init(workspace: WorkspaceModel, thisMonth: Month? = nil) {
+	public init(workspace: WorkspaceModel, thisMonth: Month? = nil, choice: ReportChoice = .standard(.netWorth)) {
 		self.workspace = workspace
+		self.choice = choice
 		standard = StandardReportModel(workspace: workspace, thisMonth: thisMonth)
 	}
 
