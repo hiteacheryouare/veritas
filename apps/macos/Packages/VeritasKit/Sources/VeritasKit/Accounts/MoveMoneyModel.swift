@@ -113,7 +113,7 @@ public final class MoveMoneyModel: Identifiable {
 		envelopes = await workspace.budgetMonth(month)?.groups.filter { !$0.hidden } ?? []
 		if let editing, editing.amount > 0, let counterpart = editing.counterpartId {
 			leg = await workspace.report { try await $0.registerRow(counterpart) }
-			if let category = leg?.categoryId { purpose.categoryID = category }
+			if let category = leg?.categoryId { purpose.restore(category) }
 		}
 		if canPlan { await purpose.load(envelopes: envelopes) }
 		await startFromLoan()

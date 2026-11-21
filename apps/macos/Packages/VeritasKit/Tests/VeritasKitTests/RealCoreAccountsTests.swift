@@ -187,6 +187,45 @@ struct RealCoreAccountsTests {
 		}
 	}
 
+	@Test func aHiddenSavingsEnvelopeIsShownAgainInsteadOfMakingASecond() async throws {
+		// CLS-4.1: the only savings envelope is hidden, so the answer revives it.
+		try await RealBudget.with { budget in
+			let workspace = budget.workspace
+			let month = try #require(Month(date: WorkspaceModel.today()))
+			let first = MoveMoneyModel(workspace: workspace, fromID: Self.checking)
+			await first.load()
+			first.toID = Self.brokerage
+			first.typeAmount("100")
+			await first.refreshPreview()
+			first.purpose.answer = .saving
+			await first.purpose.chooseNewEnvelope()
+			#expect(await first.save())
+			guard case .one(let envelope) = try #require(await workspace.report({ try await $0.kindTarget(.savings) })) else {
+				Issue.record("the first move made the savings envelope")
+				return
+			}
+			#expect(await workspace.perform(.setCategoryHidden(categoryId: envelope, hidden: true)))
+
+			let move = MoveMoneyModel(workspace: workspace, fromID: Self.checking)
+			await move.load()
+			move.toID = Self.brokerage
+			move.typeAmount("250")
+			await move.refreshPreview()
+			move.purpose.answer = .saving
+			#expect(move.purpose.revival?.categoryId == envelope, "the hidden envelope is offered")
+			#expect(!move.purpose.canCreateEnvelope)
+			#expect(move.purpose.confirmation?.title == "Show \"Savings\" again and use it?")
+			#expect(await move.save(), "saved after the person confirms")
+
+			let target = try #require(await workspace.report { try await $0.kindTarget(.savings) })
+			#expect(target == .one(categoryId: envelope), "still one savings envelope, shown again")
+			let sheet = try #require(await workspace.budgetMonth(month))
+			#expect(sheet.groups.flatMap(\.envelopes).contains { $0.id == envelope && !$0.hidden })
+			let leg = try #require(try await Self.allRows(workspace, .account(accountId: Self.checking)).first { $0.transferAccountId == Self.brokerage && $0.amount == -25_000 })
+			#expect(leg.categoryId == envelope)
+		}
+	}
+
 	@Test func aLoanPaymentSplitsIntoPrincipalInterestEscrowAndFeesAndDeletingTheLoanSideNamesEveryLine() async throws {
 		// R-DEBT-1, R-DEBT-2, DEBT-6 A.5.
 		try await RealBudget.with { budget in

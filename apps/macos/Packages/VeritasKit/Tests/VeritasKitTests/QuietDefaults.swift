@@ -64,6 +64,7 @@ extension BudgetSession {
 	func setCategoryKind(_ categoryID: String, kind: CategoryKind) async throws {}
 	func kindCategoryPlan(_ kind: CategoryKind) async throws -> KindCategoryPlan { KindCategoryPlan(groupName: "Debt", groupIsHidden: false) }
 	func createKindCategory(kind: CategoryKind, name: String, unhideGroup: Bool) async throws -> String { "" }
+	func reviveKindCategory(kind: CategoryKind, categoryID: String) async throws {}
 	func balanceHistory(_ accountID: String, from: String, to: String) async throws -> BalanceHistory { BalanceHistory(points: [], change: nil) }
 	func tags() async throws -> [TagSummary] { [] }
 	func loanTerms(_ accountID: String) async throws -> LoanTerms? { nil }

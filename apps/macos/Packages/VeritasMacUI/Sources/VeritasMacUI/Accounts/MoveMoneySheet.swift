@@ -7,7 +7,7 @@ import VeritasKit
 /// transfer opens it too, since either side edits the pair (R-XFER-3).
 struct MoveMoneySheet: View {
 	@Bindable var model: MoveMoneyModel
-	@State private var isConfirmingGroup = false
+	@State private var isConfirmingPurpose = false
 	@Environment(\.dismiss) private var dismiss
 
 	var body: some View {
@@ -65,8 +65,8 @@ struct MoveMoneySheet: View {
 				Button("Cancel", role: .cancel) { dismiss() }
 					.keyboardShortcut(.cancelAction)
 				Button(model.isNew ? "Move money" : "Save") {
-					if model.asksPurpose, model.purpose.unhidePrompt != nil {
-						isConfirmingGroup = true
+					if model.asksPurpose, model.purpose.confirmation != nil {
+						isConfirmingPurpose = true
 					} else {
 						Task { if await model.save() { dismiss() } }
 					}
@@ -79,7 +79,7 @@ struct MoveMoneySheet: View {
 		}
 		.padding(Spacing.s5)
 		.frame(width: 600)
-		.unhideGroupConfirmation(model.purpose.unhidePrompt, isPresented: $isConfirmingGroup) {
+		.purposeConfirmation(model.purpose.confirmation, isPresented: $isConfirmingPurpose) {
 			Task { if await model.save() { dismiss() } }
 		}
 		.task { await model.load() }
@@ -287,12 +287,17 @@ struct TransferPurposeSection: View {
 				}
 			)) {
 				Text("Choose an envelope").tag("")
+				ForEach(purpose.revivals, id: \.categoryId) { match in
+					Section(match.groupName) {
+						Text(TransferPurposeModel.label(match)).tag(match.categoryId)
+					}
+				}
 				ForEach(groups, id: \.self) { group in
 					Section(group) {
 						ForEach(purpose.choices.filter { $0.group == group }) { Text($0.name).tag($0.id) }
 					}
 				}
-				if purpose.needsKind {
+				if purpose.canCreateEnvelope {
 					Divider()
 					Text("New envelope").tag("new")
 				}
@@ -323,12 +328,14 @@ extension MoveMoneySheet {
 }
 
 extension View {
-	/// CLS-4.1: a new envelope whose group is hidden is added only once the
-	/// user agrees to show the group again. Cancel writes nothing.
-	func unhideGroupConfirmation(_ prompt: String?, isPresented: Binding<Bool>, confirm: @escaping () -> Void) -> some View {
-		confirmationDialog(prompt ?? "", isPresented: isPresented, titleVisibility: .visible) {
-			Button("Show Group and Add", action: confirm)
+	/// CLS-4.1: a hidden or archived envelope is shown again, or a new
+	/// envelope's hidden group is, only once the user agrees. Cancel writes nothing.
+	func purposeConfirmation(_ confirmation: TransferPurposeModel.Confirmation?, isPresented: Binding<Bool>, confirm: @escaping () -> Void) -> some View {
+		confirmationDialog(confirmation?.title ?? "", isPresented: isPresented, titleVisibility: .visible) {
+			Button(confirmation?.action ?? "OK", action: confirm)
 			Button("Cancel", role: .cancel) {}
+		} message: {
+			if let message = confirmation?.message { Text(message) }
 		}
 	}
 }

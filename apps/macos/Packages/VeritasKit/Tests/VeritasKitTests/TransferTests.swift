@@ -83,6 +83,9 @@ final class TransferFakeSession: BudgetSession, @unchecked Sendable {
 		calls.append("create \(name) \(kind)\(unhideGroup ? " unhiding" : "")")
 		return "made"
 	}
+	func reviveKindCategory(kind: CategoryKind, categoryID: String) async throws {
+		calls.append("revive \(categoryID) \(kind)")
+	}
 	func loanPaymentDefaults(_ loanAccountID: String, today: String) async throws -> LoanPaymentDefaults { defaults }
 	func loanPaymentPreview(_ loanAccountID: String, date: String, total: Int64, interest: Int64, escrow: Int64, fees: Int64) async throws -> LoanPaymentPreview {
 		let principal = total - interest - escrow - fees
@@ -217,6 +220,76 @@ struct TransferTests {
 		#expect(session.calls.last == "create Savings savings unhiding")
 		guard case .addTransaction(let draft) = session.commands.last else { Issue.record("no add"); return }
 		#expect(draft.categoryId == "made")
+	}
+
+	static func hidden(_ id: String, _ name: String, group: String = "Debt", groupHidden: Bool = false, archived: Bool = false) -> HiddenCategoryMatch {
+		HiddenCategoryMatch(categoryId: id, name: name, groupId: group.lowercased(), groupName: group, groupIsHidden: groupHidden, archived: archived)
+	}
+
+	@Test func aLoneHiddenDebtEnvelopeIsShownAgainNeverMadeTwice() async {
+		// CLS-4.1: 'Show "Old Loan" again and use it?', and no second envelope is offered.
+		session.purpose = .ask
+		session.debt = .oneHidden(category: Self.hidden("old-loan", "Old Loan", groupHidden: true))
+		let model = await move(to: "brokerage", amount: "50.00")
+		model.purpose.answer = .debt
+		#expect(model.purpose.revival?.categoryId == "old-loan", "the hidden envelope is the one offered")
+		#expect(model.purpose.categoryID == "old-loan")
+		#expect(!model.purpose.canCreateEnvelope, "no New envelope beside it")
+		#expect(TransferPurposeModel.label(model.purpose.revivals[0]) == "Old Loan (hidden)")
+		#expect(model.purpose.confirmation == .init(
+			title: "Show \"Old Loan\" again and use it?",
+			message: "Its group \"Debt\" is hidden and will be shown again too.",
+			action: "Show and Use"
+		))
+		#expect(model.canSave)
+		#expect(await model.save())
+		#expect(session.calls.contains("revive old-loan debtPrincipal"))
+		#expect(!session.calls.contains { $0.hasPrefix("create") || $0.hasPrefix("kind") }, "nothing is made and no kind changes")
+		guard case .addTransaction(let draft) = session.commands.last else { Issue.record("no add"); return }
+		#expect(draft.categoryId == "old-loan")
+	}
+
+	@Test func anArchivedSavingsEnvelopeIsRestoredOrReplacedUnderAFreeName() async {
+		// CLS-4.1: 'Restore "Savings" and use it?', or "Create a new category".
+		session.purpose = .ask
+		session.savings = .oneArchived(category: Self.hidden("old-savings", "Savings", group: "Savings and Debt", archived: true))
+		let model = await move(to: "brokerage", amount: "50.00")
+		model.purpose.answer = .saving
+		#expect(model.purpose.confirmation == .init(title: "Restore \"Savings\" and use it?", message: nil, action: "Restore and Use"))
+		#expect(model.purpose.canCreateEnvelope)
+		#expect(!model.purpose.choices.contains { $0.id == "old-savings" })
+
+		await model.purpose.chooseNewEnvelope()
+		#expect(model.purpose.revival == nil)
+		model.purpose.newEnvelopeName = "Rainy Day"
+		#expect(model.purpose.confirmation == nil, "the group isn't hidden, so a new envelope asks nothing")
+		#expect(await model.save())
+		#expect(session.calls.last == "create Rainy Day savings")
+		#expect(!session.calls.contains { $0.hasPrefix("revive") })
+	}
+
+	@Test func severalHiddenMatchesAreListedAndThePickIsShownAgain() async {
+		// CLS-4.1: each with its group and "(hidden)" or "(archived)", plus New envelope.
+		session.purpose = .ask
+		session.debt = .severalHidden(categories: [
+			Self.hidden("old-car", "Old Car Loan"),
+			Self.hidden("student", "Student Loan Principal", archived: true)
+		])
+		let model = await move(to: "brokerage", amount: "50.00")
+		model.purpose.answer = .debt
+		#expect(model.purpose.categoryID == nil, "nothing is picked for the person")
+		#expect(!model.canSave)
+		#expect(model.purpose.revivals.map(TransferPurposeModel.label) == ["Old Car Loan (hidden)", "Student Loan Principal (archived)"])
+		#expect(model.purpose.canCreateEnvelope)
+		await model.purpose.choose("old-car")
+		#expect(model.purpose.reclassifies == nil, "showing it again changes no kinds")
+		#expect(model.purpose.confirmation?.title == "Show \"Old Car Loan\" again and use it?")
+		#expect(await model.save())
+		#expect(session.calls.contains("revive old-car debtPrincipal"))
+
+		await model.purpose.choose("carloan-cat")
+		#expect(model.purpose.revival == nil, "a visible envelope takes the kind instead")
+		#expect(model.purpose.confirmation == nil)
 	}
 
 	@Test func aLoanPaymentFillsFromTheLastOneAndTheCoreBuildsTheSplit() async {

@@ -35,16 +35,30 @@ public final class TransferPurposeModel {
 		public let group: String
 	}
 
+	/// What saving asks the user to agree to first (CLS-4.1).
+	public struct Confirmation: Hashable, Sendable {
+		public let title: String
+		public let message: String?
+		public let action: String
+	}
+
 	public var answer: Answer? {
 		didSet {
 			guard answer != oldValue else { return }
-			categoryID = target.flatMap { if case .one(let id) = $0 { id } else { nil } }
+			switch target {
+			case .one(let id)?: select(id)
+			case .oneHidden(let match)?, .oneArchived(let match)?: select(match.categoryId)
+			default: select(nil)
+			}
 			createsEnvelope = false
 			newEnvelopeName = answer == .saving ? "Savings" : "Loan Principal"
 			reclassifies = nil
 		}
 	}
-	public var categoryID: String?
+	public private(set) var categoryID: String?
+	/// The hidden or archived envelope the answer shows again instead of making
+	/// a second one (CLS-4.1). Saving revives it through the core.
+	public private(set) var revival: HiddenCategoryMatch?
 	/// No envelope has the kind yet, so the answer makes one (CLS-4.1).
 	public var createsEnvelope = false
 	public var newEnvelopeName = ""
@@ -63,13 +77,23 @@ public final class TransferPurposeModel {
 		self.categoryID = categoryID
 	}
 
+	/// The envelope the transfer is already filed under, when editing one.
+	public func restore(_ categoryID: String) {
+		select(categoryID)
+	}
+
+	private func select(_ categoryID: String?) {
+		self.categoryID = categoryID
+		revival = revivals.first { $0.categoryId == categoryID }
+	}
+
 	public func load(envelopes: [EnvelopeGroup]) async {
 		self.envelopes = envelopes
 		debt = await workspace.report { try await $0.kindTarget(.debtPrincipal) } ?? .none
 		savings = await workspace.report { try await $0.kindTarget(.savings) } ?? .none
 		if answer == nil, let categoryID {
 			answer = Self.answer(for: categoryID, debt: debt, savings: savings)
-			self.categoryID = categoryID
+			select(categoryID)
 		}
 	}
 
@@ -91,18 +115,42 @@ public final class TransferPurposeModel {
 		if case .one(let id) = debt { id } else { nil }
 	}
 
-	/// What the envelope menu offers for the answer.
+	/// What the envelope menu offers for the answer, besides `revivals`.
 	public var choices: [Choice] {
 		switch target {
 		case .several(let ids): all.filter { ids.contains($0.id) }.map(\.choice)
 		case .one: []
-		case .none?, .oneHidden?, .oneArchived?, .severalHidden?, nil: all.filter { !$0.isIncome }.map(\.choice)
+		case .none?, .oneHidden?, .oneArchived?, .severalHidden?, nil:
+			all.filter { listed in !listed.isIncome && !revivals.contains { $0.categoryId == listed.id } }.map(\.choice)
 		}
 	}
 
-	/// No visible envelope has the answer's kind, so one is chosen or made.
-	/// Contract v12's hidden and archived matches don't block that; offering
-	/// to show one again (`reviveKindCategory`) isn't built yet.
+	/// The hidden and archived envelopes of the answer's kind, offered first
+	/// when no visible one has it (CLS-4.1).
+	public var revivals: [HiddenCategoryMatch] {
+		switch target {
+		case .oneHidden(let match)?, .oneArchived(let match)?: [match]
+		case .severalHidden(let matches)?: matches
+		case .none?, .one?, .several?, nil: []
+		}
+	}
+
+	/// "Peter's Loan (hidden)", as the envelope menu lists a revival.
+	public static func label(_ match: HiddenCategoryMatch) -> String {
+		"\(match.name) (\(match.archived ? "archived" : "hidden"))"
+	}
+
+	/// A lone hidden envelope is shown again rather than duplicated. An
+	/// archived one may be replaced under a free name (CLS-4.1).
+	public var canCreateEnvelope: Bool {
+		switch target {
+		case .none?, .oneArchived?, .severalHidden?: true
+		case .oneHidden?, .one?, .several?, nil: false
+		}
+	}
+
+	/// No visible envelope has the answer's kind, so one is chosen, shown
+	/// again or made.
 	public var needsKind: Bool {
 		switch target {
 		case .none?, .oneHidden?, .oneArchived?, .severalHidden?: true
@@ -117,15 +165,15 @@ public final class TransferPurposeModel {
 	}
 
 	public func choose(_ categoryID: String?) async {
-		self.categoryID = categoryID
+		select(categoryID)
 		createsEnvelope = false
 		reclassifies = nil
-		guard needsKind, let categoryID, let kind = answer?.kind else { return }
+		guard needsKind, revival == nil, let categoryID, let kind = answer?.kind else { return }
 		reclassifies = await workspace.report { try await $0.kindChangePreview(categoryID, kind: kind) }
 	}
 
 	public func chooseNewEnvelope() async {
-		categoryID = nil
+		select(nil)
 		createsEnvelope = true
 		reclassifies = nil
 		guard let kind = answer?.kind else { return }
@@ -140,6 +188,19 @@ public final class TransferPurposeModel {
 		return "Your group \"\(plan.groupName)\" is hidden. Show it again and add \"\(name)\" to it?"
 	}
 
+	/// Asked before saving: reviving the chosen envelope, or showing the new
+	/// one's hidden group. Cancel writes nothing.
+	public var confirmation: Confirmation? {
+		if let revival {
+			let title = revival.archived
+				? "Restore \"\(revival.name)\" and use it?"
+				: "Show \"\(revival.name)\" again and use it?"
+			let message = revival.groupIsHidden ? "Its group \"\(revival.groupName)\" is hidden and will be shown again too." : nil
+			return Confirmation(title: title, message: message, action: revival.archived ? "Restore and Use" : "Show and Use")
+		}
+		return unhidePrompt.map { Confirmation(title: $0, message: nil, action: "Show Group and Add") }
+	}
+
 	public func name(of categoryID: String) -> String? {
 		all.first { $0.id == categoryID }?.name
 	}
@@ -150,6 +211,10 @@ public final class TransferPurposeModel {
 		guard let answer else { return nil }
 		if createsEnvelope, let kind = answer.kind {
 			return try await session.createKindCategory(kind: kind, name: newEnvelopeName.trimmingCharacters(in: .whitespaces), unhideGroup: unhidePrompt != nil)
+		}
+		if let revival, let kind = answer.kind {
+			try await session.reviveKindCategory(kind: kind, categoryID: revival.categoryId)
+			return revival.categoryId
 		}
 		if needsKind, let kind = answer.kind, let categoryID {
 			try await session.setCategoryKind(categoryID, kind: kind)

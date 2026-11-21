@@ -287,6 +287,11 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 		accountStore.named(id, name, kind: kind)
 		return id
 	}
+	/// The stub has no hidden or archived envelope of any kind, so it refuses as the core would.
+	func reviveKindCategory(kind: CategoryKind, categoryID: String) async throws {
+		try writable()
+		throw FfiError.Invalid(message: "That category isn't a hidden or archived one of this kind. Pick another.")
+	}
 	func loanTerms(_ accountID: String) async throws -> LoanTerms? { accountStore.loanTerms(accountID) }
 	func setLoanTerms(_ accountID: String, _ terms: LoanTerms) async throws {
 		try writable()
