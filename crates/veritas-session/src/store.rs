@@ -41,8 +41,18 @@ impl Backend for Store {
 		Store::load(self)
 	}
 
-	fn export_actual_zip(&self, metadata: &Path, to: &Path) -> Result<ExportOutcome, CoreError> {
-		veritas_interop::export_actual_zip(self, metadata, to)
+	fn export_actual_zip(
+		&self,
+		snapshot: Option<&Path>,
+		metadata: &Path,
+		to: &Path,
+	) -> Result<ExportOutcome, CoreError> {
+		match snapshot {
+			Some(snapshot) => {
+				veritas_interop::export_actual_zip_from_snapshot(self, snapshot, metadata, to)
+			}
+			None => veritas_interop::export_actual_zip(self, metadata, to),
+		}
 	}
 
 	fn create(dir: &Path, budget: &NewBudget, today: CivilDate) -> Result<(), CoreError> {

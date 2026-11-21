@@ -10,7 +10,10 @@ use std::path::Path;
 
 use common::{Scratch, fixture, imported};
 use rusqlite::Connection;
-use veritas_interop::{ExportOutcome, export_actual_zip, import_actual_zip, open_budget};
+use veritas_interop::{
+	ExportOutcome, export_actual_zip, export_actual_zip_from_snapshot, import_actual_zip,
+	open_budget,
+};
 use veritas_store::Check;
 
 /// Scrambles the cells of an index page and leaves its header, so SQLite
@@ -70,6 +73,42 @@ fn a_working_copy_damaged_after_import_is_caught_on_reopen_and_not_exported_r_re
 		.map(|entry| entry.unwrap().file_name().into_string().unwrap())
 		.collect();
 	assert_eq!(names, ["budget.zip"]);
+}
+
+/// The zip is written while the audit runs, so a refusal has to take it back:
+/// nothing at the destination and no half-written file beside it.
+#[test]
+fn a_refused_export_leaves_no_file_and_no_partial_beside_the_destination_r_rel_2() {
+	let scratch = Scratch::new("gate-refused-clean");
+	let budget = imported(import_actual_zip(
+		&fixture("all-features"),
+		&scratch.join("budget"),
+	));
+	{
+		let mut store = open_budget(&budget.db_path).unwrap();
+		store.adopt().unwrap();
+	}
+	let snapshot = scratch.join("snapshot.sqlite");
+	Connection::open(&budget.db_path)
+		.unwrap()
+		.execute("VACUUM INTO ?1", [snapshot.to_str().unwrap()])
+		.unwrap();
+	damage_index(&budget.db_path);
+	let store = open_budget(&budget.db_path).unwrap();
+
+	let exports = scratch.join("exports");
+	std::fs::create_dir(&exports).unwrap();
+	let to = exports.join("budget.zip");
+	let vacuumed = export_actual_zip(&store, &budget.metadata_path, &to).unwrap();
+	let cloned =
+		export_actual_zip_from_snapshot(&store, &snapshot, &budget.metadata_path, &to).unwrap();
+	for outcome in [vacuumed, cloned] {
+		assert!(
+			matches!(&outcome, ExportOutcome::Refused(report) if report.is_corrupt()),
+			"{outcome:?}"
+		);
+	}
+	assert_eq!(std::fs::read_dir(&exports).unwrap().count(), 0);
 }
 
 #[test]
