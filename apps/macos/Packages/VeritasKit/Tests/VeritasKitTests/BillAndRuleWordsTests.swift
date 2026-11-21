@@ -28,7 +28,8 @@ struct BillAndRuleWordsTests {
 	}
 
 	@Test func postTodayAsksFirstWhenItWontPayTheOccurrence() {
-		#expect(BillWords.postTodayConfirm("2026-11-21") == "This won't pay the \(BillWords.day("2026-11-21")) bill. Post today anyway?")
+		#expect(BillWords.postTodayConfirm("2026-11-21", isIncome: false) == "This won't pay the \(BillWords.day("2026-11-21")) bill. Post today anyway?")
+		#expect(BillWords.postTodayConfirm("2026-11-21", isIncome: true) == "This won't count as the \(BillWords.day("2026-11-21")) income. Post today anyway?")
 	}
 
 	@Test func theEstimateLineFollowsTheAmountKind() {
