@@ -54,6 +54,9 @@ extension BudgetSession {
 	func upcoming(days: UInt32, today: String) async throws -> [UpcomingBill] { [] }
 	func rules() async throws -> [RuleSentence] { [] }
 	func rulePreview(_ source: RuleSource) async throws -> [RuleMatch] { [] }
+	func statementEntity() async throws -> StatementEntity { StatementEntity(name: "Home", customName: nil) }
+	func incomeStatement(first: String, last: String) async throws -> IncomeStatement { throw FfiError.Invalid(message: "no income statement in this fake") }
+	func wrapped(year: Int32, today: String) async throws -> WrappedReport { throw FfiError.Invalid(message: "no Wrapped in this fake") }
 	func balanceSheet(asOf: String) async throws -> BalanceSheet { throw FfiError.Invalid(message: "no balance sheet in this fake") }
 	func ownersEquity(first: String, last: String) async throws -> OwnersEquity { throw FfiError.Invalid(message: "no owner's equity in this fake") }
 	func taxSummary(year: Int32) async throws -> TaxSummary { throw FfiError.Invalid(message: "no tax summary in this fake") }

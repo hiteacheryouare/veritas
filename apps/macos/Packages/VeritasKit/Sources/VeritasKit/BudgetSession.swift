@@ -217,6 +217,12 @@ public protocol BudgetSession: AnyObject, Sendable {
 	func rules() async throws -> [RuleSentence]
 	/// The rows "Apply to existing" would change, newest first.
 	func rulePreview(_ source: RuleSource) async throws -> [RuleMatch]
+	/// The name on every statement's header and on the tax summary (ST-3).
+	func statementEntity() async throws -> StatementEntity
+	/// Revenue and expenses by category group over inclusive `YYYY-MM-DD` dates (R-REP-7, ST-3).
+	func incomeStatement(first: String, last: String) async throws -> IncomeStatement
+	/// One year's Wrapped, or this year's to `today` (R-WRAP-1, FC-8).
+	func wrapped(year: Int32, today: String) async throws -> WrappedReport
 	/// The balance sheet at the end of `asOf`, `YYYY-MM-DD` (R-REP-7).
 	func balanceSheet(asOf: String) async throws -> BalanceSheet
 	/// Owner's equity over inclusive `YYYY-MM-DD` dates (R-REP-7).
