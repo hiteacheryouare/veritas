@@ -337,6 +337,124 @@ fn wrapped_agrees_with_the_statements_and_with_actuals_own_sums() {
 	}
 }
 
+fn month_after(month: &Month) -> Month {
+	if month.month == 12 {
+		Month {
+			year: month.year + 1,
+			month: 1,
+		}
+	} else {
+		Month {
+			year: month.year,
+			month: month.month + 1,
+		}
+	}
+}
+
+#[test]
+fn wrapped_monthly_spending_is_each_months_expenses_and_its_share_of_out() {
+	// v18, FC-8's monthly series: one bar per month of the period, each the
+	// income statement's expenses for that month (CLS-6 expense_total), with
+	// its share of total out rounded on its own.
+	let scratch = Scratch::new("wrapped-months");
+	let session = import(&scratch);
+	perform(&session, entry(CHECKING, "2026-03-05", 1500, GROCERIES, "refund"));
+	for year in [2025, 2026] {
+		let report = wrapped(&session, year);
+		assert!(!report.months.is_empty(), "{year}");
+		let last = &report.months.last().unwrap().month;
+		assert_eq!(
+			format!("{}-{:02}", last.year, last.month),
+			report.last[..7],
+			"{year} runs to the period's last month"
+		);
+		for pair in report.months.windows(2) {
+			assert_eq!(pair[1].month, month_after(&pair[0].month), "{year}: no gaps");
+		}
+		for bar in &report.months {
+			let first = format!("{}-{:02}-01", bar.month.year, bar.month.month);
+			let end = {
+				let next = month_after(&bar.month);
+				let next_first = chrono::NaiveDate::from_ymd_opt(next.year, next.month, 1).unwrap();
+				let month_end = next_first.pred_opt().unwrap().format("%Y-%m-%d").to_string();
+				month_end.min(report.last.clone())
+			};
+			let statement =
+				block_on(session.income_statement(first.clone(), end, CancelToken::new())).unwrap();
+			assert_eq!(bar.total, statement.total_expenses.total, "{year} {first}");
+			let expected_share = (report.total_out > 0).then(|| {
+				let scaled = i128::from(bar.total) * 1000;
+				let whole = i128::from(report.total_out);
+				let rounded = (scaled.abs() * 2 + whole) / (whole * 2);
+				i64::try_from(if scaled < 0 { -rounded } else { rounded }).unwrap()
+			});
+			assert_eq!(bar.share, expected_share, "{year} {first}");
+		}
+		if report.months.len() == 12 {
+			let sum: i64 = report.months.iter().map(|bar| bar.total).sum();
+			assert_eq!(sum, report.total_out, "{year}: a whole year adds up to out");
+		}
+		let biggest = report.biggest_month.as_ref().unwrap();
+		assert!(
+			report
+				.months
+				.iter()
+				.any(|bar| bar.month == biggest.month && bar.total == biggest.total),
+			"{year}: the biggest month is one of the bars"
+		);
+	}
+}
+
+#[test]
+fn wrapped_years_lists_exactly_the_years_with_data_and_pins_today() {
+	let (_scratch, session) = fresh("wrapped-years", "USD");
+	let years = |today: &str| {
+		block_on(session.wrapped_years(today.to_owned(), CancelToken::new())).unwrap()
+	};
+	assert_eq!(years(TODAY), Vec::<i32>::new(), "a new budget has no rows");
+	let checking = new_account(
+		&session,
+		"Checking",
+		veritas_ffi::NewAccountKind::Checking,
+		10_000,
+		None,
+	);
+	let category = session
+		.budget_month(NOVEMBER, TODAY.to_owned())
+		.unwrap()
+		.groups
+		.into_iter()
+		.find(|group| !group.is_income)
+		.and_then(|group| group.envelopes.into_iter().next())
+		.unwrap()
+		.id;
+	perform(&session, entry(&checking, "2024-03-05", -2500, &category, ""));
+	perform(&session, entry(&checking, "2026-12-20", -2500, &category, "later"));
+	assert_eq!(years(TODAY), [2026, 2024]);
+	for year in 2024..=2026 {
+		assert_eq!(
+			years(TODAY).contains(&year),
+			wrapped(&session, year).has_data,
+			"{year}: the picker and No data agree"
+		);
+	}
+
+	assert_eq!(years("2027-06-01"), [2026, 2024], "2027 has nothing yet");
+	let savings = new_account(
+		&session,
+		"Savings",
+		veritas_ffi::NewAccountKind::Savings,
+		5_000,
+		None,
+	);
+	assert_eq!(
+		years("2027-06-01"),
+		[2027, 2026, 2024],
+		"the new account's starting balance is dated the pinned day, in 2027"
+	);
+	assert!(!savings.is_empty());
+}
+
 #[test]
 fn the_entity_name_is_one_undo_step_survives_a_reopen_and_actual_reads_the_file() {
 	let scratch = Scratch::new("entity");
