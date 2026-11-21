@@ -552,6 +552,24 @@ fn a_budget_started_in_veritas_and_used_for_a_month_reads_the_same_in_actual() {
 		"a card swipe spends in its month"
 	);
 	assert_eq!(row(&household).spent, -5_000);
+	let purchases = 5_000 + 8_766 + 7_000 + 4_319 + 10_982 + 5_000;
+	let spent: i64 = shown
+		.groups
+		.iter()
+		.filter(|g| !g.is_income)
+		.map(|g| g.spent)
+		.sum();
+	assert_eq!(
+		spent, -purchases,
+		"the card payment and the savings transfer spend nothing; only purchases do"
+	);
+	let net_profit = block_on(session.net_profit(current, current, CancelToken::new()))
+		.unwrap()
+		.total;
+	assert_eq!(
+		net_profit.expenses.total, purchases,
+		"Net Profit counts the swipes as expenses and never the card payment"
+	);
 	assert_eq!(row(&dining).budgeted, 20_000);
 	assert_eq!(
 		row(&savings_envelope).spent,
@@ -1310,4 +1328,157 @@ fn merging_payees_snapshots_the_budget_first() {
 	let snapshot = assert_snapshotted_first(&session, &before);
 	session.restore_snapshot(snapshot).unwrap();
 	assert_eq!(every_row(&session), rows);
+}
+
+#[test]
+fn finishing_a_reconcile_snapshots_the_budget_first() {
+	const TODAY: &str = "2026-11-13";
+	let scratch = Scratch::new("finish-reconcile");
+	let session = import_all_features(&scratch, TODAY);
+	let checking = "0a1c000f-c328-42b8-8966-a4be59a2504b";
+	let rows = every_row(&session);
+	let cleared = session
+		.accounts()
+		.unwrap()
+		.accounts
+		.into_iter()
+		.find(|a| a.id == checking)
+		.unwrap()
+		.cleared;
+	let unlocked = rows
+		.iter()
+		.filter(|r| r.account_id == checking && r.cleared && !r.reconciled)
+		.count();
+	assert!(unlocked > 1, "cleared rows wait to be locked");
+	let before = bulk_snapshots(&session);
+
+	perform(
+		&session,
+		Command::FinishReconcile {
+			account_id: checking.to_owned(),
+			statement_balance: cleared,
+		},
+	);
+	assert!(
+		every_row(&session)
+			.iter()
+			.filter(|r| r.account_id == checking && r.cleared)
+			.all(|r| r.reconciled),
+		"finishing locks every cleared row"
+	);
+	let snapshot = assert_snapshotted_first(&session, &before);
+	session.restore_snapshot(snapshot).unwrap();
+	assert_eq!(every_row(&session), rows);
+}
+
+#[test]
+fn deleting_a_dashboard_snapshots_the_budget_first() {
+	const TODAY: &str = "2026-11-13";
+	let scratch = Scratch::new("delete-dashboard");
+	let session = import_all_features(&scratch, TODAY);
+	let pages = |session: &Session| {
+		block_on(session.dashboards(TODAY.to_owned(), CancelToken::new()))
+			.unwrap()
+			.into_iter()
+			.map(|page| {
+				(
+					page.id,
+					page.name,
+					page.widgets
+						.into_iter()
+						.map(|w| (w.id, w.kind))
+						.collect::<Vec<_>>(),
+				)
+			})
+			.collect::<Vec<_>>()
+	};
+	let shown = pages(&session);
+	assert!(
+		shown.len() > 1,
+		"all-features has more than one dashboard page"
+	);
+	let deleted = shown[1].0.clone();
+	let before = bulk_snapshots(&session);
+
+	perform(
+		&session,
+		Command::DeleteDashboard {
+			page_id: deleted.clone(),
+		},
+	);
+	assert!(!pages(&session).iter().any(|(id, _, _)| *id == deleted));
+	let snapshot = assert_snapshotted_first(&session, &before);
+	session.restore_snapshot(snapshot).unwrap();
+	assert_eq!(pages(&session), shown, "every page and widget is back");
+}
+
+#[test]
+fn closing_a_goal_and_moving_its_later_budget_snapshots_the_budget_first() {
+	const TODAY: &str = "2026-11-13";
+	let scratch = Scratch::new("close-goal-later");
+	let session = import_all_features(&scratch, TODAY);
+	perform(
+		&session,
+		Command::CreateGoal {
+			name: "Kayak".to_owned(),
+			target: 90_000,
+			target_date: Some("2027-04-15".to_owned()),
+			icon: None,
+			color: None,
+		},
+	);
+	let kayak = session
+		.goals(TODAY.to_owned())
+		.unwrap()
+		.goals
+		.into_iter()
+		.find(|g| g.name == "Kayak")
+		.unwrap();
+	let months: Vec<Month> = (0..3)
+		.map(|ahead| months_after(month(TODAY), ahead))
+		.collect();
+	for (index, month) in months.iter().enumerate() {
+		perform(
+			&session,
+			Command::SetBudget {
+				month: *month,
+				category_id: kayak.category_id.clone(),
+				amount: 10_000 * (index as i64 + 1),
+			},
+		);
+	}
+	let cells = |session: &Session| -> Vec<(String, i64, i64)> {
+		months
+			.iter()
+			.flat_map(|m| session.budget_month(*m, TODAY.to_owned()).unwrap().groups)
+			.flat_map(|g| g.envelopes)
+			.map(|e| (e.id, e.budgeted, e.available))
+			.collect()
+	};
+	let budgeted = cells(&session);
+	let rows = every_row(&session);
+	let before = bulk_snapshots(&session);
+
+	perform(
+		&session,
+		Command::CloseGoal {
+			goal_id: kayak.id.clone(),
+			release_to_category_id: None,
+			also_move_later: true,
+		},
+	);
+	assert_ne!(cells(&session), budgeted, "the later months' budget moved");
+	let snapshot = assert_snapshotted_first(&session, &before);
+	session.restore_snapshot(snapshot).unwrap();
+	assert_eq!(cells(&session), budgeted, "every month's budget is back");
+	assert_eq!(every_row(&session), rows);
+	assert!(
+		session
+			.goals(TODAY.to_owned())
+			.unwrap()
+			.goals
+			.iter()
+			.any(|g| g.id == kayak.id && g.state != GoalState::Closed),
+		"and the goal is open again"
+	);
 }
