@@ -754,6 +754,67 @@ fn reports_through_the_ffi_match_veritas_reports_on_a_fresh_load_and_drill_to_th
 	}
 }
 
+#[test]
+fn a_drilled_transfer_names_its_other_account_as_the_register_does() {
+	// v18 (C1): every row behind a Net Profit line carries the account on
+	// the other side of its transfer, the same account the register shows,
+	// so the drill-down can draw "To X" or "From X"; other rows carry none.
+	let scratch = Scratch::new("drill-transfers");
+	let session = import(&scratch, "all-features");
+	let account_name = |id: &str| {
+		session
+			.accounts()
+			.unwrap()
+			.accounts
+			.into_iter()
+			.find(|account| account.id == id)
+			.map(|account| account.name)
+	};
+	let mut transfers = 0;
+	let mut others = 0;
+	for line in [
+		NetProfitLine::Income,
+		NetProfitLine::Expenses,
+		NetProfitLine::Savings,
+		NetProfitLine::DebtPaydown,
+		NetProfitLine::Unreviewed,
+	] {
+		let rows: Vec<ReportTransaction> = block_on(session.report_transactions(
+			ReportDrill::NetProfit {
+				first: PERIOD.0.to_owned(),
+				last: PERIOD.1.to_owned(),
+				line,
+				category: None,
+			},
+			CancelToken::new(),
+		))
+		.unwrap();
+		for row in rows {
+			let register = match &row.parent_id {
+				Some(parent) => session
+					.register_row(parent.clone())
+					.unwrap()
+					.lines
+					.into_iter()
+					.find(|split| split.id == row.id)
+					.unwrap()
+					.transfer_account_id,
+				None => session.register_row(row.id.clone()).unwrap().transfer_account_id,
+			};
+			assert_eq!(row.transfer_account_id, register, "{line:?} {}", row.id);
+			match &row.transfer_account_id {
+				Some(other) => {
+					transfers += 1;
+					assert_ne!(*other, row.account_id, "{}", row.id);
+					assert_eq!(row.payee, account_name(other), "the payee names that account");
+				}
+				None => others += 1,
+			}
+		}
+	}
+	assert!(transfers > 0 && others > 0, "{transfers} transfers, {others} others");
+}
+
 fn oracle() -> Option<PathBuf> {
 	let oracle = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/actual-oracle");
 	if oracle.join("node_modules").exists() {
