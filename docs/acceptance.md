@@ -1,6 +1,6 @@
 # Acceptance
 
-Each criterion from PLAN §10, with the evidence for it. Last checked on dev at `b12a8c2` (2026-11-20), plus open PRs #81 and #85 where a row names them.
+Each criterion from PLAN §10, with the evidence for it. Last checked on ws/qa at `4a11f6d`, with dev merged in (2026-11-20), plus open PR #85 where a row names it.
 
 | Status | Meaning |
 |---|---|
