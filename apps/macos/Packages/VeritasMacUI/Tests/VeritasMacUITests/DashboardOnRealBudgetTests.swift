@@ -77,7 +77,7 @@ struct DashboardOnRealBudgetTests {
 	/// The page's cards as the dashboard lays them out, without the screen's scroll view, which renders only in a window.
 	private static func grid(_ model: DashboardModel) throws -> some View {
 		let sheet = try #require(model.sheet)
-		return DashboardGrid(sheet: sheet, model: model, configure: { _ in }, remove: { _ in }).background(.white)
+		return DashboardGrid(sheet: sheet, model: model, open: { _ in }, configure: { _ in }, remove: { _ in }).background(.white)
 	}
 
 	/// Opens all-features with `sql` applied to its file first.
