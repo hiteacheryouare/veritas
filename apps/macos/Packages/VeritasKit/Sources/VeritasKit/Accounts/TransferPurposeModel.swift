@@ -205,21 +205,27 @@ public final class TransferPurposeModel {
 		all.first { $0.id == categoryID }?.name
 	}
 
-	/// The envelope to save on the on-budget side, after giving it its kind
-	/// or making it. `nil` when that failed; the workspace shows why.
-	func resolve(using session: any BudgetSession) async throws -> String? {
-		guard let answer else { return nil }
-		if createsEnvelope, let kind = answer.kind {
-			return try await session.createKindCategory(kind: kind, name: newEnvelopeName.trimmingCharacters(in: .whitespaces), unhideGroup: unhidePrompt != nil)
+	/// What the answer does to an envelope before the transaction is filed
+	/// under it: makes one, shows one again, or gives one the kind.
+	var envelopeChange: EnvelopeChange? {
+		guard let kind = answer?.kind else { return nil }
+		if createsEnvelope {
+			return .createKind(kind: kind, name: newEnvelopeName.trimmingCharacters(in: .whitespaces), unhideGroup: unhidePrompt != nil)
 		}
-		if let revival, let kind = answer.kind {
-			try await session.reviveKindCategory(kind: kind, categoryID: revival.categoryId)
-			return revival.categoryId
+		if let revival { return .revive(kind: kind, categoryId: revival.categoryId) }
+		if needsKind, let categoryID { return .setKind(categoryId: categoryID, kind: kind) }
+		return nil
+	}
+
+	/// Saves the on-budget side under the answer's envelope as one command,
+	/// so a refused save writes nothing and one undo takes back both.
+	func command(saving draft: TransactionDraft, editing transactionID: String?) -> Command {
+		if let envelopeChange {
+			return .saveTransactionWithEnvelope(envelope: envelopeChange, transactionId: transactionID, transaction: draft)
 		}
-		if needsKind, let kind = answer.kind, let categoryID {
-			try await session.setCategoryKind(categoryID, kind: kind)
-		}
-		return categoryID
+		var filed = draft
+		filed.categoryId = categoryID
+		return transactionID.map { .editTransaction(transactionId: $0, transaction: filed) } ?? .addTransaction(transaction: filed)
 	}
 
 	private struct Listed {

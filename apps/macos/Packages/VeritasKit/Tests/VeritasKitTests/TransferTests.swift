@@ -83,9 +83,6 @@ final class TransferFakeSession: BudgetSession, @unchecked Sendable {
 		calls.append("create \(name) \(kind)\(unhideGroup ? " unhiding" : "")")
 		return "made"
 	}
-	func reviveKindCategory(kind: CategoryKind, categoryID: String) async throws {
-		calls.append("revive \(categoryID) \(kind)")
-	}
 	func loanPaymentDefaults(_ loanAccountID: String, today: String) async throws -> LoanPaymentDefaults { defaults }
 	func loanPaymentPreview(_ loanAccountID: String, date: String, total: Int64, interest: Int64, escrow: Int64, fees: Int64) async throws -> LoanPaymentPreview {
 		let principal = total - interest - escrow - fees
@@ -202,9 +199,10 @@ struct TransferTests {
 		await model.purpose.choose("carloan-cat")
 		#expect(model.purpose.reclassifies == 12)
 		#expect(await model.save())
-		#expect(session.calls.last == "kind carloan-cat debtPrincipal")
-		guard case .addTransaction(let draft) = session.commands.last else { Issue.record("no add"); return }
-		#expect(draft.categoryId == "carloan-cat")
+		guard case .saveTransactionWithEnvelope(let envelope, nil, let draft) = session.commands.last else { Issue.record("not one step"); return }
+		#expect(envelope == .setKind(categoryId: "carloan-cat", kind: .debtPrincipal), "the kind and the transaction are one command")
+		#expect(draft.payeeId == "to-brokerage" && draft.amount == -5_000)
+		#expect(session.commands.count == 1)
 	}
 
 	@Test func aNewEnvelopeIsMadeWithTheKind() async {
@@ -217,9 +215,9 @@ struct TransferTests {
 		#expect(model.purpose.unhidePrompt == "Your group \"Savings and Debt\" is hidden. Show it again and add \"Savings\" to it?")
 		#expect(model.canSave)
 		#expect(await model.save())
-		#expect(session.calls.last == "create Savings savings unhiding")
-		guard case .addTransaction(let draft) = session.commands.last else { Issue.record("no add"); return }
-		#expect(draft.categoryId == "made")
+		guard case .saveTransactionWithEnvelope(let envelope, nil, _) = session.commands.last else { Issue.record("not one step"); return }
+		#expect(envelope == .createKind(kind: .savings, name: "Savings", unhideGroup: true))
+		#expect(session.commands.count == 1, "no separate create")
 	}
 
 	static func hidden(_ id: String, _ name: String, group: String = "Debt", groupHidden: Bool = false, archived: Bool = false) -> HiddenCategoryMatch {
@@ -243,10 +241,9 @@ struct TransferTests {
 		))
 		#expect(model.canSave)
 		#expect(await model.save())
-		#expect(session.calls.contains("revive old-loan debtPrincipal"))
-		#expect(!session.calls.contains { $0.hasPrefix("create") || $0.hasPrefix("kind") }, "nothing is made and no kind changes")
-		guard case .addTransaction(let draft) = session.commands.last else { Issue.record("no add"); return }
-		#expect(draft.categoryId == "old-loan")
+		#expect(session.commands.count == 1)
+		guard case .saveTransactionWithEnvelope(let envelope, nil, _) = session.commands.last else { Issue.record("not one step"); return }
+		#expect(envelope == .revive(kind: .debtPrincipal, categoryId: "old-loan"), "nothing is made and no kind changes")
 	}
 
 	@Test func anArchivedSavingsEnvelopeIsRestoredOrReplacedUnderAFreeName() async {
@@ -264,8 +261,7 @@ struct TransferTests {
 		model.purpose.newEnvelopeName = "Rainy Day"
 		#expect(model.purpose.confirmation == nil, "the group isn't hidden, so a new envelope asks nothing")
 		#expect(await model.save())
-		#expect(session.calls.last == "create Rainy Day savings")
-		#expect(!session.calls.contains { $0.hasPrefix("revive") })
+		#expect(session.commands.last.map { if case .saveTransactionWithEnvelope(.createKind(.savings, "Rainy Day", false), nil, _) = $0 { true } else { false } } == true)
 	}
 
 	@Test func severalHiddenMatchesAreListedAndThePickIsShownAgain() async {
@@ -285,7 +281,7 @@ struct TransferTests {
 		#expect(model.purpose.reclassifies == nil, "showing it again changes no kinds")
 		#expect(model.purpose.confirmation?.title == "Show \"Old Car Loan\" again and use it?")
 		#expect(await model.save())
-		#expect(session.calls.contains("revive old-car debtPrincipal"))
+		#expect(session.commands.last.map { if case .saveTransactionWithEnvelope(.revive(.debtPrincipal, "old-car"), nil, _) = $0 { true } else { false } } == true)
 
 		await model.purpose.choose("carloan-cat")
 		#expect(model.purpose.revival == nil, "a visible envelope takes the kind instead")

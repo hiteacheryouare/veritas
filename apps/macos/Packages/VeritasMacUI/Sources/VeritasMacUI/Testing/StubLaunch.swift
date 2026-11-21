@@ -239,8 +239,25 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 		switch command {
 		case .saveCustomReport(let settings): try reports.save(settings)
 		case .placeWidget(let id, let x, let y, let width, let height): try dashboardStore.place(id, x: x, y: y, width: width, height: height)
+		case .saveTransactionWithEnvelope(let envelope, let transactionID, let draft):
+			var filed = draft
+			filed.categoryId = try await envelopeID(envelope)
+			try await perform(transactionID.map { .editTransaction(transactionId: $0, transaction: filed) } ?? .addTransaction(transaction: filed))
 		default:
 			if try !accountStore.perform(command) { try budget.perform(command) }
+		}
+	}
+
+	/// The stub has no hidden or archived envelope of any kind, so a revive is refused as the core would refuse it.
+	private func envelopeID(_ change: EnvelopeChange) async throws -> String {
+		switch change {
+		case .setKind(let categoryID, let kind):
+			try await setCategoryKind(categoryID, kind: kind)
+			return categoryID
+		case .createKind(let kind, let name, let unhideGroup):
+			return try await createKindCategory(kind: kind, name: name, unhideGroup: unhideGroup)
+		case .revive:
+			throw FfiError.Invalid(message: "That category isn't a hidden or archived one of this kind. Pick another.")
 		}
 	}
 
@@ -285,11 +302,6 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 		let id = try budget.createEnvelope(in: "savingsdebt", name: name)
 		accountStore.named(id, name, kind: kind)
 		return id
-	}
-	/// The stub has no hidden or archived envelope of any kind, so it refuses as the core would.
-	func reviveKindCategory(kind: CategoryKind, categoryID: String) async throws {
-		try writable()
-		throw FfiError.Invalid(message: "That category isn't a hidden or archived one of this kind. Pick another.")
 	}
 	func loanTerms(_ accountID: String) async throws -> LoanTerms? { accountStore.loanTerms(accountID) }
 	func setLoanTerms(_ accountID: String, _ terms: LoanTerms) async throws {

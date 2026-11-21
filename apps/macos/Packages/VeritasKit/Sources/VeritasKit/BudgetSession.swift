@@ -169,8 +169,6 @@ public protocol BudgetSession: AnyObject, Sendable {
 	/// Returns the new envelope's id. `unhideGroup` is the user's yes to showing a hidden group again.
 	@discardableResult
 	func createKindCategory(kind: CategoryKind, name: String, unhideGroup: Bool) async throws -> String
-	/// Shows a hidden or archived envelope of the kind again, and its group if hidden (CLS-4.1).
-	func reviveKindCategory(kind: CategoryKind, categoryID: String) async throws
 	/// `nil` when the account isn't a loan.
 	func loanTerms(_ accountID: String) async throws -> LoanTerms?
 	func setLoanTerms(_ accountID: String, _ terms: LoanTerms) async throws

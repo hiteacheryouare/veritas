@@ -272,10 +272,6 @@ final class CoreBudgetSession: BudgetSession {
 		try await created(.category, by: .createKindCategory(kind: kind, name: name, unhideGroup: unhideGroup))
 	}
 
-	func reviveKindCategory(kind: CategoryKind, categoryID: String) async throws {
-		try await perform(.reviveKindCategory(kind: kind, categoryId: categoryID))
-	}
-
 	func loanTerms(_ accountID: String) async throws -> LoanTerms? {
 		let session = session
 		return try await Core.run { try session.loanTerms(accountId: accountID) }
