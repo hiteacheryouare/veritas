@@ -79,24 +79,36 @@ Measured on an M3 Pro at `b12a8c2`, release build, perf-100k (100k transactions)
 
 | ID | Budget | Measured | Status |
 |---|---|---|---|
-| R-PERF-1 | Cold launch to an interactive budget ≤ 400 ms | Core: open until editable, 175 ms (`open_import_export` bench). | **partial.** The app's share of launch isn't measured. Ryan to time a cold launch, or add an `XCTApplicationLaunchMetric` test. |
-| R-PERF-2 | Cell edit to updated screen ≤ 16 ms | A budget cell edit until the month reads back takes 3.8 ms. The engine's recompute takes 0.2–0.7 ms, and one envelope set to its 3-month average takes 10.8 ms. | **partial.** The core is well inside the budget, but the redraw isn't measured. Setting every envelope to its average takes 3.8–6.8 s; that's a bulk action, not a cell edit, so no budget covers it. |
-| R-PERF-3 | Register scrolls at 120 Hz with no hitches | Next page while scrolling (47,479 rows): 181 µs. First page after a commit: 18.6 ms. First page of a search: 63.7 ms. | **partial.** The core fetch fits in a frame. Scrolling smoothness in the table is unmeasured; Ryan to check with Instruments. |
-| R-PERF-4 | Typical report ≤ 100 ms; year Sankey or forecast ≤ 500 ms | As the app calls it, right after an edit (`reports_perf.rs`, `dashboard_perf.rs`): net profit for 12 months 85 ms, net worth 62, cash flow 69, balance sheet 75, owner's equity 67, tax summary 67, a year's Sankey 100, a dashboard of 24 cards 73. | **proven** on the app's path. The margin is thin: net profit is at 85 of its 100 ms. With nothing cached (the first report after opening), the bench measures net profit for a year at 119 ms and the tax summary at 154 ms. |
-| R-PERF-5 | Import or export of a 100k zip ≤ 3 s | Import 1.33 s, export 2.12 s (upper estimate 2.5 s). | **proven** |
+| R-PERF-1 | Cold launch to an interactive budget ≤ 400 ms | GitHub runner: open until editable, 371 ms (`open_import_export` bench). M3 Pro, for reference: 156 ms. | **partial.** The core passes on the runner, but only 7% under the budget. The app's share of launch isn't measured; Ryan to time a cold launch, or add an `XCTApplicationLaunchMetric` test. |
+| R-PERF-2 | Cell edit to updated screen ≤ 16 ms | GitHub runner: a budget cell edit until the month reads back 1.2 ms, the engine's recompute at most 1.0 ms, an envelope set to its 3-month average 10.4 ms. M3 Pro, for reference: 2.4 ms and 6.7 ms. | **partial.** The core passes, but the redraw isn't measured. Setting every envelope to its average is a bulk action, not a cell edit, so no budget covers it. |
+| R-PERF-3 | Register scrolls at 120 Hz with no hitches | GitHub runner: the next page while scrolling (47,479 rows) takes 0.22 ms. M3 Pro, for reference: 0.10 ms, with the first page after a commit at 18.6 ms and the first page of a search at 63.7 ms. | **partial.** The core fetch fits in a frame. Scrolling smoothness in the table is unmeasured; Ryan to check with Instruments. |
+| R-PERF-4 | Typical report ≤ 100 ms; year-long Sankey or forecast ≤ 500 ms | GitHub runner: the default dashboard 31–46 ms, each card's marginal cost at most 36 ms, the every-card page 131–175 ms. `reports_perf` hasn't run there yet (a failing test stopped it), so the reports' runner numbers come with the next perf run. M3 Pro, for reference, right after an edit: net profit for 12 months 85 ms, net worth 62, cash flow 69, balance sheet 75, owner's equity 67, tax summary 67, a year's Sankey 100, the default dashboard 22, the every-card page 73. | **proven** for the dashboard on the runner, under the Architect's reading of PLAN line 245 (each report, card and the default dashboard ≤ 100 ms; the every-card page ≤ 500 ms). The reports wait for the next perf run. |
+| R-PERF-5 | Import or export of a 100k zip ≤ 3 s | GitHub runner (macos-26-arm64): import 1.75 s, export 3.15 s. M3 Pro, for reference: 0.71 s and 1.34 s. | **gap on the CI runner.** Export is 5% over the budget; it needs a core fix. |
 
-**The CI gate.** CI's `perf` job runs `cargo xtask perf` on an Apple Silicon runner, in a release build.
-- **R-PERF-4:** the job runs the R-PERF-4 tests (`reports_perf.rs`, `dashboard_perf.rs`), which assert their budgets on the app's own path, right after an edit makes the session classify again.
-- **R-PERF-1, 2, 3 and 5:** it runs the criterion benches, then reads each bench's median from criterion's `estimates.json` and fails if any median is over its budget. A bench takes 10 to 100 samples after a warm-up, so one slow sample on a shared runner doesn't move the median.
-- **What's gated:** open until editable ≤ 400 ms; a budget cell edit, a recompute and an envelope set to its average ≤ 16 ms; a register page while scrolling ≤ 8.33 ms (one 120 Hz frame); import and export ≤ 3 s.
+**The CI gate.** CI's `perf` job runs `cargo xtask perf` on an Apple Silicon runner, in a release build. Every check runs, and then every budget that was exceeded is listed together.
+- **R-PERF-4:** the job runs the release R-PERF-4 tests (`reports_perf.rs`, `dashboard_perf.rs`), which time the app's own path right after an edit makes the session classify again. They follow PLAN line 245 ("Typical report ≤ 100 ms; year-long Sankey or forecast ≤ 500 ms"), as the Architect read it on 2026-11-21:
+  - each report, each card's marginal cost, and the default dashboard: ≤ 100 ms;
+  - the page with every native card, year-long Sankey and forecast cards among them: ≤ 500 ms.
+- **R-PERF-1, 2, 3 and 5:** the criterion benches run, and the gate reads each median from criterion's `estimates.json`. A bench takes 10 to 100 samples after a warm-up, so one slow sample on a shared runner doesn't move the median.
+- **What's gated:**
+  - open until editable ≤ 400 ms;
+  - a budget cell edit, a recompute and an envelope set to its average ≤ 16 ms;
+  - a register page while scrolling ≤ 8.33 ms (one 120 Hz frame);
+  - import and export ≤ 3 s.
 
-The same reports measured with nothing cached are printed against 100 ms and 500 ms, but they don't gate. PLAN doesn't say whether "typical report" means warm, and the first report after opening is the cold case.
+Reports measured with nothing cached are printed against 100 ms and 500 ms, but they don't gate.
 
-Local run of the gate (M3 Pro, with other agents sharing the machine, 2026-11-20):
-- every gated median passes: open 156 ms, cell edit 2.4 ms, envelope average 6.7 ms, scrolling page 0.10 ms, import 714 ms, export 1.34 s;
-- the cold reports' medians are 68–74 ms, and a year's Sankey 103 ms.
+| Measured | M3 Pro, local | GitHub runner (macos-26-arm64), 2026-11-21 |
+|---|---|---|
+| Open until editable (≤ 400 ms) | 156 ms | 371 ms |
+| Cell edit / envelope average (≤ 16 ms) | 2.4 / 6.7 ms | 1.2 / 10.4 ms |
+| Scrolling page (≤ 8.33 ms) | 0.10 ms | 0.22 ms |
+| Import / export (≤ 3 s) | 0.71 / 1.34 s | 1.75 / **3.15 s, over** |
+| Default dashboard, warm (≤ 100 ms) | 22 ms | 31–46 ms |
+| Every-card page (≤ 500 ms) | 73 ms | 131–175 ms |
+| Reports with nothing cached (shown, not gated) | 68–74 ms | 145–174 ms |
 
-The earlier 119 ms and 154 ms were means taken while the fuzz harnesses shared the CPU.
+On the runner, export misses R-PERF-5 by 5%, and open until editable is 7% under its budget. A miss gets a core fix, not a new reading.
 
 ## Full-size runs
 
