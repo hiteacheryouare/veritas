@@ -14,15 +14,16 @@ struct StandardReportView: View {
 			switch model.kind {
 			case .netWorth:
 				if let last = model.netWorth.last {
-					Hero(amount: last.netWorth, caption: "Net worth at the end of \(ReportPeriod.monthYear(last.month))", format: model.format)
+					Hero(amount: last.netWorth, caption: "Net worth at the end of \(ReportPeriod.monthYear(last.month))", format: model.format, tone: last.netWorth < 0 ? .overspent : .neutral)
 				}
 				Card {
+					let stop = ZeroSplit.lineStop(model.netWorth.map { model.format.chartValue($0.netWorth, on: .register) })
 					Chart(model.netWorth, id: \.month) { point in
 						LineMark(x: .value("Month", ReportPeriod.shortMonth(point.month)), y: .value("Net worth", model.format.chartValue(point.netWorth, on: .register)))
-							.foregroundStyle(Color.moneyIncomeFill)
+							.foregroundStyle(LinearGradient(stops: [.init(color: .moneyIncomeFill, location: 0), .init(color: .moneyIncomeFill, location: stop), .init(color: .moneyOverspent, location: stop), .init(color: .moneyOverspent, location: 1)], startPoint: .top, endPoint: .bottom))
 							.lineStyle(StrokeStyle(lineWidth: 2.5))
 						PointMark(x: .value("Month", ReportPeriod.shortMonth(point.month)), y: .value("Net worth", model.format.chartValue(point.netWorth, on: .register)))
-							.foregroundStyle(Color.moneyIncomeFill)
+							.foregroundStyle(point.netWorth < 0 ? Color.moneyOverspent : Color.moneyIncomeFill)
 					}
 					.chartYAxis { thousandsAxis }
 					.frame(height: 220)
@@ -69,10 +70,11 @@ struct Hero: View {
 	let amount: Int64
 	let caption: String
 	let format: MoneyFormat
+	var tone: VeritasCore.MoneyTone = .neutral
 
 	var body: some View {
 		HStack(alignment: .firstTextBaseline, spacing: Spacing.s3) {
-			ReportAmount(amount: amount, tone: .neutral, format: format, weight: .bold, size: .display)
+			ReportAmount(amount: amount, tone: tone, format: format, weight: .bold, size: .display)
 			Text(caption)
 				.font(.text(.heading, weight: .semibold))
 				.foregroundStyle(.textSecondary)

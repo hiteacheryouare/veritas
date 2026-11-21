@@ -132,7 +132,7 @@ public final class StandardReportModel {
 		[
 			ReportRow(id: "assets", title: "Assets", values: netWorth.map(\.assets)),
 			ReportRow(id: "liabilities", title: "Liabilities", values: netWorth.map(\.liabilities)),
-			ReportRow(id: "netWorth", title: "Net worth", values: netWorth.map(\.netWorth), isTotal: true)
+			ReportRow(id: "netWorth", title: "Net worth", values: netWorth.map(\.netWorth), isTotal: true, tones: netWorth.map { $0.netWorth < 0 ? .overspent : .neutral })
 		]
 	}
 
