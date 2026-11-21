@@ -52,7 +52,7 @@ fn share(value: Money, total: Money) -> f64 {
 	if total.minor() <= 0 {
 		return 0.0;
 	}
-	let result = value.minor().abs() as f64 / total.minor() as f64 * 100.0;
+	let result = value.minor().unsigned_abs() as f64 / total.minor() as f64 * 100.0;
 	if result.is_finite() { result } else { 0.0 }
 }
 
@@ -97,8 +97,11 @@ pub fn calendar(
 		let in_month = |map: &BTreeMap<NaiveDate, Money>| -> Result<Option<Money>, CoreError> {
 			let mut total: Option<Money> = None;
 			for amount in map.range(first..=last).map(|(_, amount)| *amount) {
-				let absolute = Money::from_minor(amount.minor().abs());
-				total = Some(total.unwrap_or(Money::ZERO).checked_add(absolute)?);
+				total = Some(
+					total
+						.unwrap_or(Money::ZERO)
+						.checked_add(amount.checked_abs()?)?,
+				);
 			}
 			Ok(total)
 		};
@@ -119,8 +122,8 @@ pub fn calendar(
 			let day_expense = day_expense.unwrap_or(Money::ZERO);
 			days.push(CalendarDay {
 				date,
-				income: Money::from_minor(day_income.minor().abs()),
-				expense: Money::from_minor(day_expense.minor().abs()),
+				income: day_income.checked_abs()?,
+				expense: day_expense.checked_abs()?,
 				income_size: share(day_income, total_income),
 				expense_size: share(day_expense, total_expense),
 			});

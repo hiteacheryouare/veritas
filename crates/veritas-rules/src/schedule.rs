@@ -8,7 +8,7 @@ use veritas_domain::{CivilDate, CoreError};
 
 use crate::condition::DateValue;
 use crate::js;
-use crate::recur::{RecurError, WeekendSolveMode};
+use crate::recur::{RecurError, Recurrence, WeekendSolveMode};
 
 fn previous_day(date: NaiveDate) -> NaiveDate {
 	date.pred_opt().unwrap_or(date)
@@ -51,12 +51,20 @@ fn next_date_from_start(
 				None => recurrence.last()?,
 			};
 			match found {
-				Some(date) if recurrence.skip_weekend && !no_skip_weekend => {
-					skip_weekend(date, &recurrence.weekend_solve_mode).map(Some)
-				}
+				Some(date) if !no_skip_weekend => shown(date, recurrence).map(Some),
 				other => Ok(other),
 			}
 		}
+	}
+}
+
+/// An occurrence as the schedule shows it, moved off the weekend if the
+/// recurrence asks.
+fn shown(occurrence: NaiveDate, recurrence: &Recurrence) -> Result<NaiveDate, RecurError> {
+	if recurrence.skip_weekend {
+		skip_weekend(occurrence, &recurrence.weekend_solve_mode)
+	} else {
+		Ok(occurrence)
 	}
 }
 
@@ -76,9 +84,11 @@ pub fn next_date_after(
 			Some(occurrence) if occurrence >= start => occurrence,
 			_ => return Ok(None),
 		};
-		if let Some(next) = next_date_from_start(date, start, false)?
-			&& next > after
-		{
+		let next = match date {
+			DateValue::Recur(recurrence) => shown(occurrence, recurrence)?,
+			_ => occurrence,
+		};
+		if next > after {
 			return Ok(Some(next.into()));
 		}
 		start = next_day(occurrence);
@@ -172,12 +182,7 @@ pub fn upcoming_dates(
 		else {
 			break;
 		};
-		let shown = if recurrence.skip_weekend {
-			skip_weekend(occurrence, &recurrence.weekend_solve_mode)?
-		} else {
-			occurrence
-		};
-		dates.push(CivilDate::from(shown));
+		dates.push(CivilDate::from(shown(occurrence, recurrence)?));
 		from = occurrence.succ_opt();
 	}
 	Ok(dates)

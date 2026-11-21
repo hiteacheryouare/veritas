@@ -5,10 +5,12 @@
 	reason = "integration tests fail by panicking"
 )]
 
-//! R-PERF-4 for the dashboard through the exported API on perf-100k: the
-//! default dashboard, and a page with every native card D73 draws, filtered
-//! the way a typical card is, each within a typical report's 100 ms once
-//! warm, and no card adding more than that.
+//! R-PERF-4 for the dashboard through the exported API on perf-100k, as PLAN
+//! line 245 reads ("Typical report ≤ 100 ms; year-long Sankey or forecast ≤
+//! 500 ms", the Architect's reading of 2026-11-21): the default dashboard and
+//! each native card's marginal cost within a typical report's 100 ms, and a
+//! page with every native card D73 draws, year-long Sankey and forecast cards
+//! among them, within 500 ms.
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -52,6 +54,7 @@ impl Drop for Scratch {
 }
 
 const TYPICAL: Duration = Duration::from_millis(100);
+const EVERY_CARD: Duration = Duration::from_millis(500);
 
 fn fastest(mut before: impl FnMut(), mut run: impl FnMut()) -> Duration {
 	(0..10)
@@ -246,7 +249,7 @@ fn the_dashboard_with_every_native_card_meets_r_perf_4_on_perf_100k() {
 		default_warm <= TYPICAL,
 		"the default dashboard took {default_warm:?}"
 	);
-	assert!(warm <= TYPICAL, "every native card took {warm:?}");
+	assert!(warm <= EVERY_CARD, "every native card took {warm:?}");
 	for (kind, cost) in &marginal {
 		assert!(*cost <= TYPICAL, "{kind} adds {cost:?} to the dashboard");
 	}

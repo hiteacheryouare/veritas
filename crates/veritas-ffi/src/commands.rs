@@ -520,11 +520,20 @@ impl veritas_session::Command for Command {
 		self.plan_with_sheet(data, &sheet)
 	}
 
-	/// R-REL-3: a merge repoints every row of the merged payees, and clearing
-	/// several rows at once is a bulk edit.
+	/// R-REL-3: a bulk edit is one command that rewrites or deletes many of
+	/// the user's transactions, budget cells or dashboard widgets at once.
+	/// Single-row edits and flags that a second toggle restores rely on undo.
 	fn snapshot_first(&self) -> Option<SnapshotReason> {
 		match self {
-			Command::MergePayees { .. } => Some(SnapshotReason::BulkEdit),
+			Command::MergePayees { .. }
+			| Command::DeleteCategoryMovingHistory { .. }
+			| Command::ApplySuggestions { .. }
+			| Command::FinishReconcile { .. }
+			| Command::DeleteDashboard { .. } => Some(SnapshotReason::BulkEdit),
+			Command::CloseGoal {
+				also_move_later: true,
+				..
+			} => Some(SnapshotReason::BulkEdit),
 			Command::SetCleared {
 				transaction_ids, ..
 			} if transaction_ids.len() > 1 => Some(SnapshotReason::BulkEdit),
