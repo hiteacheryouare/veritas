@@ -1836,8 +1836,47 @@ fn a_formula_chaining_operators_past_the_limit_is_refused_not_a_crash() {
 			today(),
 		)
 	};
-	assert_eq!(chained(150).unwrap().value, FormulaValue::Number(150.0));
+	assert_eq!(chained(64).unwrap().value, FormulaValue::Number(64.0));
+	assert!(matches!(chained(65), Err(CoreError::Invalid(_))));
 	assert!(matches!(chained(200_000), Err(CoreError::Invalid(_))));
+}
+
+/// `SUM(1,SUM(1,…1))` with `calls` calls: a tree `calls + 1` levels deep.
+fn nested_sums(calls: usize) -> Option<Json> {
+	let text = format!("={}1{}", "SUM(1,".repeat(calls), ")".repeat(calls));
+	meta(&json!({ "formula": text }))
+}
+
+/// Swift runs work off the main thread on 512 KiB stacks, and the app ships a
+/// release build, so release proves the margin there (`cargo xtask perf` runs
+/// this test with `--release`). A debug build spends several times the stack
+/// per level and gets Rust's default 2 MiB.
+const SMALL_STACK: usize = if cfg!(debug_assertions) {
+	2 * 1024 * 1024
+} else {
+	512 * 1024
+};
+
+/// The deepest formula the limit allows, 64 levels, evaluates on a small
+/// stack, and one level more is refused.
+#[test]
+fn nested_calls_evaluate_up_to_64_levels_on_a_small_stack_and_are_refused_past_it() {
+	let budget = fixture("all-features");
+	let sheet = EnvelopeSheet::compute(&budget, CivilDate::from(today())).unwrap();
+	let (deepest, past) = std::thread::Builder::new()
+		.stack_size(SMALL_STACK)
+		.spawn(move || {
+			let card = |calls| formula_card(&budget, &sheet, nested_sums(calls).as_ref(), today());
+			(
+				card(63).map(|card| card.value),
+				card(64).map(|card| card.value),
+			)
+		})
+		.unwrap()
+		.join()
+		.unwrap();
+	assert_eq!(deepest.unwrap(), FormulaValue::Number(64.0));
+	assert!(matches!(past, Err(CoreError::Invalid(_))));
 }
 
 /// Black-box probes of the clean-room engine (D75) at the edges HyperFormula's

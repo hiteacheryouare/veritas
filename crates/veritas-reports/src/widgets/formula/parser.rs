@@ -229,8 +229,10 @@ fn is_r1c1(word: &str) -> bool {
 		.is_some_and(|digits| digits.bytes().all(|b| b.is_ascii_digit()))
 }
 
-/// Past this depth Veritas refuses rather than risk its stack.
-const MAX_DEPTH: usize = 200;
+/// Past this depth Veritas refuses rather than risk its stack. Real formulas
+/// nest a few levels; 64 matches the settings JSON limit, and the formula
+/// tests evaluate the deepest formula it allows on a small stack.
+const MAX_DEPTH: usize = 64;
 
 /// The tallest tree Veritas keeps, on the same stack budget. A chain of
 /// operators parses in a loop but nests one node per operator, and evaluating
