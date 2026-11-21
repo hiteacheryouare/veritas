@@ -306,11 +306,12 @@ fn months(session: &Session, dump: &Value, today: &str) -> Checked<bool> {
 		.as_object()
 		.ok_or(Stopped(CHECK))?;
 	let (mut cells, mut differ, mut bad_months) = (0usize, 0usize, Vec::new());
+	let (mut only_actual, mut only_veritas) = (0usize, 0usize);
 	for (index, (label, theirs)) in months.iter().enumerate() {
 		let shown = session
 			.budget_month(month(label)?, today.to_owned())
 			.map_err(|_| Stopped(CHECK))?;
-		let before = differ;
+		let before = (differ, only_actual, only_veritas);
 		let mut check = |ours: i64, theirs: &Value| {
 			cells += 1;
 			if *theirs != ours {
@@ -318,9 +319,15 @@ fn months(session: &Session, dump: &Value, today: &str) -> Checked<bool> {
 			}
 		};
 		check(shown.to_budget, &theirs["toBudget"]);
+		let mut ours = BTreeSet::new();
 		for group in &shown.groups {
 			for row in &group.envelopes {
+				ours.insert(row.id.as_str());
 				let category = &theirs["categories"][&row.id];
+				if category.is_null() {
+					only_veritas += 1;
+					continue;
+				}
 				if group.is_income {
 					check(row.spent, &category["received"]);
 				} else {
@@ -330,12 +337,19 @@ fn months(session: &Session, dump: &Value, today: &str) -> Checked<bool> {
 				}
 			}
 		}
-		if differ > before {
+		if let Some(categories) = theirs["categories"].as_object() {
+			only_actual += categories
+				.keys()
+				.filter(|id| !ours.contains(id.as_str()))
+				.count();
+		}
+		if (differ, only_actual, only_veritas) != before {
 			bad_months.push(format!("#{}", index + 1));
 		}
 	}
 	say(&format!(
-		"{CHECK}: {} compared, {} mismatched{}; {cells} cells, {differ} differ",
+		"{CHECK}: {} compared, {} mismatched{}; {cells} cells, {differ} differ; \
+		 categories only in Actual: {only_actual}, only in Veritas: {only_veritas}",
 		months.len(),
 		bad_months.len(),
 		listed(&bad_months)
@@ -345,20 +359,35 @@ fn months(session: &Session, dump: &Value, today: &str) -> Checked<bool> {
 		.accounts()
 		.map_err(|_| Stopped("accounts"))?
 		.accounts;
+	let theirs = dump["computed"]["accounts"]
+		.as_object()
+		.ok_or(Stopped("accounts"))?;
 	let mut differing = Vec::new();
-	let open: Vec<_> = accounts.iter().filter(|a| !a.closed).collect();
-	for (index, account) in open.iter().enumerate() {
-		if dump["computed"]["accounts"][&account.id]["balance"] != account.total {
-			differing.push(format!("#{}", index + 1));
+	let mut missing = 0usize;
+	for (index, account) in accounts.iter().enumerate() {
+		match theirs.get(&account.id) {
+			Some(actual) if actual["balance"] == account.total => {}
+			Some(_) => differing.push(format!("#{}", index + 1)),
+			None => missing += 1,
 		}
 	}
+	let only_actual_accounts = theirs
+		.keys()
+		.filter(|id| !accounts.iter().any(|a| &a.id == *id))
+		.count();
+	let closed = accounts.iter().filter(|a| a.closed).count();
 	say(&format!(
-		"accounts: {} compared, {} differ{}",
-		open.len(),
+		"accounts: {} compared ({closed} closed), {} differ{}; only in Actual: {only_actual_accounts}, only in Veritas: {missing}",
+		accounts.len(),
 		differing.len(),
 		listed(&differing)
 	));
-	Ok(differ == 0 && differing.is_empty())
+	Ok(differ == 0
+		&& only_actual == 0
+		&& only_veritas == 0
+		&& differing.is_empty()
+		&& missing == 0
+		&& only_actual_accounts == 0)
 }
 
 fn listed(items: &[String]) -> String {
@@ -413,13 +442,19 @@ fn widgets(
 				.collect()
 		})
 		.unwrap_or_default();
-	let zero_places = session
+	// D74: a budget whose currency has no decimal places keeps its cells on the
+	// budget scale, so Actual's card code reads it after the register-scale ops.
+	let currency = session
 		.overview()
 		.ok()
 		.and_then(|overview| overview.number_format)
-		.and_then(|format| format.currency)
-		.as_deref()
-		== Some("JPY");
+		.and_then(|format| format.currency);
+	let zero_places = currency.is_some_and(|code| {
+		veritas_ffi::currencies()
+			.unwrap_or_default()
+			.iter()
+			.any(|known| known.code == code && known.decimal_places == 0)
+	});
 	let actuals_zip = if zero_places {
 		let ops = scratch.join("register-scale.ops.json");
 		let scaled = scratch.join("register-scale.zip");

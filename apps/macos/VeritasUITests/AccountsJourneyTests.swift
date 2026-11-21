@@ -36,6 +36,44 @@ final class AccountsJourneyTests: XCTestCase {
 	}
 
 	@MainActor
+	func testTypingPlusAnAmountAfterATransactionsAmountAddsToIt() {
+		// PLAN §10 B2: "The same works in transaction amount fields."
+		let app = openChecking()
+		app.typeKey("n", modifierFlags: .command)
+		let sheet = app.descendants(matching: .any)["sheet.transaction"]
+		XCTAssertTrue(sheet.waitForExistence(timeout: 5))
+		sheet.textFields["transaction.payee"].typeText("Hardware Barn")
+		let entry = sheet.textFields["amountField"]
+		entry.click()
+		entry.typeKey("a", modifierFlags: .command)
+		entry.typeText("100.00")
+		sheet.buttons["transaction.save"].click()
+		XCTAssertTrue(sheet.waitForDisappearance())
+
+		let row = app.tables["register.table"].staticTexts["Hardware Barn"].firstMatch
+		XCTAssertTrue(row.waitForExistence(timeout: 5))
+		row.doubleClick()
+		XCTAssertTrue(sheet.waitForExistence(timeout: 5))
+		let field = sheet.textFields["amountField"]
+		XCTAssertEqual(field.value as? String, "100.00")
+		field.click()
+		field.typeKey("a", modifierFlags: .command)
+		field.typeText("+12.34")
+		XCTAssertEqual(field.value as? String, "100.00+12.34", "typing + over the amount keeps it")
+		attachScreenshot(of: app, named: "transaction-amount-editing")
+		field.typeKey(.return, modifierFlags: [])
+		if sheet.exists {
+			sheet.buttons["transaction.save"].click()
+		}
+		XCTAssertTrue(sheet.waitForDisappearance())
+
+		row.doubleClick()
+		XCTAssertTrue(sheet.waitForExistence(timeout: 5))
+		XCTAssertEqual(sheet.textFields["amountField"].value as? String, "112.34")
+		sheet.buttons["Cancel"].click()
+	}
+
+	@MainActor
 	func testMovingMoneyOutOfTheBudgetAsksWhatItsFor() {
 		// R-XFER-1, R-XFER-4
 		let app = openChecking()
