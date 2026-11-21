@@ -235,7 +235,7 @@ struct TransferTests {
 		#expect(model.purpose.revival?.categoryId == "old-loan", "the hidden envelope is the one offered")
 		#expect(model.purpose.categoryID == "old-loan")
 		#expect(!model.purpose.canCreateEnvelope, "no New envelope beside it")
-		#expect(TransferPurposeModel.label(model.purpose.revivals[0]) == "Old Loan (hidden)")
+		#expect(TransferPurposeModel.label(model.purpose.revivals[0]) == "Old Loan in Debt (hidden)")
 		#expect(model.purpose.confirmation == .init(
 			title: "Show \"Old Loan\" again and use it?",
 			message: "Its group \"Debt\" is hidden and will be shown again too.",
@@ -273,13 +273,13 @@ struct TransferTests {
 		session.purpose = .ask
 		session.debt = .severalHidden(categories: [
 			Self.hidden("old-car", "Old Car Loan"),
-			Self.hidden("student", "Student Loan Principal", archived: true)
+			Self.hidden("student", "Student Loan Principal", group: "Old Debts", groupHidden: true, archived: true)
 		])
 		let model = await move(to: "brokerage", amount: "50.00")
 		model.purpose.answer = .debt
 		#expect(model.purpose.categoryID == nil, "nothing is picked for the person")
 		#expect(!model.canSave)
-		#expect(model.purpose.revivals.map(TransferPurposeModel.label) == ["Old Car Loan (hidden)", "Student Loan Principal (archived)"])
+		#expect(model.purpose.revivals.map(TransferPurposeModel.label) == ["Old Car Loan in Debt (hidden)", "Student Loan Principal in Old Debts (archived)"], "each names the group the core sends")
 		#expect(model.purpose.canCreateEnvelope)
 		await model.purpose.choose("old-car")
 		#expect(model.purpose.reclassifies == nil, "showing it again changes no kinds")

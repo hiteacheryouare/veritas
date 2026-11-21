@@ -288,9 +288,7 @@ struct TransferPurposeSection: View {
 			)) {
 				Text("Choose an envelope").tag("")
 				ForEach(purpose.revivals, id: \.categoryId) { match in
-					Section(match.groupName) {
-						Text(TransferPurposeModel.label(match)).tag(match.categoryId)
-					}
+					Text(TransferPurposeModel.label(match)).tag(match.categoryId)
 				}
 				ForEach(groups, id: \.self) { group in
 					Section(group) {

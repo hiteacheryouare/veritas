@@ -135,9 +135,9 @@ public final class TransferPurposeModel {
 		}
 	}
 
-	/// "Peter's Loan (hidden)", as the envelope menu lists a revival.
+	/// "Old Car Loan in Debt (hidden)", as the envelope menu lists a revival (CLS-4.1).
 	public static func label(_ match: HiddenCategoryMatch) -> String {
-		"\(match.name) (\(match.archived ? "archived" : "hidden"))"
+		"\(match.name) in \(match.groupName) (\(match.archived ? "archived" : "hidden"))"
 	}
 
 	/// A lone hidden envelope is shown again rather than duplicated. An
