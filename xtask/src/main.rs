@@ -571,13 +571,16 @@ fn perf() -> Result {
 			"small_stack_",
 		],
 	)?;
-	// R-PERF-4 asserts its own budgets; a failure is reported with the benches below.
+	// R-PERF-4 (PLAN line 245: "Typical report ≤ 100 ms; year-long Sankey or forecast ≤ 500 ms")
+	// asserts its own budgets: each report, each card and the default dashboard within 100 ms,
+	// the page with every card within 500 ms. A failure is reported with the benches below.
 	let reports = run(
 		&root,
 		"cargo",
 		&[
 			"test",
 			"--release",
+			"--no-fail-fast",
 			"-p",
 			"veritas-ffi",
 			"--test",
