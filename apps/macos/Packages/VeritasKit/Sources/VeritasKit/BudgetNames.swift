@@ -17,6 +17,9 @@ public struct BudgetNames: Hashable, Sendable {
 
 	public var openAccounts: [AccountDetail] { accounts.filter { !$0.closed } }
 
+	/// How the bill and rule payee pickers list a payee.
+	public func payeeLabel(_ payee: PayeeDetail) -> String { PayeeText(payee).label }
+
 	public func payee(_ id: String?) -> String? { id.flatMap { id in payees.first { $0.id == id }?.name } }
 	public func account(_ id: String?) -> String? { id.flatMap { id in accounts.first { $0.id == id }?.name } }
 	public func categoryGroup(_ id: String?) -> String? { id.flatMap { id in categoryGroups.first { $0.id == id }?.name } }
