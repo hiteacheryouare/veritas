@@ -1,5 +1,4 @@
 import Foundation
-import FoundationModels
 import VeritasCore
 
 /// The tools the on-device model can call. Each reads through
@@ -7,7 +6,7 @@ import VeritasCore
 /// already formatted the way the matching screen formats them, so the model
 /// never does money arithmetic.
 public enum AssistantTools {
-	public static func all(_ context: AssistantContext) -> [any Tool] {
+	public static func all(_ context: AssistantContext) -> [any AssistantTool] {
 		[
 			NetProfitTool(context: context),
 			BudgetMonthTool(context: context),
@@ -22,6 +21,49 @@ public enum AssistantTools {
 
 	static let maximumMonths = 24
 	static let monthHint = "Ask again with months written as YYYY-MM."
+}
+
+/// A read the model can ask for. The AI plug-in describes it to the model and
+/// hands back the arguments the model filled in.
+public protocol AssistantTool: Sendable {
+	var name: String { get }
+	var description: String { get }
+	var arguments: [AssistantToolArgument] { get }
+	func run(_ input: AssistantToolInput) async throws -> String
+}
+
+public struct AssistantToolArgument: Hashable, Sendable {
+	public enum Kind: Hashable, Sendable {
+		case text
+		case integer(ClosedRange<Int>)
+	}
+
+	public let name: String
+	public let description: String
+	public let kind: Kind
+}
+
+/// The arguments the model filled in. A missing one reads as empty text or 0,
+/// which each tool answers with a hint rather than a read.
+public struct AssistantToolInput: Sendable {
+	public enum Value: Hashable, Sendable {
+		case text(String)
+		case integer(Int)
+	}
+
+	public let values: [String: Value]
+
+	public init(_ values: [String: Value]) {
+		self.values = values
+	}
+
+	func text(_ name: String) -> String {
+		if case .text(let text) = values[name] { text } else { "" }
+	}
+
+	func integer(_ name: String) -> Int {
+		if case .integer(let number) = values[name] { number } else { 0 }
+	}
 }
 
 enum AssistantDates {
@@ -45,17 +87,23 @@ enum AssistantDates {
 	}
 }
 
-struct NetProfitTool: Tool {
+struct NetProfitTool: AssistantTool {
 	let context: AssistantContext
 	let name = "netProfit"
 	let description = "Income, expenses, Net Profit, debt paydown, savings and net cash flow for whole months, with each income and expense category's total."
 
-	@Generable
 	struct Arguments {
-		@Guide(description: "First month, YYYY-MM")
 		var first: String
-		@Guide(description: "Last month, YYYY-MM. Same as first for one month.")
 		var last: String
+	}
+
+	let arguments: [AssistantToolArgument] = [
+		AssistantToolArgument(name: "first", description: "First month, YYYY-MM", kind: .text),
+		AssistantToolArgument(name: "last", description: "Last month, YYYY-MM. Same as first for one month.", kind: .text)
+	]
+
+	func run(_ input: AssistantToolInput) async throws -> String {
+		try await call(arguments: Arguments(first: input.text("first"), last: input.text("last")))
 	}
 
 	func call(arguments: Arguments) async throws -> String {
@@ -92,15 +140,21 @@ struct NetProfitTool: Tool {
 	}
 }
 
-struct BudgetMonthTool: Tool {
+struct BudgetMonthTool: AssistantTool {
 	let context: AssistantContext
 	let name = "budgetMonth"
 	let description = "One month of the envelope budget: To Budget, and each envelope's budgeted, spent and available amounts."
 
-	@Generable
 	struct Arguments {
-		@Guide(description: "Month, YYYY-MM")
 		var month: String
+	}
+
+	let arguments: [AssistantToolArgument] = [
+		AssistantToolArgument(name: "month", description: "Month, YYYY-MM", kind: .text)
+	]
+
+	func run(_ input: AssistantToolInput) async throws -> String {
+		try await call(arguments: Arguments(month: input.text("month")))
 	}
 
 	func call(arguments: Arguments) async throws -> String {
@@ -133,13 +187,18 @@ struct BudgetMonthTool: Tool {
 	}
 }
 
-struct AccountsTool: Tool {
+struct AccountsTool: AssistantTool {
 	let context: AssistantContext
 	let name = "accounts"
 	let description = "Every account with its current balance, group, and whether it is off budget or closed."
 
-	@Generable
 	struct Arguments {}
+
+	let arguments: [AssistantToolArgument] = []
+
+	func run(_ input: AssistantToolInput) async throws -> String {
+		try await call(arguments: Arguments())
+	}
 
 	func call(arguments: Arguments) async throws -> String {
 		Self.text(try await context.queries.accounts(), format: context.format)
@@ -170,15 +229,21 @@ enum StatementText {
 	}
 }
 
-struct BalanceSheetTool: Tool {
+struct BalanceSheetTool: AssistantTool {
 	let context: AssistantContext
 	let name = "balanceSheet"
 	let description = "Assets, liabilities and net worth at the end of a day."
 
-	@Generable
 	struct Arguments {
-		@Guide(description: "Date, YYYY-MM-DD. Today's date for now.")
 		var date: String
+	}
+
+	let arguments: [AssistantToolArgument] = [
+		AssistantToolArgument(name: "date", description: "Date, YYYY-MM-DD. Today's date for now.", kind: .text)
+	]
+
+	func run(_ input: AssistantToolInput) async throws -> String {
+		try await call(arguments: Arguments(date: input.text("date")))
 	}
 
 	func call(arguments: Arguments) async throws -> String {
@@ -189,17 +254,23 @@ struct BalanceSheetTool: Tool {
 	}
 }
 
-struct CashFlowTool: Tool {
+struct CashFlowTool: AssistantTool {
 	let context: AssistantContext
 	let name = "cashFlow"
 	let description = "The cash flow statement for whole months: opening and closing budget account balances, Net Profit, debt paydown and savings."
 
-	@Generable
 	struct Arguments {
-		@Guide(description: "First month, YYYY-MM")
 		var first: String
-		@Guide(description: "Last month, YYYY-MM. Same as first for one month.")
 		var last: String
+	}
+
+	let arguments: [AssistantToolArgument] = [
+		AssistantToolArgument(name: "first", description: "First month, YYYY-MM", kind: .text),
+		AssistantToolArgument(name: "last", description: "Last month, YYYY-MM. Same as first for one month.", kind: .text)
+	]
+
+	func run(_ input: AssistantToolInput) async throws -> String {
+		try await call(arguments: Arguments(first: input.text("first"), last: input.text("last")))
 	}
 
 	func call(arguments: Arguments) async throws -> String {
@@ -209,13 +280,18 @@ struct CashFlowTool: Tool {
 	}
 }
 
-struct GoalsTool: Tool {
+struct GoalsTool: AssistantTool {
 	let context: AssistantContext
 	let name = "goals"
 	let description = "Every savings goal: progress toward its target, target date, pace, and closed or reached goals."
 
-	@Generable
 	struct Arguments {}
+
+	let arguments: [AssistantToolArgument] = []
+
+	func run(_ input: AssistantToolInput) async throws -> String {
+		try await call(arguments: Arguments())
+	}
 
 	func call(arguments: Arguments) async throws -> String {
 		Self.text(try await context.queries.goals(today: context.today), format: context.format)
@@ -272,15 +348,21 @@ struct GoalsTool: Tool {
 	}
 }
 
-struct TaxSummaryTool: Tool {
+struct TaxSummaryTool: AssistantTool {
 	let context: AssistantContext
 	let name = "taxSummary"
 	let description = "One calendar year's tax buckets, such as W-2 income, charitable giving and medical, each with its total."
 
-	@Generable
 	struct Arguments {
-		@Guide(description: "Calendar year, such as 2026", .range(1900...2200))
 		var year: Int
+	}
+
+	let arguments: [AssistantToolArgument] = [
+		AssistantToolArgument(name: "year", description: "Calendar year, such as 2026", kind: .integer(1900...2200))
+	]
+
+	func run(_ input: AssistantToolInput) async throws -> String {
+		try await call(arguments: Arguments(year: input.integer("year")))
 	}
 
 	func call(arguments: Arguments) async throws -> String {
@@ -299,15 +381,21 @@ struct TaxSummaryTool: Tool {
 	}
 }
 
-struct SavedReportTool: Tool {
+struct SavedReportTool: AssistantTool {
 	let context: AssistantContext
 	let name = "savedReport"
 	let description = "A custom report saved in the budget, by name. With a name that matches none, lists the saved reports."
 
-	@Generable
 	struct Arguments {
-		@Guide(description: "The saved report's name")
 		var name: String
+	}
+
+	let arguments: [AssistantToolArgument] = [
+		AssistantToolArgument(name: "name", description: "The saved report's name", kind: .text)
+	]
+
+	func run(_ input: AssistantToolInput) async throws -> String {
+		try await call(arguments: Arguments(name: input.text("name")))
 	}
 
 	func call(arguments: Arguments) async throws -> String {

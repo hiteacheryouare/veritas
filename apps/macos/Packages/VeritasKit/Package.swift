@@ -11,13 +11,16 @@ let package = Package(
 		.library(name: "VeritasKit", targets: ["VeritasKit"]),
 		.library(name: "VeritasDesign", targets: ["VeritasDesign"])
 	],
+	dependencies: [
+		.package(path: "../VeritasAI")
+	],
 	targets: [
 		.binaryTarget(name: "VeritasCoreFFI", path: "VeritasCoreFFI.xcframework"),
 		.target(name: "VeritasCore", dependencies: ["VeritasCoreFFI"]),
-		.target(name: "VeritasKit", dependencies: ["VeritasCore"]),
+		.target(name: "VeritasKit", dependencies: ["VeritasCore", .product(name: "VeritasAIBridge", package: "VeritasAI")]),
 		.target(name: "VeritasDesign"),
 		.testTarget(name: "VeritasCoreTests", dependencies: ["VeritasCore"]),
-		.testTarget(name: "VeritasKitTests", dependencies: ["VeritasKit", "VeritasCore"]),
+		.testTarget(name: "VeritasKitTests", dependencies: ["VeritasKit", "VeritasCore", .product(name: "VeritasAIBridge", package: "VeritasAI")]),
 		.testTarget(name: "VeritasDesignTests", dependencies: ["VeritasDesign"])
 	]
 )

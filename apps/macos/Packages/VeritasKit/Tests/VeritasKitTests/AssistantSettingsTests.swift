@@ -1,5 +1,4 @@
 import Foundation
-import FoundationModels
 import Synchronization
 import Testing
 import VeritasCore
@@ -94,8 +93,6 @@ struct AssistantSettingsTests {
 
 	@Test func failuresReadAsPlainSentences() {
 		#expect(AssistantFailure(AssistantFailure(message: "Kept.")).message == "Kept.")
-		let tool = LanguageModelSession.ToolCallError(tool: AccountsTool(context: AssistantContext(queries: RecordingQueries(), format: MoneyFormat(), today: "2026-11-17")), underlyingError: FfiError.Io(message: "The disk is full."))
-		#expect(AssistantFailure(tool).message == "Couldn't read the budget. The disk is full.")
 	}
 }
 
@@ -121,24 +118,5 @@ final class SwitchableAvailability: AssistantAvailabilityChecking {
 
 	func set(_ availability: AssistantAvailability) {
 		current.withLock { $0 = availability }
-	}
-}
-
-/// Runs only where Apple Intelligence is on and its model is downloaded.
-@MainActor
-@Suite(.enabled(if: SystemLanguageModel.default.isAvailable, "needs the on-device model"))
-struct AssistantModelTests {
-	@Test func theModelAnswersFromTheToolsAndChangesNothing() async throws {
-		try await RealBudget.with { budget in
-			let before = try budget.transactionRows()
-			let context = AssistantContext(queries: try #require(budget.workspace.readOnlyQueries), format: budget.workspace.format, today: "2026-11-17")
-			let assistant = FoundationModelsAssistant(context: context)
-			var answer = ""
-			for try await partial in assistant.answer("What was my Net Profit in October 2026?") {
-				answer = partial
-			}
-			#expect(!answer.isEmpty)
-			#expect(try budget.transactionRows() == before)
-		}
 	}
 }
