@@ -558,7 +558,7 @@ const COLD_REPORTS: [(&str, f64); 7] = [
 /// on a 512 KiB stack like Swift's secondary threads.
 fn perf() -> Result {
 	let root = root();
-	run(
+	let stack = run(
 		&root,
 		"cargo",
 		&[
@@ -570,7 +570,7 @@ fn perf() -> Result {
 			"formula",
 			"small_stack_",
 		],
-	)?;
+	);
 	// R-PERF-4 (PLAN line 245: "Typical report ≤ 100 ms; year-long Sankey or forecast ≤ 500 ms")
 	// asserts its own budgets: each report, each card and the default dashboard within 100 ms,
 	// the page with every card within 500 ms. A failure is reported with the benches below.
@@ -639,6 +639,12 @@ fn perf() -> Result {
 		std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| root.join("target"), PathBuf::from);
 	let medians = criterion_medians(&target.join("criterion"));
 	let mut over = Vec::new();
+	if stack.is_err() {
+		over.push(
+			"formula stack margin: a small_stack_ test failed in release (see its output above)"
+				.to_owned(),
+		);
+	}
 	if reports.is_err() {
 		over.push(
 			"R-PERF-4: reports_perf or dashboard_perf is over budget (see its output above)"
