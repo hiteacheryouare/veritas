@@ -11,16 +11,31 @@ use veritas_domain::{
 /// own amounts, so a projection never starts from an absurd number.
 const MAX_AMOUNT: i64 = (1 << 51) - 1;
 
+/// A new what-if, with its first event when one is given (v17). The event is
+/// checked as `add_scenario_event` checks one, and a refused event refuses
+/// the whole command, so "Add what-if" is one undo step that leaves nothing
+/// behind when it fails.
 pub fn create_scenario(
 	data: &BudgetData,
 	id: ScenarioId,
 	name: &str,
 	created_at: i64,
+	first_event: Option<(ScenarioEventId, ScenarioChange, CivilDate)>,
 ) -> Result<Vec<Row>, CoreError> {
 	if data.scenarios.contains_key(&id) {
 		return Err(CoreError::Invalid(format!("what-if {id} already exists")));
 	}
 	let name = scenario_name(data, None, name)?;
+	let events = match first_event {
+		Some((event_id, change, today)) => {
+			check_change(data, &change, today)?;
+			vec![ScenarioEvent {
+				id: event_id,
+				change,
+			}]
+		}
+		None => Vec::new(),
+	};
 	let sort_order = data
 		.scenarios
 		.values()
@@ -32,7 +47,7 @@ pub fn create_scenario(
 		name,
 		sort_order,
 		created_at,
-		events: Vec::new(),
+		events,
 	})])
 }
 

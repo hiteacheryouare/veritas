@@ -57,6 +57,10 @@ extension BudgetSession {
 	func balanceSheet(asOf: String) async throws -> BalanceSheet { throw FfiError.Invalid(message: "no balance sheet in this fake") }
 	func ownersEquity(first: String, last: String) async throws -> OwnersEquity { throw FfiError.Invalid(message: "no owner's equity in this fake") }
 	func taxSummary(year: Int32) async throws -> TaxSummary { throw FfiError.Invalid(message: "no tax summary in this fake") }
+	func forecast(today: String, scenarioIDs: [String]) async throws -> Forecast { throw FfiError.Invalid(message: "no forecast in this fake") }
+	func budgetSuggestions(today: String) async throws -> SuggestionList { throw FfiError.Invalid(message: "no suggestions in this fake") }
+	func scenarios(today: String) async throws -> [ScenarioSummary] { [] }
+	func createScenario(named name: String, firstEvent: ScenarioChange?, today: String) async throws -> String { "" }
 	var canPlanTransfers: Bool { false }
 	func transferPreview(from: String, to: String, amount: Int64) async throws -> TransferPreview { throw FfiError.Cancelled }
 	func kindTarget(_ kind: CategoryKind) async throws -> KindTarget { .none }

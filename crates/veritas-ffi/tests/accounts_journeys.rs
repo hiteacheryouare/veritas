@@ -2331,6 +2331,8 @@ fn insights_calls_pin_the_shells_local_date_too() {
 			&session,
 			Command::CreateScenario {
 				name: "Pinned".to_owned(),
+				first_event: None,
+				today: None,
 			},
 		),
 		EntityKind::Scenario,
