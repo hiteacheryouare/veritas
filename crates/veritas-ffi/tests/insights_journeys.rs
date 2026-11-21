@@ -472,6 +472,109 @@ fn wrapped_years_lists_exactly_the_years_with_data_and_pins_today() {
 	assert!(!savings.is_empty());
 }
 
+#[test]
+fn a_goal_icon_is_a_symbol_name_or_one_emoji_in_create_and_in_set() {
+	// The Architect's v18 call: Ryan asked for icons or emojis, so a goal's
+	// icon is an SF Symbol name (ASCII a-z, 0-9 and dots, 1 to 64, no dot at
+	// either end) or one emoji of up to 35 bytes, checked the same way when
+	// the goal is made and when its icon changes.
+	let (_scratch, session) = fresh("goal-icon-kinds", "USD");
+	let create = |name: &str, icon: Option<&str>| {
+		session.perform(Command::CreateGoal {
+			name: name.to_owned(),
+			target: 50_000,
+			target_date: None,
+			icon: icon.map(str::to_owned),
+			color: None,
+		})
+	};
+	let goals = || session.goals(TODAY.to_owned()).unwrap().goals;
+	let icon_of = |id: &str| goals().into_iter().find(|goal| goal.id == id).unwrap().icon;
+
+	let laptop = create("New laptop", Some("laptopcomputer"))
+		.unwrap()
+		.entities
+		.into_iter()
+		.find(|entity| entity.kind == veritas_ffi::EntityKind::Goal)
+		.and_then(|entity| entity.id)
+		.unwrap();
+	assert_eq!(
+		icon_of(&laptop).as_deref(),
+		Some("laptopcomputer"),
+		"the Mac sheet's symbol names keep working"
+	);
+	for refused in ["Laptop", "car fill", ".car", "🎯🎯"] {
+		assert!(
+			matches!(
+				create("Refused", Some(refused)),
+				Err(FfiError::Invalid { .. })
+			),
+			"{refused:?}"
+		);
+	}
+	assert_eq!(
+		goals().len(),
+		1,
+		"a refused icon makes no goal and no envelope"
+	);
+	assert!(
+		session
+			.budget_month(NOVEMBER, TODAY.to_owned())
+			.unwrap()
+			.groups
+			.iter()
+			.flat_map(|group| &group.envelopes)
+			.all(|envelope| envelope.name != "Refused")
+	);
+	let blank = create("Bike", Some(""))
+		.unwrap()
+		.entities
+		.into_iter()
+		.find(|entity| entity.kind == veritas_ffi::EntityKind::Goal)
+		.and_then(|entity| entity.id)
+		.unwrap();
+	assert_eq!(icon_of(&blank), None, "empty is no icon");
+
+	let longest_name = "a".repeat(64);
+	let family_of_three = "👨‍👩‍👧";
+	let england = "🏴\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}";
+	assert_eq!((family_of_three.len(), england.len()), (18, 28));
+	for accepted in [
+		"car.fill",
+		longest_name.as_str(),
+		family_of_three,
+		england,
+		"👩🏻‍❤️‍💋‍👨🏼",
+	] {
+		perform(
+			&session,
+			Command::SetGoalIcon {
+				goal_id: laptop.clone(),
+				icon: Some(accepted.to_owned()),
+			},
+		);
+		assert_eq!(icon_of(&laptop).as_deref(), Some(accepted));
+	}
+	for refused in [
+		"a".repeat(65),
+		"🧑‍🧑‍🧑‍🧑‍🧑‍🧑".to_owned(),
+		"car.".to_owned(),
+		"Car".to_owned(),
+	] {
+		assert!(
+			matches!(
+				session.perform(Command::SetGoalIcon {
+					goal_id: laptop.clone(),
+					icon: Some(refused.clone()),
+				}),
+				Err(FfiError::Invalid { .. })
+			),
+			"{refused:?}"
+		);
+	}
+	assert_eq!(icon_of(&laptop).as_deref(), Some("👩🏻‍❤️‍💋‍👨🏼"));
+}
+
 fn actual_tables(dump: &Value) -> Value {
 	let mut dump = dump.clone();
 	if let Some(tables) = dump["tables"].as_object_mut() {
@@ -481,7 +584,7 @@ fn actual_tables(dump: &Value) -> Value {
 }
 
 #[test]
-fn a_goal_icon_is_one_emoji_one_undo_step_and_never_reaches_actuals_tables() {
+fn a_goal_icon_is_one_undo_step_and_never_reaches_actuals_tables() {
 	let (scratch, session) = fresh("goal-icon", "USD");
 	let goal = created_id(
 		&session,
@@ -528,8 +631,9 @@ fn a_goal_icon_is_one_emoji_one_undo_step_and_never_reaches_actuals_tables() {
 		month_before,
 		"an icon moves no money"
 	);
-	for refused in ["ab", "🎯🎯", "✈️ ", "laptopcomputer", "👨‍👩‍👧", "🇯", "1"]
-	{
+	for refused in [
+		"ab🎯", "🎯🎯", "✈️ ", "Laptop", ".car", "car.", "car fill", "🇯",
+	] {
 		assert!(
 			matches!(set(&session, Some(refused)), Err(FfiError::Invalid { .. })),
 			"{refused:?}"

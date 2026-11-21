@@ -131,8 +131,9 @@ pub enum Command {
 		hidden: bool,
 	},
 	/// A goal as a new envelope at the top of the Goals group, created if the
-	/// budget has none. `target_date` is `YYYY-MM-DD`. The goal's id comes back
-	/// in the `Change` (R-GOAL-1, D36).
+	/// budget has none. `target_date` is `YYYY-MM-DD`; `icon` is checked as
+	/// `SetGoalIcon` checks it (v18). The goal's id comes back in the `Change`
+	/// (R-GOAL-1, D36).
 	CreateGoal {
 		name: String,
 		target: i64,
@@ -165,7 +166,7 @@ pub enum Command {
 		target: i64,
 		target_date: Option<String>,
 	},
-	/// v18: the goal's icon, exactly one emoji of at most 16 bytes, kept only
+	/// v18: the goal's icon, an SF Symbol name or exactly one emoji, kept only
 	/// in Veritas's goal table; `None` or empty clears it. Moves no money.
 	SetGoalIcon {
 		goal_id: String,

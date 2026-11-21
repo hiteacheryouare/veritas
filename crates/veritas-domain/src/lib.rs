@@ -28,4 +28,7 @@ pub use money::Money;
 pub use new_budget::{LoanTerms, NewAccount, NewAccountKind, NewBudget, NumberFormat, NumberStyle};
 pub use scenario::{Cadence, IncomeDelta, Scenario, ScenarioChange, ScenarioEvent};
 pub use store::{Store, StoreTransaction};
-pub use text::{MAX_EMOJI_BYTES, is_js_whitespace, is_single_emoji};
+pub use text::{
+	MAX_EMOJI_BYTES, MAX_SYMBOL_CHARS, is_goal_icon, is_js_whitespace, is_single_emoji,
+	is_symbol_name,
+};

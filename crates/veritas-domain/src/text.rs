@@ -12,8 +12,29 @@ pub fn is_js_whitespace(c: char) -> bool {
 	)
 }
 
-/// The longest icon a goal may carry, in UTF-8 bytes.
-pub const MAX_EMOJI_BYTES: usize = 16;
+/// The longest emoji a goal icon may be, in UTF-8 bytes: room for every
+/// RGI emoji, the longest being a kiss with two skin tones (35).
+pub const MAX_EMOJI_BYTES: usize = 35;
+
+/// The longest SF Symbol name a goal icon may be.
+pub const MAX_SYMBOL_CHARS: usize = 64;
+
+/// A goal's icon: an SF Symbol name or exactly one emoji. ASCII means a
+/// symbol name, anything else an emoji.
+pub fn is_goal_icon(text: &str) -> bool {
+	is_symbol_name(text) || is_single_emoji(text)
+}
+
+/// An SF Symbol name: 1 to 64 of `a-z`, `0-9` and `.`, not starting or
+/// ending with `.`.
+pub fn is_symbol_name(text: &str) -> bool {
+	(1..=MAX_SYMBOL_CHARS).contains(&text.len())
+		&& text
+			.bytes()
+			.all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'.')
+		&& !text.starts_with('.')
+		&& !text.ends_with('.')
+}
 
 /// Whether `text` is one emoji: a flag (two regional indicators), a keycap,
 /// or pictographs with their variation selectors, skin tones and tags joined
@@ -83,10 +104,14 @@ fn is_pictographic(c: char) -> bool {
 
 #[cfg(test)]
 mod tests {
-	use super::{is_js_whitespace, is_single_emoji};
+	use super::{is_goal_icon, is_js_whitespace, is_single_emoji, is_symbol_name};
+
+	const FAMILY_OF_THREE: &str = "👨‍👩‍👧";
+	const ENGLAND: &str = "🏴\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}";
+	const KISS_WITH_SKIN_TONES: &str = "👩🏻‍❤️‍💋‍👨🏼";
 
 	#[test]
-	fn one_emoji_of_any_shape_up_to_16_bytes_and_nothing_else() {
+	fn one_emoji_of_any_shape_up_to_35_bytes_and_nothing_else() {
 		for emoji in [
 			"🎯",
 			"💻",
@@ -100,6 +125,9 @@ mod tests {
 			"👩🏽‍💻",
 			"🏳️‍🌈",
 			"©",
+			FAMILY_OF_THREE,
+			ENGLAND,
+			KISS_WITH_SKIN_TONES,
 		] {
 			assert!(is_single_emoji(emoji), "{emoji}");
 		}
@@ -127,11 +155,52 @@ mod tests {
 		] {
 			assert!(!is_single_emoji(not_one), "{not_one:?}");
 		}
-		assert_eq!("👨‍👩‍👧".len(), 18);
-		assert!(!is_single_emoji("👨‍👩‍👧"), "one grapheme, but past 16 bytes");
-		assert!(!is_single_emoji(
-			"🏴\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}"
-		));
+		assert_eq!(
+			(
+				FAMILY_OF_THREE.len(),
+				ENGLAND.len(),
+				KISS_WITH_SKIN_TONES.len()
+			),
+			(18, 28, 35)
+		);
+		let six = "🧑‍🧑‍🧑‍🧑‍🧑‍🧑";
+		assert_eq!(six.len(), 39);
+		assert!(!is_single_emoji(six), "one grapheme, but past 35 bytes");
+	}
+
+	#[test]
+	fn a_goal_icon_is_a_symbol_name_or_one_emoji() {
+		for name in [
+			"laptopcomputer",
+			"car.fill",
+			"graduationcap",
+			"1",
+			"airplane.circle.fill",
+		] {
+			assert!(is_symbol_name(name) && is_goal_icon(name), "{name}");
+		}
+		let longest = "a".repeat(64);
+		assert!(is_goal_icon(&longest));
+		for not_a_name in [
+			"",
+			"Laptop",
+			".car",
+			"car.",
+			".",
+			"car fill",
+			"car-fill",
+			"car_fill",
+			"café",
+			&"a".repeat(65),
+		] {
+			assert!(!is_symbol_name(not_a_name), "{not_a_name:?}");
+		}
+		for emoji in ["🎯", FAMILY_OF_THREE, ENGLAND] {
+			assert!(is_goal_icon(emoji) && !is_symbol_name(emoji), "{emoji}");
+		}
+		for neither in ["", "ab🎯", "🎯🎯", "Car", "car ", " ", "🎯car"] {
+			assert!(!is_goal_icon(neither), "{neither:?}");
+		}
 	}
 
 	#[test]
