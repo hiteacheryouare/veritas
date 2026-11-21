@@ -293,7 +293,7 @@ final class StubReports: @unchecked Sendable {
 		let intervals = months.enumerated().map { index, month in
 			CustomReportInterval(
 				interval: cell(month, groups.reduce(0) { $0 + $1.intervals[index].amount }),
-				stacked: groups.map { StackedAmount(key: $0.id, amount: $0.intervals[index].amount) }
+				stacked: groups.map { StackedAmount(key: $0.id, amount: $0.intervals[index].amount) } + [StackedAmount(key: Self.emptyCategoryID, amount: 0)]
 			)
 		}
 		return CustomReportView(
@@ -302,6 +302,10 @@ final class StubReports: @unchecked Sendable {
 			problem: nil
 		)
 	}
+
+	/// Actual's intervals stack every category, the empty and hidden ones at
+	/// zero, though only the report's groups are drawn.
+	static let emptyCategoryID = "5b9c3f1e-7d2a-4c8b-9e61-0a4f2d7c3b18"
 
 	static func settings(id: String, name: String, groupBy: ReportGrouping, totalMode: Bool, graph: String) -> CustomReportSettings {
 		CustomReportSettings(

@@ -86,6 +86,9 @@ struct TaxScreen: View {
 			}
 			ToolbarItem(placement: .primaryAction) {
 				Menu {
+					Button("PDF…") { Task { await TaxExportPanel.runPDF(for: model, workspace: workspace) } }
+						.disabled(model.document == nil)
+						.accessibilityIdentifier("tax.export.pdf")
 					Button("Summary CSV…") { Task { await TaxExportPanel.run(.summary, for: model) } }
 						.accessibilityIdentifier("tax.export.summary")
 					Button("Detail CSV…") { Task { await TaxExportPanel.run(.detail, for: model) } }
