@@ -5,6 +5,9 @@ import VeritasKit
 struct WorkspaceView: View {
 	@Bindable var model: WorkspaceModel
 	@State private var paletteChoice: PaletteItem?
+	@Environment(AssistantSettings.self) private var assistant: AssistantSettings?
+
+	private var offersAssistant: Bool { assistant?.offersPanel ?? false }
 
 	var body: some View {
 		NavigationSplitView {
@@ -75,7 +78,17 @@ struct WorkspaceView: View {
 					}
 				}
 				.navigationTitle(model.title(of: model.destination))
-				.toolbar { WorkspaceToolbar(model: model) }
+				.toolbar { WorkspaceToolbar(model: model, offersAssistant: offersAssistant) }
+				.inspector(isPresented: Binding(get: { offersAssistant && model.isAssistantShown }, set: { model.isAssistantShown = $0 })) {
+					if let assistant {
+						AssistantInspector(workspace: model, settings: assistant)
+							.id(model.overview?.directory)
+							.inspectorColumnWidth(min: 260, ideal: 320, max: 480)
+					}
+				}
+				.onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+					assistant?.refresh()
+				}
 		}
 		.sheet(isPresented: $model.isPaletteShown, onDismiss: activatePaletteChoice) {
 			CommandPaletteView(index: model.paletteIndex, format: model.format) { item in

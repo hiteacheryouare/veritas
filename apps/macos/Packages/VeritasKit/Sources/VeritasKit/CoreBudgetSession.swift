@@ -146,9 +146,9 @@ final class CoreBudgetSession: BudgetSession {
 		return try await Core.run { try session.budgetMonth(month: month, today: today) }
 	}
 
-	func goals(today: String) async throws -> [GoalSummary] {
+	func goals(today: String) async throws -> GoalList {
 		let session = session
-		return try await Core.run { try session.goals(today: today).goals }
+		return try await Core.run { try session.goals(today: today) }
 	}
 
 	func goalClosePreview(_ goalID: String, releaseTo: String?, today: String) async throws -> GoalClosePreview {

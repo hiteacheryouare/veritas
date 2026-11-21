@@ -29,6 +29,7 @@ public final class WorkspaceModel {
 	public var newBudgetSetup: NewBudgetSetup?
 	public var isPaletteShown = false
 	public var isFindShown = false
+	public var isAssistantShown = false
 	public var isDense = false
 	public var showsHiddenEnvelopes = false
 	/// The budget's own format once the core reports it, else the Mac's.
@@ -160,7 +161,7 @@ public final class WorkspaceModel {
 	public func goals() async -> [GoalSummary] {
 		guard let session else { return [] }
 		do {
-			return try await session.goals(today: Self.today())
+			return try await session.goals(today: Self.today()).goals
 		} catch {
 			present(error, isRefresh: true)
 			return []
@@ -246,6 +247,11 @@ public final class WorkspaceModel {
 		return overview?.accounts.first { !$0.isInactive }?.id ?? ""
 	}
 
+	/// The open budget's reads for the assistant, with no way to write.
+	public var readOnlyQueries: (any ReadOnlyBudgetQueries)? {
+		session.map(BudgetSessionQueries.init)
+	}
+
 	/// The budget currency's decimal places (D63): budget cells and goal
 	/// amounts use them; the register always uses two. They arrive with the
 	/// overview, so they are never another budget's.
@@ -259,7 +265,7 @@ public final class WorkspaceModel {
 	/// `BudgetMonth.mixedScaleNote`.
 	public var mixedScaleNote: String? {
 		phase == .open && budgetDecimalPlaces == 0
-			? "Spending is recorded at 2 places and budgets at 0, so these numbers mix both, as in Actual."
+			? MoneyFormat.mixedScaleNote
 			: nil
 	}
 
