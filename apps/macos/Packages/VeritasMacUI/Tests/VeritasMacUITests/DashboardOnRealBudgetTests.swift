@@ -1,5 +1,4 @@
 import AppKit
-import Vision
 import SQLite3
 import SwiftUI
 import Testing
@@ -8,7 +7,7 @@ import VeritasKit
 @testable import VeritasMacUI
 
 /// The dashboard as drawn, on fixtures/synthetic/all-features through the
-/// real core, read back from the accessibility tree.
+/// real core, read back with `DrawnText`.
 @MainActor
 struct DashboardOnRealBudgetTests {
 	static let mainPage = "48f79e8a-0a29-4f3c-a7a3-9c04110766ad"
@@ -33,7 +32,7 @@ struct DashboardOnRealBudgetTests {
 				let card = try #require(model.sheet?.cards.first { $0.id == id })
 				#expect(card.summaryFigure == .undefined, "\(id): the core's non-finite result arrives as an undefined figure")
 			}
-			let texts = try await Self.texts(in: DashboardScreen(workspace: workspace, model: model), size: CGSize(width: 900, height: 360))
+			let texts = try DrawnText.texts(in: Self.grid(model), size: CGSize(width: 900, height: 360))
 			#expect(texts.contains("Share of nothing") && texts.contains("Nothing of nothing"), "both cards are drawn: \(texts)")
 			let figure = texts.filter { $0.contains("%") || $0.contains("∞") || $0.contains("NaN") }
 			#expect(figure.isEmpty, "\(figure)")
@@ -47,7 +46,8 @@ struct DashboardOnRealBudgetTests {
 			await model.load()
 			await model.startNew()
 			#expect(model.preview != nil, "\(model.previewProblem ?? "")")
-			let texts = try await Self.texts(in: CustomReportsScreen(workspace: workspace, model: model), size: CGSize(width: 1200, height: 820))
+			let shown = try #require(model.shown, "the editor shows the preview, not \"Couldn't preview\"")
+			let texts = try DrawnText.texts(in: CustomReportDetail(view: shown, format: model.format), size: CGSize(width: 900, height: 600))
 			#expect(!texts.contains { $0.contains("Couldn't preview") }, "\(texts)")
 		}
 	}
@@ -64,7 +64,7 @@ struct DashboardOnRealBudgetTests {
 			let model = DashboardModel(workspace: workspace)
 			await model.load()
 			#expect(Set(model.sheet?.cards.map(\.id) ?? []) == ["fc", "fx", "mc"])
-			let texts = try await Self.texts(in: DashboardScreen(workspace: workspace, model: model), size: CGSize(width: 1100, height: 760))
+			let texts = try DrawnText.texts(in: Self.grid(model), size: CGSize(width: 1100, height: 760))
 			let all = texts.joined(separator: " | ")
 			#expect(all.contains("Balance with scheduled transactions"), "\(all)")
 			#expect(all.contains("Formula error: DIV_BY_ZERO"), "\(all)")
@@ -72,6 +72,12 @@ struct DashboardOnRealBudgetTests {
 			#expect(all.contains("Success rate to age"), "\(all)")
 			#expect(!all.contains("Forecast"), "the card never says Forecast: \(all)")
 		}
+	}
+
+	/// The page's cards as the dashboard lays them out, without the screen's scroll view, which renders only in a window.
+	private static func grid(_ model: DashboardModel) throws -> some View {
+		let sheet = try #require(model.sheet)
+		return DashboardGrid(sheet: sheet, model: model, open: { _ in }, configure: { _ in }, remove: { _ in }).background(.white)
 	}
 
 	/// Opens all-features with `sql` applied to its file first.
@@ -100,26 +106,5 @@ struct DashboardOnRealBudgetTests {
 			throw error
 		}
 		await workspace.closeBudget()
-	}
-
-	/// The text Vision reads off the view as drawn, in light mode.
-	static func texts(in view: some View, size: CGSize) async throws -> [String] {
-		let host = NSHostingView(rootView: view.frame(width: size.width, height: size.height).background(.white))
-		host.frame.size = size
-		let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
-		window.appearance = NSAppearance(named: .aqua)
-		window.contentView = host
-		for _ in 0..<10 {
-			host.layoutSubtreeIfNeeded()
-			try await Task.sleep(for: .milliseconds(20))
-		}
-		let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
-		host.cacheDisplay(in: host.bounds, to: bitmap)
-		let image = try #require(bitmap.cgImage)
-		let request = VNRecognizeTextRequest()
-		request.recognitionLevel = .accurate
-		request.usesLanguageCorrection = false
-		try VNImageRequestHandler(cgImage: image).perform([request])
-		return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }
 	}
 }
