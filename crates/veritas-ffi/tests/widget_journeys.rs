@@ -352,6 +352,7 @@ fn as_actual(view: &WidgetView) -> Option<Value> {
 			"boundedStart": month_text(first), "boundedEnd": month_text(last),
 			"nodes": nodes.iter().map(|node| json!({
 				"key": node.key, "percentageLabel": node.percentage, "color": sankey_color(node.color),
+				"value": node.value,
 			})).collect::<Vec<_>>(),
 			"links": links.iter().map(|link| json!({
 				"source": link.source,
@@ -567,6 +568,7 @@ fn theirs_comparable(kind: &str, result: &Value, today: &str) -> Value {
 			"boundedStart": result["boundedStart"], "boundedEnd": result["boundedEnd"],
 			"nodes": data["nodes"].as_array().unwrap().iter().map(|node| json!({
 				"key": node["key"], "percentageLabel": node["percentageLabel"], "color": node["color"],
+				"value": node["value"],
 			})).collect::<Vec<_>>(),
 			"links": data["links"],
 		}),

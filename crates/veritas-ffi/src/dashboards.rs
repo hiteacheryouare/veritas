@@ -234,6 +234,9 @@ pub struct SankeyCardNode {
 	/// for hidden nodes.
 	pub percentage: String,
 	pub color: SankeyCardColor,
+	/// v18: the amount Actual's graph prints under the node, register scale.
+	#[uniffi(default = 0)]
+	pub value: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -703,6 +706,7 @@ fn sankey_view(card: reports::SankeyCard) -> WidgetView {
 				label: sankey_label(node.label),
 				percentage: node.percentage,
 				color: sankey_color(node.color),
+				value: node.value.minor(),
 			})
 			.collect(),
 		links: card
