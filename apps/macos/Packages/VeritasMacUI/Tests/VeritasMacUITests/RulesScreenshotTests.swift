@@ -68,6 +68,39 @@ struct RulesScreenshotTests {
 		host.layoutSubtreeIfNeeded()
 	}
 
+	/// Removing every split line, then every action, and saving, all while the sheet is drawn.
+	@Test func editorSurvivesRemovingRowsAndSavingWhileShown() async throws {
+		let (_, model) = await model()
+		model.edit(try #require(model.rules.first { $0.id == "costco" }))
+		let lines = try #require(model.editing?.splitLines)
+		closeWhileShown(RuleEditorSheet(model: model)) {
+			for line in lines.reversed() { model.editing?.removeSplitLine(line) }
+		}
+		#expect(model.editing?.splitLines.isEmpty == true)
+		closeWhileShown(RuleEditorSheet(model: model)) { model.editing?.draft.actions.removeAll() }
+		#expect(model.editing?.draft.actions.isEmpty == true)
+
+		model.edit(try #require(model.rules.first { $0.id == "amazon" }))
+		let host = shown(RuleEditorSheet(model: model))
+		#expect(await model.save(), "\(String(describing: model.editing?.problem))")
+		settle(host)
+		#expect(model.editing == nil)
+	}
+
+	private func shown(_ view: some View) -> NSView {
+		let host = NSHostingView(rootView: view)
+		host.frame.size = host.fittingSize
+		let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+		window.contentView = host
+		RunLoop.main.run(until: .now.addingTimeInterval(0.4))
+		return host
+	}
+
+	private func settle(_ host: NSView) {
+		RunLoop.main.run(until: .now.addingTimeInterval(0.4))
+		host.layoutSubtreeIfNeeded()
+	}
+
 	@Test func applyPreviewWithAReconciledRow() async throws {
 		let (_, model) = await model()
 		await model.preview(.saved(ruleId: "amazon"))

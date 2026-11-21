@@ -113,4 +113,40 @@ struct AssistantZeroPlaceTests {
 		#expect(month.components(separatedBy: "\n").first == coreNote, "the note comes before the figures it explains")
 		await workspace.closeBudget()
 	}
+
+	@Test func aYenGoalWithSpendingRecordedSaysSoWithNoFigure() async throws {
+		// D77: in a budget without 2 places, an active goal with spending has no ETA and no needed amount.
+		let budgets = URL.temporaryDirectory.appending(path: "veritas-real-\(UUID().uuidString)", directoryHint: .isDirectory)
+		defer { try? FileManager.default.removeItem(at: budgets) }
+		let workspace = WorkspaceModel(library: CoreBudgetLibrary(budgetsDirectory: budgets), format: MoneyFormat())
+		await workspace.createBudget(NewBudget(
+			name: "Yen", currencyCode: "JPY", numberStyle: .commaDot,
+			accounts: [StartingAccount(name: "Wallet", type: .cash, balance: 10_000_000)],
+			hasRetirementPlan: false, hasHealthSavingsAccount: false
+		))
+		try #require(workspace.phase == .open)
+		let wallet = try #require(workspace.overview?.accounts.first { $0.name == "Wallet" }).id
+
+		let goals = GoalsScreenModel(workspace: workspace)
+		let due = try #require(Calendar.current.date(byAdding: .month, value: 8, to: .now))
+		#expect(await goals.create(name: "Trip", target: 300_000, date: due, icon: nil, color: nil))
+		let trip = try #require(goals.open.first { $0.name == "Trip" })
+		#expect(await workspace.perform(.addTransaction(transaction: TransactionDraft(
+			id: nil, accountId: wallet, date: WorkspaceModel.today(), amount: -500_000, payeeId: nil, payeeName: "Rail pass",
+			categoryId: trip.categoryId, notes: nil, cleared: true, splits: []
+		))))
+
+		let context = AssistantContext(queries: try #require(workspace.readOnlyQueries), format: workspace.format, today: WorkspaceModel.today())
+		let list = try await context.queries.goals(today: context.today)
+		let recorded = try #require(list.goals.first { $0.id == trip.id })
+		#expect(recorded.state == .active)
+		#expect(recorded.pace == .spendingRecorded, "the core's D77 pace")
+		#expect(recorded.suggestedMonthly == nil)
+
+		let text = try await GoalsTool(context: context).call(arguments: .init())
+		let line = try #require(text.components(separatedBy: "\n").first { $0.hasPrefix("Trip: ") })
+		#expect(line.hasSuffix("no ETA, spending recorded"), "\(line)")
+		#expect(!line.contains("needs") && !line.contains("a month"), "no needed figure beside it")
+		await workspace.closeBudget()
+	}
 }
