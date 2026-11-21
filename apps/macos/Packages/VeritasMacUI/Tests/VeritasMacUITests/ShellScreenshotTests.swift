@@ -74,8 +74,8 @@ struct ShellScreenshotTests {
 
 struct SettingsSectionTests {
 	@Test func onlyTheSectionsThatWorkAreShown() {
-		// D69: AI and Tags come back when they work.
-		#expect(SettingsView.Section.allCases.map(\.title) == ["Backups", "Actual", "Appearance"])
+		// D69: Tags comes back when it works. AI shows when the app provides its setting.
+		#expect(SettingsView.Section.allCases.map(\.title) == ["Backups", "Actual", "Appearance", "AI"])
 	}
 }
 

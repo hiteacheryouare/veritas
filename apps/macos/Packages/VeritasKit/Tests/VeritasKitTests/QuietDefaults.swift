@@ -14,7 +14,7 @@ extension BudgetSession {
 	func setRetention(_ retention: Retention) async throws {}
 	func budgetMonth(_ month: Month, today: String) async throws -> BudgetMonth { throw FfiError.Cancelled }
 	func perform(_ command: Command) async throws {}
-	func goals(today: String) async throws -> [GoalSummary] { [] }
+	func goals(today: String) async throws -> GoalList { GoalList(goals: [], mixedScaleNote: nil, zeroPlaces: false) }
 	func goalClosePreview(_ goalID: String, releaseTo: String?, today: String) async throws -> GoalClosePreview {
 		GoalClosePreview(leftover: 0, laterBudget: [], destinationAvailableAfter: 0)
 	}
@@ -60,6 +60,10 @@ extension BudgetSession {
 	func balanceSheet(asOf: String) async throws -> BalanceSheet { throw FfiError.Invalid(message: "no balance sheet in this fake") }
 	func ownersEquity(first: String, last: String) async throws -> OwnersEquity { throw FfiError.Invalid(message: "no owner's equity in this fake") }
 	func taxSummary(year: Int32) async throws -> TaxSummary { throw FfiError.Invalid(message: "no tax summary in this fake") }
+	func forecast(today: String, scenarioIDs: [String]) async throws -> Forecast { throw FfiError.Invalid(message: "no forecast in this fake") }
+	func budgetSuggestions(today: String) async throws -> SuggestionList { throw FfiError.Invalid(message: "no suggestions in this fake") }
+	func scenarios(today: String) async throws -> [ScenarioSummary] { [] }
+	func createScenario(named name: String, firstEvent: ScenarioChange?, today: String) async throws -> String { "" }
 	var canPlanTransfers: Bool { false }
 	func transferPreview(from: String, to: String, amount: Int64) async throws -> TransferPreview { throw FfiError.Cancelled }
 	func kindTarget(_ kind: CategoryKind) async throws -> KindTarget { .none }

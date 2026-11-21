@@ -146,9 +146,9 @@ final class CoreBudgetSession: BudgetSession {
 		return try await Core.run { try session.budgetMonth(month: month, today: today) }
 	}
 
-	func goals(today: String) async throws -> [GoalSummary] {
+	func goals(today: String) async throws -> GoalList {
 		let session = session
-		return try await Core.run { try session.goals(today: today).goals }
+		return try await Core.run { try session.goals(today: today) }
 	}
 
 	func goalClosePreview(_ goalID: String, releaseTo: String?, today: String) async throws -> GoalClosePreview {
@@ -400,6 +400,25 @@ final class CoreBudgetSession: BudgetSession {
 	func taxSummary(year: Int32) async throws -> TaxSummary {
 		let session = session
 		return try await Core.cancellable { try await session.taxSummary(year: year, cancel: $0) }
+	}
+
+	func forecast(today: String, scenarioIDs: [String]) async throws -> Forecast {
+		let session = session
+		return try await Core.cancellable { try await session.forecast(today: today, scenarioIds: scenarioIDs, cancel: $0) }
+	}
+
+	func budgetSuggestions(today: String) async throws -> SuggestionList {
+		let session = session
+		return try await Core.cancellable { try await session.budgetSuggestions(today: today, cancel: $0) }
+	}
+
+	func scenarios(today: String) async throws -> [ScenarioSummary] {
+		let session = session
+		return try await Core.run { try session.scenarios(today: today) }
+	}
+
+	func createScenario(named name: String, firstEvent: ScenarioChange?, today: String) async throws -> String {
+		try await created(.scenario, by: .createScenario(name: name, firstEvent: firstEvent, today: today))
 	}
 
 	/// Runs a command that makes one row and returns that row's id.

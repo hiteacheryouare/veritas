@@ -119,7 +119,7 @@ public protocol BudgetSession: AnyObject, Sendable {
 	/// One user action: one transaction and one undo step.
 	func perform(_ command: Command) async throws
 	/// Every goal, closed ones included, in the core's order.
-	func goals(today: String) async throws -> [GoalSummary]
+	func goals(today: String) async throws -> GoalList
 	/// What closing a goal would move, this month and later (D66).
 	func goalClosePreview(_ goalID: String, releaseTo: String?, today: String) async throws -> GoalClosePreview
 	/// Whether a category has history, which turns delete into Archive (R-BUD-5).
@@ -229,6 +229,16 @@ public protocol BudgetSession: AnyObject, Sendable {
 	func ownersEquity(first: String, last: String) async throws -> OwnersEquity
 	/// One tax year's buckets, detail, conflicts and CSVs (R-REP-8).
 	func taxSummary(year: Int32) async throws -> TaxSummary
+	/// The baseline and up to 3 what-ifs as of `today` (R-FC-1, R-FC-2, R-FC-4).
+	func forecast(today: String, scenarioIDs: [String]) async throws -> Forecast
+	/// Next month's suggestions (R-FC-3).
+	func budgetSuggestions(today: String) async throws -> SuggestionList
+	/// Every what-if in the order it was made, with its events (R-FC-2).
+	func scenarios(today: String) async throws -> [ScenarioSummary]
+	/// Returns the new what-if's id. With `firstEvent`, the what-if and its
+	/// first line are one undo step, and a refused line makes nothing (v17).
+	@discardableResult
+	func createScenario(named name: String, firstEvent: ScenarioChange?, today: String) async throws -> String
 }
 
 /// The budgets in the app's budgets folder: new ones, Actual imports and reopened ones.
