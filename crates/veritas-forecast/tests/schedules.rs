@@ -273,6 +273,47 @@ fn fc_3_overdue_bills_count_now_and_unreadable_schedules_are_reported() {
 	);
 }
 
+#[test]
+fn d2_a_bill_the_forecast_cannot_read_says_so_without_the_word_rule() {
+	let mut book = Book::household();
+	let any = schedule(
+		&mut book,
+		"Any",
+		monthly_on("2026-11-10"),
+		condition("amount", "is", json!(-2000)),
+		Some("Fun"),
+		"2027-02-10",
+	)
+	.rule
+	.clone();
+	book.budget.rules.get_mut(&any).unwrap().conditions_op = ConditionsOp::Or;
+	let gone = schedule(
+		&mut book,
+		"Gone",
+		monthly_on("2026-11-10"),
+		condition("amount", "is", json!(-2000)),
+		Some("Fun"),
+		"2027-02-10",
+	)
+	.rule
+	.clone();
+	book.budget.rules.get_mut(&gone).unwrap().tombstone = true;
+	let result = flows(&book);
+	let reasons: Vec<(String, String)> = result
+		.unforecast
+		.iter()
+		.map(|item| (item.schedule.clone().unwrap().to_string(), item.reason.clone()))
+		.collect();
+	assert_eq!(
+		reasons,
+		[
+			("Any".to_owned(), "it has settings only Actual can apply".to_owned()),
+			("Gone".to_owned(), "its settings are missing".to_owned()),
+		]
+	);
+	assert!(reasons.iter().all(|(_, reason)| !reason.contains("rule")));
+}
+
 fn loan_book() -> Book {
 	let mut book = Book::household();
 	book.opening("CHK", "2026-11-30", 500000);
