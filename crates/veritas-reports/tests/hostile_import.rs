@@ -779,9 +779,9 @@ fn spent_the_minimum() -> support::Book {
 
 #[test]
 fn the_calendar_card_refuses_a_day_spent_at_the_smallest_storable_amount() {
-	// Known bug, left failing: the calendar card takes `.abs()` of a day's
-	// total (calendar.rs:100, 122-123), which overflows on i64::MIN. A debug
-	// build panics; a release build wraps and shows a negative expense.
+	// Found by this harness and fixed in ca2a23f: the calendar card took
+	// `.abs()` of a day's total, which overflows on i64::MIN (a debug build
+	// panicked; a release build wrapped and showed a negative expense).
 	let book = spent_the_minimum();
 	let result = within("calendar, one expense at i64::MIN", move || {
 		calendar(&book.budget, None, today(), 0).map(drop)
@@ -797,8 +797,8 @@ fn the_calendar_card_refuses_a_day_spent_at_the_smallest_storable_amount() {
 
 #[test]
 fn the_age_of_money_card_refuses_a_day_spent_at_the_smallest_storable_amount() {
-	// Known bug, left failing: age of money takes `.abs()` of each expense
-	// (age_of_money.rs:277), the same overflow as the calendar card's.
+	// Found by this harness and fixed in ca2a23f: age of money took `.abs()`
+	// of each expense, the same overflow as the calendar card's.
 	let book = spent_the_minimum();
 	let result = within("age of money, one expense at i64::MIN", move || {
 		age_of_money(&book.budget, None, today()).map(drop)
@@ -810,6 +810,81 @@ fn the_age_of_money_card_refuses_a_day_spent_at_the_smallest_storable_amount() {
 		),
 		"{result:?}"
 	);
+}
+
+/// Two months that each balance, earning, budgeting and spending a little
+/// over 2^62, so each month is sound but the two together pass i64::MAX.
+fn two_months_past_the_limit() -> support::Book {
+	let half = (1_i64 << 62) + 1;
+	let mut book = support::Book::new();
+	book.account("checking", false);
+	book.group("income", true);
+	book.category("salary", "income", None);
+	book.group("bills", false);
+	book.category("rent", "bills", None);
+	for (month, day) in [("2026-10", "03"), ("2026-11", "03")] {
+		book.row(
+			&format!("pay-{month}"),
+			"checking",
+			&format!("{month}-02"),
+			half,
+		)
+		.category = Some(support::cat("salary"));
+		book.row(
+			&format!("rent-{month}"),
+			"checking",
+			&format!("{month}-{day}"),
+			-half,
+		)
+		.category = Some(support::cat("rent"));
+		let ym = veritas_domain::YearMonth::parse(month).unwrap();
+		book.budget.budget_cells.insert(
+			(ym, support::cat("rent")),
+			veritas_domain::BudgetCell {
+				month: ym,
+				category: support::cat("rent"),
+				budgeted: veritas_domain::Money::from_minor(half),
+				carryover: false,
+				goal: None,
+				long_goal: false,
+			},
+		);
+	}
+	book
+}
+
+/// The app's path: the envelope sheet first, then the card. Data past the
+/// integer limit is refused with a typed error there, never drawn as a wrong
+/// number. (The engine's sheet refuses these books itself, so the cards'
+/// own checked arithmetic from fc70664 is a second line behind it.)
+fn sheet_then(
+	budget: &BudgetData,
+	card: impl FnOnce(&BudgetData, &EnvelopeSheet) -> Result<(), CoreError>,
+) -> Result<(), CoreError> {
+	let sheet = EnvelopeSheet::compute(budget, CivilDate::new(2026, 11, 20)?)?;
+	card(budget, &sheet)
+}
+
+#[test]
+fn a_range_past_the_integer_limit_is_refused_before_the_sankey_card_draws_it() {
+	let book = two_months_past_the_limit();
+	let result = within("sankey card, two months past i64::MAX", move || {
+		sheet_then(&book.budget, |budget, sheet| {
+			sankey_card(budget, sheet, None, today(), Some(8)).map(drop)
+		})
+	});
+	assert!(matches!(result, Err(CoreError::Overflow)), "{result:?}");
+}
+
+#[test]
+fn a_range_past_the_integer_limit_is_refused_before_budget_analysis_draws_it() {
+	let book = two_months_past_the_limit();
+	let result = within("budget analysis, two months past i64::MAX", move || {
+		sheet_then(&book.budget, |budget, sheet| {
+			budget_analysis(budget, sheet, None, today()).map(drop)
+		})
+	});
+	assert!(matches!(result, Err(CoreError::Overflow)), "{result:?}");
 }
 
 /// Imports small.zip after `sql` and loads it the way the app does.
