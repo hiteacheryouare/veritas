@@ -17,8 +17,11 @@ enum StubTax {
 	static let summaryHeader = "tax_year,bucket,direction,total_cents,total,transaction_count\n"
 	static let detailHeader = "tax_year,bucket,source,date,account,payee,category,category_status,amount_cents,counted_cents,notes,transaction_id,parent_id\n"
 
-	private static func row(_ id: String, _ date: String, _ bucket: TaxBucket?, tag: Bool = false, _ amount: Int64, _ counted: Int64?, _ category: String) -> TaxDetailRow {
-		TaxDetailRow(transactionId: id, parentId: nil, date: date, bucket: bucket, fromTag: tag, amount: amount, counted: counted, category: category)
+	private static func row(_ id: String, _ date: String, _ bucket: TaxBucket?, tag: Bool = false, _ amount: Int64, _ counted: Int64?, _ category: String, conflicting: [TaxBucket] = []) -> TaxDetailRow {
+		TaxDetailRow(
+			transactionId: id, parentId: nil, date: date, bucket: bucket, fromTag: tag, amount: amount, counted: counted, category: category,
+			accountName: "Checking", payee: "", categoryLabels: nil, notes: "", conflicting: conflicting
+		)
 	}
 
 	static let y2026 = TaxSummary(
@@ -36,7 +39,7 @@ enum StubTax {
 			row("tax-donation-march", "2026-03-14", .charitable, -10_000, 10_000, "Donations"),
 			row("tax-donation-june", "2026-06-02", .charitable, -5_000, 5_000, "Donations"),
 			row("tax-donation-refund", "2026-09-20", .charitable, 2_000, -2_000, "Donations"),
-			row("tax-glasses", "2026-05-22", nil, tag: true, -2_500, nil, "Shopping"),
+			row("tax-glasses", "2026-05-22", nil, tag: true, -2_500, nil, "Shopping", conflicting: [.medical, .education]),
 			row("tax-hsa-january", "2026-01-15", .hsa, tag: true, -20_000, 20_000, "Health savings"),
 			row("tax-hsa-july", "2026-07-15", .hsa, tag: true, -20_000, 20_000, "Health savings"),
 			row("tax-interest-march", "2026-03-31", .interestIncome, 1_240, 1_240, "Interest"),

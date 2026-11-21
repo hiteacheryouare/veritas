@@ -63,14 +63,20 @@ struct StatementsScreen: View {
 				}
 			}
 			ToolbarItem(placement: .primaryAction) {
-				Button {
-					guard let document = model.document else { return }
-					Task { await StatementExport.run(document, period: model.periodFileName, format: model.format, workspace: workspace) }
+				Menu {
+					Button("\(model.kind.documentTitle)…") {
+						guard let document = model.document else { return }
+						Task { await StatementExport.run(document, period: model.periodFileName, format: model.format, workspace: workspace) }
+					}
+					.accessibilityIdentifier("statements.export.current")
+					Button("All four statements…") {
+						Task { await StatementExport.runSet(model, workspace: workspace) }
+					}
+					.accessibilityIdentifier("statements.export.all")
 				} label: {
 					Label("Export PDF", systemImage: "square.and.arrow.up")
 						.labelStyle(.titleAndIcon)
 				}
-				.buttonStyle(.borderedProminent)
 				.disabled(model.document == nil)
 				.accessibilityIdentifier("statements.export")
 			}

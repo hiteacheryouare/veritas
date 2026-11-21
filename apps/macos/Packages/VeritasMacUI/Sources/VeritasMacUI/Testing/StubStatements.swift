@@ -33,8 +33,8 @@ enum StubStatements {
 			],
 			totalAssets: worth.assets,
 			liabilities: [
-				SheetSection(groupId: "credit", groupName: "Credit", accounts: [account("card", "Visa", visa)], total: visa),
-				SheetSection(groupId: "loans", groupName: "Loans", accounts: [account("car-loan", "Car loan", carLoan)], total: carLoan)
+				SheetSection(groupId: "credit", groupName: "Credit", accounts: [account("visa", "Visa", visa)], total: visa),
+				SheetSection(groupId: "loans", groupName: "Loans", accounts: [account("carloan", "Car loan", carLoan)], total: carLoan)
 			],
 			totalLiabilities: worth.liabilities,
 			netWorth: worth.netWorth
@@ -56,6 +56,30 @@ enum StubStatements {
 			netIncome: netIncome, capitalizedTransfers: capitalized, startingBalances: none,
 			reconciliationAdjustments: reconciliation, revaluations: ReportLine(total: revaluation, count: UInt64(months.count)),
 			unpairedTransfers: none, inTransit: none, closing: closing, unexplained: 0
+		)
+	}
+
+	/// Net Profit's column for the months, grouped the way the core groups it.
+	static func incomeStatement(first: String, last: String) throws -> IncomeStatement {
+		guard let from = Month(date: first), let to = Month(date: last) else { throw FfiError.Invalid(message: "\(first) to \(last) isn't a range.") }
+		let column = StubReports.column(ReportPeriod(first: from, last: to).months)
+		func groups(_ categories: [ReportCategory]) -> [StatementGroup] {
+			var groups: [StatementGroup] = []
+			for category in categories {
+				if let index = groups.lastIndex(where: { $0.groupId == category.groupId }) {
+					groups[index].categories.append(category)
+					groups[index].total += category.total
+				} else {
+					groups.append(StatementGroup(groupId: category.groupId, groupName: category.groupName, categories: [category], total: category.total))
+				}
+			}
+			return groups
+		}
+		return IncomeStatement(
+			first: first, last: last,
+			revenue: groups(column.income.categories), totalRevenue: ReportLine(total: column.income.total, count: column.income.count),
+			expenses: groups(column.expenses.categories), totalExpenses: ReportLine(total: column.expenses.total, count: column.expenses.count),
+			netIncome: column.netProfit
 		)
 	}
 
