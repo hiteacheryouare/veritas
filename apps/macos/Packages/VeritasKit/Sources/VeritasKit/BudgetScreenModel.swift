@@ -77,7 +77,7 @@ public final class BudgetScreenModel {
 		loadGeneration += 1
 		let generation = loadGeneration
 		guard let loaded = await workspace.budgetMonth(month) else { return }
-		let openGoals = await workspace.goals().filter(\.isOpen)
+		let openGoals = await workspace.goals().goals.filter(\.isOpen)
 		guard generation == loadGeneration else { return }
 		sheet = loaded
 		month = loaded.month

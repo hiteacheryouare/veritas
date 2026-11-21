@@ -158,13 +158,14 @@ public final class WorkspaceModel {
 		}
 	}
 
-	public func goals() async -> [GoalSummary] {
-		guard let session else { return [] }
+	public func goals() async -> GoalList {
+		let none = GoalList(goals: [], mixedScaleNote: nil, zeroPlaces: false)
+		guard let session else { return none }
 		do {
-			return try await session.goals(today: Self.today()).goals
+			return try await session.goals(today: Self.today())
 		} catch {
 			present(error, isRefresh: true)
-			return []
+			return none
 		}
 	}
 
@@ -257,16 +258,6 @@ public final class WorkspaceModel {
 	/// overview, so they are never another budget's.
 	public var budgetDecimalPlaces: UInt8 {
 		format.decimalPlaces
-	}
-
-	/// CLS-12.11: the line the goal views show in a 0-place budget, whose
-	/// envelope numbers add both scales as Actual does. `goals()` carries no
-	/// note, so this one stays here; the Budget screen shows the core's
-	/// `BudgetMonth.mixedScaleNote`.
-	public var mixedScaleNote: String? {
-		phase == .open && budgetDecimalPlaces == 0
-			? MoneyFormat.mixedScaleNote
-			: nil
 	}
 
 	/// What every budget-cell and goal amount field asks the core, at the
