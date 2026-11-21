@@ -27,6 +27,10 @@ struct StubJourneyDataTests {
 
 	@Test func aRowTheStubDoesntHoldIsNotFound() async throws {
 		await #expect(throws: FfiError.self) { _ = try await session.registerRow("no-such-row") }
-		#expect(try await session.registerRow(StubRules.reconciledRow).reconciled)
+	}
+
+	@Test func theRulePreviewMarksItsReconciledRowAsTheCoreDoes() async throws {
+		let matches = try await session.rulePreview(.saved(ruleId: "amazon"))
+		#expect(matches.filter(\.reconciled).map(\.transactionId) == [StubRules.reconciledRow])
 	}
 }

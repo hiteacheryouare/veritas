@@ -250,8 +250,7 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 	}
 	/// A row the Accounts stub doesn't hold may be one of the Rules stub's preview rows; any other id is NotFound.
 	func registerRow(_ id: String) async throws -> RegisterRow {
-		if let row = try? accountStore.registerRow(id) { return row }
-		return try ruleStore.registerRow(id)
+		try accountStore.registerRow(id)
 	}
 	/// The Accounts stub's payees, then the Bills stub's own; one they share, such as `to-carloan`, is listed once.
 	func payees() async throws -> [PayeeDetail] {

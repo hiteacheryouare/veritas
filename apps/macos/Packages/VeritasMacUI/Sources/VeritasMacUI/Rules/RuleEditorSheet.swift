@@ -216,7 +216,7 @@ struct RuleEditorSheet: View {
 							get: { RuleMenus.Allocation(allocation.value) },
 							set: { choice in change { $0.setAllocation(choice, line: line) } }
 						)) {
-							ForEach(RuleMenus.Allocation.allCases, id: \.self) { choice in
+							ForEach(RuleMenus.allocations, id: \.self) { choice in
 								Text(RuleWords.allocation(choice)).tag(choice)
 							}
 						}
