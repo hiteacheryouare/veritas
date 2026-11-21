@@ -331,3 +331,15 @@ extension DashboardCard {
 		)
 	}
 }
+
+extension DashboardCard {
+	/// Whether clicking the card opens it full size, as Actual's cards open
+	/// their report page. A text card, a deleted report, a card with a
+	/// problem and a type Veritas doesn't know have nothing more to show.
+	public var opensFullSize: Bool {
+		switch content {
+		case .markdown, .missingReport, .unknown, .problem: false
+		default: true
+		}
+	}
+}

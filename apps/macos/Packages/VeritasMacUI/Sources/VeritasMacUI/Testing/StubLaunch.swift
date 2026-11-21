@@ -130,6 +130,7 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 	private lazy var dashboardStore = StubDashboards(reports: reports)
 	private let billStore = StubBills()
 	private let ruleStore = StubRules()
+	private let forecastStore = StubForecast()
 
 	init(readOnly: ReadOnlyKind?, hasFindings: Bool = false, backupFails: Bool = false, hidesDecimals: Bool = false) {
 		self.readOnly = readOnly
@@ -235,8 +236,14 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 
 	func perform(_ command: Command) async throws {
 		if let readOnly { throw FfiError.ReadOnly(reason: readOnly) }
-		if try billStore.perform(command) || ruleStore.perform(command) { return }
+		if try billStore.perform(command) || ruleStore.perform(command) || forecastStore.perform(command) { return }
 		switch command {
+		case .applySuggestions(let today):
+			let suggestions = forecastStore.suggestions(today: today)
+			for item in suggestions.items {
+				guard let amount = item.amount else { continue }
+				try budget.perform(.setBudget(month: suggestions.month, categoryId: item.categoryId, amount: amount))
+			}
 		case .saveCustomReport(let settings): try reports.save(settings)
 		case .placeWidget(let id, let x, let y, let width, let height): try dashboardStore.place(id, x: x, y: y, width: width, height: height)
 		case .saveTransactionWithEnvelope(let envelope, let transactionID, let draft):
@@ -385,6 +392,13 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 	func balanceSheet(asOf: String) async throws -> BalanceSheet { try StubStatements.balanceSheet(asOf: asOf) }
 	func ownersEquity(first: String, last: String) async throws -> OwnersEquity { try StubStatements.ownersEquity(first: first, last: last) }
 	func taxSummary(year: Int32) async throws -> TaxSummary { try StubTax.summary(year: year) }
+	func forecast(today: String, scenarioIDs: [String]) async throws -> Forecast { try forecastStore.forecast(today: today, scenarioIDs: scenarioIDs) }
+	func budgetSuggestions(today: String) async throws -> SuggestionList { forecastStore.suggestions(today: today) }
+	func scenarios(today: String) async throws -> [ScenarioSummary] { forecastStore.scenarios(today: today) }
+	func createScenario(named name: String, firstEvent: ScenarioChange?, today: String) async throws -> String {
+		try writable()
+		return try forecastStore.create(named: name, firstEvent: firstEvent, today: today)
+	}
 
 	private func writable() throws {
 		if let readOnly { throw FfiError.ReadOnly(reason: readOnly) }

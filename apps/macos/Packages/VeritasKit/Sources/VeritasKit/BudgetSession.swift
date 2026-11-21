@@ -223,6 +223,16 @@ public protocol BudgetSession: AnyObject, Sendable {
 	func ownersEquity(first: String, last: String) async throws -> OwnersEquity
 	/// One tax year's buckets, detail, conflicts and CSVs (R-REP-8).
 	func taxSummary(year: Int32) async throws -> TaxSummary
+	/// The baseline and up to 3 what-ifs as of `today` (R-FC-1, R-FC-2, R-FC-4).
+	func forecast(today: String, scenarioIDs: [String]) async throws -> Forecast
+	/// Next month's suggestions (R-FC-3).
+	func budgetSuggestions(today: String) async throws -> SuggestionList
+	/// Every what-if in the order it was made, with its events (R-FC-2).
+	func scenarios(today: String) async throws -> [ScenarioSummary]
+	/// Returns the new what-if's id. With `firstEvent`, the what-if and its
+	/// first line are one undo step, and a refused line makes nothing (v17).
+	@discardableResult
+	func createScenario(named name: String, firstEvent: ScenarioChange?, today: String) async throws -> String
 }
 
 /// The budgets in the app's budgets folder: new ones, Actual imports and reopened ones.
