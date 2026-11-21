@@ -125,6 +125,10 @@ Applies to each non-hidden `expense`-kind category (a spending baseline) and eac
 
 **Net worth.** `NW(t) = NW(today) + sum of forecast net income (income - expenses) up to t`. Principal payments, savings transfers and card payments change no net worth. Non-cash changes (revaluations, adjustments, starting balances) are assumed zero and the screen says so. No market return or inflation is assumed unless a what-if adds it.
 
+**Net worth history.** The projection chart may show the month-end net worth of the up to 12 complete months before the current month. These are the figures of the net worth report (ST-2), from the same function, every account on and off budget, open and closed, so the two never differ by a cent. Months before the budget's first row are left out, not shown as 0, because 0 would read as a real balance. Revaluations and other non-cash changes are in the history, while the projection assumes none (Net worth, above), and the screen says so.
+
+**What-if difference.** For each horizon, the difference from the baseline is `NW_h(scenario) - NW_h(baseline)`, and for each account `balance_h(scenario) - balance_h(baseline)`, in the same sign as the balances: positive means the what-if leaves you better off. The band is not differenced (FC-3, Band).
+
 **Spending that is not baselined.** Uncategorized spending (CLS-4 row 15) and spending in hidden or archived categories get no baseline, so the projection leaves them out and net worth reads higher than the history suggests. The screen says so with a line: "Not forecast: ${median} a month in uncategorized or hidden spending", where `median` is the median over the baseline window of that spending's monthly total, rounded half up to whole dollars, and the line is omitted when it is 0. The amount is never added to the projection until the product question of forecasting it as one series is decided.
 
 **Per-account balances.** Each flow moves the account it posts to. A baseline category posts to the account where the category had the largest sum of `|amount|` over its window (ties: lower account sort order). Known flows post to the schedule's account. Income schedules post to their account. Off-budget account balances change only by explicit flows (transfers, loan principal) and what-ifs.
@@ -169,6 +173,7 @@ The band covers the category baselines only, for now: `F_t` = baselined income m
 2. With `n` residuals, sort ascending as `e(1)..e(n)`. Nearest-rank percentile: `P10 = e(ceil(n / 10))`, `P90 = e(ceil(9n / 10))`.
 3. For horizon `h` months the one-month band is scaled by `h` to the power `BAND_GROWTH` = 3/4, by integer arithmetic: `scale_h = isqrt(isqrt(h^3 * 10^16))` (this is `h^0.75 * 10000`, truncated; nested integer square roots give the integer fourth root exactly). `h^3 * 10^16` overflows a signed 64-bit integer from `h = 10` (10^19) and still fits an unsigned 64-bit integer at `h = 12` (1.728 * 10^19), so compute it in an unsigned 64-bit or wider integer. `lo_h = round_half_away(P10 * scale_h / 10000)`, `hi_h = round_half_away(P90 * scale_h / 10000)`. At `h = 1` the scale is 10000, so the one-month band is unchanged. The scale is deliberately wider than independent errors would need (`sqrt(h)`): a level error or an annual lump repeats from month to month.
 4. Net worth band at horizon `h` is `[NW_h + lo_h, NW_h + hi_h]`.
+5. **Every projected month.** The same formula is applied at every integer `h` from 1 to 12, so the chart can draw a band at each complete projected month; the horizons 3, 6, 10 and 12 are the `h` = 3, 6, 10 and 12 values of this series, not a separate calculation. Nothing is interpolated. The remainder of the current month (the first projected point) has no band, because `h` counts complete months after the current one (FC-3, Horizon); a zero-width band there would claim a certainty the baselines do not have. A what-if's months use the same offsets (FC-3, Band).
 
 The label reads "80% band from N past months". The detail view states the method, N, that errors are assumed to partly repeat (growth 3/4, not independent), that annual lumps such as gifts or insurance can fall outside the range (a yearly bill makes them known), and that the range covers category baselines only (FC-4.1).
 
@@ -349,6 +354,12 @@ No dollar amount appears. Replace amounts with shares, in tenths of a percent:
 - Prior-year change and biggest-month-vs-typical are already percentages, in basis points, and are shown as they are, with the "new this year" and "prior year from {date}" labels carried.
 - Net-worth change: change over opening net worth, `round_half_away`, tenths. Opening net worth <= 0: "n/a".
 - Counts (days, streaks, goals) are shown as is. Month names are shown as is.
+
+### Wrapped monthly series and years
+
+- **Monthly series.** For the bar chart on the biggest-month card: one entry per calendar month of the Wrapped period, each `total` that month's `expense_total` (CLS-6), the figure "Biggest month" ranks. A month with no rows reads 0. Months before the month of the budget's first row are left out, as in the evaluated range above. The series never changes the ranking: "Biggest month" still ranks only months that have expense rows. A month's total can be negative (refunds beat spending) and is shown as it is, never clamped.
+- **Redaction.** Each month's bar is `round_half_away(month_expense_total * 1000 / out)` tenths, the same rule and denominator as the "Biggest month" share above, `out <= 0`: "n/a". The bars are labeled "of total out". A negative share is shown as a refund month, not as an empty bar. Shares are rounded one by one and are not forced to sum to 1000.
+- **Years with data.** The year picker lists the calendar years from the year of the first row through today's year, newest first, for which `has_data` is true for that year's Wrapped period (at least one classified row in the period, which for the current year ends today). It uses the same test as the "No data for this year" line, so a year is listed exactly when its Wrapped is not empty.
 
 ### FC-8 Worked examples
 

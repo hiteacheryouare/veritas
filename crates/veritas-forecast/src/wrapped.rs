@@ -102,6 +102,10 @@ pub struct Wrapped {
 	pub other_payees: Money,
 	pub biggest_month: Option<(YearMonth, Money)>,
 	pub biggest_vs_typical: Option<i64>,
+	/// FC-8's monthly series: each month's `expense_total` from the month of
+	/// the budget's first row (or January) through the period's last month,
+	/// 0 for a month without rows. Never read by `biggest_month`.
+	pub monthly_spending: Vec<(YearMonth, Money)>,
 	pub no_spend: NoSpend,
 	pub goals_completed: usize,
 	/// The goals behind `goals_completed`, by id.
@@ -129,6 +133,9 @@ pub struct Redacted {
 	pub savings: Option<i64>,
 	/// The biggest month's spending over total out.
 	pub biggest_month: Option<i64>,
+	/// Each of `monthly_spending` over total out, in its order, rounded one
+	/// by one (FC-8 monthly series).
+	pub months: Vec<Option<i64>>,
 	pub net_worth_change: Option<i64>,
 }
 
@@ -206,6 +213,11 @@ impl Wrapped {
 			biggest_month: self
 				.biggest_month
 				.and_then(|(_, total)| tenths(total, self.total_out)),
+			months: self
+				.monthly_spending
+				.iter()
+				.map(|(_, total)| tenths(*total, self.total_out))
+				.collect(),
 			net_worth_change: tenths(self.net_worth_change, self.net_worth_start),
 		}
 	}
@@ -353,24 +365,54 @@ fn totals(
 	))
 }
 
+/// FC-8's period: the calendar year, or January 1 through today for the
+/// current year.
+fn period_of(year: i32, today: CivilDate) -> Result<Period, CoreError> {
+	if year > today.year() {
+		return Err(CoreError::Invalid(format!(
+			"{year} hasn't started yet, so there's nothing to wrap"
+		)));
+	}
+	let last = if year == today.year() {
+		today
+	} else {
+		CivilDate::new(year, 12, 31)?
+	};
+	Period::new(CivilDate::new(year, 1, 1)?, last)
+}
+
+/// The one test behind both `Wrapped::has_data` and `wrapped_years`, so the
+/// picker lists a year exactly when its Wrapped isn't "No data for this year".
+fn has_data(classification: &Classification, period: Period) -> bool {
+	!classification.within(period).is_empty()
+}
+
+/// FC-8's years with data, newest first: from the year of the first row
+/// through today's year, each one whose Wrapped has data.
+pub fn wrapped_years(
+	classification: &Classification,
+	today: CivilDate,
+) -> Result<Vec<i32>, CoreError> {
+	let Some(first) = classification.rows().first().map(|row| row.date.year()) else {
+		return Ok(Vec::new());
+	};
+	let mut years = Vec::new();
+	for year in (first..=today.year()).rev() {
+		if has_data(classification, period_of(year, today)?) {
+			years.push(year);
+		}
+	}
+	Ok(years)
+}
+
 pub fn wrapped(
 	budget: &BudgetData,
 	classification: &Classification,
 	year: i32,
 	today: CivilDate,
 ) -> Result<Wrapped, CoreError> {
-	if year > today.year() {
-		return Err(CoreError::Invalid(format!(
-			"{year} hasn't started yet, so there's nothing to wrap"
-		)));
-	}
-	let first = CivilDate::new(year, 1, 1)?;
-	let last = if year == today.year() {
-		today
-	} else {
-		CivilDate::new(year, 12, 31)?
-	};
-	let period = Period::new(first, last)?;
+	let period = period_of(year, today)?;
+	let (first, last) = (period.first(), period.last());
 	let rows = classification.within(period);
 	let (current, report) = totals(budget, classification, period)?;
 
@@ -475,6 +517,7 @@ pub fn wrapped(
 			_ => Some((*month, *total)),
 		},
 	);
+	let monthly_spending = monthly_series(classification, period, &months)?;
 	let monthly: Vec<i64> = months.values().copied().collect();
 	let biggest_vs_typical = match (biggest_month, median(&monthly)) {
 		(Some((_, max)), Some(mid)) if mid > 0 => Some(
@@ -515,7 +558,7 @@ pub fn wrapped(
 	Ok(Wrapped {
 		year,
 		period,
-		has_data: !rows.is_empty(),
+		has_data: has_data(classification, period),
 		total_in: current.total_in,
 		total_out: current.total_out,
 		net,
@@ -529,6 +572,7 @@ pub fn wrapped(
 		other_payees,
 		biggest_month: biggest_month.map(|(month, total)| (month, Money::from_minor(total))),
 		biggest_vs_typical,
+		monthly_spending,
 		no_spend,
 		goals_completed: completed_goals.len(),
 		completed_goals,
@@ -544,6 +588,33 @@ pub fn wrapped(
 			from,
 		},
 	})
+}
+
+/// Every month of `period` from the month of the budget's first row, with
+/// its `expense_total` or 0. Months before that row are left out, as the
+/// evaluated range leaves out its days, so no bar reads "spent nothing"
+/// before the budget existed (FC-8 monthly series).
+fn monthly_series(
+	classification: &Classification,
+	period: Period,
+	totals: &BTreeMap<YearMonth, i64>,
+) -> Result<Vec<(YearMonth, Money)>, CoreError> {
+	let Some(first_row) = classification
+		.rows()
+		.first()
+		.map(|row| row.date.year_month())
+	else {
+		return Ok(Vec::new());
+	};
+	let mut month = first_row.max(period.first().year_month());
+	let last = period.last().year_month();
+	let mut series = Vec::new();
+	while month <= last {
+		let total = totals.get(&month).copied().unwrap_or(0);
+		series.push((month, Money::from_minor(total)));
+		month = month.offset(1)?;
+	}
+	Ok(series)
 }
 
 /// A discretionary row breaks a no-spend day: spending that isn't a bill or

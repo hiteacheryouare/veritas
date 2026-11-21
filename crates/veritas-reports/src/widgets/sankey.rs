@@ -143,6 +143,9 @@ pub struct SankeyNode {
 	/// for hidden nodes.
 	pub percentage: String,
 	pub color: SankeyColor,
+	/// The amount the graph prints under the node (`SankeyGraph.tsx`), which
+	/// recharts computes, never Actual's spreadsheet: see `node_value`.
+	pub value: Money,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1758,7 +1761,7 @@ fn convert(graph: &Graph, mut folded: Folded) -> (Vec<SankeyNode>, Vec<SankeyLin
 		.enumerate()
 		.map(|(index, (key, _))| (key, index))
 		.collect();
-	let nodes = graph
+	let mut nodes: Vec<SankeyNode> = graph
 		.iter()
 		.map(|(key, node)| SankeyNode {
 			key: key.to_owned(),
@@ -1769,6 +1772,7 @@ fn convert(graph: &Graph, mut folded: Folded) -> (Vec<SankeyNode>, Vec<SankeyLin
 			}),
 			percentage: node.percentage.clone().unwrap_or_default(),
 			color: node.color.unwrap_or(SankeyColor::Palette(0)),
+			value: Money::ZERO,
 		})
 		.collect();
 	let color_of = |key: &str| graph.get(key).and_then(|node| node.color);
@@ -1808,7 +1812,25 @@ fn convert(graph: &Graph, mut folded: Folded) -> (Vec<SankeyNode>, Vec<SankeyLin
 			});
 		}
 	}
+	for (index, node) in nodes.iter_mut().enumerate() {
+		node.value = node_value(&links, index);
+	}
 	(nodes, links)
+}
+
+/// recharts' `getNodesTree` (`Sankey.tsx`): the larger of a node's incoming
+/// and outgoing link sums, counting -1 links to hidden nodes and links whose
+/// target the layer range cut, exactly as the graph receives them.
+fn node_value(links: &[SankeyLink], index: usize) -> Money {
+	let sum = |linked: &dyn Fn(&SankeyLink) -> bool| {
+		links
+			.iter()
+			.filter(|link| linked(link))
+			.fold(0_i64, |sum, link| sum.saturating_add(link.value.minor()))
+	};
+	let incoming = sum(&|link| link.target == Some(index));
+	let outgoing = sum(&|link| link.source == index);
+	Money::from_minor(incoming.max(outgoing))
 }
 
 fn month_of(text: &str) -> Result<YearMonth, CoreError> {

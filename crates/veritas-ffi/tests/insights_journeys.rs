@@ -337,6 +337,377 @@ fn wrapped_agrees_with_the_statements_and_with_actuals_own_sums() {
 	}
 }
 
+fn month_after(month: &Month) -> Month {
+	if month.month == 12 {
+		Month {
+			year: month.year + 1,
+			month: 1,
+		}
+	} else {
+		Month {
+			year: month.year,
+			month: month.month + 1,
+		}
+	}
+}
+
+#[test]
+fn wrapped_monthly_spending_is_each_months_expenses_and_its_share_of_out() {
+	// v18, FC-8's monthly series: one bar per month of the period, each the
+	// income statement's expenses for that month (CLS-6 expense_total), with
+	// its share of total out rounded on its own.
+	let scratch = Scratch::new("wrapped-months");
+	let session = import(&scratch);
+	perform(
+		&session,
+		entry(CHECKING, "2026-03-05", 1500, GROCERIES, "refund"),
+	);
+	for year in [2025, 2026] {
+		let report = wrapped(&session, year);
+		assert!(!report.months.is_empty(), "{year}");
+		let last = &report.months.last().unwrap().month;
+		assert_eq!(
+			format!("{}-{:02}", last.year, last.month),
+			report.last[..7],
+			"{year} runs to the period's last month"
+		);
+		for pair in report.months.windows(2) {
+			assert_eq!(
+				pair[1].month,
+				month_after(&pair[0].month),
+				"{year}: no gaps"
+			);
+		}
+		for bar in &report.months {
+			let first = format!("{}-{:02}-01", bar.month.year, bar.month.month);
+			let end = {
+				let next = month_after(&bar.month);
+				let next_first = chrono::NaiveDate::from_ymd_opt(next.year, next.month, 1).unwrap();
+				let month_end = next_first
+					.pred_opt()
+					.unwrap()
+					.format("%Y-%m-%d")
+					.to_string();
+				month_end.min(report.last.clone())
+			};
+			let statement =
+				block_on(session.income_statement(first.clone(), end, CancelToken::new())).unwrap();
+			assert_eq!(bar.total, statement.total_expenses.total, "{year} {first}");
+			let expected_share = (report.total_out > 0).then(|| {
+				let scaled = i128::from(bar.total) * 1000;
+				let whole = i128::from(report.total_out);
+				let rounded = (scaled.abs() * 2 + whole) / (whole * 2);
+				i64::try_from(if scaled < 0 { -rounded } else { rounded }).unwrap()
+			});
+			assert_eq!(bar.share, expected_share, "{year} {first}");
+		}
+		if report.months.len() == 12 {
+			let sum: i64 = report.months.iter().map(|bar| bar.total).sum();
+			assert_eq!(sum, report.total_out, "{year}: a whole year adds up to out");
+		}
+		let biggest = report.biggest_month.as_ref().unwrap();
+		assert!(
+			report
+				.months
+				.iter()
+				.any(|bar| bar.month == biggest.month && bar.total == biggest.total),
+			"{year}: the biggest month is one of the bars"
+		);
+	}
+}
+
+#[test]
+fn wrapped_years_lists_exactly_the_years_with_data_and_pins_today() {
+	let (_scratch, session) = fresh("wrapped-years", "USD");
+	let years = |today: &str| {
+		block_on(session.wrapped_years(today.to_owned(), CancelToken::new())).unwrap()
+	};
+	assert_eq!(years(TODAY), Vec::<i32>::new(), "a new budget has no rows");
+	let checking = new_account(
+		&session,
+		"Checking",
+		veritas_ffi::NewAccountKind::Checking,
+		10_000,
+		None,
+	);
+	let category = session
+		.budget_month(NOVEMBER, TODAY.to_owned())
+		.unwrap()
+		.groups
+		.into_iter()
+		.find(|group| !group.is_income)
+		.and_then(|group| group.envelopes.into_iter().next())
+		.unwrap()
+		.id;
+	perform(
+		&session,
+		entry(&checking, "2024-03-05", -2500, &category, ""),
+	);
+	perform(
+		&session,
+		entry(&checking, "2026-12-20", -2500, &category, "later"),
+	);
+	assert_eq!(years(TODAY), [2026, 2024]);
+	for year in 2024..=2026 {
+		assert_eq!(
+			years(TODAY).contains(&year),
+			wrapped(&session, year).has_data,
+			"{year}: the picker and No data agree"
+		);
+	}
+
+	assert_eq!(years("2027-06-01"), [2026, 2024], "2027 has nothing yet");
+	let savings = new_account(
+		&session,
+		"Savings",
+		veritas_ffi::NewAccountKind::Savings,
+		5_000,
+		None,
+	);
+	assert_eq!(
+		years("2027-06-01"),
+		[2027, 2026, 2024],
+		"the new account's starting balance is dated the pinned day, in 2027"
+	);
+	assert!(!savings.is_empty());
+}
+
+#[test]
+fn a_goal_icon_is_a_symbol_name_or_one_emoji_in_create_and_in_set() {
+	// The Architect's v18 call: Ryan asked for icons or emojis, so a goal's
+	// icon is an SF Symbol name (ASCII a-z, 0-9 and dots, 1 to 64, no dot at
+	// either end) or one emoji of up to 35 bytes, checked the same way when
+	// the goal is made and when its icon changes.
+	let (_scratch, session) = fresh("goal-icon-kinds", "USD");
+	let create = |name: &str, icon: Option<&str>| {
+		session.perform(Command::CreateGoal {
+			name: name.to_owned(),
+			target: 50_000,
+			target_date: None,
+			icon: icon.map(str::to_owned),
+			color: None,
+		})
+	};
+	let goals = || session.goals(TODAY.to_owned()).unwrap().goals;
+	let icon_of = |id: &str| goals().into_iter().find(|goal| goal.id == id).unwrap().icon;
+
+	let laptop = create("New laptop", Some("laptopcomputer"))
+		.unwrap()
+		.entities
+		.into_iter()
+		.find(|entity| entity.kind == veritas_ffi::EntityKind::Goal)
+		.and_then(|entity| entity.id)
+		.unwrap();
+	assert_eq!(
+		icon_of(&laptop).as_deref(),
+		Some("laptopcomputer"),
+		"the Mac sheet's symbol names keep working"
+	);
+	for refused in ["Laptop", "car fill", ".car", "🎯🎯"] {
+		assert!(
+			matches!(
+				create("Refused", Some(refused)),
+				Err(FfiError::Invalid { .. })
+			),
+			"{refused:?}"
+		);
+	}
+	assert_eq!(
+		goals().len(),
+		1,
+		"a refused icon makes no goal and no envelope"
+	);
+	assert!(
+		session
+			.budget_month(NOVEMBER, TODAY.to_owned())
+			.unwrap()
+			.groups
+			.iter()
+			.flat_map(|group| &group.envelopes)
+			.all(|envelope| envelope.name != "Refused")
+	);
+	let blank = create("Bike", Some(""))
+		.unwrap()
+		.entities
+		.into_iter()
+		.find(|entity| entity.kind == veritas_ffi::EntityKind::Goal)
+		.and_then(|entity| entity.id)
+		.unwrap();
+	assert_eq!(icon_of(&blank), None, "empty is no icon");
+
+	let longest_name = "a".repeat(64);
+	let family_of_three = "👨‍👩‍👧";
+	let england = "🏴\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}";
+	assert_eq!((family_of_three.len(), england.len()), (18, 28));
+	for accepted in [
+		"car.fill",
+		longest_name.as_str(),
+		family_of_three,
+		england,
+		"👩🏻‍❤️‍💋‍👨🏼",
+	] {
+		perform(
+			&session,
+			Command::SetGoalIcon {
+				goal_id: laptop.clone(),
+				icon: Some(accepted.to_owned()),
+			},
+		);
+		assert_eq!(icon_of(&laptop).as_deref(), Some(accepted));
+	}
+	for refused in [
+		"a".repeat(65),
+		"🧑‍🧑‍🧑‍🧑‍🧑‍🧑".to_owned(),
+		"car.".to_owned(),
+		"Car".to_owned(),
+	] {
+		assert!(
+			matches!(
+				session.perform(Command::SetGoalIcon {
+					goal_id: laptop.clone(),
+					icon: Some(refused.clone()),
+				}),
+				Err(FfiError::Invalid { .. })
+			),
+			"{refused:?}"
+		);
+	}
+	assert_eq!(icon_of(&laptop).as_deref(), Some("👩🏻‍❤️‍💋‍👨🏼"));
+}
+
+fn actual_tables(dump: &Value) -> Value {
+	let mut dump = dump.clone();
+	if let Some(tables) = dump["tables"].as_object_mut() {
+		tables.retain(|name, _| !name.starts_with("veritas_"));
+	}
+	dump
+}
+
+#[test]
+fn a_goal_icon_is_one_undo_step_and_never_reaches_actuals_tables() {
+	let (scratch, session) = fresh("goal-icon", "USD");
+	let goal = created_id(
+		&session,
+		Command::CreateGoal {
+			name: "Trip".to_owned(),
+			target: 50_000,
+			target_date: None,
+			icon: None,
+			color: None,
+		},
+		veritas_ffi::EntityKind::Goal,
+	);
+	let icon = |session: &Session| {
+		session
+			.goals(TODAY.to_owned())
+			.unwrap()
+			.goals
+			.into_iter()
+			.find(|summary| summary.id == goal)
+			.unwrap()
+			.icon
+	};
+	let set = |session: &Session, icon: Option<&str>| {
+		session.perform(Command::SetGoalIcon {
+			goal_id: goal.clone(),
+			icon: icon.map(str::to_owned),
+		})
+	};
+	let before_zip = scratch.join("before.zip");
+	export(&session, &before_zip);
+	let month_before = session.budget_month(NOVEMBER, TODAY.to_owned()).unwrap();
+
+	let change = set(&session, Some("✈️")).unwrap();
+	assert!(
+		change
+			.entities
+			.iter()
+			.any(|entity| entity.kind == veritas_ffi::EntityKind::Goal
+				&& entity.id.as_deref() == Some(goal.as_str()))
+	);
+	assert_eq!(icon(&session).as_deref(), Some("✈️"));
+	assert_eq!(
+		session.budget_month(NOVEMBER, TODAY.to_owned()).unwrap(),
+		month_before,
+		"an icon moves no money"
+	);
+	for refused in [
+		"ab🎯", "🎯🎯", "✈️ ", "Laptop", ".car", "car.", "car fill", "🇯",
+	] {
+		assert!(
+			matches!(set(&session, Some(refused)), Err(FfiError::Invalid { .. })),
+			"{refused:?}"
+		);
+	}
+	assert_eq!(
+		icon(&session).as_deref(),
+		Some("✈️"),
+		"a refusal changes nothing"
+	);
+	assert!(
+		set(&session, Some("✈️")).unwrap().entities.is_empty(),
+		"the same icon writes nothing"
+	);
+
+	set(&session, Some("👩🏽‍💻")).unwrap();
+	session.undo().unwrap();
+	assert_eq!(icon(&session).as_deref(), Some("✈️"), "one undo step");
+	session.undo().unwrap();
+	assert_eq!(icon(&session), None);
+	session.redo().unwrap();
+	assert_eq!(icon(&session).as_deref(), Some("✈️"));
+
+	perform(
+		&session,
+		Command::CloseGoal {
+			goal_id: goal.clone(),
+			release_to_category_id: None,
+			also_move_later: false,
+		},
+	);
+	assert_eq!(icon(&session).as_deref(), Some("✈️"), "closing keeps it");
+	set(&session, Some("🇯🇵")).unwrap();
+	assert_eq!(
+		icon(&session).as_deref(),
+		Some("🇯🇵"),
+		"a closed goal can change it"
+	);
+	let session = reopen(&scratch, session);
+	assert_eq!(icon(&session).as_deref(), Some("🇯🇵"));
+	set(&session, Some("")).unwrap();
+	assert_eq!(icon(&session), None, "empty clears, like nil");
+	set(&session, Some("🎯")).unwrap();
+	set(&session, None).unwrap();
+	assert_eq!(icon(&session), None);
+	assert!(matches!(
+		session.perform(Command::SetGoalIcon {
+			goal_id: "no-such-goal".to_owned(),
+			icon: Some("🎯".to_owned()),
+		}),
+		Err(FfiError::NotFound { .. })
+	));
+
+	let Some(oracle) = oracle() else {
+		return;
+	};
+	session.undo().unwrap();
+	assert_eq!(icon(&session).as_deref(), Some("🎯"));
+	let after_zip = scratch.join("after.zip");
+	export(&session, &after_zip);
+	let before = node(&oracle, &["dump", &before_zip]);
+	let after = node(&oracle, &["dump", &after_zip]);
+	assert!(
+		after["tables"]["veritas_goal"].to_string().contains("🎯"),
+		"the icon is in veritas_goal"
+	);
+	let holds_icon = |dump: &Value| dump.to_string().contains("🎯");
+	assert!(
+		!holds_icon(&actual_tables(&after)),
+		"no Actual table holds the icon"
+	);
+	assert!(!holds_icon(&before));
+}
+
 #[test]
 fn the_entity_name_is_one_undo_step_survives_a_reopen_and_actual_reads_the_file() {
 	let scratch = Scratch::new("entity");
@@ -1089,10 +1460,102 @@ fn a_what_if_moves_its_horizons_by_its_amount_and_every_horizon_adds_up() {
 			base_horizon.months
 		);
 	}
+	// v18: each horizon carries the what-if's difference from the baseline,
+	// in net worth and per account (FC-3); the baseline's is nil.
+	for (base_horizon, scenario_horizon) in forecast.baseline.horizons.iter().zip(&what_if.horizons)
+	{
+		let shift = base_horizon.net_worth - scenario_horizon.net_worth;
+		assert_eq!(scenario_horizon.net_worth_difference, Some(-shift));
+		assert_eq!(base_horizon.net_worth_difference, None);
+		assert!(
+			base_horizon
+				.accounts
+				.iter()
+				.all(|account| account.difference.is_none())
+		);
+		for account in &scenario_horizon.accounts {
+			let expected = if account.account_id == CHECKING {
+				-shift
+			} else {
+				0
+			};
+			assert_eq!(account.difference, Some(expected), "{}", account.name);
+		}
+	}
+	assert!(
+		forecast
+			.accounts_today
+			.iter()
+			.all(|account| account.difference.is_none())
+	);
+	// v18: the band at every projected month (FC-4.2 step 5), none for the
+	// current month's remainder, and the horizons are points of that series.
+	for projection in [&forecast.baseline, what_if] {
+		assert_eq!(
+			(
+				projection.months[0].band_low,
+				projection.months[0].band_high
+			),
+			(None, None)
+		);
+		assert!(
+			projection
+				.months
+				.iter()
+				.skip(1)
+				.all(|month| month.band_low.is_some())
+		);
+		for horizon in &projection.horizons {
+			let month = &projection.months[horizon.months as usize];
+			assert_eq!(month.month, horizon.month);
+			assert_eq!(
+				(month.band_low, month.band_high),
+				(horizon.band_low, horizon.band_high)
+			);
+		}
+		for (base_month, month) in forecast.baseline.months.iter().zip(&projection.months) {
+			assert_eq!(
+				month
+					.band_high
+					.zip(month.band_low)
+					.map(|(high, low)| high - low),
+				base_month
+					.band_high
+					.zip(base_month.band_low)
+					.map(|(high, low)| high - low),
+				"a what-if never widens the band"
+			);
+		}
+	}
+	// v18: net worth before today is the net worth report's, to the cent.
+	assert_eq!(forecast.history.len(), 12);
+	let report = block_on(session.net_worth(
+		forecast.history[0].month,
+		forecast.history[11].month,
+		CancelToken::new(),
+	))
+	.unwrap();
+	assert_eq!(forecast.history, report);
+	assert_eq!(
+		forecast.history[11].month,
+		Month {
+			year: 2026,
+			month: 10
+		},
+		"the last complete month before today's"
+	);
+
 	session.undo().unwrap();
 	let undone =
 		block_on(session.forecast(TODAY.to_owned(), vec![scenario.clone()], CancelToken::new()))
 			.unwrap();
+	assert!(
+		undone.scenarios[0]
+			.horizons
+			.iter()
+			.all(|horizon| horizon.net_worth_difference == Some(0)),
+		"an empty what-if differs by nothing"
+	);
 	assert_eq!(
 		horizons(&undone.scenarios[0]),
 		base,

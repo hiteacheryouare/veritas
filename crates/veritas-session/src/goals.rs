@@ -4,7 +4,7 @@
 
 use veritas_domain::{
 	BudgetData, CategoryGroupId, CategoryId, CivilDate, CoreError, Goal, GoalId, GoalStatus, Money,
-	Row, YearMonth,
+	Row, YearMonth, is_goal_icon,
 };
 use veritas_engine::goals::{self as engine, Suggestion};
 use veritas_engine::{BudgetEditor, BudgetWrites, Envelope, EnvelopeSheet};
@@ -217,6 +217,7 @@ pub fn create_goal(
 	sheet: &EnvelopeSheet,
 	new: NewGoal<'_>,
 ) -> Result<(Vec<Row>, GoalId), CoreError> {
+	let icon = checked_icon(new.icon.as_deref())?;
 	let mut planned = Vec::new();
 	let group = match goals_group(data) {
 		Some(group) => group,
@@ -243,7 +244,7 @@ pub fn create_goal(
 		category,
 		target: new.target,
 		target_date: new.target_date,
-		icon: new.icon,
+		icon,
 		color: new.color,
 		status: GoalStatus::Active,
 		reached_month: None,
@@ -389,6 +390,37 @@ fn goals_group(data: &BudgetData) -> Option<CategoryGroupId> {
 		.filter(|g| !g.tombstone && !g.is_income)
 		.find(|g| g.name.trim().eq_ignore_ascii_case(GOALS_GROUP))
 		.map(|g| g.id.clone())
+}
+
+/// An SF Symbol name or one emoji; `None` or empty means no icon.
+fn checked_icon(icon: Option<&str>) -> Result<Option<String>, CoreError> {
+	match icon.filter(|icon| !icon.is_empty()) {
+		None => Ok(None),
+		Some(icon) if is_goal_icon(icon) => Ok(Some(icon.to_owned())),
+		Some(_) => Err(CoreError::Invalid(
+			"Choose a symbol or one emoji.".to_owned(),
+		)),
+	}
+}
+
+/// A goal's icon, an SF Symbol name or one emoji, stored only in
+/// `veritas_goal`; `None` or empty clears it. A label (DEBT-8): it moves no
+/// money, changes no status, ETA or suggestion, and a closed goal keeps it
+/// and can still change it.
+pub fn set_goal_icon(
+	data: &BudgetData,
+	id: &GoalId,
+	icon: Option<&str>,
+) -> Result<Vec<Row>, CoreError> {
+	let goal = live_goal(data, id)?;
+	let icon = checked_icon(icon)?;
+	if goal.icon == icon {
+		return Ok(Vec::new());
+	}
+	Ok(vec![Row::Goal(Goal {
+		icon,
+		..goal.clone()
+	})])
 }
 
 fn live_goal<'a>(data: &'a BudgetData, id: &GoalId) -> Result<&'a Goal, CoreError> {
