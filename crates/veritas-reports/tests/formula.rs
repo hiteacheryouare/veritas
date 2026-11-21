@@ -1821,24 +1821,52 @@ fn formula_card_evaluates_its_default_and_refuses_half_a_character() {
 	);
 }
 
-/// A chain of operators parses in a loop but nests one node per operator, so
-/// a long one is refused before evaluating it could overflow the stack.
+/// A run of one precedence level is one node however long, so a chain far
+/// past the nesting limit evaluates, on the same small stack.
 #[test]
-fn a_formula_chaining_operators_past_the_limit_is_refused_not_a_crash() {
+fn small_stack_evaluates_a_10000_term_chain() {
 	let budget = fixture("all-features");
 	let sheet = EnvelopeSheet::compute(&budget, CivilDate::from(today())).unwrap();
-	let chained = |terms: usize| {
-		let text = format!("={}1", "1+".repeat(terms - 1));
-		formula_card(
-			&budget,
-			&sheet,
-			meta(&json!({ "formula": text })).as_ref(),
-			today(),
-		)
-	};
-	assert_eq!(chained(64).unwrap().value, FormulaValue::Number(64.0));
-	assert!(matches!(chained(65), Err(CoreError::Invalid(_))));
-	assert!(matches!(chained(200_000), Err(CoreError::Invalid(_))));
+	let value = std::thread::Builder::new()
+		.stack_size(SMALL_STACK)
+		.spawn(move || {
+			let text = format!("={}1", "1+".repeat(9_999));
+			let meta = meta(&json!({ "formula": text }));
+			formula_card(&budget, &sheet, meta.as_ref(), today()).map(|card| card.value)
+		})
+		.unwrap()
+		.join()
+		.unwrap();
+	assert_eq!(value.unwrap(), FormulaValue::Number(10_000.0));
+}
+
+/// Runs of mixed operators, and errors on either side, read left to right
+/// exactly as Actual's card reads them.
+#[test]
+fn mixed_operator_chains_match_actual() {
+	let budget = fixture("all-features");
+	let long_mixed = format!("={}1", "7-3*2/4+2^3^2&1-".repeat(100));
+	let cases: Vec<Case> = [
+		"=1-2+3-4+5",
+		"=8/2/2*3/4",
+		"=2^3^2",
+		"=-2^2+1",
+		"=1+2*3-4/5+6^2-7%",
+		"=1-2+3-4*5/2+2^3^2-10%",
+		"=\"a\"&1+2&TRUE&\"b\"",
+		"=1<2=TRUE",
+		"=1=1=1",
+		"=1/0+#N/A",
+		"=#N/A+1/0",
+		"=1/0&#N/A",
+		"=\"x\"+1+#N/A",
+		"=1+\"x\"*#N/A",
+		long_mixed.as_str(),
+	]
+	.into_iter()
+	.map(|text| formula(text, Expect::Same))
+	.collect();
+	compare(&budget, &cases);
 }
 
 /// `SUM(1,SUM(1,…1))` with `calls` calls: a tree `calls + 1` levels deep.
@@ -1849,8 +1877,8 @@ fn nested_sums(calls: usize) -> Option<Json> {
 
 /// Swift runs work off the main thread on 512 KiB stacks, and the app ships a
 /// release build, so release proves the margin there (`cargo xtask perf` runs
-/// this test with `--release`). A debug build spends several times the stack
-/// per level and gets Rust's default 2 MiB.
+/// the `small_stack_` tests with `--release`). A debug build spends several
+/// times the stack per level and gets Rust's default 2 MiB.
 const SMALL_STACK: usize = if cfg!(debug_assertions) {
 	2 * 1024 * 1024
 } else {
@@ -1860,7 +1888,7 @@ const SMALL_STACK: usize = if cfg!(debug_assertions) {
 /// The deepest formula the limit allows, 64 levels, evaluates on a small
 /// stack, and one level more is refused.
 #[test]
-fn nested_calls_evaluate_up_to_64_levels_on_a_small_stack_and_are_refused_past_it() {
+fn small_stack_evaluates_nested_calls_up_to_64_levels_and_refuses_past_it() {
 	let budget = fixture("all-features");
 	let sheet = EnvelopeSheet::compute(&budget, CivilDate::from(today())).unwrap();
 	let (deepest, past) = std::thread::Builder::new()

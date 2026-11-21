@@ -554,7 +554,7 @@ const COLD_REPORTS: [(&str, f64); 7] = [
 /// reads its median, which one slow sample on a shared runner doesn't move.
 /// R-PERF-4 is the release-mode reports_perf and dashboard_perf tests, which
 /// assert their own budgets. Fails if any median is over its budget. It also
-/// runs the formula stack-margin test in release, the build the app ships,
+/// runs the formula stack-margin tests in release, the build the app ships,
 /// on a 512 KiB stack like Swift's secondary threads.
 fn perf() -> Result {
 	let root = root();
@@ -568,7 +568,7 @@ fn perf() -> Result {
 			"veritas-reports",
 			"--test",
 			"formula",
-			"nested_calls_evaluate_up_to_64_levels_on_a_small_stack",
+			"small_stack_",
 		],
 	)?;
 	// R-PERF-4 asserts its own budgets; a failure is reported with the benches below.
