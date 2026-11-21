@@ -25,10 +25,15 @@ struct CardWordsTests {
 		#expect(CardWords.projectedReturn == "Projected investment return")
 		#expect(CardWords.crossoverCategories(filtered: false) == "All non-income categories")
 		#expect(CardWords.crossoverCategories(filtered: true) == "Selected categories")
+		#expect(CardWords.crossoverProjectedCategories(filtered: false) == "All non-income categories, projected")
+		#expect(CardWords.crossoverProjectedCategories(filtered: true) == "Selected categories, projected")
 		let month = Month(year: 2041, month: 3)
 		#expect(CardWords.crossoverChart(crossover: month, filtered: false) == "Projected investment return passes all non-income categories in March 2041")
 		#expect(CardWords.crossoverChart(crossover: nil, filtered: true) == "Projected investment return against selected categories")
-		let words = [CardWords.projectedReturn, CardWords.crossoverChart(crossover: month, filtered: false), CardWords.crossoverChart(crossover: nil, filtered: false)]
+		let words = [
+			CardWords.projectedReturn, CardWords.crossoverProjectedCategories(filtered: false),
+			CardWords.crossoverChart(crossover: month, filtered: false), CardWords.crossoverChart(crossover: nil, filtered: false)
+		]
 		for word in ["income", "expense", "spending", "net profit"] {
 			#expect(!words.contains { $0.lowercased().replacing("non-income", with: "").contains(word) }, "\(word)")
 		}

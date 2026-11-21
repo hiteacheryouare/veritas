@@ -70,6 +70,11 @@ public enum CardWords {
 		filtered ? "Selected categories" : "All non-income categories"
 	}
 
+	/// The dashed line: the same categories with the card's projected expenses.
+	public static func crossoverProjectedCategories(filtered: Bool) -> String {
+		"\(crossoverCategories(filtered: filtered)), projected"
+	}
+
 	/// The chart's VoiceOver label, in the series' own words.
 	public static func crossoverChart(crossover: Month?, filtered: Bool) -> String {
 		let categories = crossoverCategories(filtered: filtered).lowercased()
