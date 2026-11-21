@@ -1405,7 +1405,31 @@ mod tests {
 		let forecast = core.forecast(TODAY, &[id], &token()).unwrap();
 		let what_if = &forecast.scenarios[0];
 		assert_eq!(forecast.baseline.months, what_if.months);
-		assert_eq!(forecast.baseline.horizons, what_if.horizons);
+		// v18: the what-if's horizons differ from the baseline's by exactly 0,
+		// and otherwise match it field for field.
+		let undifferenced: Vec<ForecastHorizon> = what_if
+			.horizons
+			.iter()
+			.map(|horizon| {
+				assert_eq!(horizon.net_worth_difference, Some(0));
+				ForecastHorizon {
+					net_worth_difference: None,
+					accounts: horizon
+						.accounts
+						.iter()
+						.map(|account| {
+							assert_eq!(account.difference, Some(0));
+							ForecastAccount {
+								difference: None,
+								..account.clone()
+							}
+						})
+						.collect(),
+					..horizon.clone()
+				}
+			})
+			.collect();
+		assert_eq!(forecast.baseline.horizons, undifferenced);
 		let eta = |projection: &ForecastProjection| {
 			projection
 				.goal_etas
