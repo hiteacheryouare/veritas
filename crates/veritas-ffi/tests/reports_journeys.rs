@@ -791,28 +791,42 @@ fn a_drilled_transfer_names_its_other_account_as_the_register_does() {
 		.unwrap();
 		for row in rows {
 			let register = match &row.parent_id {
-				Some(parent) => session
-					.register_row(parent.clone())
-					.unwrap()
-					.lines
-					.into_iter()
-					.find(|split| split.id == row.id)
-					.unwrap()
-					.transfer_account_id,
-				None => session.register_row(row.id.clone()).unwrap().transfer_account_id,
+				Some(parent) => {
+					session
+						.register_row(parent.clone())
+						.unwrap()
+						.lines
+						.into_iter()
+						.find(|split| split.id == row.id)
+						.unwrap()
+						.transfer_account_id
+				}
+				None => {
+					session
+						.register_row(row.id.clone())
+						.unwrap()
+						.transfer_account_id
+				}
 			};
 			assert_eq!(row.transfer_account_id, register, "{line:?} {}", row.id);
 			match &row.transfer_account_id {
 				Some(other) => {
 					transfers += 1;
 					assert_ne!(*other, row.account_id, "{}", row.id);
-					assert_eq!(row.payee, account_name(other), "the payee names that account");
+					assert_eq!(
+						row.payee,
+						account_name(other),
+						"the payee names that account"
+					);
 				}
 				None => others += 1,
 			}
 		}
 	}
-	assert!(transfers > 0 && others > 0, "{transfers} transfers, {others} others");
+	assert!(
+		transfers > 0 && others > 0,
+		"{transfers} transfers, {others} others"
+	);
 }
 
 fn oracle() -> Option<PathBuf> {

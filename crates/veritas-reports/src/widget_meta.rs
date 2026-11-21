@@ -550,7 +550,9 @@ mod tests {
 		assert_eq!(
 			read_settings(
 				Some(WidgetType::CashFlow),
-				parse_meta(Some(r#"{"showBalance":false}"#)).unwrap().as_ref()
+				parse_meta(Some(r#"{"showBalance":false}"#))
+					.unwrap()
+					.as_ref()
 			)
 			.show_balance,
 			None

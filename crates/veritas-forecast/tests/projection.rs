@@ -147,11 +147,7 @@ fn fc_4_2_step_5_the_band_at_every_projected_month() {
 		"the current month's remainder has no band"
 	);
 	for (complete, month) in projection.months.iter().enumerate().skip(1) {
-		let (low, high) = projection
-			.band
-			.offsets(complete as u32)
-			.unwrap()
-			.unwrap();
+		let (low, high) = projection.band.offsets(complete as u32).unwrap().unwrap();
 		assert_eq!(
 			month.band,
 			Some((
@@ -522,16 +518,19 @@ fn fc_3_a_what_ifs_difference_from_the_baseline_at_each_horizon() {
 		.compare(date(TODAY), &flows, &[&car, &laptop])
 		.unwrap();
 
-	let differences = comparison
-		.differences(&comparison.scenarios[0])
-		.unwrap();
+	let differences = comparison.differences(&comparison.scenarios[0]).unwrap();
 	let net_worth: Vec<(u32, i64)> = differences
 		.iter()
 		.map(|difference| (difference.months, difference.net_worth.minor()))
 		.collect();
 	assert_eq!(
 		net_worth,
-		[(3, 30000), (6, 30000 - 2_000_000), (10, 30000 - 2_000_000), (12, 30000 - 2_000_000)],
+		[
+			(3, 30000),
+			(6, 30000 - 2_000_000),
+			(10, 30000 - 2_000_000),
+			(12, 30000 - 2_000_000)
+		],
 		"three paychecks by April, then the car in May"
 	);
 	for difference in &differences {
@@ -558,13 +557,20 @@ fn fc_3_a_what_ifs_difference_from_the_baseline_at_each_horizon() {
 		);
 	}
 
-	let sn_5 = comparison
-		.differences(&comparison.scenarios[1])
-		.unwrap();
+	let sn_5 = comparison.differences(&comparison.scenarios[1]).unwrap();
 	assert_eq!(sn_5.len(), 4);
 	for difference in &sn_5 {
-		assert_eq!(difference.net_worth, cents(0), "SN-5: goal money never moves net worth");
-		assert!(difference.balances.values().all(|amount| *amount == cents(0)));
+		assert_eq!(
+			difference.net_worth,
+			cents(0),
+			"SN-5: goal money never moves net worth"
+		);
+		assert!(
+			difference
+				.balances
+				.values()
+				.all(|amount| *amount == cents(0))
+		);
 	}
 	assert!(
 		comparison
@@ -580,10 +586,15 @@ fn fc_3_net_worth_history_is_the_net_worth_reports_months() {
 	let book = fc_3_book();
 	let forecaster = Forecaster::new(&book.budget).unwrap();
 	let history = forecaster.net_worth_history(date(TODAY)).unwrap();
-	let months: Vec<String> = history.iter().map(|point| point.month.to_string()).collect();
+	let months: Vec<String> = history
+		.iter()
+		.map(|point| point.month.to_string())
+		.collect();
 	assert_eq!(
 		months,
-		["2026-06", "2026-07", "2026-08", "2026-09", "2026-10", "2026-11", "2026-12"],
+		[
+			"2026-06", "2026-07", "2026-08", "2026-09", "2026-10", "2026-11", "2026-12"
+		],
 		"from the first row's month, before today's month"
 	);
 	let report = net_worth_by_month(

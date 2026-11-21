@@ -465,7 +465,8 @@ impl Bill {
 
 	/// Saving this bill over an existing schedule rule.
 	pub fn edit_rule(&self, rule: &Rule, today: CivilDate) -> Result<EditedRule, CoreError> {
-		let unreadable = || invalid("This bill's settings can't be read here, so edit this bill in Actual");
+		let unreadable =
+			|| invalid("This bill's settings can't be read here, so edit this bill in Actual");
 		let old: Vec<&str> = array_items(&rule.conditions_json).ok_or_else(unreadable)?;
 		let old_values: Vec<Value> = old
 			.iter()

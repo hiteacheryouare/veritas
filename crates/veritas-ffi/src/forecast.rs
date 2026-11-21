@@ -17,8 +17,8 @@ use veritas_forecast::{
 use veritas_session::forecast::{self as core, ForecastView};
 
 use crate::blocking::{CancelToken as CancelHandle, run};
-use crate::reports::NetWorthMonth;
 use crate::budget::{civil_date, year_month};
+use crate::reports::NetWorthMonth;
 use crate::session::{Core, Session};
 use crate::{FfiError, Month};
 

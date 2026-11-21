@@ -302,12 +302,20 @@ fn d2_a_bill_the_forecast_cannot_read_says_so_without_the_word_rule() {
 	let reasons: Vec<(String, String)> = result
 		.unforecast
 		.iter()
-		.map(|item| (item.schedule.clone().unwrap().to_string(), item.reason.clone()))
+		.map(|item| {
+			(
+				item.schedule.clone().unwrap().to_string(),
+				item.reason.clone(),
+			)
+		})
 		.collect();
 	assert_eq!(
 		reasons,
 		[
-			("Any".to_owned(), "it has settings only Actual can apply".to_owned()),
+			(
+				"Any".to_owned(),
+				"it has settings only Actual can apply".to_owned()
+			),
 			("Gone".to_owned(), "its settings are missing".to_owned()),
 		]
 	);

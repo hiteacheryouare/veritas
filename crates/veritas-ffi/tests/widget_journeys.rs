@@ -1896,7 +1896,10 @@ fn the_budget_analysis_cards_show_balance_reads_and_saves_as_actuals_card_does()
 	let with_key = widget(&pages, "with-key").clone();
 	let without_key = widget(&pages, "without-key").clone();
 	assert_eq!(with_key.config.show_balance, Some(true));
-	assert_eq!(without_key.config.show_balance, None, "absent reads nil, which Actual shows");
+	assert_eq!(
+		without_key.config.show_balance, None,
+		"absent reads nil, which Actual shows"
+	);
 
 	let mut off = with_key.config.clone();
 	off.show_balance = Some(false);
@@ -1919,7 +1922,10 @@ fn the_budget_analysis_cards_show_balance_reads_and_saves_as_actuals_card_does()
 	);
 	let after = dashboards(&session, "2026-11-13");
 	assert_eq!(widget(&after, "with-key").config.show_balance, Some(false));
-	assert_eq!(widget(&after, "without-key").config.show_balance, Some(true));
+	assert_eq!(
+		widget(&after, "without-key").config.show_balance,
+		Some(true)
+	);
 	assert_eq!(
 		widget(&after, "with-key").view,
 		with_key.view,
@@ -1951,7 +1957,9 @@ fn the_budget_analysis_cards_show_balance_reads_and_saves_as_actuals_card_does()
 
 	session.undo().unwrap();
 	assert_eq!(
-		widget(&dashboards(&session, "2026-11-13"), "without-key").config.show_balance,
+		widget(&dashboards(&session, "2026-11-13"), "without-key")
+			.config
+			.show_balance,
 		None,
 		"each save is one undo step"
 	);

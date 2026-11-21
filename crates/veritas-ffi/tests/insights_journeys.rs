@@ -358,7 +358,10 @@ fn wrapped_monthly_spending_is_each_months_expenses_and_its_share_of_out() {
 	// its share of total out rounded on its own.
 	let scratch = Scratch::new("wrapped-months");
 	let session = import(&scratch);
-	perform(&session, entry(CHECKING, "2026-03-05", 1500, GROCERIES, "refund"));
+	perform(
+		&session,
+		entry(CHECKING, "2026-03-05", 1500, GROCERIES, "refund"),
+	);
 	for year in [2025, 2026] {
 		let report = wrapped(&session, year);
 		assert!(!report.months.is_empty(), "{year}");
@@ -369,14 +372,22 @@ fn wrapped_monthly_spending_is_each_months_expenses_and_its_share_of_out() {
 			"{year} runs to the period's last month"
 		);
 		for pair in report.months.windows(2) {
-			assert_eq!(pair[1].month, month_after(&pair[0].month), "{year}: no gaps");
+			assert_eq!(
+				pair[1].month,
+				month_after(&pair[0].month),
+				"{year}: no gaps"
+			);
 		}
 		for bar in &report.months {
 			let first = format!("{}-{:02}-01", bar.month.year, bar.month.month);
 			let end = {
 				let next = month_after(&bar.month);
 				let next_first = chrono::NaiveDate::from_ymd_opt(next.year, next.month, 1).unwrap();
-				let month_end = next_first.pred_opt().unwrap().format("%Y-%m-%d").to_string();
+				let month_end = next_first
+					.pred_opt()
+					.unwrap()
+					.format("%Y-%m-%d")
+					.to_string();
 				month_end.min(report.last.clone())
 			};
 			let statement =
@@ -428,8 +439,14 @@ fn wrapped_years_lists_exactly_the_years_with_data_and_pins_today() {
 		.and_then(|group| group.envelopes.into_iter().next())
 		.unwrap()
 		.id;
-	perform(&session, entry(&checking, "2024-03-05", -2500, &category, ""));
-	perform(&session, entry(&checking, "2026-12-20", -2500, &category, "later"));
+	perform(
+		&session,
+		entry(&checking, "2024-03-05", -2500, &category, ""),
+	);
+	perform(
+		&session,
+		entry(&checking, "2026-12-20", -2500, &category, "later"),
+	);
 	assert_eq!(years(TODAY), [2026, 2024]);
 	for year in 2024..=2026 {
 		assert_eq!(
@@ -511,14 +528,22 @@ fn a_goal_icon_is_one_emoji_one_undo_step_and_never_reaches_actuals_tables() {
 		month_before,
 		"an icon moves no money"
 	);
-	for refused in ["ab", "🎯🎯", "✈️ ", "laptopcomputer", "👨‍👩‍👧", "🇯", "1"] {
+	for refused in ["ab", "🎯🎯", "✈️ ", "laptopcomputer", "👨‍👩‍👧", "🇯", "1"]
+	{
 		assert!(
 			matches!(set(&session, Some(refused)), Err(FfiError::Invalid { .. })),
 			"{refused:?}"
 		);
 	}
-	assert_eq!(icon(&session).as_deref(), Some("✈️"), "a refusal changes nothing");
-	assert!(set(&session, Some("✈️")).unwrap().entities.is_empty(), "the same icon writes nothing");
+	assert_eq!(
+		icon(&session).as_deref(),
+		Some("✈️"),
+		"a refusal changes nothing"
+	);
+	assert!(
+		set(&session, Some("✈️")).unwrap().entities.is_empty(),
+		"the same icon writes nothing"
+	);
 
 	set(&session, Some("👩🏽‍💻")).unwrap();
 	session.undo().unwrap();
@@ -538,7 +563,11 @@ fn a_goal_icon_is_one_emoji_one_undo_step_and_never_reaches_actuals_tables() {
 	);
 	assert_eq!(icon(&session).as_deref(), Some("✈️"), "closing keeps it");
 	set(&session, Some("🇯🇵")).unwrap();
-	assert_eq!(icon(&session).as_deref(), Some("🇯🇵"), "a closed goal can change it");
+	assert_eq!(
+		icon(&session).as_deref(),
+		Some("🇯🇵"),
+		"a closed goal can change it"
+	);
 	let session = reopen(&scratch, session);
 	assert_eq!(icon(&session).as_deref(), Some("🇯🇵"));
 	set(&session, Some("")).unwrap();
@@ -568,7 +597,10 @@ fn a_goal_icon_is_one_emoji_one_undo_step_and_never_reaches_actuals_tables() {
 		"the icon is in veritas_goal"
 	);
 	let holds_icon = |dump: &Value| dump.to_string().contains("🎯");
-	assert!(!holds_icon(&actual_tables(&after)), "no Actual table holds the icon");
+	assert!(
+		!holds_icon(&actual_tables(&after)),
+		"no Actual table holds the icon"
+	);
 	assert!(!holds_icon(&before));
 }
 
@@ -1329,18 +1361,44 @@ fn a_what_if_moves_its_horizons_by_its_amount_and_every_horizon_adds_up() {
 		let shift = base_horizon.net_worth - scenario_horizon.net_worth;
 		assert_eq!(scenario_horizon.net_worth_difference, Some(-shift));
 		assert_eq!(base_horizon.net_worth_difference, None);
-		assert!(base_horizon.accounts.iter().all(|account| account.difference.is_none()));
+		assert!(
+			base_horizon
+				.accounts
+				.iter()
+				.all(|account| account.difference.is_none())
+		);
 		for account in &scenario_horizon.accounts {
-			let expected = if account.account_id == CHECKING { -shift } else { 0 };
+			let expected = if account.account_id == CHECKING {
+				-shift
+			} else {
+				0
+			};
 			assert_eq!(account.difference, Some(expected), "{}", account.name);
 		}
 	}
-	assert!(forecast.accounts_today.iter().all(|account| account.difference.is_none()));
+	assert!(
+		forecast
+			.accounts_today
+			.iter()
+			.all(|account| account.difference.is_none())
+	);
 	// v18: the band at every projected month (FC-4.2 step 5), none for the
 	// current month's remainder, and the horizons are points of that series.
 	for projection in [&forecast.baseline, what_if] {
-		assert_eq!((projection.months[0].band_low, projection.months[0].band_high), (None, None));
-		assert!(projection.months.iter().skip(1).all(|month| month.band_low.is_some()));
+		assert_eq!(
+			(
+				projection.months[0].band_low,
+				projection.months[0].band_high
+			),
+			(None, None)
+		);
+		assert!(
+			projection
+				.months
+				.iter()
+				.skip(1)
+				.all(|month| month.band_low.is_some())
+		);
 		for horizon in &projection.horizons {
 			let month = &projection.months[horizon.months as usize];
 			assert_eq!(month.month, horizon.month);
@@ -1351,8 +1409,14 @@ fn a_what_if_moves_its_horizons_by_its_amount_and_every_horizon_adds_up() {
 		}
 		for (base_month, month) in forecast.baseline.months.iter().zip(&projection.months) {
 			assert_eq!(
-				month.band_high.zip(month.band_low).map(|(high, low)| high - low),
-				base_month.band_high.zip(base_month.band_low).map(|(high, low)| high - low),
+				month
+					.band_high
+					.zip(month.band_low)
+					.map(|(high, low)| high - low),
+				base_month
+					.band_high
+					.zip(base_month.band_low)
+					.map(|(high, low)| high - low),
 				"a what-if never widens the band"
 			);
 		}

@@ -26,15 +26,13 @@ pub fn is_single_emoji(text: &str) -> bool {
 	let chars: Vec<char> = text.chars().collect();
 	match chars.as_slice() {
 		[first, second] if is_regional_indicator(*first) && is_regional_indicator(*second) => true,
-		[base, rest @ ..] if matches!(base, '0'..='9' | '#' | '*') => {
+		['0'..='9' | '#' | '*', rest @ ..] => {
 			matches!(rest, ['\u{20E3}'] | ['\u{FE0F}', '\u{20E3}'])
 		}
-		_ => text
-			.split('\u{200D}')
-			.all(|element| {
-				let mut element = element.chars();
-				element.next().is_some_and(is_pictographic) && element.all(is_emoji_extend)
-			}),
+		_ => text.split('\u{200D}').all(|element| {
+			let mut element = element.chars();
+			element.next().is_some_and(is_pictographic) && element.all(is_emoji_extend)
+		}),
 	}
 }
 
@@ -90,20 +88,50 @@ mod tests {
 	#[test]
 	fn one_emoji_of_any_shape_up_to_16_bytes_and_nothing_else() {
 		for emoji in [
-			"🎯", "💻", "❤", "❤️", "👍🏽", "🇯🇵", "1️⃣", "#⃣", "🧑‍💻", "👩🏽‍💻", "🏳️‍🌈", "©",
+			"🎯",
+			"💻",
+			"❤",
+			"❤️",
+			"👍🏽",
+			"🇯🇵",
+			"1️⃣",
+			"#⃣",
+			"🧑‍💻",
+			"👩🏽‍💻",
+			"🏳️‍🌈",
+			"©",
 		] {
 			assert!(is_single_emoji(emoji), "{emoji}");
 		}
 		for not_one in [
-			"", " ", "a", "1", "ab", "🎯🎯", "🎯 ", " 🎯", "🇯", "🇯🇵🇺", "🏽", "\u{200D}", "🧑\u{200D}",
-			"\u{200D}💻", "🧑\u{200D}\u{200D}💻", "é", "e\u{301}", "🎯\u{301}", "1\u{20E3}\u{20E3}",
+			"",
+			" ",
+			"a",
+			"1",
+			"ab",
+			"🎯🎯",
+			"🎯 ",
+			" 🎯",
+			"🇯",
+			"🇯🇵🇺",
+			"🏽",
+			"\u{200D}",
+			"🧑\u{200D}",
+			"\u{200D}💻",
+			"🧑\u{200D}\u{200D}💻",
+			"é",
+			"e\u{301}",
+			"🎯\u{301}",
+			"1\u{20E3}\u{20E3}",
 			"laptopcomputer",
 		] {
 			assert!(!is_single_emoji(not_one), "{not_one:?}");
 		}
 		assert_eq!("👨‍👩‍👧".len(), 18);
 		assert!(!is_single_emoji("👨‍👩‍👧"), "one grapheme, but past 16 bytes");
-		assert!(!is_single_emoji("🏴\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}"));
+		assert!(!is_single_emoji(
+			"🏴\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}"
+		));
 	}
 
 	#[test]

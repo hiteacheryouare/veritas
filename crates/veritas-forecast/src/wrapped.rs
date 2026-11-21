@@ -599,7 +599,11 @@ fn monthly_series(
 	period: Period,
 	totals: &BTreeMap<YearMonth, i64>,
 ) -> Result<Vec<(YearMonth, Money)>, CoreError> {
-	let Some(first_row) = classification.rows().first().map(|row| row.date.year_month()) else {
+	let Some(first_row) = classification
+		.rows()
+		.first()
+		.map(|row| row.date.year_month())
+	else {
 		return Ok(Vec::new());
 	};
 	let mut month = first_row.max(period.first().year_month());

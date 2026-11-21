@@ -5,11 +5,11 @@
 
 use veritas_domain::{BudgetData, CivilDate, CoreError, Row, Scenario, ScenarioId};
 use veritas_engine::{BudgetEditor, BudgetWrites, EnvelopeSheet};
-use veritas_reports::NetWorthPoint;
 use veritas_forecast::{
 	Comparison, Forecaster, GoalEta, MAX_COMPARED, ScheduledFlows, Suggestions, goal_etas,
 	next_month_envelopes,
 };
+use veritas_reports::NetWorthPoint;
 
 use crate::CancelToken;
 

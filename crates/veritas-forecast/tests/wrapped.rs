@@ -389,21 +389,36 @@ fn fc_8_monthly_series_leaves_out_months_before_the_first_row() {
 	book.spend("Groceries", "2026-04-02", -1000);
 	book.spend("Groceries", "2026-12-30", -2000);
 	let first_year = wrap(&book, 2026, "2027-02-01");
-	let months: Vec<String> = series(&first_year).into_iter().map(|(month, _)| month).collect();
+	let months: Vec<String> = series(&first_year)
+		.into_iter()
+		.map(|(month, _)| month)
+		.collect();
 	assert_eq!(months.first().map(String::as_str), Some("2026-03"));
 	assert_eq!(months.len(), 10, "March through December");
-	assert_eq!(series(&first_year)[0].1, 0, "the first row's month has no spending");
+	assert_eq!(
+		series(&first_year)[0].1,
+		0,
+		"the first row's month has no spending"
+	);
 
 	let next_year = wrap(&book, 2027, "2027-02-01");
 	assert_eq!(
 		series(&next_year),
 		[("2027-01".to_owned(), 0), ("2027-02".to_owned(), 0)]
 	);
-	assert_eq!(next_year.redacted().months, [None, None], "n/a without spending");
+	assert_eq!(
+		next_year.redacted().months,
+		[None, None],
+		"n/a without spending"
+	);
 
 	let before = wrap(&book, 2025, "2027-02-01");
 	assert!(before.monthly_spending.is_empty());
-	assert!(wrap(&Book::household(), 2027, "2027-02-01").monthly_spending.is_empty());
+	assert!(
+		wrap(&Book::household(), 2027, "2027-02-01")
+			.monthly_spending
+			.is_empty()
+	);
 }
 
 #[test]
@@ -436,7 +451,11 @@ fn fc_8_years_with_data_are_the_years_whose_wrapped_has_data() {
 	let classification = classify(&book.budget);
 	let today = date("2026-06-01");
 	let years = wrapped_years(&classification, today).unwrap();
-	assert_eq!(years, [2025, 2023], "newest first; 2026's only row is after today");
+	assert_eq!(
+		years,
+		[2025, 2023],
+		"newest first; 2026's only row is after today"
+	);
 	for year in 2023..=2026 {
 		let listed = years.contains(&year);
 		let result = wrapped(&book.budget, &classification, year, today).unwrap();
