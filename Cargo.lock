@@ -1421,6 +1421,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "veritas-shadow"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "rusqlite",
+ "serde_json",
+ "veritas-ffi",
+ "veritas-interop",
+ "veritas-reports",
+ "veritas-store",
+ "zip",
+]
+
+[[package]]
 name = "veritas-store"
 version = "0.1.0"
 dependencies = [
