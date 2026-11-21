@@ -42,8 +42,14 @@ public struct BudgetOverview: Hashable, Sendable {
 	/// with the overview so they are set before any screen shows the budget.
 	/// `nil` until the core reads the budget's own format.
 	public let format: MoneyFormat?
+	/// The budget currency's ISO 4217 code, `nil` when it has none.
+	public let currencyCode: String?
 	/// How amount fields read what's typed: the budget's separators.
 	public let numberStyle: NumberStyle
+	/// Why the last daily bill run failed, until one works.
+	public let scheduleProblem: String?
+	/// Why the last snapshot failed.
+	public let snapshotProblem: String?
 
 	public init(
 		name: String?,
@@ -54,7 +60,10 @@ public struct BudgetOverview: Hashable, Sendable {
 		isChecking: Bool = false,
 		accountGroups: [SidebarGroup],
 		format: MoneyFormat? = nil,
-		numberStyle: NumberStyle = .commaDot
+		currencyCode: String? = nil,
+		numberStyle: NumberStyle = .commaDot,
+		scheduleProblem: String? = nil,
+		snapshotProblem: String? = nil
 	) {
 		self.name = name
 		self.directory = directory
@@ -64,7 +73,10 @@ public struct BudgetOverview: Hashable, Sendable {
 		self.isChecking = isChecking
 		self.accountGroups = accountGroups
 		self.format = format
+		self.currencyCode = currencyCode
 		self.numberStyle = numberStyle
+		self.scheduleProblem = scheduleProblem
+		self.snapshotProblem = snapshotProblem
 	}
 
 	public var accounts: [SidebarAccount] {
@@ -107,7 +119,7 @@ public protocol BudgetSession: AnyObject, Sendable {
 	/// One user action: one transaction and one undo step.
 	func perform(_ command: Command) async throws
 	/// Every goal, closed ones included, in the core's order.
-	func goals(today: String) async throws -> [GoalSummary]
+	func goals(today: String) async throws -> GoalList
 	/// What closing a goal would move, this month and later (D66).
 	func goalClosePreview(_ goalID: String, releaseTo: String?, today: String) async throws -> GoalClosePreview
 	/// Whether a category has history, which turns delete into Archive (R-BUD-5).
@@ -117,9 +129,9 @@ public protocol BudgetSession: AnyObject, Sendable {
 	func netProfit(first: Month, last: Month) async throws -> NetProfitReport
 	/// Assets, liabilities and net worth at each month's end (R-REP-5).
 	func netWorth(first: Month, last: Month) async throws -> [NetWorthMonth]
-	/// One Cash Flow Statement per month (R-REP-5).
+	/// One cash flow statement per month (R-REP-5).
 	func cashFlow(first: Month, last: Month) async throws -> [CashFlowColumn]
-	/// One Cash Flow Statement for an inclusive date range (R-REP-7).
+	/// One cash flow statement for an inclusive date range (R-REP-7).
 	func cashFlowStatement(first: String, last: String) async throws -> CashFlowColumn
 	/// Inclusive `YYYY-MM-DD` dates (R-REP-6).
 	func sankey(first: String, last: String) async throws -> SankeyReport
@@ -195,6 +207,32 @@ public protocol BudgetSession: AnyObject, Sendable {
 	/// Returns the new report's id.
 	@discardableResult
 	func createReport(_ draft: ReportDraft) async throws -> String
+	/// Active bills by next date, then paused and ended ones (R-BILL-1).
+	func bills(today: String) async throws -> [BillSummary]
+	/// One bill for the editor, with its next dates.
+	func bill(_ id: String, today: String) async throws -> BillDetail
+	/// Unpaid occurrences of active bills through `today + days`, oldest first (R-BILL-3).
+	func upcoming(days: UInt32, today: String) async throws -> [UpcomingBill]
+	/// Live rules in the order Actual runs them (R-RULE-2).
+	func rules() async throws -> [RuleSentence]
+	/// The rows "Apply to existing" would change, newest first.
+	func rulePreview(_ source: RuleSource) async throws -> [RuleMatch]
+	/// The balance sheet at the end of `asOf`, `YYYY-MM-DD` (R-REP-7).
+	func balanceSheet(asOf: String) async throws -> BalanceSheet
+	/// Owner's equity over inclusive `YYYY-MM-DD` dates (R-REP-7).
+	func ownersEquity(first: String, last: String) async throws -> OwnersEquity
+	/// One tax year's buckets, detail, conflicts and CSVs (R-REP-8).
+	func taxSummary(year: Int32) async throws -> TaxSummary
+	/// The baseline and up to 3 what-ifs as of `today` (R-FC-1, R-FC-2, R-FC-4).
+	func forecast(today: String, scenarioIDs: [String]) async throws -> Forecast
+	/// Next month's suggestions (R-FC-3).
+	func budgetSuggestions(today: String) async throws -> SuggestionList
+	/// Every what-if in the order it was made, with its events (R-FC-2).
+	func scenarios(today: String) async throws -> [ScenarioSummary]
+	/// Returns the new what-if's id. With `firstEvent`, the what-if and its
+	/// first line are one undo step, and a refused line makes nothing (v17).
+	@discardableResult
+	func createScenario(named name: String, firstEvent: ScenarioChange?, today: String) async throws -> String
 }
 
 /// The budgets in the app's budgets folder: new ones, Actual imports and reopened ones.

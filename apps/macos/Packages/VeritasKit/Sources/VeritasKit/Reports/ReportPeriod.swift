@@ -128,7 +128,7 @@ public enum MonthSpan: String, CaseIterable, Hashable, Sendable {
 	}
 }
 
-/// The Sankey's range control (design/mockups/sankey.html).
+/// The Sankey's and the statements' range control (design/mockups/sankey.html).
 public enum SankeySpan: String, CaseIterable, Hashable, Sendable {
 	case month
 	case quarter

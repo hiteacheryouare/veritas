@@ -5,6 +5,9 @@ import VeritasKit
 struct WorkspaceView: View {
 	@Bindable var model: WorkspaceModel
 	@State private var paletteChoice: PaletteItem?
+	@Environment(AssistantSettings.self) private var assistant: AssistantSettings?
+
+	private var offersAssistant: Bool { assistant?.offersPanel ?? false }
 
 	var body: some View {
 		NavigationSplitView {
@@ -16,6 +19,18 @@ struct WorkspaceView: View {
 					SettingsView(model: model)
 				} else if model.destination == .screen(.budget) {
 					BudgetScreen(workspace: model)
+				} else if model.destination == .screen(.bills) {
+					BillsScreen(workspace: model)
+				} else if model.destination == .screen(.rules) {
+					RulesScreen(workspace: model)
+				} else if model.destination == .screen(.statements) {
+					StatementsScreen(workspace: model)
+				} else if model.destination == .screen(.forecast) {
+					ForecastScreen(workspace: model)
+				} else if model.destination == .screen(.whatIfs) {
+					WhatIfsScreen(workspace: model)
+				} else if model.destination == .screen(.tax) {
+					TaxScreen(workspace: model)
 				} else if model.destination == .screen(.goals) {
 					GoalsScreen(workspace: model)
 				} else if model.destination == .screen(.accounts) {
@@ -51,11 +66,33 @@ struct WorkspaceView: View {
 							}
 							.accessibilityIdentifier("backupBanner")
 						}
+						if let problem = model.overview?.scheduleProblem {
+							NoticeBanner(symbol: "calendar.badge.exclamationmark", message: "Bills didn't post today. \(problem)", actionTitle: "Show bills") {
+								model.go(to: .screen(.bills))
+							}
+							.accessibilityIdentifier("scheduleBanner")
+						}
+						if let problem = model.overview?.snapshotProblem {
+							NoticeBanner(symbol: "clock.badge.exclamationmark", message: "The last snapshot failed. \(problem)", actionTitle: "Show settings") {
+								model.go(to: .screen(.settings))
+							}
+							.accessibilityIdentifier("snapshotBanner")
+						}
 						FindBar(isShown: $model.isFindShown)
 					}
 				}
 				.navigationTitle(model.title(of: model.destination))
-				.toolbar { WorkspaceToolbar(model: model) }
+				.toolbar { WorkspaceToolbar(model: model, offersAssistant: offersAssistant) }
+				.inspector(isPresented: Binding(get: { offersAssistant && model.isAssistantShown }, set: { model.isAssistantShown = $0 })) {
+					if let assistant {
+						AssistantInspector(workspace: model, settings: assistant)
+							.id(model.overview?.directory)
+							.inspectorColumnWidth(min: 260, ideal: 320, max: 480)
+					}
+				}
+				.onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+					assistant?.refresh()
+				}
 		}
 		.sheet(isPresented: $model.isPaletteShown, onDismiss: activatePaletteChoice) {
 			CommandPaletteView(index: model.paletteIndex, format: model.format) { item in

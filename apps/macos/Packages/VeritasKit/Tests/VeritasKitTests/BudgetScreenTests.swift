@@ -291,8 +291,8 @@ final class BudgetFakeSession: BudgetSession, @unchecked Sendable {
 	var echoesMonth = false
 	var slowMonth: Month?
 
-	func goals(today: String) async throws -> [GoalSummary] {
-		goals
+	func goals(today: String) async throws -> GoalList {
+		GoalList(goals: goals, mixedScaleNote: nil, zeroPlaces: false)
 	}
 
 	func categoryHistory(_ categoryID: String) async throws -> CategoryHistory {

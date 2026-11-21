@@ -28,7 +28,10 @@ final class CoreBudgetSession: BudgetSession {
 				})
 			},
 			format: overview.numberFormat.map { MoneyFormat($0, currency: currency) },
-			numberStyle: overview.numberFormat?.style ?? .commaDot
+			currencyCode: currency.flatMap { $0.code.isEmpty ? nil : $0.code },
+			numberStyle: overview.numberFormat?.style ?? .commaDot,
+			scheduleProblem: state.scheduleProblem,
+			snapshotProblem: state.snapshotProblem
 		)
 	}
 
@@ -143,9 +146,9 @@ final class CoreBudgetSession: BudgetSession {
 		return try await Core.run { try session.budgetMonth(month: month, today: today) }
 	}
 
-	func goals(today: String) async throws -> [GoalSummary] {
+	func goals(today: String) async throws -> GoalList {
 		let session = session
-		return try await Core.run { try session.goals(today: today).goals }
+		return try await Core.run { try session.goals(today: today) }
 	}
 
 	func goalClosePreview(_ goalID: String, releaseTo: String?, today: String) async throws -> GoalClosePreview {
@@ -342,6 +345,65 @@ final class CoreBudgetSession: BudgetSession {
 
 	func saveReport(_ draft: ReportDraft) async throws {
 		try await perform(.saveCustomReport(settings: draft.settings))
+	}
+
+	func bills(today: String) async throws -> [BillSummary] {
+		let session = session
+		return try await Core.run { try session.bills(today: today) }
+	}
+
+	func bill(_ id: String, today: String) async throws -> BillDetail {
+		let session = session
+		return try await Core.run { try session.bill(billId: id, today: today) }
+	}
+
+	func upcoming(days: UInt32, today: String) async throws -> [UpcomingBill] {
+		let session = session
+		return try await Core.run { try session.upcoming(days: days, today: today) }
+	}
+
+	func rules() async throws -> [RuleSentence] {
+		let session = session
+		return try await Core.run { try session.rules() }
+	}
+
+	func rulePreview(_ source: RuleSource) async throws -> [RuleMatch] {
+		let session = session
+		return try await Core.cancellable { try await session.rulePreview(source: source, cancel: $0) }
+	}
+
+	func balanceSheet(asOf: String) async throws -> BalanceSheet {
+		let session = session
+		return try await Core.cancellable { try await session.balanceSheet(asOf: asOf, cancel: $0) }
+	}
+
+	func ownersEquity(first: String, last: String) async throws -> OwnersEquity {
+		let session = session
+		return try await Core.cancellable { try await session.ownersEquity(first: first, last: last, cancel: $0) }
+	}
+
+	func taxSummary(year: Int32) async throws -> TaxSummary {
+		let session = session
+		return try await Core.cancellable { try await session.taxSummary(year: year, cancel: $0) }
+	}
+
+	func forecast(today: String, scenarioIDs: [String]) async throws -> Forecast {
+		let session = session
+		return try await Core.cancellable { try await session.forecast(today: today, scenarioIds: scenarioIDs, cancel: $0) }
+	}
+
+	func budgetSuggestions(today: String) async throws -> SuggestionList {
+		let session = session
+		return try await Core.cancellable { try await session.budgetSuggestions(today: today, cancel: $0) }
+	}
+
+	func scenarios(today: String) async throws -> [ScenarioSummary] {
+		let session = session
+		return try await Core.run { try session.scenarios(today: today) }
+	}
+
+	func createScenario(named name: String, firstEvent: ScenarioChange?, today: String) async throws -> String {
+		try await created(.scenario, by: .createScenario(name: name, firstEvent: firstEvent, today: today))
 	}
 
 	/// Runs a command that makes one row and returns that row's id.

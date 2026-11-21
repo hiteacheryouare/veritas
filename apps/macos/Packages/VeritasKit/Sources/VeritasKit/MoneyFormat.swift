@@ -7,6 +7,9 @@ import VeritasCore
 public struct MoneyFormat: Hashable, Sendable {
 	public static let minus = "\u{2212}"
 
+	/// CLS-12.10's line for a 0-place budget, whose envelope and goal numbers add both scales.
+	public static let mixedScaleNote = "Spending is recorded at 2 places and budgets at 0, so these numbers mix both, as in Actual."
+
 	/// D63 stores a 0-place budget's numbers on two scales 100 times apart, so
 	/// every call names the scale of the number it shows (CLS-12.9).
 	public enum Scale: Hashable, Sendable {
@@ -93,11 +96,25 @@ public struct MoneyFormat: Hashable, Sendable {
 		return sign(minorUnits, magnitude) + digits(magnitude, places: shown)
 	}
 
+	/// `2,140.18`, `(612.33)`: a statement shows a negative in parentheses (ST-3).
+	public func statement(_ minorUnits: Int64, on scale: Scale) -> String {
+		let shown = shownPlaces
+		let magnitude = Self.rounded(minorUnits.magnitude, from: impliedPlaces(scale), to: shown)
+		let text = digits(magnitude, places: shown)
+		return sign(minorUnits, magnitude).isEmpty ? text : "(\(text))"
+	}
+
 	/// `$312.40`, `−$34.75`, `12,50€`: titles and hero figures.
 	public func currency(_ minorUnits: Int64, on scale: Scale) -> String {
 		let shown = shownPlaces
 		let magnitude = Self.rounded(minorUnits.magnitude, from: impliedPlaces(scale), to: shown)
 		return sign(minorUnits, magnitude) + withSymbol(digits(magnitude, places: shown))
+	}
+
+	/// `$34.75` for both 3475 and -3475: prose that names the direction in words.
+	public func currencyMagnitude(_ minorUnits: Int64, on scale: Scale) -> String {
+		let shown = shownPlaces
+		return withSymbol(digits(Self.rounded(minorUnits.magnitude, from: impliedPlaces(scale), to: shown), places: shown))
 	}
 
 	/// `$1,120`: goal cards, rounded half away from zero to the whole unit (CLS-12.4).

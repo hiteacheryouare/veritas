@@ -130,9 +130,10 @@ struct WorkspaceModelTests {
 		let model = WorkspaceModel(library: library, format: MoneyFormat())
 		await model.importActualZip(URL(filePath: "/tmp/a.zip"))
 		library.session.overviewErrors = Array(repeating: .NotFound(entity: "account", id: "a"), count: 50)
+		let before = library.session.overviews
 		await model.refresh()
 		try await Task.sleep(for: .milliseconds(50))
-		#expect(library.session.overviews == 2)
+		#expect(library.session.overviews == before + 1)
 	}
 
 	@Test func undoAndRedoFollowTheCoresState() async {
@@ -165,6 +166,7 @@ struct WorkspaceModelTests {
 	@Test func maintenanceCollectsTheOpenCheckWhileItRuns() async throws {
 		let library = FakeLibrary()
 		library.session.checking = true
+		library.session.checkFinishesOnMaintain = 2
 		let model = WorkspaceModel(library: library, format: MoneyFormat(), maintenanceInterval: .seconds(60), checkingInterval: .milliseconds(5))
 		await model.importActualZip(URL(filePath: "/tmp/a.zip"))
 		var turns = 0
@@ -196,6 +198,8 @@ private final class FakeSession: BudgetSession, @unchecked Sendable {
 	var undoable = 0
 	var redoable = 0
 	var checking = false
+	/// Which maintain() call finishes the open check.
+	var checkFinishesOnMaintain = 1
 	var exports = 0
 	var maintained = 0
 	var closed = false
@@ -233,7 +237,7 @@ private final class FakeSession: BudgetSession, @unchecked Sendable {
 
 	func maintain() async throws {
 		maintained += 1
-		if checking {
+		if checking, maintained >= checkFinishesOnMaintain {
 			checking = false
 			readOnly = .auditFailed
 		}
