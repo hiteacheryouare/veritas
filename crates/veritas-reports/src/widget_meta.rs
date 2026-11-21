@@ -34,6 +34,9 @@ pub struct WidgetSettings {
 	pub formula: Option<String>,
 	/// The custom report a `custom-report` widget shows.
 	pub report_id: Option<String>,
+	/// The budget analysis card's `showBalance`, read as its card reads it
+	/// (`meta?.showBalance ?? true`): `None` when the key is absent or null.
+	pub show_balance: Option<bool>,
 }
 
 /// The text Actual gives a new markdown card (`Overview.tsx` `onAddWidget`).
@@ -44,6 +47,17 @@ fn text(meta: Option<&Json>, key: &str) -> Option<String> {
 	meta.and_then(|meta| meta.get(key))
 		.and_then(Json::as_str)
 		.map(str::to_owned)
+}
+
+/// JavaScript's truthiness, for a key Actual's card tests as it is stored.
+fn truthy(value: &Json) -> bool {
+	match value {
+		Json::Null => false,
+		Json::Bool(value) => *value,
+		Json::Number(text) => text.parse::<f64>().is_ok_and(|number| number != 0.0),
+		Json::String(text) => !text.is_empty(),
+		Json::Array(_) | Json::Object(_) => true,
+	}
 }
 
 fn summary_content(meta: Option<&Json>) -> Option<Json> {
@@ -103,6 +117,11 @@ pub fn read_settings(kind: Option<WidgetType>, meta: Option<&Json>) -> WidgetSet
 		report_id: (kind == Some(WidgetType::CustomReport))
 			.then(|| text(meta, "id"))
 			.flatten(),
+		show_balance: (kind == Some(WidgetType::BudgetAnalysis))
+			.then(|| meta.and_then(|meta| meta.get("showBalance")))
+			.flatten()
+			.filter(|value| !matches!(value, Json::Null))
+			.map(truthy),
 	}
 }
 
@@ -257,6 +276,13 @@ pub fn write_settings(
 	}
 	if kind == Some(WidgetType::CustomReport) && old.report_id != settings.report_id {
 		set(&mut entries, "id", string(settings.report_id.as_ref()));
+	}
+	if kind == Some(WidgetType::BudgetAnalysis) && old.show_balance != settings.show_balance {
+		set(
+			&mut entries,
+			"showBalance",
+			settings.show_balance.map(Json::Bool),
+		);
 	}
 	Ok(Some(Json::Object(entries).stringify()))
 }
@@ -507,6 +533,49 @@ mod tests {
 		assert_eq!(
 			write_settings(kind, Some(stored), &settings).unwrap(),
 			meta(r#"{"content":"{\"type\":\"sum\",\"divisorConditions\":[]}"}"#)
+		);
+	}
+
+	#[test]
+	fn show_balance_reads_as_actuals_card_and_writes_a_boolean_in_place() {
+		let kind = Some(WidgetType::BudgetAnalysis);
+		let read = |stored: &str| {
+			read_settings(kind, parse_meta(Some(stored)).unwrap().as_ref()).show_balance
+		};
+		assert_eq!(read(r#"{"name":"B"}"#), None);
+		assert_eq!(read(r#"{"showBalance":null}"#), None);
+		assert_eq!(read(r#"{"showBalance":false}"#), Some(false));
+		assert_eq!(read(r#"{"showBalance":0}"#), Some(false));
+		assert_eq!(read(r#"{"showBalance":"no"}"#), Some(true));
+		assert_eq!(
+			read_settings(
+				Some(WidgetType::CashFlow),
+				parse_meta(Some(r#"{"showBalance":false}"#)).unwrap().as_ref()
+			)
+			.show_balance,
+			None
+		);
+
+		let stored = r#"{"showBalance":"no","graphType":"Line","future":{"x":1.50}}"#;
+		let mut settings = read_settings(kind, parse_meta(Some(stored)).unwrap().as_ref());
+		assert_eq!(write_settings(kind, Some(stored), &settings).unwrap(), None);
+		settings.show_balance = Some(false);
+		assert_eq!(
+			write_settings(kind, Some(stored), &settings).unwrap(),
+			meta(r#"{"showBalance":false,"graphType":"Line","future":{"x":1.50}}"#)
+		);
+		settings.show_balance = None;
+		assert_eq!(
+			write_settings(kind, Some(stored), &settings).unwrap(),
+			meta(r#"{"graphType":"Line","future":{"x":1.50}}"#)
+		);
+		let added = WidgetSettings {
+			show_balance: Some(true),
+			..WidgetSettings::default()
+		};
+		assert_eq!(
+			write_settings(kind, None, &added).unwrap(),
+			meta(r#"{"showBalance":true}"#)
 		);
 	}
 

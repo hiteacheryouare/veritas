@@ -156,6 +156,7 @@ fn blank() -> WidgetConfig {
 		text_align: None,
 		formula: None,
 		report_id: None,
+		show_balance: None,
 	}
 }
 
@@ -1830,6 +1831,7 @@ fn every_dashboard_edit_is_one_undo_step_and_survives_redo_and_a_reopen() {
 		height: 2,
 		config: WidgetConfig {
 			report_id: Some(report_id),
+			show_balance: None,
 			..blank()
 		},
 	});
@@ -1862,6 +1864,104 @@ fn every_dashboard_edit_is_one_undo_step_and_survives_redo_and_a_reopen() {
 		dashboards(&reopened, "2026-11-13")
 			.iter()
 			.all(|page| page.id != DEEP_DIVE)
+	);
+}
+
+#[test]
+fn the_budget_analysis_cards_show_balance_reads_and_saves_as_actuals_card_does() {
+	// Two cards Actual made: one with showBalance stored beside keys Veritas
+	// never reads, one without it. Veritas turns the first off and the second
+	// on; Actual's handler makes the same change. The meta text must match
+	// byte for byte, and the card's numbers must not move.
+	let scratch = Scratch::new("show-balance");
+	let Some(oracle) = oracle() else {
+		return;
+	};
+	let stored = r#"{"name":"Plan","graphType":"Line","showBalance":true,"balanceOnly":false,"futureKey":{"nested":[1,2.5,null]},"showHiddenCategories":true}"#;
+	let base = scratch.join("base.zip");
+	apply(
+		&oracle,
+		&all_features(),
+		json!([
+			{"op": "addDashboardWidget", "id": "with-key", "page": MAIN, "type": "budget-analysis-card",
+				"x": 0, "y": 50, "width": 4, "height": 2, "metaText": stored},
+			{"op": "addDashboardWidget", "id": "without-key", "page": MAIN, "type": "budget-analysis-card",
+				"x": 4, "y": 50, "width": 4, "height": 2, "metaText": r#"{"graphType":"Bar"}"#},
+		]),
+		&base,
+		9,
+	);
+	let session = import(&base, &scratch.join("veritas"));
+	let pages = dashboards(&session, "2026-11-13");
+	let with_key = widget(&pages, "with-key").clone();
+	let without_key = widget(&pages, "without-key").clone();
+	assert_eq!(with_key.config.show_balance, Some(true));
+	assert_eq!(without_key.config.show_balance, None, "absent reads nil, which Actual shows");
+
+	let mut off = with_key.config.clone();
+	off.show_balance = Some(false);
+	let change = perform(
+		&session,
+		Command::SetWidgetConfig {
+			widget_id: "with-key".to_owned(),
+			config: off,
+		},
+	);
+	assert!(!change.entities.is_empty());
+	let mut on = without_key.config.clone();
+	on.show_balance = Some(true);
+	perform(
+		&session,
+		Command::SetWidgetConfig {
+			widget_id: "without-key".to_owned(),
+			config: on,
+		},
+	);
+	let after = dashboards(&session, "2026-11-13");
+	assert_eq!(widget(&after, "with-key").config.show_balance, Some(false));
+	assert_eq!(widget(&after, "without-key").config.show_balance, Some(true));
+	assert_eq!(
+		widget(&after, "with-key").view,
+		with_key.view,
+		"showBalance only hides a line, the figures stay"
+	);
+
+	let ours_zip = scratch.join("veritas.zip");
+	export(&session, &ours_zip);
+	let theirs_zip = scratch.join("actual.zip");
+	apply(
+		&oracle,
+		&base,
+		json!([
+			{"op": "updateWidgetMeta", "id": "with-key", "setText": r#"{"showBalance":false}"#},
+			{"op": "updateWidgetMeta", "id": "without-key", "setText": r#"{"showBalance":true}"#},
+		]),
+		&theirs_zip,
+		10,
+	);
+	let ours = raw_dump(&oracle, &ours_zip);
+	let theirs = raw_dump(&oracle, &theirs_zip);
+	for id in ["with-key", "without-key"] {
+		assert_eq!(
+			table(&ours, "dashboard")[id]["meta"],
+			table(&theirs, "dashboard")[id]["meta"],
+			"{id}"
+		);
+	}
+
+	session.undo().unwrap();
+	assert_eq!(
+		widget(&dashboards(&session, "2026-11-13"), "without-key").config.show_balance,
+		None,
+		"each save is one undo step"
+	);
+	session.undo().unwrap();
+	let undone_zip = scratch.join("undone.zip");
+	export(&session, &undone_zip);
+	assert_eq!(
+		table(&raw_dump(&oracle, &undone_zip), "dashboard")["with-key"]["meta"],
+		json!(stored),
+		"undo puts the original text back byte for byte"
 	);
 }
 

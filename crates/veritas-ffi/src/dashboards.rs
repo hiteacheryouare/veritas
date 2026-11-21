@@ -53,6 +53,10 @@ pub struct WidgetConfig {
 	pub formula: Option<String>,
 	/// The saved report a custom-report widget shows.
 	pub report_id: Option<String>,
+	/// v18: the budget analysis card's `showBalance`; `nil` when the card
+	/// doesn't store it, which Actual shows as `true`.
+	#[uniffi(default = None)]
+	pub show_balance: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
@@ -520,6 +524,7 @@ fn config(budget: &BudgetData, settings: WidgetSettings) -> WidgetConfig {
 		text_align: settings.text_align,
 		formula: settings.formula,
 		report_id: settings.report_id,
+		show_balance: settings.show_balance,
 	}
 }
 
@@ -543,6 +548,7 @@ fn settings(
 		text_align: config.text_align.clone(),
 		formula: config.formula.clone(),
 		report_id: config.report_id.clone(),
+		show_balance: config.show_balance,
 	})
 }
 
@@ -1343,6 +1349,7 @@ mod tests {
 			text_align: None,
 			formula: None,
 			report_id: None,
+			show_balance: None,
 		}
 	}
 
