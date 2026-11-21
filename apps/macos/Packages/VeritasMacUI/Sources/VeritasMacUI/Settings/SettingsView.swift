@@ -2,24 +2,31 @@ import SwiftUI
 import VeritasDesign
 import VeritasKit
 
-/// Settings, with the mockup's segmented control. AI and Tags stay hidden until they work (D69).
+/// Settings, with the mockup's segmented control. Tags stays hidden until it works (D69).
 struct SettingsView: View {
 	enum Section: String, CaseIterable {
 		case backups
 		case actual
 		case appearance
+		case assistant
 
 		var title: String {
 			switch self {
 			case .backups: "Backups"
 			case .actual: "Actual"
 			case .appearance: "Appearance"
+			case .assistant: "AI"
 			}
 		}
 	}
 
 	@Bindable var model: WorkspaceModel
 	@SceneStorage("settingsSection") private var section = Section.backups
+	@Environment(AssistantSettings.self) private var assistant: AssistantSettings?
+
+	private var sections: [Section] {
+		Section.allCases.filter { $0 != .assistant || assistant != nil }
+	}
 
 	var body: some View {
 		Group {
@@ -32,6 +39,10 @@ struct SettingsView: View {
 				ActualSettingsView(model: model)
 			case .appearance:
 				AppearanceSettingsView()
+			case .assistant:
+				if let assistant {
+					AssistantSettingsView(settings: assistant)
+				}
 			}
 		}
 		.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -39,7 +50,7 @@ struct SettingsView: View {
 		.toolbar {
 			ToolbarItem(placement: .primaryAction) {
 				Picker("Settings section", selection: $section) {
-					ForEach(Section.allCases, id: \.self) { section in
+					ForEach(sections, id: \.self) { section in
 						Text(section.title).tag(section)
 					}
 				}

@@ -119,7 +119,7 @@ public protocol BudgetSession: AnyObject, Sendable {
 	/// One user action: one transaction and one undo step.
 	func perform(_ command: Command) async throws
 	/// Every goal, closed ones included, in the core's order.
-	func goals(today: String) async throws -> [GoalSummary]
+	func goals(today: String) async throws -> GoalList
 	/// What closing a goal would move, this month and later (D66).
 	func goalClosePreview(_ goalID: String, releaseTo: String?, today: String) async throws -> GoalClosePreview
 	/// Whether a category has history, which turns delete into Archive (R-BUD-5).

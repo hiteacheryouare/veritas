@@ -236,14 +236,14 @@ public final class StatementsModel {
 		return "\(when), in \(code)"
 	}
 
-	static func date(_ text: String, style: Date.FormatStyle.Symbol.Month) -> String {
+	nonisolated static func date(_ text: String, style: Date.FormatStyle.Symbol.Month) -> String {
 		guard let date = CivilDate.date(text) else { return text }
 		return date.formatted(.dateTime.month(style).day().year())
 	}
 
 	/// ST-3 and ST-2: assets and liabilities by account group, each as the
 	/// core totals them. A group's subtotal shows when it has more than one account.
-	static func lines(_ sheet: BalanceSheet) -> [StatementLine] {
+	nonisolated static func lines(_ sheet: BalanceSheet) -> [StatementLine] {
 		func side(_ id: String, _ title: String, _ sections: [SheetSection], total: Int64, totalTitle: String) -> [StatementLine] {
 			var lines = [StatementLine(id: id, title: title, style: .section)]
 			for section in sections {
@@ -266,14 +266,14 @@ public final class StatementsModel {
 			+ [StatementLine(id: "netWorth", title: "Net worth", amount: sheet.netWorth, style: .grand)]
 	}
 
-	static func accountTitle(_ account: SheetAccount) -> String {
+	nonisolated static func accountTitle(_ account: SheetAccount) -> String {
 		if account.deleted { return "\(account.name) (deleted)" }
 		if account.closed { return "\(account.name) (closed)" }
 		return account.name
 	}
 
 	/// "Total cash" for the group Cash, but "Total HSA" stays as written.
-	static func lowercasedFirstWord(_ name: String) -> String {
+	nonisolated static func lowercasedFirstWord(_ name: String) -> String {
 		let first = name.prefix { !$0.isWhitespace }
 		guard first.count > 1, first != first.uppercased() else { return name }
 		return name.prefix(1).lowercased() + name.dropFirst()
@@ -281,7 +281,7 @@ public final class StatementsModel {
 
 	/// ST-3's income statement: revenue and expenses by category group then
 	/// category, and Net income, which is Net Profit (ST-1).
-	static func lines(_ column: NetProfitColumn) -> [StatementLine] {
+	nonisolated static func lines(_ column: NetProfitColumn) -> [StatementLine] {
 		func section(_ id: String, _ title: String, _ section: ReportSection, totalTitle: String) -> [StatementLine] {
 			var lines = [StatementLine(id: id, title: title, style: .section)]
 			var group: String??
@@ -309,7 +309,7 @@ public final class StatementsModel {
 	/// Net income and the capitalized transfers line always show; the other
 	/// five only when they aren't zero. Closing equity is the core's, so when
 	/// `unexplained` isn't zero the column doesn't add up and the notice says so.
-	static func lines(_ equity: OwnersEquity) -> [StatementLine] {
+	nonisolated static func lines(_ equity: OwnersEquity) -> [StatementLine] {
 		let optional: [(String, String, ReportLine)] = [
 			("startingBalances", "Starting balances", equity.startingBalances),
 			("reconciliationAdjustments", "Reconciliation adjustments", equity.reconciliationAdjustments),
@@ -330,7 +330,7 @@ public final class StatementsModel {
 	/// ST-6 in its sections, with ST-10.7's rule for which lines show: the
 	/// review and other lines only when they aren't zero, and Change in budget
 	/// cash from operations only with Unreviewed transfers. Signs are the core's.
-	static func lines(_ flow: CashFlowColumn) -> [StatementLine] {
+	nonisolated static func lines(_ flow: CashFlowColumn) -> [StatementLine] {
 		var lines = [
 			StatementLine(id: "opening.section", title: "Opening", style: .section),
 			StatementLine(id: "opening", title: "Budget accounts balance", amount: flow.opening, style: .line),

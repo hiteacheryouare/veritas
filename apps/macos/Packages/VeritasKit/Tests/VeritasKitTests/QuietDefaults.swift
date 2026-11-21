@@ -14,7 +14,7 @@ extension BudgetSession {
 	func setRetention(_ retention: Retention) async throws {}
 	func budgetMonth(_ month: Month, today: String) async throws -> BudgetMonth { throw FfiError.Cancelled }
 	func perform(_ command: Command) async throws {}
-	func goals(today: String) async throws -> [GoalSummary] { [] }
+	func goals(today: String) async throws -> GoalList { GoalList(goals: [], mixedScaleNote: nil, zeroPlaces: false) }
 	func goalClosePreview(_ goalID: String, releaseTo: String?, today: String) async throws -> GoalClosePreview {
 		GoalClosePreview(leftover: 0, laterBudget: [], destinationAvailableAfter: 0)
 	}

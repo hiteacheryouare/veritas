@@ -166,7 +166,7 @@ public final class NetProfitModel {
 		}
 	}
 
-	static func section(_ line: NetProfitLine, in column: NetProfitColumn?) -> ReportSection? {
+	nonisolated static func section(_ line: NetProfitLine, in column: NetProfitColumn?) -> ReportSection? {
 		guard let column else { return nil }
 		switch line {
 		case .income: return column.income
@@ -177,7 +177,7 @@ public final class NetProfitModel {
 		}
 	}
 
-	static func value(_ line: NetProfitLine, in column: NetProfitColumn) -> ReportLine {
+	nonisolated static func value(_ line: NetProfitLine, in column: NetProfitColumn) -> ReportLine {
 		switch line {
 		case .income: ReportLine(total: column.income.total, count: column.income.count)
 		case .expenses: ReportLine(total: column.expenses.total, count: column.expenses.count)
