@@ -88,10 +88,11 @@ struct SpanPicker<Span: Hashable>: View {
 	let choices: [Span]
 	let title: KeyPath<Span, String>
 	let id: String
+	var label = "Range"
 	let choose: (Span) -> Void
 
 	var body: some View {
-		Picker("Range", selection: Binding(get: { selection }, set: choose)) {
+		Picker(label, selection: Binding(get: { selection }, set: choose)) {
 			ForEach(choices, id: \.self) { Text($0[keyPath: title]).tag($0) }
 		}
 		.pickerStyle(.segmented)

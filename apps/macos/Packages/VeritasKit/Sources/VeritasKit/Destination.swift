@@ -3,6 +3,7 @@ public enum Screen: String, CaseIterable, Codable, Sendable {
 	case budget
 	case accounts
 	case bills
+	case rules
 	case goals
 	case reports
 	case dashboard
@@ -24,6 +25,7 @@ public enum Screen: String, CaseIterable, Codable, Sendable {
 		case .budget: "Budget"
 		case .accounts: "Accounts"
 		case .bills: "Bills"
+		case .rules: "Rules"
 		case .goals: "Goals"
 		case .reports: "Reports"
 		case .dashboard: "Dashboard"
@@ -42,6 +44,7 @@ public enum Screen: String, CaseIterable, Codable, Sendable {
 
 	public var pages: [Screen] {
 		switch self {
+		case .bills: [.rules]
 		case .reports: [.dashboard, .netProfit, .sankey, .customReports]
 		case .insights: [.forecast, .whatIfs, .wrapped, .statements, .tax]
 		default: []

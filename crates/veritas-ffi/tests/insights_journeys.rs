@@ -1020,6 +1020,8 @@ fn a_what_if_moves_its_horizons_by_its_amount_and_every_horizon_adds_up() {
 		&session,
 		Command::CreateScenario {
 			name: "Roof repair".to_owned(),
+			first_event: None,
+			today: None,
 		},
 		EntityKind::Scenario,
 	);
@@ -1095,6 +1097,105 @@ fn a_what_if_moves_its_horizons_by_its_amount_and_every_horizon_adds_up() {
 		horizons(&undone.scenarios[0]),
 		base,
 		"undoing the event leaves the what-if at the baseline"
+	);
+}
+
+#[test]
+fn v17_add_what_if_with_its_first_event_is_one_undo_step_and_a_refusal_leaves_nothing() {
+	// "Add what-if" makes the what-if and its first line in one command, so
+	// one undo removes both, and a refused line refuses the what-if too:
+	// nothing is written and the undo stack doesn't move.
+	use veritas_ffi::{EntityKind, ScenarioChange};
+	let scratch = Scratch::new("what-if-first-event");
+	let session = import(&scratch);
+	let repair = ScenarioChange::OneTime {
+		date: "2027-03-15".to_owned(),
+		account_id: CHECKING.to_owned(),
+		category_id: Some(HOUSEHOLD.to_owned()),
+		amount: -100_000,
+	};
+	let id = created_id(
+		&session,
+		Command::CreateScenario {
+			name: "Roof repair".to_owned(),
+			first_event: Some(repair.clone()),
+			today: Some(TODAY.to_owned()),
+		},
+		EntityKind::Scenario,
+	);
+	let listed = session.scenarios(TODAY.to_owned()).unwrap();
+	assert_eq!(listed.len(), 1);
+	assert_eq!(listed[0].id, id);
+	assert_eq!(listed[0].events.len(), 1);
+	assert_eq!(listed[0].events[0].change, repair);
+	let forecast =
+		block_on(session.forecast(TODAY.to_owned(), vec![id.clone()], CancelToken::new())).unwrap();
+	assert_ne!(
+		forecast.scenarios[0].horizons.last().map(|h| h.net_worth),
+		forecast.baseline.horizons.last().map(|h| h.net_worth),
+		"the first line is in the projection"
+	);
+
+	session.undo().unwrap();
+	assert!(
+		session.scenarios(TODAY.to_owned()).unwrap().is_empty(),
+		"one undo removes the what-if and its line together"
+	);
+	session.redo().unwrap();
+	assert_eq!(session.scenarios(TODAY.to_owned()).unwrap().len(), 1);
+
+	refused(
+		&session,
+		Command::CreateScenario {
+			name: "Last month".to_owned(),
+			first_event: Some(ScenarioChange::OneTime {
+				date: "2026-10-01".to_owned(),
+				account_id: CHECKING.to_owned(),
+				category_id: None,
+				amount: -100,
+			}),
+			today: Some(TODAY.to_owned()),
+		},
+	);
+	refused(
+		&session,
+		Command::CreateScenario {
+			name: "No date".to_owned(),
+			first_event: Some(repair),
+			today: None,
+		},
+	);
+	assert!(
+		matches!(
+			session.perform(Command::CreateScenario {
+				name: "Gone account".to_owned(),
+				first_event: Some(ScenarioChange::OneTime {
+					date: "2027-01-10".to_owned(),
+					account_id: "no-such-account".to_owned(),
+					category_id: None,
+					amount: -100,
+				}),
+				today: Some(TODAY.to_owned()),
+			}),
+			Err(FfiError::NotFound { .. })
+		),
+		"an unknown account refuses the what-if too"
+	);
+	let names: Vec<String> = session
+		.scenarios(TODAY.to_owned())
+		.unwrap()
+		.into_iter()
+		.map(|scenario| scenario.name)
+		.collect();
+	assert_eq!(
+		names,
+		["Roof repair"],
+		"a refused line leaves no what-if behind"
+	);
+	session.undo().unwrap();
+	assert!(
+		session.scenarios(TODAY.to_owned()).unwrap().is_empty(),
+		"the refusals added no undo steps"
 	);
 }
 

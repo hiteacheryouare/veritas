@@ -305,7 +305,7 @@ pub fn evaluate_rate(text: String, style: NumberStyle) -> Result<i64, FfiError> 
 	let rate = crate::evaluate_amount(number, style)?;
 	if rate < 0 {
 		return Err(FfiError::Invalid {
-			message: "The interest rate can't be negative.".to_owned(),
+			message: "A rate can't be negative.".to_owned(),
 		});
 	}
 	Ok(rate)

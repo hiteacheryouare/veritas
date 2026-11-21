@@ -113,13 +113,13 @@ final class StubDashboards: @unchecked Sendable {
 				)
 			}
 			let series = [
-				NetWorthCardSeries(accountId: "card", name: "Card", points: points.map { -$0.debt }, color: 1),
+				NetWorthCardSeries(accountId: "visa", name: "Visa", points: points.map { -$0.debt }, color: 1),
 				NetWorthCardSeries(accountId: "checking", name: "Checking", points: points.map(\.assets), color: 0)
 			]
 			return .netWorth(
 				range: widgetRange(kind, config), interval: .monthly, points: points, netWorth: points.last?.netWorth ?? 0,
 				change: (points.last?.netWorth ?? 0) - (points.first?.netWorth ?? 0), lowest: points.map(\.netWorth).min(), highest: points.map(\.netWorth).max(),
-				hasNegative: false, accounts: ["checking", "card"], series: series
+				hasNegative: false, accounts: ["checking", "visa"], series: series
 			)
 		case .cashFlow:
 			return .cashFlow(range: widgetRange(kind, config), income: 387_440, expense: -310_566, change: 76_874)

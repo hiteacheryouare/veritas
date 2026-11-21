@@ -128,6 +128,9 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 	private let reports = StubReports()
 	private let accountStore = StubAccounts()
 	private lazy var dashboardStore = StubDashboards(reports: reports)
+	private let billStore = StubBills()
+	private let ruleStore = StubRules()
+	private let forecastStore = StubForecast()
 
 	init(readOnly: ReadOnlyKind?, hasFindings: Bool = false, backupFails: Bool = false, hidesDecimals: Bool = false) {
 		self.readOnly = readOnly
@@ -137,7 +140,7 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 		name = "Stub"
 		accountGroups = [
 			SidebarGroup(name: "Cash", accounts: [SidebarAccount(id: "checking", name: "Checking", balance: 0)]),
-			SidebarGroup(name: "Credit", accounts: [SidebarAccount(id: "card", name: "Card", balance: 0)])
+			SidebarGroup(name: "Credit", accounts: [SidebarAccount(id: "visa", name: "Visa", balance: 0)])
 		]
 	}
 
@@ -158,7 +161,8 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 	func overview() async throws -> BudgetOverview {
 		BudgetOverview(
 			name: name, directory: StubLaunch.budgetDirectory, readOnly: readOnly, accountGroups: name == "Stub" ? accountStore.sidebar() : accountGroups,
-			format: hidesDecimals ? MoneyFormat(Self.hiddenDecimals, currency: Self.dollar) : nil
+			format: hidesDecimals ? MoneyFormat(Self.hiddenDecimals, currency: Self.dollar) : nil,
+			currencyCode: Self.dollar.code
 		)
 	}
 
@@ -218,8 +222,8 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 		budget.month(month)
 	}
 
-	func goals(today: String) async throws -> [GoalSummary] {
-		budget.goals
+	func goals(today: String) async throws -> GoalList {
+		GoalList(goals: budget.goals, mixedScaleNote: nil, zeroPlaces: false)
 	}
 
 	func goalClosePreview(_ goalID: String, releaseTo: String?, today: String) async throws -> GoalClosePreview {
@@ -232,7 +236,14 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 
 	func perform(_ command: Command) async throws {
 		if let readOnly { throw FfiError.ReadOnly(reason: readOnly) }
+		if try billStore.perform(command) || ruleStore.perform(command) || forecastStore.perform(command) { return }
 		switch command {
+		case .applySuggestions(let today):
+			let suggestions = forecastStore.suggestions(today: today)
+			for item in suggestions.items {
+				guard let amount = item.amount else { continue }
+				try budget.perform(.setBudget(month: suggestions.month, categoryId: item.categoryId, amount: amount))
+			}
 		case .saveCustomReport(let settings): try reports.save(settings)
 		case .placeWidget(let id, let x, let y, let width, let height): try dashboardStore.place(id, x: x, y: y, width: width, height: height)
 		default:
@@ -244,8 +255,17 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 	func register(_ scope: RegisterScope, filter: RegisterFilter, sort: RegisterSort, offset: UInt64, limit: UInt64) async throws -> RegisterPage {
 		accountStore.register(scope, filter: filter, sort: sort, offset: offset, limit: limit)
 	}
-	func registerRow(_ id: String) async throws -> RegisterRow { try accountStore.registerRow(id) }
-	func payees() async throws -> [PayeeDetail] { accountStore.payeeList() }
+	/// A row the Accounts stub doesn't hold may be one of the Rules stub's preview rows; any other id is NotFound.
+	func registerRow(_ id: String) async throws -> RegisterRow {
+		if let row = try? accountStore.registerRow(id) { return row }
+		return try ruleStore.registerRow(id)
+	}
+	/// The Accounts stub's payees, then the Bills stub's own; one they share, such as `to-carloan`, is listed once.
+	func payees() async throws -> [PayeeDetail] {
+		let payees = accountStore.payeeList()
+		let known = Set(payees.map(\.id))
+		return payees + StubBills.payees.filter { !known.contains($0.id) }
+	}
 	func payeeMemory(_ payeeID: String) async throws -> PayeeMemory? { accountStore.memory(payeeID) }
 	func reconciliation(_ accountID: String, statementBalance: Int64) async throws -> Reconciliation {
 		accountStore.reconciliation(accountID, statement: statementBalance)
@@ -346,6 +366,22 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 	func createReport(_ draft: ReportDraft) async throws -> String {
 		try writable()
 		return try reports.create(draft)
+	}
+
+	func bills(today: String) async throws -> [BillSummary] { billStore.bills() }
+	func bill(_ id: String, today: String) async throws -> BillDetail { try billStore.detail(id) }
+	func upcoming(days: UInt32, today: String) async throws -> [UpcomingBill] { billStore.upcoming(days: days) }
+	func rules() async throws -> [RuleSentence] { ruleStore.rules() }
+	func rulePreview(_ source: RuleSource) async throws -> [RuleMatch] { try ruleStore.preview(source) }
+	func balanceSheet(asOf: String) async throws -> BalanceSheet { try StubStatements.balanceSheet(asOf: asOf) }
+	func ownersEquity(first: String, last: String) async throws -> OwnersEquity { try StubStatements.ownersEquity(first: first, last: last) }
+	func taxSummary(year: Int32) async throws -> TaxSummary { try StubTax.summary(year: year) }
+	func forecast(today: String, scenarioIDs: [String]) async throws -> Forecast { try forecastStore.forecast(today: today, scenarioIDs: scenarioIDs) }
+	func budgetSuggestions(today: String) async throws -> SuggestionList { forecastStore.suggestions(today: today) }
+	func scenarios(today: String) async throws -> [ScenarioSummary] { forecastStore.scenarios(today: today) }
+	func createScenario(named name: String, firstEvent: ScenarioChange?, today: String) async throws -> String {
+		try writable()
+		return try forecastStore.create(named: name, firstEvent: firstEvent, today: today)
 	}
 
 	private func writable() throws {

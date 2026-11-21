@@ -29,8 +29,12 @@ public final class WorkspaceModel {
 	public var newBudgetSetup: NewBudgetSetup?
 	public var isPaletteShown = false
 	public var isFindShown = false
+	public var isAssistantShown = false
 	public var isDense = false
 	public var showsHiddenEnvelopes = false
+	/// The what-ifs Forecast compares against the baseline, in the order
+	/// chosen, kept here so the What-ifs page and Forecast share them.
+	public var comparedScenarios: [String] = []
 	/// The budget's own format once the core reports it, else the Mac's.
 	public var format: MoneyFormat {
 		overview?.format ?? fallbackFormat
@@ -160,7 +164,7 @@ public final class WorkspaceModel {
 	public func goals() async -> [GoalSummary] {
 		guard let session else { return [] }
 		do {
-			return try await session.goals(today: Self.today())
+			return try await session.goals(today: Self.today()).goals
 		} catch {
 			present(error, isRefresh: true)
 			return []
@@ -237,6 +241,26 @@ public final class WorkspaceModel {
 		}
 	}
 
+	/// A write that isn't a `Command`, from a sheet that shows the core's
+	/// `Invalid` message beside its own fields, as `perform(_:inline:)` does.
+	@discardableResult
+	public func change<T: Sendable>(_ write: @Sendable (any BudgetSession) async throws -> T, inline: (String) -> Void) async -> T? {
+		guard let session else { return nil }
+		do {
+			let result = try await write(session)
+			changeCount += 1
+			await refresh()
+			return result
+		} catch {
+			if case .inline(let message) = ErrorPresentation(error) {
+				inline(message)
+			} else {
+				present(error)
+			}
+			return nil
+		}
+	}
+
 	public var canEditDashboards: Bool { session?.canEditDashboards ?? false }
 	public var canPlanTransfers: Bool { session?.canPlanTransfers ?? false }
 
@@ -244,6 +268,11 @@ public final class WorkspaceModel {
 	public var currentAccountID: String {
 		if case .account(let id) = destination { return id }
 		return overview?.accounts.first { !$0.isInactive }?.id ?? ""
+	}
+
+	/// The open budget's reads for the assistant, with no way to write.
+	public var readOnlyQueries: (any ReadOnlyBudgetQueries)? {
+		session.map(BudgetSessionQueries.init)
 	}
 
 	/// The budget currency's decimal places (D63): budget cells and goal
@@ -259,7 +288,7 @@ public final class WorkspaceModel {
 	/// `BudgetMonth.mixedScaleNote`.
 	public var mixedScaleNote: String? {
 		phase == .open && budgetDecimalPlaces == 0
-			? "Spending is recorded at 2 places and budgets at 0, so these numbers mix both, as in Actual."
+			? MoneyFormat.mixedScaleNote
 			: nil
 	}
 
@@ -280,6 +309,26 @@ public final class WorkspaceModel {
 			return true
 		} catch {
 			present(error) { [weak self] in await self?.perform(command) }
+			return false
+		}
+	}
+
+	/// A command from a sheet that shows the core's `Invalid` message beside
+	/// its own fields. Every other error is shown as `perform` shows it.
+	@discardableResult
+	public func perform(_ command: Command, inline: (String) -> Void) async -> Bool {
+		guard let session else { return false }
+		do {
+			try await session.perform(command)
+			changeCount += 1
+			await refresh()
+			return true
+		} catch {
+			if case .inline(let message) = ErrorPresentation(error) {
+				inline(message)
+			} else {
+				present(error)
+			}
 			return false
 		}
 	}
@@ -340,6 +389,7 @@ public final class WorkspaceModel {
 		settings = nil
 		integrityReport = nil
 		sheet = nil
+		comparedScenarios = []
 		destination = .start
 		phase = .empty
 	}
@@ -390,6 +440,9 @@ public final class WorkspaceModel {
 		retry = nil
 		await action?()
 	}
+
+	/// A bill another screen asked the Bills screen to open, such as a bill's rule on the Rules page.
+	public var pendingBillID: String?
 
 	public func go(to destination: Destination) {
 		self.destination = destination
@@ -450,6 +503,8 @@ public final class WorkspaceModel {
 			} catch {
 				present(error)
 			}
+			// maintain() may have changed state(): a failed schedule run or snapshot shows its banner now.
+			await refresh()
 			startMaintenance(of: opened)
 			await settings.connectBackupFolder()
 			await settings.backUpIfDue()

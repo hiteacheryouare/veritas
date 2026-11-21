@@ -464,11 +464,16 @@ pub enum Command {
 		tag: String,
 		meaning: Option<crate::tax_setup::TaxTagMeaning>,
 	},
-	/// v16. A new, empty what-if (R-FC-2). Its id comes back as the
-	/// `scenario` entity. A blank name, or one another what-if has
-	/// (case-insensitively), is `Invalid`.
+	/// v16. A new what-if (R-FC-2). Its id comes back as the `scenario`
+	/// entity. A blank name, or one another what-if has
+	/// (case-insensitively), is `Invalid`. v17: `firstEvent` makes the
+	/// what-if with that line, checked as `AddScenarioEvent` checks one, in
+	/// the same undo step. A refused line refuses the whole command, and
+	/// `today` is required with a first event (`Invalid` without it).
 	CreateScenario {
 		name: String,
+		first_event: Option<ScenarioChange>,
+		today: Option<String>,
 	},
 	RenameScenario {
 		scenario_id: String,
@@ -940,7 +945,10 @@ impl Command {
 	/// does (v15), so the sheet the plan reads is that day's too.
 	pub(crate) fn local_today(&self) -> Option<&str> {
 		match self {
-			Command::AddScenarioEvent { today, .. }
+			Command::CreateScenario {
+				today: Some(today), ..
+			}
+			| Command::AddScenarioEvent { today, .. }
 			| Command::EditScenarioEvent { today, .. }
 			| Command::ApplySuggestions { today } => Some(today),
 			_ => None,
@@ -1169,12 +1177,32 @@ impl Command {
 			Command::CreateDashboard { name } => dashboards::create_dashboard(data, name),
 			Command::RenameDashboard { page_id, name } => reports::rename_page(data, page_id, name),
 			Command::DeleteDashboard { page_id } => reports::delete_page(data, page_id),
-			Command::CreateScenario { name } => scenarios::create_scenario(
-				data,
-				ScenarioId::new(veritas_store::new_id()),
+			Command::CreateScenario {
 				name,
-				now_ms() as i64,
-			),
+				first_event,
+				today,
+			} => {
+				let first_event = match (first_event, today) {
+					(Some(change), Some(today)) => Some((
+						ScenarioEventId::new(veritas_store::new_id()),
+						core_change(change)?,
+						civil_date(today)?,
+					)),
+					(Some(_), None) => {
+						return Err(CoreError::Invalid(
+							"A what-if's first event needs today's date.".to_owned(),
+						));
+					}
+					(None, _) => None,
+				};
+				scenarios::create_scenario(
+					data,
+					ScenarioId::new(veritas_store::new_id()),
+					name,
+					now_ms() as i64,
+					first_event,
+				)
+			}
 			Command::RenameScenario { scenario_id, name } => {
 				scenarios::rename_scenario(data, &ScenarioId::new(scenario_id.as_str()), name)
 			}
