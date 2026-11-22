@@ -378,4 +378,57 @@ struct RealCoreReportTests {
 			#expect(spending.subtitle?.hasPrefix("Compare ") == true)
 		}
 	}
+
+	@Test func aSankeyCardNodeShowsTheCoresValue() async throws {
+		// v18: hovering a node shows the amount Actual prints under it.
+		try await RealBudget.with { budget in
+			let model = DashboardModel(workspace: budget.workspace)
+			await model.load()
+			model.pageID = Self.mainPage
+			await model.add(.sankey)
+			let card = try #require(model.sheet?.cards.last { $0.kind == .sankey })
+			guard case .sankey(_, _, _, _, _, let nodes, let links) = card.content else {
+				Issue.record("a Sankey card, got \(card.content)")
+				return
+			}
+			#expect(nodes.contains { $0.value > 0 }, "the fixture's card has amounts")
+			for index in nodes.indices where nodes[index].label != .hidden {
+				let readout = try #require(SankeyCardNode.readout(.node(index), nodes: nodes, links: links))
+				#expect(readout.amount == (nodes[index].value > 0 ? nodes[index].value : nil), "\(readout.title)")
+			}
+		}
+	}
+
+	@Test func theBudgetAnalysisCardSavesShowBalanceAsActualDoes() async throws {
+		// v18: no key reads as on; false and true are saved as JSON booleans,
+		// and the card's figures don't change.
+		try await RealBudget.with { budget in
+			let model = DashboardModel(workspace: budget.workspace)
+			await model.load()
+			model.pageID = Self.mainPage
+			await model.add(.budgetAnalysis)
+			let added = try #require(model.sheet?.cards.last { $0.kind == .budgetAnalysis })
+			#expect(added.config.showBalance == nil)
+
+			var hidden = added.config
+			hidden.showBalance = false
+			await model.configure(added, hidden)
+			let off = try #require(model.sheet?.cards.first { $0.id == added.id })
+			#expect(off.config.showBalance == false)
+			#expect(off.content == added.content, "it hides only the line")
+			let meta = try #require(try budget.sqlite("SELECT meta FROM dashboard WHERE id = '\(added.id)'").first?.first)
+			#expect(meta.contains("\"showBalance\":false"), "\(meta)")
+
+			let again = DashboardModel(workspace: budget.workspace)
+			await again.load()
+			again.pageID = Self.mainPage
+			#expect(again.sheet?.cards.first { $0.id == added.id }?.config.showBalance == false, "kept across a reload")
+
+			var shown = off.config
+			shown.showBalance = true
+			await model.configure(off, shown)
+			#expect(model.sheet?.cards.first { $0.id == added.id }?.config.showBalance == true)
+		}
+	}
 }
+
