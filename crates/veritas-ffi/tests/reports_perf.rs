@@ -87,6 +87,17 @@ fn reports_on_perf_100k_meet_r_perf_4_right_after_an_edit() {
 		CancelToken::new(),
 	))
 	.unwrap();
+	// The open check (integrity and audit) runs in the background right after
+	// an import. R-PERF-4 times reports in a session that's open, so wait for
+	// it instead of timing reports against it for the CPU.
+	let opened = Instant::now();
+	while session.state().unwrap().checking {
+		assert!(
+			opened.elapsed() < Duration::from_secs(120),
+			"the open check never finished"
+		);
+		std::thread::sleep(Duration::from_millis(20));
+	}
 	let account = session.accounts().unwrap().accounts[0].id.clone();
 	let latest = session
 		.register(

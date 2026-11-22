@@ -9,6 +9,7 @@ members = [
 	"crates/veritas-forecast",
 	"crates/veritas-session",
 	"crates/veritas-ffi",
+	"tools/shadow",
 	"xtask",
 ]
 resolver = "3"

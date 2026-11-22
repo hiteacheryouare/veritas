@@ -12,7 +12,7 @@ mod write;
 
 pub use audit::{AuditReport, Check, Violation, audit};
 pub use connection::{
-	Access, Store, audit_connection, integrity_check, migration_ids, open_read_only,
+	Access, Store, audit_connection, export_copy, integrity_check, migration_ids, open_read_only,
 	recover_after_crash,
 };
 pub use create::{

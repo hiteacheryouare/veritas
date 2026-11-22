@@ -127,6 +127,7 @@ fn blank() -> WidgetConfig {
 		text_align: None,
 		formula: None,
 		report_id: None,
+		show_balance: None,
 	}
 }
 
@@ -370,6 +371,11 @@ fn same_widget(theirs: &Value, ours: &DashboardWidget, page: &str) {
 	match ours.kind.as_str() {
 		"markdown-card" => assert_eq!(string("content"), config.content, "{id}"),
 		"custom-report" => assert_eq!(string("id"), config.report_id, "{id}"),
+		"budget-analysis-card" => assert_eq!(
+			meta.get("showBalance").and_then(Value::as_bool),
+			config.show_balance,
+			"{id} showBalance"
+		),
 		"summary-card" => {
 			let content: Value =
 				serde_json::from_str(&string("content").unwrap_or_else(|| "{}".to_owned()))
@@ -495,6 +501,7 @@ fn a_dashboard_rework_reads_back_in_actual_as_veritas_wrote_it() {
 		"custom-report",
 		WidgetConfig {
 			report_id: Some(SPENDING_REPORT.to_owned()),
+			show_balance: None,
 			..blank()
 		},
 		json!({"id": SPENDING_REPORT}),

@@ -44,6 +44,18 @@ pub struct WrappedPayee {
 	pub share: i64,
 }
 
+/// v18: one bar of the biggest-month card's chart (FC-8 monthly series).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct WrappedSpendingMonth {
+	pub month: Month,
+	/// The month's `expense_total`, register scale; negative when refunds
+	/// beat spending.
+	pub total: i64,
+	/// `total` over total out in tenths of a percent, for "hide amounts";
+	/// `nil` when total out is 0 or less.
+	pub share: Option<i64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct WrappedMonth {
 	pub month: Month,
@@ -184,6 +196,10 @@ pub struct WrappedReport {
 	pub prior_year: WrappedPriorYear,
 	pub shares: WrappedShares,
 	pub fun_facts: Vec<WrappedFact>,
+	/// v18: every month from January, or the month of the budget's first
+	/// row, through the last month of the period, oldest first.
+	#[uniffi(default = [])]
+	pub months: Vec<WrappedSpendingMonth>,
 }
 
 fn year_change(change: Change) -> YearChange {
@@ -352,6 +368,16 @@ pub(crate) fn wrapped_report(
 			other_payees: other_payees_share,
 		},
 		fun_facts: wrapped.fun_facts().into_iter().map(fact).collect(),
+		months: wrapped
+			.monthly_spending
+			.iter()
+			.zip(&redacted.months)
+			.map(|((month, total), share)| WrappedSpendingMonth {
+				month: (*month).into(),
+				total: total.minor(),
+				share: *share,
+			})
+			.collect(),
 	})
 }
 
@@ -370,6 +396,23 @@ impl Session {
 			core.pin_today(&today)?;
 			core.report(cancel, |budget, classification| {
 				wrapped_report(budget, classification, year, civil_date(&today)?)
+			})
+		})
+		.await
+	}
+
+	/// v18: the years Wrapped's picker offers, newest first: each year from
+	/// the budget's first row through today's whose Wrapped has data.
+	pub async fn wrapped_years(
+		&self,
+		today: String,
+		cancel: Arc<CancelHandle>,
+	) -> Result<Vec<i32>, FfiError> {
+		let core = self.core.clone();
+		run(&cancel, move |cancel| {
+			core.pin_today(&today)?;
+			core.report(cancel, |_, classification| {
+				forecast::wrapped_years(classification, civil_date(&today)?)
 			})
 		})
 		.await

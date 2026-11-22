@@ -20,6 +20,7 @@ impl Json {
 		let mut parser = Parser {
 			chars: text.chars().collect(),
 			at: 0,
+			depth: 0,
 		};
 		parser.skip_space();
 		let value = parser.value()?;
@@ -139,9 +140,16 @@ fn write_string(out: &mut String, text: &str) {
 	out.push('"');
 }
 
+/// How deep arrays and objects may nest. Actual's deepest settings, a formula
+/// card's query conditions, nest six levels; the parser, `stringify` and drop
+/// all recurse once per level, and 64 levels stays far inside even a 512 KiB
+/// dispatch thread's stack.
+const MAX_DEPTH: usize = 64;
+
 struct Parser {
 	chars: Vec<char>,
 	at: usize,
+	depth: usize,
 }
 
 impl Parser {
@@ -179,55 +187,72 @@ impl Parser {
 			't' => self.literal("true", Json::Bool(true)),
 			'f' => self.literal("false", Json::Bool(false)),
 			'"' => self.string().map(Json::String),
-			'[' => {
+			open @ ('[' | '{') => {
+				if self.depth == MAX_DEPTH {
+					return Err(format!(
+						"nested deeper than {MAX_DEPTH} levels at {}",
+						self.at
+					));
+				}
+				self.depth += 1;
 				self.at += 1;
-				let mut items = Vec::new();
-				self.skip_space();
-				if self.peek() == Some(']') {
-					self.at += 1;
-					return Ok(Json::Array(items));
-				}
-				loop {
-					self.skip_space();
-					items.push(self.value()?);
-					self.skip_space();
-					match self.next()? {
-						',' => {}
-						']' => return Ok(Json::Array(items)),
-						_ => return Err("expected , or ]".to_owned()),
-					}
-				}
-			}
-			'{' => {
-				self.at += 1;
-				let mut entries = Vec::new();
-				self.skip_space();
-				if self.peek() == Some('}') {
-					self.at += 1;
-					return Ok(Json::Object(entries));
-				}
-				loop {
-					self.skip_space();
-					let key = self.string()?;
-					self.skip_space();
-					if self.next()? != ':' {
-						return Err("expected :".to_owned());
-					}
-					self.skip_space();
-					let value = self.value()?;
-					match entries.iter_mut().find(|(name, _)| name == &key) {
-						Some(entry) => entry.1 = value,
-						None => entries.push((key, value)),
-					}
-					self.skip_space();
-					match self.next()? {
-						',' => {}
-						'}' => return Ok(Json::Object(entries)),
-						_ => return Err("expected , or }".to_owned()),
-					}
-				}
+				let value = if open == '[' {
+					self.array()
+				} else {
+					self.object()
+				};
+				self.depth -= 1;
+				value
 			}
 			_ => self.number(),
+		}
+	}
+
+	fn array(&mut self) -> Result<Json, String> {
+		let mut items = Vec::new();
+		self.skip_space();
+		if self.peek() == Some(']') {
+			self.at += 1;
+			return Ok(Json::Array(items));
+		}
+		loop {
+			self.skip_space();
+			items.push(self.value()?);
+			self.skip_space();
+			match self.next()? {
+				',' => {}
+				']' => return Ok(Json::Array(items)),
+				_ => return Err("expected , or ]".to_owned()),
+			}
+		}
+	}
+
+	fn object(&mut self) -> Result<Json, String> {
+		let mut entries = Vec::new();
+		self.skip_space();
+		if self.peek() == Some('}') {
+			self.at += 1;
+			return Ok(Json::Object(entries));
+		}
+		loop {
+			self.skip_space();
+			let key = self.string()?;
+			self.skip_space();
+			if self.next()? != ':' {
+				return Err("expected :".to_owned());
+			}
+			self.skip_space();
+			let value = self.value()?;
+			match entries.iter_mut().find(|(name, _)| name == &key) {
+				Some(entry) => entry.1 = value,
+				None => entries.push((key, value)),
+			}
+			self.skip_space();
+			match self.next()? {
+				',' => {}
+				'}' => return Ok(Json::Object(entries)),
+				_ => return Err("expected , or }".to_owned()),
+			}
 		}
 	}
 
@@ -328,5 +353,12 @@ mod tests {
 		assert_eq!(value.stringify(), r#""a\"b\\c\n\t\u0001é/""#);
 		assert!(Json::parse("[1,").is_err());
 		assert!(Json::parse("{\"a\":1} x").is_err());
+	}
+
+	#[test]
+	fn nesting_past_the_limit_is_refused() {
+		let nested = |depth: usize| format!("{}{}", "[".repeat(depth), "]".repeat(depth));
+		assert!(Json::parse(&nested(MAX_DEPTH)).is_ok());
+		assert!(Json::parse(&nested(MAX_DEPTH + 1)).is_err());
 	}
 }
