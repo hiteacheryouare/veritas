@@ -58,8 +58,8 @@ final class StubBudget: @unchecked Sendable {
 	private var held: Int64 = 0
 	private var created = 0
 	private var goalList: [GoalSummary] = [
-		StubBudget.goal("laptop", "New laptop", target: 150_000, available: 112_000, date: "2027-03-01", state: .active, monthly: 7_600, pace: .onTrack(etaMonth: Month(year: 2027, month: 3))),
-		StubBudget.goal("japan", "Japan trip", target: 600_000, available: 231_000, date: "2027-09-01", state: .active, monthly: 41_000, pace: .behind(neededMonthly: 41_000)),
+		StubBudget.goal("laptop", "New laptop", target: 150_000, available: 112_000, date: "2027-03-01", state: .active, monthly: 7_600, pace: .onTrack(etaMonth: Month(year: 2027, month: 3)), icon: "laptopcomputer"),
+		StubBudget.goal("japan", "Japan trip", target: 600_000, available: 231_000, date: "2027-09-01", state: .active, monthly: 41_000, pace: .behind(neededMonthly: 41_000), icon: "🗾"),
 		StubBudget.goal("tires", "Winter tires", target: 85_000, available: 2_000, date: nil, state: .reachedSpent, spent: 83_000),
 		StubBudget.goal("vet", "Vet bill", target: 120_418, available: 0, date: nil, state: .closed, spent: 120_418, closed: Month(year: 2026, month: 8))
 	]
@@ -155,9 +155,13 @@ final class StubBudget: @unchecked Sendable {
 				let moving = groups.remove(at: g)
 				let at = before.flatMap { b in groups.firstIndex { $0.id == b } } ?? groups.count - 1
 				groups.insert(moving, at: at)
-			case .createGoal(let name, let target, let date, _, _):
+			case .createGoal(let name, let target, let date, let icon, _):
+				let icon = try StubBudget.checkedIcon(icon)
 				created += 1
-				goalList.insert(StubBudget.goal("goal-\(created)", name, target: target, available: 0, date: date, state: .active, monthly: date == nil ? nil : target / 6), at: 0)
+				goalList.insert(StubBudget.goal("goal-\(created)", name, target: target, available: 0, date: date, state: .active, monthly: date == nil ? nil : target / 6, icon: icon), at: 0)
+			case .setGoalIcon(let id, let icon):
+				let icon = try StubBudget.checkedIcon(icon)
+				try updateGoal(id) { $0.icon = icon }
 			case .closeGoal(let id, _, _):
 				try updateGoal(id) { $0.state = .closed; $0.closedMonth = StubBudget.month }
 			case .reopenGoal(let id):
@@ -198,9 +202,9 @@ final class StubBudget: @unchecked Sendable {
 
 	/// `zeroPlaces` stands for a 0-place budget, where the core keeps a
 	/// negative, mixed-scale goal neutral (CLS-12.14).
-	static func goal(_ id: String, _ name: String, target: Int64, available: Int64, date: String?, state: GoalState, monthly: Int64? = nil, spent: Int64 = 0, closed: Month? = nil, pace: GoalPace? = nil, zeroPlaces: Bool = false) -> GoalSummary {
+	static func goal(_ id: String, _ name: String, target: Int64, available: Int64, date: String?, state: GoalState, monthly: Int64? = nil, spent: Int64 = 0, closed: Month? = nil, pace: GoalPace? = nil, icon: String? = nil, zeroPlaces: Bool = false) -> GoalSummary {
 		withCoreFields(GoalSummary(
-			id: id, categoryId: id, name: name, target: target, targetDate: date, icon: nil, color: nil, state: state,
+			id: id, categoryId: id, name: name, target: target, targetDate: date, icon: icon, color: nil, state: state,
 			available: available, spent: spent, tone: .neutral, progressPercent: 0, progressAmount: 0,
 			suggestedMonthly: monthly, monthsLeft: monthly == nil ? nil : 5,
 			pace: pace, reachedMonth: nil, closedMonth: closed, laterBudget: [], newActivity: false
@@ -226,6 +230,16 @@ final class StubBudget: @unchecked Sendable {
 		case .closed: .neutral
 		}
 		return goal
+	}
+
+	/// The core's icon rule (v18): an SF Symbol name or one emoji; blank is none.
+	static func checkedIcon(_ icon: String?) throws -> String? {
+		guard let icon, !icon.isEmpty else { return nil }
+		let symbol = icon.utf8.count <= 64 && !icon.hasPrefix(".") && !icon.hasSuffix(".")
+			&& icon.unicodeScalars.allSatisfy { ("a"..."z").contains($0) || ("0"..."9").contains($0) || $0 == "." }
+		let emoji = icon.count == 1 && icon.utf8.count <= 35 && icon.unicodeScalars.contains { $0.properties.isEmojiPresentation || $0.properties.isEmoji && !$0.isASCII }
+		guard symbol || emoji else { throw FfiError.Invalid(message: "Choose a symbol or one emoji.") }
+		return icon
 	}
 
 	static func toBudgetTone(_ toBudget: Int64) -> VeritasCore.MoneyTone {

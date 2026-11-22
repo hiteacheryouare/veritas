@@ -14,6 +14,7 @@ struct GoalsScreen: View {
 	@State private var isCreating = false
 	@State private var closing: GoalSummary?
 	@State private var retargeting: GoalSummary?
+	@State private var choosingIcon: GoalSummary?
 	@FocusState private var hasKeyFocus: Bool
 
 	init(workspace: WorkspaceModel, goals: GoalsScreenModel? = nil) {
@@ -83,6 +84,7 @@ struct GoalsScreen: View {
 		.sheet(isPresented: $isCreating) { NewGoalSheet(goals: goals) }
 		.sheet(item: $closing) { goal in CloseGoalSheet(goals: goals, goal: goal) }
 		.sheet(item: $retargeting) { goal in RetargetGoalSheet(goals: goals, goal: goal) }
+		.sheet(item: $choosingIcon) { goal in GoalIconSheet(goals: goals, goal: goal) }
 		.task(id: workspace.changeCount) { await goals.load() }
 		// Reached from another screen with ⌘4, the sidebar still holds the
 		// keys; defaultFocus only applies when the window first opens.
@@ -115,6 +117,7 @@ struct GoalsScreen: View {
 		return GoalActions(
 			close: goal.flatMap { goal in writable && goal.isOpen ? { closing = goal } : nil },
 			changeTarget: goal.flatMap { goal in writable && goal.canRetarget ? { retargeting = goal } : nil },
+			changeIcon: goal.flatMap { goal in writable ? { choosingIcon = goal } : nil },
 			reopen: goal.flatMap { goal in writable && !goal.isOpen ? { Task { await goals.reopen(goal) } } : nil }
 		)
 	}
@@ -143,6 +146,7 @@ struct GoalsScreen: View {
 		} else {
 			Button("Reopen Goal") { Task { await goals.reopen(goal) } }
 		}
+		Button("Change Icon…") { choosingIcon = goal }
 	}
 }
 
@@ -151,6 +155,7 @@ struct GoalsScreen: View {
 struct GoalActions {
 	let close: (() -> Void)?
 	let changeTarget: (() -> Void)?
+	let changeIcon: (() -> Void)?
 	let reopen: (() -> Void)?
 }
 
@@ -170,8 +175,14 @@ private struct LargeGoalCard: View {
 		VStack(alignment: .leading, spacing: 0) {
 			GoalRing(goal: goal, tone: words.tone, size: Size.ringLarge, lineWidth: 9, showsPercent: true)
 				.padding(.bottom, Spacing.s3)
-			Text(goal.name)
-				.font(.text(.heading, weight: .semibold))
+			HStack(spacing: Spacing.s2) {
+				if let icon = GoalIcon(goal.icon) {
+					GoalIconView(icon: icon)
+						.accessibilityIdentifier("goal.\(goal.id).icon.\(icon.stored)")
+				}
+				Text(goal.name)
+					.font(.text(.heading, weight: .semibold))
+			}
 			GoalProgress(goal: goal, format: format)
 				.padding(.top, 2)
 				.padding(.bottom, Spacing.s2)
@@ -218,10 +229,15 @@ private struct ArchivedGoalRow: View {
 	var body: some View {
 		let words = GoalWords(goal, format: format)
 		HStack {
-			Text(goal.name)
-				.font(.text(.body, weight: .medium))
-				.foregroundStyle(.textPrimary)
-				.frame(maxWidth: .infinity, alignment: .leading)
+			HStack(spacing: Spacing.s2) {
+				if let icon = GoalIcon(goal.icon) {
+					GoalIconView(icon: icon, size: 13)
+				}
+				Text(goal.name)
+					.font(.text(.body, weight: .medium))
+					.foregroundStyle(.textPrimary)
+			}
+			.frame(maxWidth: .infinity, alignment: .leading)
 			Text(words.note)
 				.frame(width: 200, alignment: .leading)
 			Text(words.detail ?? "")
