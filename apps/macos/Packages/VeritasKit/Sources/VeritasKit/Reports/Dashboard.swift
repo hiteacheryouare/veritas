@@ -297,14 +297,54 @@ public struct DashboardSheet: Identifiable, Hashable, Sendable {
 		self.cards = cards
 	}
 
-	/// Each card's row with the grid's empty rows taken out: a row no card
-	/// touches is dropped, so a stored gap never shows. Cards keep their order,
-	/// so moving one down a row still moves it while another card holds that row.
+	/// Each card's row as Actual's grid draws it. react-grid-layout compacts
+	/// vertically (Actual's Overview sets no compact type, so the default
+	/// applies): in row-then-column order, each card rises in its own columns
+	/// until it meets a card already placed above it.
 	public var rows: [String: Int64] {
-		let occupied = Set(cards.flatMap { card in (0..<max(card.height, 0)).map { card.y + $0 } })
-		return Dictionary(uniqueKeysWithValues: cards.map { card in
-			(card.id, card.y - Int64((0..<max(card.y, 0)).filter { !occupied.contains($0) }.count))
-		})
+		var placed: [(x: Int64, width: Int64, bottom: Int64)] = []
+		var rows: [String: Int64] = [:]
+		for card in compactionOrder {
+			let row = placed
+				.filter { $0.x < card.x + card.width && card.x < $0.x + $0.width }
+				.map(\.bottom)
+				.max() ?? 0
+			rows[card.id] = row
+			placed.append((card.x, card.width, row + card.height))
+		}
+		return rows
+	}
+
+	/// Move ▸ Down as it survives compaction: the card goes just under the next
+	/// card that shares its columns, which then rises into its place. `nil`
+	/// when nothing below shares its columns.
+	public func placementDown(_ card: DashboardCard) -> (id: String, y: Int64)? {
+		let order = compactionOrder
+		guard let index = order.firstIndex(where: { $0.id == card.id }),
+			let next = order[(index + 1)...].first(where: { Self.sharesColumns($0, card) })
+		else { return nil }
+		return (card.id, next.y + next.height)
+	}
+
+	/// Move ▸ Up: the card above that shares its columns goes just under this
+	/// one, so this card rises into its place. `nil` when nothing is above.
+	public func placementUp(_ card: DashboardCard) -> (id: String, y: Int64)? {
+		let order = compactionOrder
+		guard let index = order.firstIndex(where: { $0.id == card.id }),
+			let previous = order[..<index].last(where: { Self.sharesColumns($0, card) })
+		else { return nil }
+		return (previous.id, card.y + card.height)
+	}
+
+	/// Row, then column, then the page's own order, as react-grid-layout's stable sort leaves ties.
+	private var compactionOrder: [DashboardCard] {
+		cards.enumerated()
+			.sorted { ($0.element.y, $0.element.x, $0.offset) < ($1.element.y, $1.element.x, $1.offset) }
+			.map(\.element)
+	}
+
+	private static func sharesColumns(_ a: DashboardCard, _ b: DashboardCard) -> Bool {
+		a.x < b.x + b.width && b.x < a.x + a.width
 	}
 }
 

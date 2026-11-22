@@ -302,8 +302,10 @@ private struct WidgetCard: View {
 			Menu("Move") {
 				Button("Left") { Task { await model.move(card, columns: -1) } }
 				Button("Right") { Task { await model.move(card, columns: 1) } }
-				Button("Up") { Task { await model.move(card, rows: -1) } }
-				Button("Down") { Task { await model.move(card, rows: 1) } }
+				Button("Up") { Task { await model.move(card, down: false) } }
+					.disabled(model.sheet?.placementUp(card) == nil)
+				Button("Down") { Task { await model.move(card, down: true) } }
+					.disabled(model.sheet?.placementDown(card) == nil)
 			}
 			Menu("Resize") {
 				Button("Wider") { Task { await model.resize(card, columns: 1) } }

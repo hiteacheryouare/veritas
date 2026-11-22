@@ -297,6 +297,14 @@ public final class DashboardModel {
 		await place(card, x: card.x + columns, y: card.y + rows, width: card.width, height: card.height)
 	}
 
+	/// Move ▸ Down or Up, as the compacted grid settles it (`DashboardSheet.placementDown`).
+	public func move(_ card: DashboardCard, down: Bool) async {
+		guard let sheet, let placement = down ? sheet.placementDown(card) : sheet.placementUp(card),
+			let moved = sheet.cards.first(where: { $0.id == placement.id })
+		else { return }
+		await place(moved, x: moved.x, y: placement.y, width: moved.width, height: moved.height)
+	}
+
 	public func resize(_ card: DashboardCard, columns: Int64 = 0, rows: Int64 = 0) async {
 		await resize(card, trailing: columns, bottom: rows)
 	}
