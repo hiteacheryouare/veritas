@@ -30,6 +30,7 @@ struct AssistantPanel: View {
 
 	private var header: some View {
 		HStack {
+			AssistantTitle()
 			Spacer()
 			Button {
 				model.clear()
@@ -127,7 +128,19 @@ private struct ComposerButton: View {
 	}
 }
 
-private struct QuestionBubble: View {
+/// "Mo Nee" on screen, "Money" to VoiceOver.
+struct AssistantTitle: View {
+	var body: some View {
+		Text(AssistantName.shown)
+			.font(.text(.body, weight: .semibold))
+			.foregroundStyle(.textPrimary)
+			.accessibilityLabel(AssistantName.spoken)
+			.accessibilityAddTraits(.isHeader)
+			.accessibilityIdentifier("assistant.title")
+	}
+}
+
+struct QuestionBubble: View {
 	let text: String
 
 	var body: some View {
@@ -142,11 +155,11 @@ private struct QuestionBubble: View {
 				.background(.accentSoft, in: RoundedRectangle(cornerRadius: Radius.section, style: .continuous))
 		}
 		.accessibilityElement(children: .combine)
-		.accessibilityLabel("You: \(text)")
+		.accessibilityLabel(AssistantSpeech.question(text))
 	}
 }
 
-private struct AnswerBubble: View {
+struct AnswerBubble: View {
 	let exchange: AssistantExchange
 
 	private var failure: String? {
@@ -154,40 +167,96 @@ private struct AnswerBubble: View {
 	}
 
 	var body: some View {
-		HStack {
-			VStack(alignment: .leading, spacing: Spacing.s2) {
-				if exchange.answer.isEmpty, exchange.state == .answering {
-					ProgressView()
-						.controlSize(.small)
-						.accessibilityHidden(true)
+		VStack(alignment: .leading, spacing: Spacing.s1) {
+			Text(AssistantName.shown)
+				.font(.text(.caption))
+				.foregroundStyle(.textSecondary)
+				.accessibilityLabel(AssistantName.spoken)
+				.padding(.leading, Spacing.s1)
+			HStack {
+				VStack(alignment: .leading, spacing: Spacing.s2) {
+					if exchange.answer.isEmpty, exchange.state == .answering {
+						TypingDots()
+					}
+					if !exchange.answer.isEmpty {
+						Text(Self.formatted(exchange.answer))
+							.foregroundStyle(.textPrimary)
+					}
+					if let failure {
+						Text(failure).foregroundStyle(.textSecondary)
+					}
 				}
-				if !exchange.answer.isEmpty {
-					Text(Self.formatted(exchange.answer))
-						.foregroundStyle(.textPrimary)
-				}
-				if let failure {
-					Text(failure).foregroundStyle(.textSecondary)
-				}
+				.font(.text(.body))
+				.textSelection(.enabled)
+				.padding(.horizontal, Spacing.s3)
+				.padding(.vertical, Spacing.s2)
+				.background(.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.section, style: .continuous))
+				.overlay(RoundedRectangle(cornerRadius: Radius.section, style: .continuous).strokeBorder(Color.separator))
+				Spacer(minLength: Spacing.s6)
 			}
-			.font(.text(.body))
-			.textSelection(.enabled)
-			.padding(.horizontal, Spacing.s3)
-			.padding(.vertical, Spacing.s2)
-			.background(.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.section, style: .continuous))
-			.overlay(RoundedRectangle(cornerRadius: Radius.section, style: .continuous).strokeBorder(Color.separator))
-			Spacer(minLength: Spacing.s6)
 		}
 		.accessibilityElement(children: .ignore)
-		.accessibilityLabel(accessibilityText)
-		.accessibilityValue(exchange.state == .answering ? "Answering" : "")
-	}
-
-	private var accessibilityText: String {
-		[exchange.answer.isEmpty ? nil : "Answer: \(exchange.answer)", failure].compactMap(\.self).joined(separator: " ")
+		.accessibilityLabel(AssistantSpeech.reply(answer: exchange.answer, failure: failure))
+		.accessibilityValue(exchange.state == .answering ? AssistantSpeech.answering : "")
 	}
 
 	/// The model sometimes writes **bold**; show it as bold rather than as asterisks.
 	static func formatted(_ answer: String) -> AttributedString {
 		(try? AttributedString(markdown: answer, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(answer)
+	}
+}
+
+/// What VoiceOver reads for the conversation: the assistant's name as it's said, "Money".
+enum AssistantSpeech {
+	static let answering = "Answering"
+
+	static func question(_ text: String) -> String {
+		"You: \(text)"
+	}
+
+	static func reply(answer: String, failure: String?) -> String {
+		let said = [answer.isEmpty ? nil : answer, failure].compactMap(\.self).joined(separator: " ")
+		return said.isEmpty ? AssistantName.spoken : "\(AssistantName.spoken): \(said)"
+	}
+}
+
+/// Three dots that pulse one after another while the first words are on
+/// their way. With Reduce Motion they hold still.
+struct TypingDots: View {
+	@Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+	static let count = 3
+	static let cycle: TimeInterval = 1.2
+	static let still = 0.55
+
+	var body: some View {
+		if reduceMotion {
+			dots(at: nil)
+		} else {
+			TimelineView(.animation) { timeline in
+				dots(at: timeline.date.timeIntervalSinceReferenceDate)
+			}
+		}
+	}
+
+	private func dots(at time: TimeInterval?) -> some View {
+		HStack(spacing: 4) {
+			ForEach(0..<Self.count, id: \.self) { index in
+				Circle()
+					.fill(Color.secondary)
+					.frame(width: 7, height: 7)
+					.opacity(Self.opacity(index: index, time: time))
+			}
+		}
+		.frame(height: 18)
+	}
+
+	/// Each dot brightens a third of a cycle after the one before it. A nil
+	/// time, as with Reduce Motion, holds every dot at the same opacity.
+	static func opacity(index: Int, time: TimeInterval?) -> Double {
+		guard let time else { return still }
+		let phase = (time / cycle - Double(index) / Double(count + 1)).truncatingRemainder(dividingBy: 1)
+		let wave = 0.5 - 0.5 * cos(2 * .pi * (phase < 0 ? phase + 1 : phase))
+		return 0.3 + 0.7 * wave
 	}
 }

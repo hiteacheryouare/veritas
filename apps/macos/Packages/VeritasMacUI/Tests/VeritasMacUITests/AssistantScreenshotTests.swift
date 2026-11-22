@@ -68,6 +68,14 @@ struct AssistantScreenshotTests {
 		}
 		#expect(panel.exchanges.map(\.state) == [.answered, .answered])
 		try render(AssistantPanel(model: panel).frame(width: 340, height: 520), named: "panel")
+		let drawn = try DrawnText.texts(in: VStack {
+			AssistantTitle()
+			ForEach(panel.exchanges) { exchange in
+				QuestionBubble(text: exchange.question)
+				AnswerBubble(exchange: exchange)
+			}
+		}, size: CGSize(width: 340, height: 520))
+		#expect(drawn.filter { $0 == "Mo Nee" }.count == 3, "the title and one sender label per reply, none on questions: \(drawn)")
 
 		let failing = AssistantPanelModel(makeAnswerer: { _ in HeldAnswerer(failure: "The model is busy. Ask again in a moment.") }) {
 			workspace.readOnlyQueries.map { AssistantContext(queries: $0, format: workspace.format, today: "2026-11-17") }
@@ -89,6 +97,17 @@ struct AssistantScreenshotTests {
 		}
 		#expect(streaming.isAnswering)
 		try render(AssistantPanel(model: streaming).frame(width: 340, height: 520), named: "panel-streaming")
+
+		let waiting = AssistantPanelModel(makeAnswerer: { _ in HeldAnswerer() }) {
+			workspace.readOnlyQueries.map { AssistantContext(queries: $0, format: workspace.format, today: "2026-11-17") }
+		}
+		waiting.draft = "What did I spend last month?"
+		waiting.ask()
+		for _ in 0..<10_000 where waiting.exchanges.isEmpty {
+			await Task.yield()
+		}
+		#expect(waiting.isAnswering && waiting.exchanges.first?.answer.isEmpty == true)
+		try render(AssistantPanel(model: waiting).frame(width: 340, height: 520), named: "panel-waiting")
 	}
 
 	func render(_ view: some View, named name: String, settle: TimeInterval = 0.4) throws {
