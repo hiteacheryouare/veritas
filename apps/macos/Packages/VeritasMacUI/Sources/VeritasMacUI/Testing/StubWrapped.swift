@@ -9,10 +9,16 @@ import VeritasCore
 enum StubWrapped {
 	static let years: [Int32] = [2026, 2025]
 
-	/// FC-8's monthly series, each share of total out rounded half away from zero.
+	/// FC-8's monthly series from the budget's first month through the
+	/// period's last: each share of total out rounded half away from zero,
+	/// and a month without rows 0.
 	private static func months(_ year: Int32, _ figures: [(month: UInt32, total: Int64, share: Int64)], through last: String) -> [WrappedSpendingMonth] {
 		let end = Month(date: last)?.month ?? 12
-		return figures.filter { $0.month <= end }.map { WrappedSpendingMonth(month: Month(year: year, month: $0.month), total: $0.total, share: $0.share) }
+		let start = figures.first?.month ?? 1
+		return (start...max(start, end)).map { month in
+			let figure = figures.first { $0.month == month }
+			return WrappedSpendingMonth(month: Month(year: year, month: month), total: figure?.total ?? 0, share: figure?.share ?? 0)
+		}
 	}
 
 	static func report(year: Int32, today: String) throws -> WrappedReport {

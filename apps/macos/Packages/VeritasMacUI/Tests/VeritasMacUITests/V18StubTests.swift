@@ -10,10 +10,31 @@ import VeritasKit
 struct V18StubTests {
 	let session = StubSession(readOnly: nil)
 
-	@Test func everyPickerSymbolIsOnThisMac() {
+	@Test func thePickerOffersOnlySymbolsThisMacDraws() {
+		#expect(GoalIcon.drawableSymbols.allSatisfy(GoalIcon.isDrawable))
+		#expect(GoalIcon.drawableSymbols == GoalIcon.symbols.filter { NSImage(systemSymbolName: $0, accessibilityDescription: nil) != nil })
+		#expect(!GoalIcon.isDrawable("no.such.symbol.anywhere"))
+		#expect(NewGoalSheet.icons.allSatisfy(GoalIcon.isDrawable))
 		for name in GoalIcon.symbols {
-			#expect(NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil, "\(name)")
+			#expect(GoalIcon.isDrawable(name), "\(name) is in the curated list but not on this Mac")
 		}
+	}
+
+	@Test func aWrappedYearStartingLateDrawsEachBarInItsMonthsSlot() async throws {
+		// The stub's 2025 starts in August, so January to July stay empty.
+		let report = try await session.wrapped(year: 2025, today: "2026-11-16")
+		let bars = WrappedStory(report: report, format: MoneyFormat()).cards(redacted: true).first { $0.kind == .biggestMonth }?.bars ?? []
+		#expect(bars.map(\.slot) == [7, 8, 9, 10, 11])
+		#expect(bars.last?.isBiggest == true, "December")
+	}
+
+	@Test func aWrappedYearStartingInMayLeavesJanuaryToAprilEmpty() throws {
+		var report = try StubWrapped.report(year: 2026, today: "2026-11-16")
+		report.months = report.months.filter { $0.month.month >= 5 }
+		let bars = WrappedStory(report: report, format: MoneyFormat()).cards(redacted: false).first { $0.kind == .biggestMonth }?.bars ?? []
+		#expect(bars.first?.slot == 4)
+		#expect(bars.first?.letter == "M")
+		#expect(bars.map(\.slot) == Array(4...10))
 	}
 
 	@Test func aGoalIconIsASymbolOrOneEmoji() async throws {
@@ -55,6 +76,22 @@ struct V18StubTests {
 			#expect(shown.share == report.shares.biggestMonth)
 		}
 		#expect(try await session.wrapped(year: 2026, today: today).months.map(\.total).reduce(0, +) == 6_140_000)
+	}
+
+	@Test func wrappedMonthsFollowFC8() async throws {
+		// One month after another through the period's last, each share
+		// round_half_away(total * 1000 / out), summing to total out.
+		for (year, today) in [(Int32(2026), "2026-11-16"), (2025, "2026-11-16"), (2026, "2027-02-01")] {
+			let report = try await session.wrapped(year: year, today: today)
+			let months = report.months.map(\.month)
+			#expect(months.last == Month(date: report.last), "\(year) as of \(today)")
+			#expect(zip(months, months.dropFirst()).allSatisfy { $0.adding(months: 1) == $1 })
+			#expect(report.months.map(\.total).reduce(0, +) == report.totalOut)
+			for month in report.months {
+				let exact = Double(month.total) * 1000 / Double(report.totalOut)
+				#expect(month.share == Int64(exact.rounded(.toNearestOrAwayFromZero)), "\(month.month)")
+			}
+		}
 	}
 
 	@Test func theForecastHasHistoryABandEachMonthAndDifferences() async throws {

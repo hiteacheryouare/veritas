@@ -35,20 +35,25 @@ public struct WrappedCard: Identifiable, Hashable, Sendable {
 	/// One month of the biggest-month card's chart, FC-8's monthly series.
 	public struct Bar: Identifiable, Hashable, Sendable {
 		public let id: String
+		/// The bar's place on the card: 0 for January to 11 for December, so a
+		/// year that starts late leaves its first slots empty.
+		public let slot: Int
 		/// "M" for March.
 		public let letter: String
 		/// The core's share of total out in tenths of a percent, negative for
 		/// a refund month. Bars are drawn against the tallest on the card.
-		public let share: Int64
+		/// `nil` when total out is 0 or less, and the bar reads "n/a" (W-21).
+		public let share: Int64?
 		public let isBiggest: Bool
-		/// The biggest month's amount over its bar; `nil` everywhere else and
-		/// with amounts hidden.
+		/// The text at the bar: "n/a" without a share, otherwise the biggest
+		/// month's amount with amounts shown, and `nil` everywhere else.
 		public let value: String?
 		/// What VoiceOver reads for the bar.
 		public let spoken: String
 
-		public init(id: String, letter: String, share: Int64, isBiggest: Bool, value: String?, spoken: String) {
+		public init(id: String, slot: Int, letter: String, share: Int64?, isBiggest: Bool, value: String?, spoken: String) {
 			self.id = id
+			self.slot = slot
 			self.letter = letter
 			self.share = share
 			self.isBiggest = isBiggest
@@ -220,21 +225,29 @@ public struct WrappedStory: Sendable {
 		)
 	}
 
-	/// FC-8's months, drawn by the core's shares; none when total out is 0 or less.
+	/// FC-8's months, drawn by the core's shares (W-20, W-21).
 	private func bars(biggest: WrappedMonth, _ redacted: Bool) -> [WrappedCard.Bar] {
-		report.months.compactMap { month in
-			guard let share = month.share else { return nil }
+		report.months.map { month in
 			let name = WrappedWords.monthName(month.month)
 			let isBiggest = month.month == biggest.month
+			let refund = month.share.map { $0 < 0 } ?? (month.total < 0)
+			let value: String? = month.share == nil
+				? WrappedWords.notApplicable
+				: isBiggest && !redacted ? format.wholeCurrency(month.total, on: .register) : nil
+			let spoken: String = switch (redacted, month.share) {
+			case (true, nil): "\(name), \(WrappedWords.notApplicable)"
+			case (true, let share?) where share < 0: "\(name), refund month"
+			case (true, let share?): "\(name), \(WrappedWords.percent(share, format: format)) of total out"
+			case (false, _): refund ? "\(name), refund month, \(money(month.total))" : "\(name), \(money(month.total))"
+			}
 			return WrappedCard.Bar(
 				id: "\(month.month.year)-\(month.month.month)",
+				slot: Int(month.month.month) - 1,
 				letter: month.month.date()?.formatted(.dateTime.month(.narrow)) ?? "",
-				share: share,
+				share: month.share,
 				isBiggest: isBiggest,
-				value: isBiggest && !redacted ? format.wholeCurrency(month.total, on: .register) : nil,
-				spoken: redacted
-					? "\(name), \(WrappedWords.percent(share, format: format)) of total out"
-					: "\(name), \(money(month.total))"
+				value: value,
+				spoken: spoken
 			)
 		}
 	}

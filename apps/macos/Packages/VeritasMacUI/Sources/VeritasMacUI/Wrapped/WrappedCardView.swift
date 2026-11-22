@@ -127,16 +127,19 @@ private struct WrappedBars: View {
 	var body: some View {
 		GeometryReader { proxy in
 			let width = (proxy.size.width - Self.gap * CGFloat(Self.slots - 1)) / CGFloat(Self.slots)
-			let up = CGFloat(bars.map(\.share).max().map { max($0, 0) } ?? 0)
-			let down = CGFloat(bars.map(\.share).min().map { max(-$0, 0) } ?? 0)
+			let shares = bars.compactMap(\.share)
+			let up = CGFloat(shares.max().map { max($0, 0) } ?? 0)
+			let down = CGFloat(shares.min().map { max(-$0, 0) } ?? 0)
 			let plot = proxy.size.height - Self.labelHeight - Self.valueHeight
 			let scale = up + down > 0 ? plot / (up + down) : 0
 			let axis = Self.valueHeight + up * scale
 			ZStack(alignment: .topLeading) {
-				ForEach(Array(bars.enumerated()), id: \.element.id) { index, bar in
-					let x = CGFloat(index) * (width + Self.gap)
-					let height = max(CGFloat(abs(bar.share)) * scale, bar.share == 0 ? 0 : 2)
-					let top = bar.share >= 0 ? axis - height : axis
+				ForEach(bars) { bar in
+					let x = CGFloat(bar.slot) * (width + Self.gap)
+					let share = bar.share ?? 0
+					let height = max(CGFloat(abs(share)) * scale, share == 0 ? 0 : 2)
+					// Without a share (W-21) the slot holds only its "n/a", over the month.
+					let top = bar.share == nil ? plot + Self.valueHeight : share >= 0 ? axis - height : axis
 					RoundedRectangle(cornerRadius: 4)
 						.fill(bar.isBiggest ? colors.highlight : colors.ink.opacity(0.4))
 						.overlay {
