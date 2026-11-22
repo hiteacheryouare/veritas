@@ -15,6 +15,8 @@ public final class TaxSummaryModel {
 
 	public private(set) var year: Int32
 	public private(set) var summary: TaxSummary?
+	/// The statements' entity name, which the PDF's header uses too (ST-3).
+	public private(set) var entity: StatementEntity?
 	public var expanded: Set<TaxBucket> = []
 
 	@ObservationIgnored let workspace: WorkspaceModel
@@ -34,6 +36,9 @@ public final class TaxSummaryModel {
 	public var canGoForward: Bool { year < thisYear }
 
 	public func load() async {
+		if let entity = await workspace.report({ try await $0.statementEntity() }) {
+			self.entity = entity
+		}
 		let year = year
 		guard let summary = await workspace.report({ try await $0.taxSummary(year: year) }) else { return }
 		guard year == self.year else { return }
@@ -79,6 +84,12 @@ public final class TaxSummaryModel {
 		case .summary: return "veritas-tax-summary-\(year).csv"
 		case .detail: return "veritas-tax-detail-\(year).csv"
 		}
+	}
+
+	/// The PDF's words, once the summary and the entity name have loaded.
+	public var document: TaxDocument? {
+		guard let summary, let entity else { return nil }
+		return TaxDocument(summary: summary, entity: entity.name, currencyCode: workspace.overview?.currencyCode, format: format)
 	}
 
 	public func csv(_ export: Export) -> String? {

@@ -10,19 +10,28 @@ enum StatementPDF {
 	static let pageNumberSpace: CGFloat = 28
 
 	static func data(_ document: StatementDocument, format: MoneyFormat) -> Data {
-		let pages = paginate(document, format: format)
-		let notice = document.notice(format: format)
+		data([document], title: "\(document.entity) \(document.title)", format: format)
+	}
+
+	/// Several statements in one file, each starting on a new page, numbered
+	/// through the whole file.
+	static func data(_ documents: [StatementDocument], title: String, format: MoneyFormat) -> Data {
+		let sheets = documents.flatMap { document in
+			let pages = paginate(document, format: format)
+			return pages.enumerated().map { (document, $0.element, isLast: $0.offset == pages.count - 1) }
+		}
 		let data = NSMutableData()
 		var box = CGRect(x: 0, y: 0, width: PaperMetrics.width, height: PaperMetrics.height)
 		let info: [CFString: Any] = [
-			kCGPDFContextTitle: "\(document.entity) \(document.title)",
+			kCGPDFContextTitle: title,
 			kCGPDFContextCreator: "Veritas"
 		]
 		guard let consumer = CGDataConsumer(data: data as CFMutableData),
 			let context = CGContext(consumer: consumer, mediaBox: &box, info as CFDictionary)
 		else { return Data() }
-		let hasGroups = document.lines.contains { $0.style == .group }
-		for (index, lines) in pages.enumerated() {
+		for (index, sheet) in sheets.enumerated() {
+			let (document, lines, isLast) = sheet
+			let hasGroups = document.lines.contains { $0.style == .group }
 			context.beginPDFPage(nil)
 			context.translateBy(x: 0, y: PaperMetrics.height)
 			context.scaleBy(x: 1, y: -1)
@@ -34,11 +43,11 @@ enum StatementPDF {
 				y = draw(line, at: y, after: previous, format: format, hasGroups: hasGroups)
 				previous = line.style
 			}
-			if let notice, index == pages.count - 1 {
+			if isLast, let notice = document.notice(format: format) {
 				drawNotice(notice, at: y)
 			}
-			if pages.count > 1 {
-				drawCentered("Page \(index + 1) of \(pages.count)", font: font(PaperMetrics.pageNumberSize), color: secondary, y: PaperMetrics.height - PaperMetrics.bottom + 12)
+			if sheets.count > 1 {
+				drawCentered("Page \(index + 1) of \(sheets.count)", font: font(PaperMetrics.pageNumberSize), color: secondary, y: PaperMetrics.height - PaperMetrics.bottom + 12)
 			}
 			NSGraphicsContext.restoreGraphicsState()
 			context.endPDFPage()

@@ -1,5 +1,4 @@
 import Foundation
-import FoundationModels
 
 /// Whether Apple's on-device model can answer, and why not when it can't.
 public enum AssistantAvailability: Hashable, Sendable {
@@ -29,21 +28,6 @@ public enum AssistantAvailability: Hashable, Sendable {
 
 public protocol AssistantAvailabilityChecking: Sendable {
 	var availability: AssistantAvailability { get }
-}
-
-/// Asks the system's on-device model.
-public struct SystemModelAvailability: AssistantAvailabilityChecking {
-	public init() {}
-
-	public var availability: AssistantAvailability {
-		switch SystemLanguageModel.default.availability {
-		case .available: .available
-		case .unavailable(.deviceNotEligible): .unavailable(.deviceNotEligible)
-		case .unavailable(.appleIntelligenceNotEnabled): .unavailable(.appleIntelligenceNotEnabled)
-		case .unavailable(.modelNotReady): .unavailable(.modelNotReady)
-		case .unavailable: .unavailable(.unknown)
-		}
-	}
 }
 
 /// A fixed answer, for tests and screenshots.

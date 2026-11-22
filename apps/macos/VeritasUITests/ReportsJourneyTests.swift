@@ -170,6 +170,61 @@ final class ReportsJourneyTests: XCTestCase {
 	}
 
 	@MainActor
+	func testClickingACardOpensItsReportFullSizeWithItsEditor() {
+		let app = openReport("dashboard")
+		let report = app.descendants(matching: .any)["widget.report"]
+		XCTAssertTrue(present(report, in: app))
+		report.click()
+		XCTAssertTrue(present(app.screen("cardDetail"), in: app), "the custom report card opens full size")
+		XCTAssertTrue(app.descendants(matching: .any)["customReport.table"].waitForExistence(timeout: 5), "the full report has its table")
+		app.buttons["customReport.edit"].click()
+		XCTAssertTrue(app.textFields["customReport.name"].waitForExistence(timeout: 5), "and the report editor")
+		attachScreenshot(of: app, named: "card-full-size-report")
+		app.buttons["Cancel"].click()
+		app.buttons["cardDetail.back"].click()
+		let worth = app.descendants(matching: .any)["widget.worth"]
+		XCTAssertTrue(present(worth, in: app), "back on the dashboard")
+		worth.click()
+		XCTAssertTrue(present(app.screen("cardDetail"), in: app), "the net worth card opens full size")
+		app.buttons["cardDetail.edit"].click()
+		let sheet = app.descendants(matching: .any)["sheet.widgetConfig"]
+		XCTAssertTrue(sheet.waitForExistence(timeout: 5), "with the card's editor")
+		attachScreenshot(of: app, named: "card-full-size-net-worth")
+		sheet.buttons["Cancel"].click()
+	}
+
+	@MainActor
+	func testACustomReportLegendNamesEveryGroupAndNoId() {
+		let app = openReport("customReports")
+		app.buttons["reports.custom.worth"].click()
+		let legend = app.descendants(matching: .any)["customReport.legend"]
+		XCTAssertTrue(present(legend, in: app))
+		XCTAssertTrue(legend.staticTexts["Checking"].exists)
+		XCTAssertFalse(app.staticTexts["5b9c3f1e-7d2a-4c8b-9e61-0a4f2d7c3b18"].exists, "an empty category's id is never shown")
+		attachScreenshot(of: app, named: "custom-report-legend")
+	}
+
+	@MainActor
+	func testHoveringASankeyFlowLightsItAndClickingOpensItsTransactions() {
+		let app = openReport("sankey")
+		app.screen("sankey").typeKey(.leftArrow, modifierFlags: .command)
+		let flow = app.descendants(matching: .any)["sankey.flow.categoryGroup.everyday.category.dining"]
+		XCTAssertTrue(present(flow, in: app))
+		XCTAssertFalse(app.descendants(matching: .any)["sankey.readout"].exists, "nothing is lit until the pointer is on the graph")
+		flow.hover()
+		let readout = app.descendants(matching: .any)["sankey.readout"]
+		XCTAssertTrue(readout.waitForExistence(timeout: 5))
+		XCTAssertTrue(text(readout).contains("Everyday → Dining out"), text(readout))
+		attachScreenshot(of: app, named: "sankey-flow-lit")
+		app.descendants(matching: .any)["sankey.node.categoryGroup.housing"].hover()
+		XCTAssertTrue(waitUntil { self.text(readout).contains("Housing and utilities") }, text(readout))
+		flow.click()
+		let sheet = app.descendants(matching: .any)["sheet.drilldown"]
+		XCTAssertTrue(sheet.waitForExistence(timeout: 5))
+		XCTAssertEqual(text(sheet.staticTexts["drilldown.count"]), "11 transactions")
+	}
+
+	@MainActor
 	private func openReport(_ page: String) -> XCUIApplication {
 		let app = XCUIApplication.veritas(stub: "open")
 		XCTAssertTrue(app.buttons["envelope.groceries.budgeted"].waitForExistence(timeout: 10))
