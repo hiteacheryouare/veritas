@@ -46,4 +46,18 @@ struct StubJourneyDataTests {
 		let matches = try await session.rulePreview(.saved(ruleId: "amazon"))
 		#expect(matches.filter(\.reconciled).map(\.transactionId) == [StubRules.reconciledRow])
 	}
+
+	/// The Reports journey's move, below the UI: Move › Down on the net worth card.
+	@MainActor
+	@Test func movingAWidgetDownOnTheStubDashboardMovesIt() async throws {
+		let workspace = WorkspaceModel(library: StubLibrary(readOnly: nil, importError: nil), localSettings: InMemoryBudgetSettings(), format: MoneyFormat())
+		await workspace.reopen(directory: StubLaunch.budgetDirectory)
+		let model = DashboardModel(workspace: workspace)
+		await model.load()
+		#expect(model.canPlace)
+		let worth = try #require(model.sheet?.cards.first { $0.id == "worth" })
+		await model.move(worth, rows: 1)
+		#expect(workspace.alert == nil, "\(String(describing: workspace.alert))")
+		#expect(model.sheet?.cards.first { $0.id == "worth" }?.y == worth.y + 1)
+	}
 }
