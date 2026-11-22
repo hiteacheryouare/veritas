@@ -75,6 +75,7 @@ struct DashboardScreen: View {
 			.padding(.horizontal, Spacing.s5)
 			.padding(.bottom, Spacing.s6)
 		}
+		.overlay { if !model.hasLoaded { ScreenState(kind: .loading) } }
 		.background(.surfaceWindow)
 		.navigationTitle(model.sheet?.name ?? "Dashboard")
 		.toolbar {
@@ -167,17 +168,18 @@ struct DashboardGrid: View {
 	let remove: (DashboardCard) -> Void
 
 	var body: some View {
+		let rows = sheet.rows
 		GeometryReader { proxy in
 			let column = (proxy.size.width - DashboardScreen.gap * 11) / 12
 			ZStack(alignment: .topLeading) {
 				ForEach(sheet.cards) { card in
 					WidgetCard(card: card, model: model, cell: CGSize(width: column + DashboardScreen.gap, height: DashboardScreen.rowHeight + DashboardScreen.gap), open: open, configure: configure, remove: remove)
 						.frame(width: span(card.width, column), height: height(card.height))
-						.offset(x: CGFloat(card.x) * (column + DashboardScreen.gap), y: CGFloat(card.y) * (DashboardScreen.rowHeight + DashboardScreen.gap))
+						.offset(x: CGFloat(card.x) * (column + DashboardScreen.gap), y: CGFloat(rows[card.id] ?? card.y) * (DashboardScreen.rowHeight + DashboardScreen.gap))
 				}
 			}
 		}
-		.frame(height: height(sheet.cards.map { $0.y + $0.height }.max() ?? 0))
+		.frame(height: height(sheet.cards.map { (rows[$0.id] ?? $0.y) + $0.height }.max() ?? 0))
 		.containerIdentifier("dashboard.grid")
 	}
 
@@ -360,12 +362,24 @@ struct WidgetHeader: View {
 					Text(subtitle)
 						.font(.text(.caption))
 						.foregroundStyle(.textSecondary)
-						.lineLimit(1)
+						.lineLimit(2)
+						.fixedSize(horizontal: false, vertical: true)
+				}
+				if case .spending(let mode, _, let compareTo, let averageFirst, let averageLast, _, _, let difference) = card.content {
+					Text(CardWords.comparison(difference, mode: mode, compareTo: compareTo, averageFirst: averageFirst, averageLast: averageLast, format: format))
+						.font(.text(.caption, weight: .medium))
+						.foregroundStyle(Self.spendingTone(difference))
+						.accessibilityIdentifier("widget.comparison")
 				}
 			}
 			Spacer(minLength: Spacing.s2)
 			headline
 		}
+	}
+
+	/// Actual's tones: more than the comparison is the overspent tone, and the same is neutral.
+	static func spendingTone(_ difference: Int64) -> Color {
+		difference == 0 ? Color.moneyNeutral : (difference > 0 ? Color.moneyOverspent : Color.moneyAvailable)
 	}
 
 	@ViewBuilder private var headline: some View {
@@ -383,7 +397,7 @@ struct WidgetHeader: View {
 			// Actual's tones: more than the comparison is the overspent tone.
 			Text((difference > 0 ? "+" : "") + format.amount(difference, on: .register))
 				.font(.figures(.body, weight: .semibold))
-				.foregroundStyle(difference == 0 ? Color.textPrimary : (difference > 0 ? Color.moneyOverspent : Color.moneyAvailable))
+				.foregroundStyle(Self.spendingTone(difference))
 		case .balanceForecast(_, _, _, _, true, let points, let low, _, _, _):
 			if let ending = points.last {
 				VStack(alignment: .trailing, spacing: 2) {
@@ -452,7 +466,7 @@ private struct Signed: View {
 	var body: some View {
 		Text((amount > 0 ? "+" : "") + format.amount(amount, on: .register))
 			.font(.figures(.body, weight: weight))
-			.foregroundStyle(amount < 0 ? Color.moneyOverspent : Color.moneyAvailable)
+			.foregroundStyle(amount == 0 ? Color.moneyNeutral : (amount < 0 ? Color.moneyOverspent : Color.moneyAvailable))
 	}
 }
 
@@ -564,15 +578,26 @@ private struct BigFigure: View {
 		}
 	}
 
+	/// Zero is neutral; otherwise the sign picks the tone, as Actual's summary card does.
+	private var tone: Color {
+		switch figure {
+		case .money(0), .undefined: Color.moneyNeutral
+		case .percent(let value) where value == 0: Color.moneyNeutral
+		default: figure.isNegative ? Color.moneyOverspent : Color.moneyAvailable
+		}
+	}
+
+	/// Sized from the card, not the text, so cards of one size share one figure size.
+	/// A figure longer than "−00,000.00" shrinks to fit.
 	var body: some View {
 		GeometryReader { proxy in
-			let size = min(proxy.size.height * 0.85, proxy.size.width / (CGFloat(text.count) * 0.6))
+			let size = min(proxy.size.height * 0.6, proxy.size.width / (10 * 0.62))
 			Text(text)
 				.font(.system(size: max(size, 14), weight: .semibold, design: .rounded))
 				.monospacedDigit()
 				.lineLimit(1)
-				.minimumScaleFactor(0.5)
-				.foregroundStyle(figure.isNegative ? Color.moneyOverspent : Color.moneyAvailable)
+				.minimumScaleFactor(0.4)
+				.foregroundStyle(tone)
 				.frame(maxWidth: .infinity, maxHeight: .infinity)
 		}
 		.accessibilityElement(children: .combine)
@@ -704,7 +729,7 @@ private struct NetWorthChart: View {
 					LineMark(x: .value("Period", index), y: .value(CardWords.netWorth(filtered: filtered), value))
 						.interpolationMethod(.monotone)
 						.lineStyle(StrokeStyle(lineWidth: 2))
-						.foregroundStyle(zeroSplit(ZeroSplit.lineStop(values), positive: Color.moneyIncomeFill, negative: Color.moneyOverspent))
+						.foregroundStyle(values.allSatisfy { $0 == 0 } ? LinearGradient(colors: [Color.moneyNeutral], startPoint: .top, endPoint: .bottom) : zeroSplit(ZeroSplit.lineStop(values), positive: Color.moneyIncomeFill, negative: Color.moneyOverspent))
 				}
 			}
 			if let selected, points.indices.contains(selected) {

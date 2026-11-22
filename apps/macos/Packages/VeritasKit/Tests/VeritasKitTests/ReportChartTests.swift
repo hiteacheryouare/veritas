@@ -196,3 +196,27 @@ struct SankeyCardReadoutTests {
 		#expect(SankeyCardNode.readout(.node(2), nodes: nodes, links: links) == nil, "a hidden node has no words")
 	}
 }
+
+struct DashboardCompactionTests {
+	private func card(_ id: String, x: Int64, y: Int64, width: Int64, height: Int64) -> DashboardCard {
+		DashboardCard(id: id, kind: .summary, rawKind: "summary-card", x: x, y: y, width: width, height: height, config: .empty, content: .missingReport)
+	}
+
+	@Test func aStoredGapBetweenRowsCloses() {
+		// The audit's M7: the third row stored two rows below the second.
+		let sheet = DashboardSheet(id: "p", name: "Main", cards: [
+			card("a", x: 0, y: 0, width: 3, height: 2), card("b", x: 3, y: 0, width: 3, height: 2),
+			card("worth", x: 0, y: 2, width: 6, height: 2),
+			card("month", x: 0, y: 6, width: 4, height: 2), card("avg", x: 4, y: 6, width: 4, height: 2)
+		])
+		#expect(sheet.rows == ["a": 0, "b": 0, "worth": 2, "month": 4, "avg": 4])
+	}
+
+	@Test func aCardOnlyRisesAsFarAsTheCardAboveItsColumns() {
+		let sheet = DashboardSheet(id: "p", name: "Main", cards: [
+			card("tall", x: 0, y: 0, width: 4, height: 4), card("short", x: 4, y: 0, width: 4, height: 1),
+			card("under", x: 2, y: 5, width: 4, height: 2)
+		])
+		#expect(sheet.rows["under"] == 4, "it overlaps the tall card's columns")
+	}
+}

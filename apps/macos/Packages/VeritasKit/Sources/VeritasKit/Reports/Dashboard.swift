@@ -296,6 +296,23 @@ public struct DashboardSheet: Identifiable, Hashable, Sendable {
 		self.name = name
 		self.cards = cards
 	}
+
+	/// Each card's row once the grid is compacted upward, as Actual's grid
+	/// draws it: a card rises until it meets a card above it in the same columns,
+	/// so a stored gap between rows never shows.
+	public var rows: [String: Int64] {
+		var placed: [(x: Int64, width: Int64, bottom: Int64)] = []
+		var rows: [String: Int64] = [:]
+		for card in cards.sorted(by: { ($0.y, $0.x) < ($1.y, $1.x) }) {
+			let row = placed
+				.filter { $0.x < card.x + card.width && card.x < $0.x + $0.width }
+				.map(\.bottom)
+				.max() ?? 0
+			rows[card.id] = row
+			placed.append((card.x, card.width, row + card.height))
+		}
+		return rows
+	}
 }
 
 /// A custom report's settings with its filters, for the viewer and editor.

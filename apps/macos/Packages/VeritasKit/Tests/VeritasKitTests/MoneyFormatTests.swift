@@ -35,6 +35,9 @@ struct MoneyFormatTests {
 		#expect(yen.chartValue(Int64(12_000), on: .register) == 120, "register amounts always carry 2 places")
 		#expect(yen.axisLabel(12_000) == "¥12k")
 		#expect(yen.axisLabel(-800) == "\u{2212}¥800")
+		#expect(yen.axisLabel(2_500) == "¥2.5k", "a half-thousand tick keeps its decimal")
+		#expect(yen.axisLabel(7_500) == "¥7.5k")
+		#expect(yen.axisLabel(-12_340) == "\u{2212}¥12.3k")
 		#expect(format.chartValue(Int64(123_456), on: .register) == 1_234.56)
 	}
 

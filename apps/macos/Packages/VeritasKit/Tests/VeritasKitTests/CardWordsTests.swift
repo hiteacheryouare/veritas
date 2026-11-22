@@ -82,6 +82,30 @@ struct CardWordsTests {
 		#expect(CardWords.spending(filtered: false) == "Everything except income categories")
 		#expect(CardWords.spending(filtered: true) == "Selected rows")
 	}
+
+	@Test func theSpendingComparisonSaysMoreLessOrSame() {
+		// Fred on M8 (ST-10.10): a size, more or less, and what it is compared with.
+		let format = MoneyFormat(currencySymbol: "")
+		let october = Month(year: 2026, month: 10)
+		func line(_ difference: Int64, _ mode: SpendingCardMode) -> String {
+			CardWords.comparison(difference, mode: mode, compareTo: october, averageFirst: Month(year: 2026, month: 8), averageLast: october, format: format)
+		}
+		#expect(line(150_000 - 438_784, .singleMonth) == "2,887.84 less than October")
+		#expect(line(12_500, .singleMonth) == "125.00 more than October")
+		#expect(line(0, .singleMonth) == "Same as October")
+		#expect(line(-2_500, .budget) == "25.00 less than budgeted so far")
+		#expect(line(0, .budget) == "Same as budgeted so far")
+		#expect(line(4_000, .average) == "40.00 more than the 3-month average")
+		#expect(line(0, .average) == "Same as the 3-month average")
+		for mode in [SpendingCardMode.singleMonth, .budget, .average] {
+			for difference: Int64 in [-1, 0, 1] {
+				let words = line(difference, mode).lowercased()
+				for reserved in ["spent", "spending", "income", "expenses", "over budget", "under budget"] {
+					#expect(!words.contains(reserved), "\(words)")
+				}
+			}
+		}
+	}
 }
 
 struct FilterChoicesTests {
