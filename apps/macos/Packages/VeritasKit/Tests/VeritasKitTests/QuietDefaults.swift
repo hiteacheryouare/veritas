@@ -22,6 +22,7 @@ extension BudgetSession {
 		CategoryHistory(transactions: 0, budgetedMonths: 0, taxBucket: nil)
 	}
 	func netProfit(first: Month, last: Month) async throws -> NetProfitReport { throw FfiError.Cancelled }
+	func netProfitPeriod(first: String, last: String) async throws -> NetProfitPeriod { throw FfiError.Cancelled }
 	func netWorth(first: Month, last: Month) async throws -> [NetWorthMonth] { [] }
 	func cashFlow(first: Month, last: Month) async throws -> [CashFlowColumn] { [] }
 	func cashFlowStatement(first: String, last: String) async throws -> CashFlowColumn { throw FfiError.Cancelled }

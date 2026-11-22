@@ -10,8 +10,8 @@ struct BudgetSessionQueries: ReadOnlyBudgetQueries {
 		self.session = session
 	}
 
-	func netProfit(first: Month, last: Month) async throws -> NetProfitReport {
-		try await session.netProfit(first: first, last: last)
+	func netProfitPeriod(first: String, last: String) async throws -> NetProfitPeriod {
+		try await session.netProfitPeriod(first: first, last: last)
 	}
 
 	func balanceSheet(asOf: String) async throws -> BalanceSheet {

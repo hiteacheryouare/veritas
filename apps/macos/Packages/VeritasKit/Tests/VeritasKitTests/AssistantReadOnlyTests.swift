@@ -18,7 +18,7 @@ struct AssistantReadOnlyTests {
 	static let bridge = packages.appending(path: "VeritasAI/Sources/VeritasAIBridge")
 
 	static let allowedQueries: Set<String> = [
-		"netProfit(first:last:)",
+		"netProfitPeriod(first:last:)",
 		"balanceSheet(asOf:)",
 		"cashFlowStatement(first:last:)",
 		"budgetMonth(_:today:)",
@@ -55,7 +55,7 @@ struct AssistantReadOnlyTests {
 		let queries = RecordingQueries()
 		let context = AssistantContext(queries: queries, format: MoneyFormat(), today: "2026-11-17")
 		let tools = AssistantTools.all(context)
-		#expect(tools.count == 8)
+		#expect(tools.count == 12)
 		for tool in tools {
 			for child in Self.descendants(of: tool) {
 				#expect(!(child is any BudgetSession), "\(tool.name) holds a session")
@@ -63,11 +63,15 @@ struct AssistantReadOnlyTests {
 				#expect(!(child is Command), "\(tool.name) holds a command")
 			}
 		}
-		_ = try? await NetProfitTool(context: context).call(arguments: .init(first: "2026-05", last: "2026-10"))
-		_ = try? await BudgetMonthTool(context: context).call(arguments: .init(month: "2026-10"))
+		_ = try? await SpendingTool(context: context).call(arguments: .init(period: "last month"))
+		_ = try? await CategorySpendingTool(context: context).call(arguments: .init(name: "Groceries", period: "this month"))
+		_ = try? await IncomeTool(context: context).call(arguments: .init(period: "this year"))
+		_ = try? await BudgetTool(context: context).call(arguments: .init(name: "Groceries", period: ""))
+		_ = try? await NetProfitTool(context: context).call(arguments: .init(period: "May to October 2026"))
+		_ = try? await BudgetMonthTool(context: context).call(arguments: .init(period: "2026-10"))
 		_ = try? await AccountsTool(context: context).call(arguments: .init())
 		_ = try? await BalanceSheetTool(context: context).call(arguments: .init(date: "2026-10-31"))
-		_ = try? await CashFlowTool(context: context).call(arguments: .init(first: "2026-10", last: "2026-10"))
+		_ = try? await CashFlowTool(context: context).call(arguments: .init(period: "October 2026"))
 		_ = try? await GoalsTool(context: context).call(arguments: .init())
 		_ = try? await TaxSummaryTool(context: context).call(arguments: .init(year: 2026))
 		_ = try? await SavedReportTool(context: context).call(arguments: .init(name: "Spending"))
@@ -75,12 +79,13 @@ struct AssistantReadOnlyTests {
 		#expect(queries.calls == Self.allowedQueries.subtracting(["customReport(_:today:)"]), "customReport runs only once customReports finds the name")
 	}
 
-	@Test func aMonthTheToolsCantReadIsAskedForAgainWithoutReading() async throws {
+	@Test func aPeriodTheToolsCantReadIsAskedForAgainWithoutReading() async throws {
 		let queries = RecordingQueries()
 		let context = AssistantContext(queries: queries, format: MoneyFormat(), today: "2026-11-17")
-		#expect(try await NetProfitTool(context: context).call(arguments: .init(first: "October", last: "2026-10")) == AssistantTools.monthHint)
-		#expect(try await BudgetMonthTool(context: context).call(arguments: .init(month: "2026-13")) == AssistantTools.monthHint)
-		#expect(try await NetProfitTool(context: context).call(arguments: .init(first: "2020-01", last: "2026-10")).contains("24 months or fewer"))
+		#expect(try await NetProfitTool(context: context).call(arguments: .init(period: "next fortnight")) == AssistantPeriod.hint)
+		#expect(try await SpendingTool(context: context).call(arguments: .init(period: "2026-13")) == AssistantPeriod.hint)
+		#expect(try await BudgetMonthTool(context: context).call(arguments: .init(period: "this year")) == BudgetTool.oneMonth)
+		#expect(try await CategorySpendingTool(context: context).call(arguments: .init(name: " ", period: "")) == AssistantArguments.nameHint)
 		#expect(queries.calls.isEmpty)
 	}
 
@@ -122,7 +127,7 @@ final class RecordingQueries: ReadOnlyBudgetQueries {
 		return Unreachable()
 	}
 
-	func netProfit(first: Month, last: Month) async throws -> NetProfitReport { throw record("netProfit(first:last:)") }
+	func netProfitPeriod(first: String, last: String) async throws -> NetProfitPeriod { throw record("netProfitPeriod(first:last:)") }
 	func balanceSheet(asOf: String) async throws -> BalanceSheet { throw record("balanceSheet(asOf:)") }
 	func cashFlowStatement(first: String, last: String) async throws -> CashFlowColumn { throw record("cashFlowStatement(first:last:)") }
 	func budgetMonth(_ month: Month, today: String) async throws -> BudgetMonth { throw record("budgetMonth(_:today:)") }

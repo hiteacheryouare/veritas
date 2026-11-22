@@ -8,6 +8,10 @@ import VeritasCore
 public enum AssistantTools {
 	public static func all(_ context: AssistantContext) -> [any AssistantTool] {
 		[
+			SpendingTool(context: context),
+			CategorySpendingTool(context: context),
+			IncomeTool(context: context),
+			BudgetTool(context: context),
 			NetProfitTool(context: context),
 			BudgetMonthTool(context: context),
 			AccountsTool(context: context),
@@ -19,8 +23,6 @@ public enum AssistantTools {
 		]
 	}
 
-	static let maximumMonths = 24
-	static let monthHint = "Ask again with months written as YYYY-MM."
 	static let yearHint = "Ask again with a calendar year such as 2026."
 	/// The years a tool reads. The model's arguments come from another image,
 	/// so every tool checks them again before they reach the core.
@@ -85,95 +87,71 @@ enum AssistantDates {
 		guard parts.count == 3, let month = month(text), let day = Int(parts[2]), (1...month.dayCount).contains(day) else { return nil }
 		return String(format: "%04d-%02d-%02d", month.year, month.month, day)
 	}
-
-	static func period(_ first: String, _ last: String) -> ReportPeriod? {
-		guard let first = month(first), let last = month(last) else { return nil }
-		return ReportPeriod(first: first, last: last)
-	}
 }
 
 struct NetProfitTool: AssistantTool {
 	let context: AssistantContext
 	let name = "netProfit"
-	let description = "Income, expenses, Net Profit, debt paydown, savings and net cash flow for whole months, with each income and expense category's total."
+	let description = "The Net Profit report for a period: Income, Expenses, Net Profit, debt paydown, savings and net cash flow. Use it only when the question names Net Profit, net cash flow, debt paydown or savings."
 
 	struct Arguments {
-		var first: String
-		var last: String
+		var period: String
 	}
 
-	let arguments: [AssistantToolArgument] = [
-		AssistantToolArgument(name: "first", description: "First month, YYYY-MM", kind: .text),
-		AssistantToolArgument(name: "last", description: "Last month, YYYY-MM. Same as first for one month.", kind: .text)
-	]
+	let arguments = [AssistantArguments.period]
 
 	func run(_ input: AssistantToolInput) async throws -> String {
-		try await call(arguments: Arguments(first: input.text("first"), last: input.text("last")))
+		try await call(arguments: Arguments(period: input.text("period")))
 	}
 
 	func call(arguments: Arguments) async throws -> String {
-		guard let period = AssistantDates.period(arguments.first, arguments.last) else { return AssistantTools.monthHint }
-		guard period.length <= AssistantTools.maximumMonths else { return "Ask for \(AssistantTools.maximumMonths) months or fewer." }
-		let report = try await context.queries.netProfit(first: period.first, last: period.last)
-		return Self.text(report, period: period, format: context.format)
+		guard let period = AssistantPeriod.resolve(arguments.period, today: context.today) else { return AssistantPeriod.hint }
+		let report = try await context.queries.netProfitPeriod(first: period.first, last: period.last)
+		return Self.text(report.column, period: period, format: context.format)
 	}
 
-	static let lines: [NetProfitLine] = [.income, .expenses, .netProfit, .debtPaydown, .savings, .netCashFlow]
+	static let lines: [NetProfitLine] = [.income, .expenses, .debtPaydown, .savings, .netCashFlow]
 
-	static func text(_ report: NetProfitReport, period: ReportPeriod, format: MoneyFormat) -> String {
-		func amount(_ line: NetProfitLine, _ column: NetProfitColumn) -> String {
+	static func text(_ column: NetProfitColumn, period: AssistantPeriod, format: MoneyFormat) -> String {
+		func amount(_ line: NetProfitLine) -> String {
 			format.amount(NetProfitModel.value(line, in: column).total, on: .register)
 		}
-		var text = ["Net Profit report, \(period.title)"]
 		var shown = lines
-		if (report.months + [report.total]).contains(where: { $0.unreviewed.total != 0 }) { shown.append(.unreviewed) }
-		text += shown.map { "\(ReportWords.line($0)): \(amount($0, report.total))" }
-		for (line, title) in [(NetProfitLine.income, "Income by category"), (.expenses, "Expenses by category")] {
-			let categories = NetProfitModel.section(line, in: report.total)?.categories ?? []
-			guard !categories.isEmpty else { continue }
-			text.append("\(title), \(period.title):")
-			text += categories.map { "\(ReportWords.category($0.name, labels: $0.labels)): \(format.amount($0.total, on: .register))" }
-		}
-		if report.months.count > 1 {
-			text.append("Each month:")
-			text += report.months.map { column in
-				let when = column.month.map(ReportPeriod.monthYear) ?? "\(column.first) to \(column.last)"
-				return "\(when): income \(amount(.income, column)), expenses \(amount(.expenses, column)), Net Profit \(amount(.netProfit, column))"
-			}
-		}
-		return text.joined(separator: "\n")
+		if column.unreviewed.total != 0 { shown.append(.unreviewed) }
+		return (["Net Profit, \(period.title): \(amount(.netProfit))", "Net Profit report, \(period.title):"]
+			+ shown.map { "\(ReportWords.line($0)): \(amount($0))" }).joined(separator: "\n")
 	}
 }
 
 struct BudgetMonthTool: AssistantTool {
 	let context: AssistantContext
 	let name = "budgetMonth"
-	let description = "One month of the envelope budget: To Budget, and each envelope's budgeted, spent and available amounts."
+	let description = "Every envelope on the Budget screen for one month: To Budget, and each envelope's budgeted, activity and available amounts. For one category or group, use budget."
 
 	struct Arguments {
-		var month: String
+		var period: String
 	}
 
-	let arguments: [AssistantToolArgument] = [
-		AssistantToolArgument(name: "month", description: "Month, YYYY-MM", kind: .text)
-	]
+	let arguments = [AssistantArguments.period]
 
 	func run(_ input: AssistantToolInput) async throws -> String {
-		try await call(arguments: Arguments(month: input.text("month")))
+		try await call(arguments: Arguments(period: input.text("period")))
 	}
 
 	func call(arguments: Arguments) async throws -> String {
-		guard let month = AssistantDates.month(arguments.month) else { return AssistantTools.monthHint }
-		let sheet = try await context.queries.budgetMonth(month, today: context.today)
+		guard let period = AssistantPeriod.resolve(arguments.period, today: context.today) else { return AssistantPeriod.hint }
+		guard period.firstMonth == period.lastMonth else { return BudgetTool.oneMonth }
+		let sheet = try await context.queries.budgetMonth(period.firstMonth, today: context.today)
 		return Self.text(sheet, format: context.format)
 	}
 
-	/// The Budget screen with hidden envelopes left out, as it opens.
+	/// The Budget screen with hidden envelopes left out, as it opens. AI-7:
+	/// its figures say "activity", never "spent".
 	static func text(_ sheet: BudgetMonth, format: MoneyFormat) -> String {
 		func amount(_ value: Int64) -> String { format.amount(value, on: .budget) }
 		var text = sheet.mixedScaleNote.map { [$0] } ?? []
 		text += [
-			"Budget for \(ReportPeriod.monthYear(sheet.month))",
+			"Budget screen figures for \(ReportPeriod.monthYear(sheet.month))",
 			"To Budget: \(format.currency(sheet.toBudget, on: .budget))"
 		]
 		if sheet.forNextMonth != 0 { text.append("Held for next month: \(amount(sheet.forNextMonth))") }
@@ -182,9 +160,9 @@ struct BudgetMonthTool: AssistantTool {
 				text.append("Income group \(group.name): received \(amount(group.spent))")
 				text += group.envelopes.filter { !$0.hidden }.map { "\($0.name): received \(amount($0.spent))" }
 			} else {
-				text.append("Group \(group.name): budgeted \(amount(group.budgeted)), spent \(amount(-group.spent)), available \(amount(group.available))")
+				text.append("Group \(group.name): budgeted \(amount(group.budgeted)), activity \(amount(-group.spent)), available \(amount(group.available))")
 				text += group.envelopes.filter { !$0.hidden }.map {
-					"\($0.name): budgeted \(amount($0.budgeted)), spent \(amount(-$0.spent)), available \(amount($0.available))"
+					"\($0.name): budgeted \(amount($0.budgeted)), activity \(amount(-$0.spent)), available \(amount($0.available))"
 				}
 			}
 		}
@@ -262,25 +240,21 @@ struct BalanceSheetTool: AssistantTool {
 struct CashFlowTool: AssistantTool {
 	let context: AssistantContext
 	let name = "cashFlow"
-	let description = "The cash flow statement for whole months: opening and closing budget account balances, Net Profit, debt paydown and savings."
+	let description = "The cash flow statement for a period: opening and closing budget account balances, Net Profit, debt paydown and savings."
 
 	struct Arguments {
-		var first: String
-		var last: String
+		var period: String
 	}
 
-	let arguments: [AssistantToolArgument] = [
-		AssistantToolArgument(name: "first", description: "First month, YYYY-MM", kind: .text),
-		AssistantToolArgument(name: "last", description: "Last month, YYYY-MM. Same as first for one month.", kind: .text)
-	]
+	let arguments = [AssistantArguments.period]
 
 	func run(_ input: AssistantToolInput) async throws -> String {
-		try await call(arguments: Arguments(first: input.text("first"), last: input.text("last")))
+		try await call(arguments: Arguments(period: input.text("period")))
 	}
 
 	func call(arguments: Arguments) async throws -> String {
-		guard let period = AssistantDates.period(arguments.first, arguments.last) else { return AssistantTools.monthHint }
-		let flow = try await context.queries.cashFlowStatement(first: period.first.firstDay, last: period.last.lastDay)
+		guard let period = AssistantPeriod.resolve(arguments.period, today: context.today) else { return AssistantPeriod.hint }
+		let flow = try await context.queries.cashFlowStatement(first: period.first, last: period.last)
 		return (["Cash flow statement, \(period.title)"] + StatementText.lines(StatementsModel.lines(flow), format: context.format)).joined(separator: "\n")
 	}
 }

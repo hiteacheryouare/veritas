@@ -13,6 +13,9 @@ struct AssistantRulesTests {
 			"Use each tool's own words for its figures. Call a figure Income, Expenses, Spending or Net Profit only when the tool names it that. Never call a balance, a saved report's total or a budget figure by those words.",
 			"If a result includes a note about scales, repeat it with the figures.",
 			"A question about now, such as a current balance or net worth, uses today's date.",
+			"Transfers, card payments, net cash flow, debt paydown and savings are never spending, and refunds are never income. Mention debt paydown or savings only when the question asks for them by name.",
+			"The tool works out the dates. Never work out dates yourself.",
+			"Start your answer with the first line the tool returns, copied exactly.",
 			"Today is 2026-11-18."
 		] {
 			#expect(instructions.contains(rule), "\(rule)")
@@ -43,7 +46,7 @@ struct CannedQueries: ReadOnlyBudgetQueries {
 	var tax: TaxSummary?
 	var goalList: GoalList?
 
-	func netProfit(first: Month, last: Month) async throws -> NetProfitReport { throw Missing() }
+	func netProfitPeriod(first: String, last: String) async throws -> NetProfitPeriod { throw Missing() }
 	func balanceSheet(asOf: String) async throws -> BalanceSheet { throw Missing() }
 	func cashFlowStatement(first: String, last: String) async throws -> CashFlowColumn { throw Missing() }
 	func budgetMonth(_ month: Month, today: String) async throws -> BudgetMonth { throw Missing() }
@@ -109,7 +112,7 @@ struct AssistantZeroPlaceTests {
 		let trip = try #require(lines.first { $0.hasPrefix("Trip: ") })
 		#expect(trip.hasPrefix("Trip: available ¥0, target ¥50,000"))
 
-		let month = try await BudgetMonthTool(context: context).call(arguments: .init(month: String(context.today.prefix(7))))
+		let month = try await BudgetMonthTool(context: context).call(arguments: .init(period: String(context.today.prefix(7))))
 		#expect(month.components(separatedBy: "\n").first == coreNote, "the note comes before the figures it explains")
 		await workspace.closeBudget()
 	}

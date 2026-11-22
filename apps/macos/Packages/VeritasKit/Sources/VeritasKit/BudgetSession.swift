@@ -127,6 +127,8 @@ public protocol BudgetSession: AnyObject, Sendable {
 
 	/// Net Profit for each month in the range and for the whole range (R-REP-2).
 	func netProfit(first: Month, last: Month) async throws -> NetProfitReport
+	/// Net Profit for inclusive `YYYY-MM-DD` dates, with group totals (R-AI-1).
+	func netProfitPeriod(first: String, last: String) async throws -> NetProfitPeriod
 	/// Assets, liabilities and net worth at each month's end (R-REP-5).
 	func netWorth(first: Month, last: Month) async throws -> [NetWorthMonth]
 	/// One cash flow statement per month (R-REP-5).
