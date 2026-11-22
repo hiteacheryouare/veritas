@@ -82,6 +82,25 @@ pub struct NetProfitReport {
 	pub total: NetProfitColumn,
 }
 
+/// One category group's share of a Net Profit section: the sum of its
+/// categories' lines, so a group's figure always adds up to what they show.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ReportGroup {
+	pub group_id: String,
+	pub name: String,
+	pub total: i64,
+	pub count: u64,
+}
+
+/// Net Profit for any inclusive date range, with the income and expense
+/// sections also totalled by category group, in budget order.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct NetProfitPeriod {
+	pub column: NetProfitColumn,
+	pub income_groups: Vec<ReportGroup>,
+	pub expense_groups: Vec<ReportGroup>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
 pub struct NetWorthMonth {
 	pub month: Month,
@@ -436,6 +455,55 @@ pub(crate) fn net_profit_report(
 			.map(|month| net_profit_column(budget, month))
 			.collect(),
 		total: net_profit_column(budget, &total),
+	})
+}
+
+/// The uncategorized line has no group, so it is in no group's total.
+fn groups(budget: &BudgetData, from: &reports::Section) -> Result<Vec<ReportGroup>, CoreError> {
+	let mut groups: Vec<(veritas_domain::CategoryGroupId, Money, u64)> = Vec::new();
+	for line in &from.categories {
+		let Some(group) = line
+			.category
+			.as_ref()
+			.and_then(|id| budget.categories.get(id))
+			.map(|category| category.group.clone())
+		else {
+			continue;
+		};
+		let count = line.rows.len() as u64;
+		match groups.iter_mut().find(|(id, _, _)| *id == group) {
+			Some((_, total, rows)) => {
+				*total = total.checked_add(line.total)?;
+				*rows += count;
+			}
+			None => groups.push((group, line.total, count)),
+		}
+	}
+	Ok(groups
+		.into_iter()
+		.map(|(id, total, count)| ReportGroup {
+			name: budget
+				.category_groups
+				.get(&id)
+				.map(|group| group.name.clone())
+				.unwrap_or_default(),
+			group_id: id.to_string(),
+			total: total.minor(),
+			count,
+		})
+		.collect())
+}
+
+pub(crate) fn net_profit_period(
+	budget: &BudgetData,
+	classification: &Classification,
+	period: Period,
+) -> Result<NetProfitPeriod, CoreError> {
+	let report = reports::net_profit(budget, classification, period)?;
+	Ok(NetProfitPeriod {
+		income_groups: groups(budget, &report.income)?,
+		expense_groups: groups(budget, &report.expenses)?,
+		column: net_profit_column(budget, &report),
 	})
 }
 
@@ -849,6 +917,23 @@ impl Session {
 		.await
 	}
 
+	/// Net Profit for any inclusive `YYYY-MM-DD` range, with the income and
+	/// expense sections totalled by category group (R-AI-1).
+	pub async fn net_profit_period(
+		&self,
+		first: String,
+		last: String,
+		cancel: Arc<CancelHandle>,
+	) -> Result<NetProfitPeriod, FfiError> {
+		let core = self.core.clone();
+		run(&cancel, move |cancel| {
+			core.report(cancel, |budget, classification| {
+				net_profit_period(budget, classification, period(&first, &last)?)
+			})
+		})
+		.await
+	}
+
 	/// Assets, liabilities and net worth at each month's end (R-REP-5).
 	pub async fn net_worth(
 		&self,
@@ -1015,6 +1100,57 @@ mod tests {
 			let rows = drill_rows(budget, classification, &drill)?;
 			Ok(report_transactions(budget, classification, &rows))
 		})
+	}
+
+	#[test]
+	fn a_date_range_matches_the_month_report_and_groups_sum_their_categories() {
+		let (_scratch, core) = imported("all-features");
+		let (month, range) = read(&core, |budget, classification| {
+			Ok((
+				net_profit_report(budget, classification, month(2026, 10), month(2026, 10))?,
+				net_profit_period(budget, classification, period("2026-10-01", "2026-10-31")?)?,
+			))
+		});
+		assert_eq!(range.column, month.total);
+		assert!(!range.expense_groups.is_empty());
+		for (groups, section) in [
+			(&range.expense_groups, &range.column.expenses),
+			(&range.income_groups, &range.column.income),
+		] {
+			for group in groups {
+				let lines: Vec<_> = section
+					.categories
+					.iter()
+					.filter(|line| line.group_id.as_deref() == Some(group.group_id.as_str()))
+					.collect();
+				assert!(!lines.is_empty());
+				assert_eq!(
+					group.total,
+					lines.iter().map(|line| line.total).sum::<i64>()
+				);
+				assert_eq!(
+					group.count,
+					lines.iter().map(|line| line.count).sum::<u64>()
+				);
+				assert_eq!(Some(group.name.as_str()), lines[0].group_name.as_deref());
+			}
+			let grouped: i64 = groups.iter().map(|group| group.total).sum();
+			let ungrouped: i64 = section
+				.categories
+				.iter()
+				.filter(|line| line.group_id.is_none())
+				.map(|line| line.total)
+				.sum();
+			assert_eq!(grouped + ungrouped, section.total);
+		}
+
+		let partial = read(&core, |budget, classification| {
+			net_profit_period(budget, classification, period("2026-10-01", "2026-10-15")?)
+		});
+		assert_eq!(partial.column.first, "2026-10-01");
+		assert_eq!(partial.column.last, "2026-10-15");
+		assert_eq!(partial.column.month, None);
+		assert!(partial.column.expenses.count <= range.column.expenses.count);
 	}
 
 	#[test]
