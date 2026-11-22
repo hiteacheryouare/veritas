@@ -1,3 +1,4 @@
+import Foundation
 import AppKit
 import SwiftUI
 import Testing
@@ -49,6 +50,41 @@ struct TokenBehaviorTests {
 		#expect(MoneyTone.overspent.word == "over")
 		#expect(MoneyTone.overspent.text == .moneyOverspent)
 		#expect(MoneyTone.overspent.fill == .moneyOverspentFill)
+	}
+
+	/// WCAG AA: every text token reads at 4.5:1 or better on every surface it sits on,
+	/// in both appearances. The selected sidebar row's text is primary, at 7:1 or better.
+	@Test func everyTextTokenMeetsAAOnEverySurface() {
+		let texts: [ColorToken] = [.textPrimary, .textSecondary, .textTertiary, .moneyNeutral, .moneyAvailable, .moneyLow, .moneyOverspent, .moneyIncome]
+		let opaque: [ColorToken] = [.surfaceWindow, .surfaceGrouped, .surfaceRaised, .surfaceField]
+		for dark in [false, true] {
+			let sidebar = Self.over(dark ? ColorToken.surfaceSidebar.dark : ColorToken.surfaceSidebar.light, dark ? ColorToken.surfaceWindow.dark : RGBA(0xffffff))
+			let selected = Self.over(dark ? ColorToken.surfaceSelected.dark : ColorToken.surfaceSelected.light, sidebar)
+			for text in texts {
+				for surface in opaque.map({ dark ? $0.dark : $0.light }) {
+					let ratio = Self.contrast(dark ? text.dark : text.light, surface)
+					#expect(ratio >= 4.5, "\(text) on \(surface), dark \(dark): \(ratio)")
+				}
+			}
+			for text in [ColorToken.textPrimary, .textSecondary, .textTertiary] {
+				let ratio = Self.contrast(dark ? text.dark : text.light, sidebar)
+				#expect(ratio >= 4.5, "\(text) on the sidebar, dark \(dark): \(ratio)")
+			}
+			#expect(Self.contrast(dark ? ColorToken.textPrimary.dark : ColorToken.textPrimary.light, selected) >= 7, "the selected row's text")
+		}
+	}
+
+	private static func over(_ top: RGBA, _ bottom: RGBA) -> RGBA {
+		func mix(_ a: Double, _ b: Double) -> Double { a * top.alpha + b * (1 - top.alpha) }
+		let hex = [mix(top.red, bottom.red), mix(top.green, bottom.green), mix(top.blue, bottom.blue)].map { UInt32(($0 * 255).rounded()) }
+		return RGBA(hex[0] << 16 | hex[1] << 8 | hex[2])
+	}
+
+	private static func contrast(_ a: RGBA, _ b: RGBA) -> Double {
+		func channel(_ c: Double) -> Double { c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4) }
+		func luminance(_ c: RGBA) -> Double { 0.2126 * channel(c.red) + 0.7152 * channel(c.green) + 0.0722 * channel(c.blue) }
+		let (high, low) = (max(luminance(a), luminance(b)), min(luminance(a), luminance(b)))
+		return (high + 0.05) / (low + 0.05)
 	}
 
 	private func components(of color: NSColor, in name: NSAppearance.Name) throws -> [Int] {
