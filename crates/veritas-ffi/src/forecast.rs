@@ -2,7 +2,7 @@
 //! three what-ifs, next month's budget suggestions, goal ETAs, and the
 //! what-if scenarios themselves (docs/finance/forecasting.md).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use veritas_domain::{
@@ -583,14 +583,20 @@ fn category_name(data: &BudgetData, id: &CategoryId) -> String {
 		.unwrap_or_default()
 }
 
+/// A what-if lists every account either projection holds, so an account only
+/// the baseline holds still shows its difference, with a balance of 0.
 fn accounts(
 	data: &BudgetData,
 	balances: &BTreeMap<AccountId, Money>,
 	differences: Option<&BTreeMap<AccountId, Money>>,
 ) -> Vec<ForecastAccount> {
-	let mut rows: Vec<_> = balances
-		.iter()
-		.filter_map(|(id, balance)| {
+	let ids: BTreeSet<&AccountId> = balances
+		.keys()
+		.chain(differences.into_iter().flat_map(BTreeMap::keys))
+		.collect();
+	let mut rows: Vec<_> = ids
+		.into_iter()
+		.filter_map(|id| {
 			let account = data.accounts.get(id).filter(|account| !account.tombstone)?;
 			Some((
 				(account.off_budget, account.sort_order),
@@ -598,7 +604,7 @@ fn accounts(
 					account_id: id.to_string(),
 					name: account.name.clone(),
 					off_budget: account.off_budget,
-					balance: balance.minor(),
+					balance: balances.get(id).copied().unwrap_or(Money::ZERO).minor(),
 					difference: differences.map(|differences| {
 						differences.get(id).copied().unwrap_or(Money::ZERO).minor()
 					}),
@@ -1127,6 +1133,45 @@ mod tests {
 			category_id: Some(category.to_owned()),
 			amount: -200_000,
 		}
+	}
+
+	#[test]
+	fn fc_3_an_account_only_the_baseline_holds_keeps_its_difference() {
+		let (_scratch, core) = imported("all-features");
+		let data = data(&core);
+		let mut open = data
+			.accounts
+			.values()
+			.filter(|account| !account.tombstone)
+			.map(|account| account.id.clone());
+		let (kept, dropped) = (open.next().unwrap(), open.next().unwrap());
+		let scenario = BTreeMap::from([(kept.clone(), Money::from_minor(1_245_000))]);
+		let differences = BTreeMap::from([
+			(kept.clone(), Money::from_minor(45_000)),
+			(dropped.clone(), Money::from_minor(300_000)),
+		]);
+
+		let rows = accounts(&data, &scenario, Some(&differences));
+
+		let row = |id: &AccountId| {
+			rows.iter()
+				.find(|row| row.account_id == id.to_string())
+				.unwrap_or_else(|| panic!("{id} is missing from the what-if's accounts"))
+		};
+		assert_eq!(rows.len(), 2);
+		assert_eq!(
+			(row(&kept).balance, row(&kept).difference),
+			(1_245_000, Some(45_000))
+		);
+		assert_eq!(
+			(row(&dropped).balance, row(&dropped).difference),
+			(0, Some(300_000))
+		);
+		assert_eq!(
+			accounts(&data, &scenario, None).len(),
+			1,
+			"the baseline lists only its own accounts"
+		);
 	}
 
 	#[test]
