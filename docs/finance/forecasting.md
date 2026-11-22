@@ -125,7 +125,7 @@ Applies to each non-hidden `expense`-kind category (a spending baseline) and eac
 
 **Net worth.** `NW(t) = NW(today) + sum of forecast net income (income - expenses) up to t`. Principal payments, savings transfers and card payments change no net worth. Non-cash changes (revaluations, adjustments, starting balances) are assumed zero and the screen says so. No market return or inflation is assumed unless a what-if adds it.
 
-**Net worth history.** The projection chart may show the month-end net worth of the up to 12 complete months before the current month. These are the figures of the net worth report (ST-2), from the same function, every account on and off budget, open and closed, so the two never differ by a cent. Months before the budget's first row are left out, not shown as 0, because 0 would read as a real balance. Revaluations and other non-cash changes are in the history, while the projection assumes none (Net worth, above), and the screen says so.
+**Net worth history.** The projection chart may show the month-end net worth of the up to 12 complete months before the current month. These are the figures of the net worth report (ST-2), from the same function, every account on and off budget, open and closed, so the two never differ by a cent. The months are the up to 12 calendar months before the current one, each valued at its last day. The month of the budget's first row is included: it is a complete month if it is before the current one, and its month-end figure counts every row dated on or before that day. Months before the first row's month are left out, not shown as 0, because 0 would read as a real balance. The history uses ST-2's date semantics: each leg of a transfer counts on its own date. It does not use the later-side transfer dating of the net worth card (ST-10.10), so at a month-end the two can differ by the money in transit between a transfer's two dates. The history and the net worth report always agree. Revaluations and other non-cash changes are in the history, while the projection assumes none (Net worth, above), and the screen says so.
 
 **What-if difference.** For each horizon, the difference from the baseline is `NW_h(scenario) - NW_h(baseline)`, and for each account `balance_h(scenario) - balance_h(baseline)`, in the same sign as the balances: positive means the what-if leaves you better off. The band is not differenced (FC-3, Band).
 
@@ -160,6 +160,17 @@ Today is 2027-01-15 and checking holds 388800. One exact bill, Rent -165000 on t
 | SN-4 Negative forecast | A category whose FC-1 forecast is -3000, change +1000 bp | `forecast+` is 0, delta 0, scenario forecast **0** |
 | SN-5 Goal contribution | Scenario adds 25000 a month to a goal from February | Net worth, balances and band offsets are identical to the baseline projection. Only the goal's ETA changes (E-7) |
 | AP-1 Asset purchase | Fuel window of 2 complete months: Jan 20000 of fuel, Feb 20000 of fuel plus a 50000 transfer from CHK to an off-budget CAR asset in category Fuel (row 8) | The 50000 row is excluded: `x` = 20000, 20000, `L` = **20000**. Counting it would give 20000 and 70000, `L` = 45000 and a projected net worth 25000 lower every month. Note: "1 asset purchase excluded: $500" (one purchase, 50000 cents) |
+| SN-6 What-if difference, total | Horizon h = 3. Baseline `NW_3` 1200000, scenario `NW_3` 1245000 | Difference = 1245000 - 1200000 = **+45000**. Positive means the what-if leaves you better off |
+| SN-7 What-if difference, liability account | Horizon h = 3. Loan account balance: baseline -300000, scenario -250000 | Difference = -250000 - (-300000) = **+50000** (better off, less owed). It is not -50000: the sign is the balance's, not the amount owed |
+
+### FC-3 Net worth history examples
+
+Today is 2027-06-10. All amounts made up.
+
+| Case | Inputs | Expected |
+|---|---|---|
+| NH-1 First row's month is included | The budget's first row is a starting balance of +500000 in checking dated 2027-03-14, and nothing else exists before it | History months: 2027-03, 2027-04, 2027-05 (3 months, not 12). March's point is the balance on 2027-03-31 = **500000**, so the first row's own month is in. Nothing is drawn for 2027-02 or earlier, not even 0. June is the current month and is not in the history |
+| NH-2 Transfer in transit at a month-end | CHK and SAV (both on budget) hold 1000000 and 2000000 on 2027-04-29. A transfer of 50000 is sent from CHK on 2027-04-30 and received in SAV on 2027-05-02 | History (ST-2, each leg on its own date): April month-end CHK 950000, SAV 2000000, net worth **2950000**, which is 50000 lower than 3000000, the in-transit amount. May month-end 3000000. The net worth card (ST-10.10) moves both legs to the later date, 2027-05-02, so its April figure is **3000000** (change 0), and it agrees with the history again from May 2. Both are right, each for its own question |
 
 ## FC-4 Confidence band
 
@@ -173,7 +184,7 @@ The band covers the category baselines only, for now: `F_t` = baselined income m
 2. With `n` residuals, sort ascending as `e(1)..e(n)`. Nearest-rank percentile: `P10 = e(ceil(n / 10))`, `P90 = e(ceil(9n / 10))`.
 3. For horizon `h` months the one-month band is scaled by `h` to the power `BAND_GROWTH` = 3/4, by integer arithmetic: `scale_h = isqrt(isqrt(h^3 * 10^16))` (this is `h^0.75 * 10000`, truncated; nested integer square roots give the integer fourth root exactly). `h^3 * 10^16` overflows a signed 64-bit integer from `h = 10` (10^19) and still fits an unsigned 64-bit integer at `h = 12` (1.728 * 10^19), so compute it in an unsigned 64-bit or wider integer. `lo_h = round_half_away(P10 * scale_h / 10000)`, `hi_h = round_half_away(P90 * scale_h / 10000)`. At `h = 1` the scale is 10000, so the one-month band is unchanged. The scale is deliberately wider than independent errors would need (`sqrt(h)`): a level error or an annual lump repeats from month to month.
 4. Net worth band at horizon `h` is `[NW_h + lo_h, NW_h + hi_h]`.
-5. **Every projected month.** The same formula is applied at every integer `h` from 1 to 12, so the chart can draw a band at each complete projected month; the horizons 3, 6, 10 and 12 are the `h` = 3, 6, 10 and 12 values of this series, not a separate calculation. Nothing is interpolated. The remainder of the current month (the first projected point) has no band, because `h` counts complete months after the current one (FC-3, Horizon); a zero-width band there would claim a certainty the baselines do not have. A what-if's months use the same offsets (FC-3, Band).
+5. **Every projected month.** The same formula is applied at every integer `h` from 1 to 12, so the chart can draw a band at each complete projected month; the horizons 3, 6, 10 and 12 are the `h` = 3, 6, 10 and 12 values of this series, not a separate calculation. Nothing is interpolated. The remainder of the current month (the first projected point) has no band, because `h` counts complete months after the current one (FC-3, Horizon); a zero-width band there would claim a certainty the baselines do not have. The fallback band (FC-4.3, `n < BAND_MIN_RESIDUALS`) is drawn at every `h` from 1 to 12 with the same scale too, using its own one-month `lo` and `hi` as `P10` and `P90`. "No history yet" (FC-4.3, no band) suppresses the band at every `h`. A what-if's months use the same offsets (FC-3, Band).
 
 The label reads "80% band from N past months". The detail view states the method, N, that errors are assumed to partly repeat (growth 3/4, not independent), that annual lumps such as gifts or insurance can fall outside the range (a yearly bill makes them known), and that the range covers category baselines only (FC-4.1).
 
@@ -191,6 +202,17 @@ Residuals (n = 10), sorted: -8000, -5000, -3000, -2000, -500, 0, 1000, 2500, 400
 - h = 4: `scale` = isqrt(isqrt(64 * 10^16)) = isqrt(800000000) = 28284. `lo` = -8000 * 28284 / 10000 = -22627.2, so **-22627**. `hi` = 4000 * 28284 / 10000 = 11313.6, so **11314**. NW projection 1000000 gives [977373, 1011314].
 - h = 12: `scale` = isqrt(isqrt(1728 * 10^16)) = 64474. `lo` = -8000 * 64474 / 10000 = -51579.2, so **-51579**. `hi` = 4000 * 64474 / 10000 = 25789.6, so **25790**.
 - Fallback with only 3 monthly `F` values {-1000, 0, 2000}: median 0, so `lo` = -1000 - 0 = -1000 and `hi` = 2000 - 0 = 2000 (h = 1), labeled "Based on 3 months of history, not a statistical range".
+
+### FC-4 Worked examples, band at every projected month
+
+Same residuals as above: `P10` = -8000, `P90` = +4000. NW projection at each horizon is shown where it matters.
+
+| Case | Inputs | Expected |
+|---|---|---|
+| BM-1 h = 1 | `NW_1` = 1000000 | `scale` 10000, `lo` -8000, `hi` +4000. Band **[992000, 1004000]**, the offsets unchanged |
+| BM-2 h = 2 | `NW_2` = 1000000 | `scale` = isqrt(isqrt(8 * 10^16)) = isqrt(282842712) = **16817**. `lo` = -8000 * 16817 / 10000 = -13453.6, `round_half_away` gives **-13454**. `hi` = 4000 * 16817 / 10000 = 6726.8, gives **6727**. Band **[986546, 1006727]** |
+| BM-3 Fallback at h = 2 | Only 3 monthly `F` values {-1000, 0, 2000} (offsets -1000 and +2000), `NW_2` = 1000000 | `lo` = -1000 * 16817 / 10000 = -1681.7, gives **-1682**. `hi` = 2000 * 16817 / 10000 = 3363.4, gives **3363**. Band **[998318, 1003363]**, labeled "Based on 3 months of history, not a statistical range" |
+| BM-4 No history | No complete month of history | No band at any `h` from 1 to 12. The projection shows only "No history yet" |
 
 ## FC-5 Next-month suggestions and reasons (R-FC-3)
 
@@ -359,7 +381,7 @@ No dollar amount appears. Replace amounts with shares, in tenths of a percent:
 
 - **Monthly series.** For the bar chart on the biggest-month card: one entry per calendar month of the Wrapped period, each `total` that month's `expense_total` (CLS-6), the figure "Biggest month" ranks. A month with no rows reads 0. Months before the month of the budget's first row are left out, as in the evaluated range above. The series never changes the ranking: "Biggest month" still ranks only months that have expense rows. A month's total can be negative (refunds beat spending) and is shown as it is, never clamped.
 - **Redaction.** Each month's bar is `round_half_away(month_expense_total * 1000 / out)` tenths, the same rule and denominator as the "Biggest month" share above, `out <= 0`: "n/a". The bars are labeled "of total out". A negative share is shown as a refund month, not as an empty bar. Shares are rounded one by one and are not forced to sum to 1000.
-- **Years with data.** The year picker lists the calendar years from the year of the first row through today's year, newest first, for which `has_data` is true for that year's Wrapped period (at least one classified row in the period, which for the current year ends today). It uses the same test as the "No data for this year" line, so a year is listed exactly when its Wrapped is not empty.
+- **Years with data.** The year picker lists the calendar years from the year of the first row through today's year, newest first, for which `has_data` is true for that year's Wrapped period. `has_data` is true when at least one non-mirror transaction leg (a classified row, CLS-4, with `leg != mirror`; a split parent is not classified and does not count, its children do) is dated in the period, which for the current year ends today. Every kind counts, transfers (both legs of an on-budget transfer are primary), starting balances and adjustments included. It is the same test as the "No data for this year" line, so a year is listed exactly when its Wrapped is not empty.
 
 ### FC-8 Worked examples
 
@@ -378,10 +400,14 @@ No dollar amount appears. Replace amounts with shares, in tenths of a percent:
 | W-10 Goal completion | Goal target 150000, month-end available: Feb 130000, Mar 150000, Apr 2000 (after the purchase) | `reached_month` = March, stored when March's available hit 150000, and not reverted by the April purchase. Counted once in that year. Not counted in later years |
 | W-11 Biggest month tie | Jan and Jun both 300000 | January |
 | W-12 Current year | Today is 2027-03-10 | Range 2027-01-01 to 2027-03-10. Biggest month and streaks use only that range |
-| W-13 Empty year | No rows in the year | All counts 0, "No data for this year". No division happens |
+| W-13 Empty year | No non-mirror leg in the year | `has_data` is false. All counts 0, "No data for this year". The year is not in the year picker. No division happens |
 | W-14 Everything else and uncategorized | Net by category: Groceries 43000, Dining 30000, Fuel 17000, Fun 10000, Books 6000, Gifts 5000, Pets 4000, Refunds -2000. Uncategorized spending 9000 | Top 5: Groceries, Dining, Fuel, Fun, Books. Everything else = Gifts + Pets = **9000**. Refunds and uncategorized are in neither. Total = 115000. Floors 373, 260, 147, 86, 52, 78 sum 996. Missing 4 go to the largest remainders: Fun, Groceries, Dining, Fuel. Shares **374, 261, 148, 87, 52, 78** (Groceries, Dining, Fuel, Fun, Books, Everything else), sum 1000 |
 | W-15 Out vs in | in 100000, out 50000. Then in 0. Then in -3000 | 500 tenths (50.0%). Then "n/a". Then "n/a" |
 | W-16 Out vs in, refunds beat spending | in 100000, out -250 | -250 * 1000 / 100000 = -2.5, `round_half_away` gives **-3** tenths (not -2). Net share = 1000 - (-3) = **1003** |
 | W-17 Net and out never round apart | in 10000, out 3335 | out share: 3335 * 1000 / 10000 = 333.5, `round_half_away` gives **334**. Rounded on its own, net would be 6665 * 1000 / 10000 = 666.5, which gives 667, and 334 + 667 = 1001. The rule `1000 - out_share` gives net **666**, so the two sum to 1000 |
 | W-18 Top category share | Categorized spending 10000, the top category 3335 | 3335 * 1000 / 10000 = 333.5, `round_half_away` gives **334** tenths (33.4%), labeled "of categorized spending". Uncategorized rows are not in the 10000 |
 | W-19 No-spend share | Evaluated range of 16 days, 5 of them no-spend days | 5 * 1000 / 16 = 312.5, `round_half_away` gives **313** tenths (31.3%) |
+| W-20 Monthly series with a refund month | Today is 2027-03-31, so the period is 2027-01-01 to 2027-03-31 and the first row is before it. `expense_total`: January +30000, February -5000 (refunds beat spending), March no rows | Series: Jan **30000**, Feb **-5000** (shown, not clamped), Mar **0**. `out` = 30000 - 5000 + 0 = 25000 |
+| W-21 Bars for W-20 | `out` = 25000 | Jan 30000 * 1000 / 25000 = **1200** tenths. Feb -5000 * 1000 / 25000 = **-200**, shown as a refund month. Mar **0**. Sum 1200 - 200 + 0 = 1000. Bars exceed 1000 here because another month is negative, and are not forced to sum to 1000 or clamped. Labeled "of total out". With `out` 0 or less every bar reads "n/a" |
+| W-22 Biggest month ignores the series zeros | The data of W-20 | "Biggest month" is **January** (30000). February (-5000) and March (0, no expense rows) are not ranked ahead of it |
+| W-23 Transfers-only year | The budget's first row is a starting balance of +1000000 in checking on 2026-12-01. In 2027 the only rows are a transfer of 50000 from checking to savings (both on budget) dated 2027-05-10, two primary legs, no categories | `has_data` for 2027 is true (non-mirror legs dated in the year). 2027 is listed by the year picker and its Wrapped renders, not "No data for this year". Total in 0, total out 0, net 0. Net-worth change `NW(end) - NW(start)` = 1000000 - 1000000 = **0**, shown as 0. Share lines with `out` 0 read "n/a" |

@@ -1,4 +1,4 @@
-//! R-WRAP-1 and R-WRAP-2: every FC-8 worked example (W-1 to W-13).
+//! R-WRAP-1 and R-WRAP-2: every FC-8 worked example (W-1 to W-23).
 
 #![allow(clippy::unwrap_used, clippy::panic)]
 
@@ -440,6 +440,107 @@ fn fc_8_zero_months_in_the_series_never_win_biggest_month() {
 		Some((ym("2027-02"), cents(-500))),
 		"only months with expense rows are ranked"
 	);
+}
+
+/// W-20's quarter: January +30000 of spending, February -5000 (refunds beat
+/// spending), March without rows.
+fn w_20_book() -> Book {
+	let mut book = Book::household();
+	book.spend("Groceries", "2027-01-05", -30_000);
+	book.spend("Groceries", "2027-02-03", -1_000);
+	book.spend("Groceries", "2027-02-10", 6_000);
+	book
+}
+
+#[test]
+fn w_20_the_monthly_series_shows_a_refund_month_as_negative() {
+	let result = wrap(&w_20_book(), 2027, "2027-03-31");
+	assert_eq!(
+		result.monthly_spending,
+		[
+			(ym("2027-01"), cents(30_000)),
+			(ym("2027-02"), cents(-5_000)),
+			(ym("2027-03"), cents(0))
+		]
+	);
+	assert_eq!(result.total_out, cents(25_000));
+}
+
+#[test]
+fn w_21_monthly_bars_are_shares_of_total_out_one_by_one() {
+	let result = wrap(&w_20_book(), 2027, "2027-03-31");
+	let bars = result.redacted().months;
+	assert_eq!(bars, [Some(1200), Some(-200), Some(0)]);
+	assert_eq!(bars.iter().flatten().sum::<i64>(), 1000);
+
+	let mut refunds_only = Book::household();
+	refunds_only.spend("Groceries", "2027-01-05", 2_000);
+	assert_eq!(
+		wrap(&refunds_only, 2027, "2027-03-31").redacted().months,
+		[None, None, None],
+		"out <= 0 reads n/a"
+	);
+}
+
+#[test]
+fn w_22_the_series_never_changes_the_biggest_month() {
+	let result = wrap(&w_20_book(), 2027, "2027-03-31");
+	assert_eq!(result.biggest_month, Some((ym("2027-01"), cents(30_000))));
+}
+
+/// W-23: a year whose only rows are a transfer between two on-budget
+/// accounts has data: it is listed and renders, with nothing in or out.
+#[test]
+fn w_23_a_transfers_only_year_is_listed_and_renders() {
+	let mut book = Book::household();
+	book.account("Savings", false);
+	book.opening("CHK", "2026-12-01", 1_000_000);
+	book.transfer("CHK", "Savings", "2027-05-10", -50_000);
+	let classification = classify(&book.budget);
+	let today = date("2027-12-31");
+
+	assert_eq!(wrapped_years(&classification, today).unwrap(), [2027, 2026]);
+	let result = wrapped(&book.budget, &classification, 2027, today).unwrap();
+	assert!(result.has_data);
+	assert_eq!(result.no_data_text(), None);
+	assert_eq!(
+		(result.total_in, result.total_out, result.net),
+		(cents(0), cents(0), cents(0))
+	);
+	assert_eq!(
+		(
+			result.net_worth_start,
+			result.net_worth_end,
+			result.net_worth_change
+		),
+		(cents(1_000_000), cents(1_000_000), cents(0))
+	);
+	let redacted = result.redacted();
+	assert_eq!((redacted.out_vs_in, redacted.net), (None, None));
+}
+
+/// `has_data` counts non-mirror legs only: the off-budget side of a transfer
+/// to savings, landing in the new year, gives that year no data.
+#[test]
+fn a_year_whose_only_leg_is_a_mirror_has_no_data() {
+	let mut book = Book::household();
+	book.opening("CHK", "2026-12-01", 1_000_000);
+	let sent = book
+		.transfer("CHK", "SAV", "2026-12-30", -50_000)
+		.id
+		.clone();
+	book.budget
+		.transactions
+		.get_mut(&veritas_domain::TransactionId::new(format!("{sent}m")))
+		.unwrap()
+		.date = date("2027-01-02");
+	let classification = classify(&book.budget);
+	let today = date("2027-06-01");
+
+	assert_eq!(wrapped_years(&classification, today).unwrap(), [2026]);
+	let result = wrapped(&book.budget, &classification, 2027, today).unwrap();
+	assert!(!result.has_data);
+	assert_eq!(result.no_data_text(), Some("No data for this year"));
 }
 
 #[test]

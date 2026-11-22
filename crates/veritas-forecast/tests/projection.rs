@@ -8,12 +8,13 @@ mod support;
 use support::*;
 use veritas_domain::{
 	Cadence, CoreError, GoalId, IncomeDelta, Scenario, ScenarioChange, ScenarioId, ScheduleId,
+	TransactionId,
 };
 use veritas_forecast::{
 	BandMethod, Certainty, FlowKind, Forecaster, KnownFlow, LoanPayment, Projection,
 	ScheduleAmount, cadence_dates,
 };
-use veritas_reports::{classify, net_worth_by_month};
+use veritas_reports::{Json, classify, net_worth_by_month, net_worth_card};
 
 const TODAY: &str = "2027-01-15";
 
@@ -579,6 +580,143 @@ fn fc_3_a_what_ifs_difference_from_the_baseline_at_each_horizon() {
 			.iter()
 			.all(|difference| difference.net_worth == cents(0))
 	);
+}
+
+/// NH-1: the first row's own month is a history month, and nothing before
+/// it is drawn, not even 0.
+#[test]
+fn nh_1_net_worth_history_starts_at_the_first_rows_month() {
+	let mut book = Book::household();
+	book.opening("CHK", "2027-03-14", 500_000);
+	let history = Forecaster::new(&book.budget)
+		.unwrap()
+		.net_worth_history(date("2027-06-10"))
+		.unwrap();
+	let months: Vec<(String, i64)> = history
+		.iter()
+		.map(|point| (point.month.to_string(), point.net_worth.minor()))
+		.collect();
+	assert_eq!(
+		months,
+		[
+			("2027-03".to_owned(), 500_000),
+			("2027-04".to_owned(), 500_000),
+			("2027-05".to_owned(), 500_000)
+		]
+	);
+}
+
+/// NH-2: the history dates each transfer leg on its own day (ST-2), so money
+/// in transit at April's end lowers April; the net worth card moves it to
+/// the later side (ST-10.10) and shows no dip.
+#[test]
+fn nh_2_net_worth_history_uses_st_2_dating_not_the_cards() {
+	let mut book = Book::new();
+	book.account("CHK", false).account("SAV", false);
+	book.opening("CHK", "2027-04-29", 1_000_000);
+	book.opening("SAV", "2027-04-29", 2_000_000);
+	let sent = book
+		.transfer("CHK", "SAV", "2027-04-30", -50_000)
+		.id
+		.clone();
+	book.budget
+		.transactions
+		.get_mut(&TransactionId::new(format!("{sent}m")))
+		.unwrap()
+		.date = date("2027-05-02");
+	let today = date("2027-06-10");
+
+	let history = Forecaster::new(&book.budget)
+		.unwrap()
+		.net_worth_history(today)
+		.unwrap();
+	let months: Vec<(String, i64)> = history
+		.iter()
+		.map(|point| (point.month.to_string(), point.net_worth.minor()))
+		.collect();
+	assert_eq!(
+		months,
+		[
+			("2027-04".to_owned(), 2_950_000),
+			("2027-05".to_owned(), 3_000_000)
+		]
+	);
+
+	let april = Json::parse(r#"{"timeFrame":{"start":"2027-04","end":"2027-04","mode":"static"}}"#)
+		.unwrap();
+	let card = net_worth_card(&book.budget, Some(&april), today.naive(), 0).unwrap();
+	let last = card.periods.last().unwrap();
+	assert_eq!(last.start, date("2027-04-01").naive());
+	assert_eq!(last.net_worth.minor(), 3_000_000, "the card shows no dip");
+}
+
+/// SN-6 and SN-7: a what-if's difference is scenario less baseline in the
+/// balances' own sign, so paying 50000 off a loan reads +50000 on the loan.
+#[test]
+fn sn_6_and_sn_7_what_if_differences_in_cents() {
+	let mut book = Book::household();
+	book.opening("CHK", "2026-06-30", 1_500_000);
+	book.opening("LOAN", "2026-06-30", -300_000);
+	let raise = scenario(
+		"Bonus",
+		vec![ScenarioChange::OneTime {
+			date: date("2027-02-10"),
+			account: acct("CHK"),
+			category: Some(cat("Side gigs")),
+			amount: cents(45_000),
+		}],
+	);
+	let paydown = scenario(
+		"Pay down the loan",
+		vec![ScenarioChange::OneTimeTransfer {
+			date: date("2027-02-10"),
+			from: acct("CHK"),
+			to: acct("LOAN"),
+			amount: cents(50_000),
+		}],
+	);
+	let comparison = Forecaster::new(&book.budget)
+		.unwrap()
+		.compare(date(TODAY), &[], &[&raise, &paydown])
+		.unwrap();
+	let at_3 = |projection: &Projection| {
+		projection
+			.horizons
+			.iter()
+			.find(|horizon| horizon.months == 3)
+			.unwrap()
+			.clone()
+	};
+	let difference_at_3 = |scenario: &Projection| {
+		comparison
+			.differences(scenario)
+			.unwrap()
+			.into_iter()
+			.find(|difference| difference.months == 3)
+			.unwrap()
+	};
+
+	let base = at_3(&comparison.baseline);
+	assert_eq!(base.net_worth, cents(1_200_000));
+	assert_eq!(at_3(&comparison.scenarios[0]).net_worth, cents(1_245_000));
+	assert_eq!(
+		difference_at_3(&comparison.scenarios[0]).net_worth,
+		cents(45_000)
+	);
+
+	assert_eq!(base.balances[&acct("LOAN")], cents(-300_000));
+	assert_eq!(
+		at_3(&comparison.scenarios[1]).balances[&acct("LOAN")],
+		cents(-250_000)
+	);
+	let sn_7 = difference_at_3(&comparison.scenarios[1]);
+	assert_eq!(
+		sn_7.balances[&acct("LOAN")],
+		cents(50_000),
+		"better off, not -50000"
+	);
+	assert_eq!(sn_7.balances[&acct("CHK")], cents(-50_000));
+	assert_eq!(sn_7.net_worth, cents(0));
 }
 
 #[test]

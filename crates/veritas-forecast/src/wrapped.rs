@@ -5,7 +5,7 @@ use veritas_domain::{
 	SplitRole, TransactionId, TransactionKind, YearMonth,
 };
 use veritas_reports::{
-	CategoryLabels, Classification, ClassifiedRow, Period, net_profit, net_worth,
+	CategoryLabels, Classification, ClassifiedRow, Leg, Period, net_profit, net_worth,
 };
 
 use crate::history::bill_linked;
@@ -382,9 +382,13 @@ fn period_of(year: i32, today: CivilDate) -> Result<Period, CoreError> {
 }
 
 /// The one test behind both `Wrapped::has_data` and `wrapped_years`, so the
-/// picker lists a year exactly when its Wrapped isn't "No data for this year".
+/// picker lists a year exactly when its Wrapped isn't "No data for this year":
+/// a non-mirror leg dated in the period, transfers included (FC-8).
 fn has_data(classification: &Classification, period: Period) -> bool {
-	!classification.within(period).is_empty()
+	classification
+		.within(period)
+		.iter()
+		.any(|row| row.leg != Leg::Mirror)
 }
 
 /// FC-8's years with data, newest first: from the year of the first row
