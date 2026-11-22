@@ -166,7 +166,7 @@ final class ToolReader: NSObject, AIPluginReader, Sendable {
 		for argument in tool.arguments {
 			switch argument.kind {
 			case .text: values[argument.name] = (arguments[argument.name] as? String).map { .text($0) }
-			case .integer: values[argument.name] = (arguments[argument.name] as? Int).map { .integer($0) }
+			case .integer(let range): values[argument.name] = (arguments[argument.name] as? Int).flatMap { range.contains($0) ? .integer($0) : nil }
 			}
 		}
 		return AssistantToolInput(values)

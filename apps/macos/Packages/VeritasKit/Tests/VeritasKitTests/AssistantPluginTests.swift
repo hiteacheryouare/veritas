@@ -110,6 +110,36 @@ struct AssistantPluginTests {
 		#expect(conversation.resets == 1)
 	}
 
+	@Test func hostileArgumentsGetAHintAndReadNothing() async throws {
+		// The plug-in's guides should keep the model in range, but the app checks again:
+		// Int32(year) used to trap on a year outside Int32.
+		let queries = RecordingQueries()
+		let context = AssistantContext(queries: queries, format: MoneyFormat(), today: "2026-11-17")
+		let reader = ToolReader(AssistantTools.all(context))
+		func read(_ tool: String, _ arguments: [String: Any]) async -> String? {
+			await withCheckedContinuation { continuation in
+				reader.read(tool: tool, arguments: arguments) { text, failure in continuation.resume(returning: text ?? failure) }
+			}
+		}
+		for year: Any in [Int.max, Int.min, -1, 0, 1899, 2201, 99_999, Int(Int32.max) + 1, "2026", 2026.5] {
+			#expect(await read("taxSummary", ["year": year]) == AssistantTools.yearHint, "\(year)")
+		}
+		#expect(await read("taxSummary", [:]) == AssistantTools.yearHint, "a missing year")
+		for month in ["", "-999-01", "0000-01", "99999-01", "2026-00", "2026-13", "1899-12", "2201-01", "2026", "x-y", String(repeating: "9", count: 4_000)] {
+			#expect(await read("budgetMonth", ["month": month]) == AssistantTools.monthHint, "\(month)")
+			#expect(await read("netProfit", ["first": month, "last": "2026-10"]) == AssistantTools.monthHint, "\(month)")
+			#expect(await read("cashFlow", ["first": "2026-10", "last": month]) == AssistantTools.monthHint, "\(month)")
+		}
+		#expect(await read("netProfit", ["first": 2026, "last": 10]) == AssistantTools.monthHint, "numbers where text belongs read as missing")
+		for date in ["", "2026-02-30", "-999-01-01", "2026-10-00", "2026-10-99999999999999999999", "2026-10"] {
+			#expect(await read("balanceSheet", ["date": date]) == "Ask again with a date written as YYYY-MM-DD.", "\(date)")
+		}
+		#expect(await read("noSuchTool", [:]) == "There's no noSuchTool tool.")
+		#expect(queries.calls.isEmpty, "no hostile argument reached a read: \(queries.calls)")
+		#expect(try await TaxSummaryTool(context: context).call(arguments: .init(year: Int.max)) == AssistantTools.yearHint)
+		#expect(queries.calls.isEmpty)
+	}
+
 	@Test func theReaderPassesOnlyTheArgumentsEachToolTakes() {
 		let tool = NetProfitTool(context: AssistantContext(queries: RecordingQueries(), format: MoneyFormat(), today: "2026-11-17"))
 		let input = ToolReader.input(["first": "2026-10", "last": "2026-11", "extra": "ignored", "month": 3], for: tool)
@@ -117,6 +147,7 @@ struct AssistantPluginTests {
 		let tax = TaxSummaryTool(context: AssistantContext(queries: RecordingQueries(), format: MoneyFormat(), today: "2026-11-17"))
 		#expect(ToolReader.input(["year": 2026], for: tax).values == ["year": .integer(2026)])
 		#expect(ToolReader.input(["year": "2026"], for: tax).values.isEmpty, "a value of the wrong kind is left out")
+		#expect(ToolReader.input(["year": 99_999], for: tax).values.isEmpty, "and so is one outside the argument's range")
 	}
 }
 

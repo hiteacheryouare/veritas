@@ -21,6 +21,10 @@ public enum AssistantTools {
 
 	static let maximumMonths = 24
 	static let monthHint = "Ask again with months written as YYYY-MM."
+	static let yearHint = "Ask again with a calendar year such as 2026."
+	/// The years a tool reads. The model's arguments come from another image,
+	/// so every tool checks them again before they reach the core.
+	static let years = 1900...2200
 }
 
 /// A read the model can ask for. The AI plug-in describes it to the model and
@@ -70,7 +74,8 @@ enum AssistantDates {
 	/// `2026-10`, or the month of `2026-10-14`.
 	static func month(_ text: String) -> Month? {
 		let parts = text.trimmingCharacters(in: .whitespaces).split(separator: "-")
-		guard parts.count >= 2, parts[0].count == 4, let year = Int32(parts[0]), let month = UInt32(parts[1]), (1...12).contains(month) else { return nil }
+		guard parts.count >= 2, parts[0].count == 4, let year = Int32(parts[0]), AssistantTools.years.contains(Int(year)),
+			let month = UInt32(parts[1]), (1...12).contains(month) else { return nil }
 		return Month(year: year, month: month)
 	}
 
@@ -358,7 +363,7 @@ struct TaxSummaryTool: AssistantTool {
 	}
 
 	let arguments: [AssistantToolArgument] = [
-		AssistantToolArgument(name: "year", description: "Calendar year, such as 2026", kind: .integer(1900...2200))
+		AssistantToolArgument(name: "year", description: "Calendar year, such as 2026", kind: .integer(AssistantTools.years))
 	]
 
 	func run(_ input: AssistantToolInput) async throws -> String {
@@ -366,7 +371,8 @@ struct TaxSummaryTool: AssistantTool {
 	}
 
 	func call(arguments: Arguments) async throws -> String {
-		Self.text(try await context.queries.taxSummary(year: Int32(arguments.year)), format: context.format)
+		guard AssistantTools.years.contains(arguments.year), let year = Int32(exactly: arguments.year) else { return AssistantTools.yearHint }
+		return Self.text(try await context.queries.taxSummary(year: year), format: context.format)
 	}
 
 	static func text(_ summary: TaxSummary, format: MoneyFormat) -> String {
