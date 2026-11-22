@@ -10,12 +10,14 @@ struct BillList: View {
 	let bills: [BillSummary]
 	let model: BillsModel
 
+	/// Each column's widest; every one but Next gives up to 40% of it before the bill's name truncates.
 	enum Column {
+		static let name: CGFloat = 140
 		static let amount: CGFloat = 190
 		static let when: CGFloat = 170
 		static let route: CGFloat = 190
 		static let posting: CGFloat = 170
-		static let last: CGFloat = 80
+		static let last: CGFloat = 110
 	}
 
 	private var isStopped: Bool { bills.contains { $0.state != .active } }
@@ -44,11 +46,11 @@ struct BillList: View {
 
 	private var header: some View {
 		HStack(spacing: Spacing.s4) {
-			Text("Bill").frame(maxWidth: .infinity, alignment: .leading)
-			Text("Amount").frame(width: Column.amount, alignment: .trailing)
-			Text("When").frame(width: Column.when, alignment: .leading)
-			Text("From → To").frame(width: Column.route, alignment: .leading)
-			Text(isStopped ? "State" : "Posting").frame(width: Column.posting, alignment: .leading)
+			Text("Bill").frame(minWidth: Column.name, maxWidth: .infinity, alignment: .leading)
+			Text("Amount").billColumn(Column.amount, alignment: .trailing)
+			Text("When").billColumn(Column.when, alignment: .leading)
+			Text("From → To").billColumn(Column.route, alignment: .leading)
+			Text(isStopped ? "State" : "Posting").billColumn(Column.posting, alignment: .leading)
 			Text(isStopped ? "" : "Next").frame(width: Column.last, alignment: .trailing)
 		}
 		.font(.text(.caption))
@@ -84,28 +86,29 @@ private struct BillRow: View {
 				Text(name)
 					.font(.text(.body, weight: .semibold))
 					.lineLimit(1)
-					.frame(maxWidth: .infinity, alignment: .leading)
+					.frame(minWidth: BillList.Column.name, maxWidth: .infinity, alignment: .leading)
 				Group {
 					if let amount {
 						BillAmountLabel(amount: amount, isIncome: bill.isIncome, format: model.format)
 					}
 				}
-				.frame(width: BillList.Column.amount, alignment: .trailing)
+				.billColumn(BillList.Column.amount, alignment: .trailing)
 				Text(when)
 					.foregroundStyle(.textSecondary)
 					.lineLimit(1)
-					.frame(width: BillList.Column.when, alignment: .leading)
+					.billColumn(BillList.Column.when, alignment: .leading)
 				Text(model.route(bill))
 					.foregroundStyle(.textSecondary)
 					.lineLimit(1)
-					.frame(width: BillList.Column.route, alignment: .leading)
+					.billColumn(BillList.Column.route, alignment: .leading)
 				postingLabel
-					.frame(width: BillList.Column.posting, alignment: .leading)
+					.billColumn(BillList.Column.posting, alignment: .leading)
 				Group {
 					if isActive {
 						Text(bill.nextDate.map(BillWords.day) ?? "")
 							.font(.figures(.body))
 							.foregroundStyle(.textSecondary)
+							.lineLimit(1)
 					} else {
 						Button("Resume") { Task { await model.resume(bill.id) } }
 							.controlSize(.small)
@@ -171,5 +174,12 @@ private struct BillRow: View {
 		let amountWords = amount.map { BillAmountLabel.words($0, isIncome: bill.isIncome, format: model.format) }
 		let next = isActive ? bill.nextDate.map { "next \(BillWords.day($0))" } : nil
 		return [name, amountWords, when, model.route(bill), posting, next].compactMap(\.self).joined(separator: ", ")
+	}
+}
+
+private extension View {
+	/// A bill column at its width, narrowing to 60% of it when the list is narrow.
+	func billColumn(_ width: CGFloat, alignment: Alignment) -> some View {
+		frame(minWidth: width * 0.6, maxWidth: width, alignment: alignment)
 	}
 }

@@ -187,7 +187,7 @@ public enum RuleWords {
 		case .bool(let flag): return flag ? "true" : "false"
 		case .percent(let percent): return (percent / 100).formatted(.percent.precision(.fractionLength(0...2)))
 		case .nothing: return ""
-		case .raw(let json): return json
+		case .raw(let json): return field == .date ? (RecurWords.words(json) ?? "a repeating date") : json
 		}
 	}
 
@@ -199,5 +199,42 @@ public enum RuleWords {
 		case .categoryGroup: names.categoryGroup(id)
 		default: nil
 		}
+	}
+}
+
+/// A schedule's date condition, stored as Actual's recurrence JSON, in the
+/// Bills screen's own words: "31st of month, from Jan 31, 2026".
+enum RecurWords {
+	private struct Config: Decodable {
+		struct Pattern: Decodable {
+			let type: String
+			let value: Int
+		}
+
+		let start: String
+		let interval: Int?
+		let frequency: String
+		let patterns: [Pattern]?
+	}
+
+	static func words(_ json: String) -> String? {
+		guard let data = json.data(using: .utf8), let config = try? JSONDecoder().decode(Config.self, from: data) else { return nil }
+		let frequency: BillFrequency
+		switch config.frequency {
+		case "daily": frequency = .daily
+		case "weekly": frequency = .weekly
+		case "monthly": frequency = .monthly
+		case "yearly": frequency = .yearly
+		default: return nil
+		}
+		let weekdays: [String: BillWeekday] = ["SU": .sunday, "MO": .monday, "TU": .tuesday, "WE": .wednesday, "TH": .thursday, "FR": .friday, "SA": .saturday]
+		let patterns: [BillRepeatPattern] = (config.patterns ?? []).compactMap { pattern in
+			if pattern.type == "day" { return .day(day: Int8(clamping: pattern.value)) }
+			return weekdays[pattern.type].map { .weekday(weekday: $0, nth: Int8(clamping: pattern.value)) }
+		}
+		let rule = BillRepeat(start: config.start, interval: UInt32(max(config.interval ?? 1, 1)), frequency: frequency, patterns: patterns, weekend: nil, end: .never)
+		let schedule = BillWords.repeating(rule)
+		let start = CivilDate.date(config.start)?.formatted(.dateTime.month(.abbreviated).day().year()) ?? config.start
+		return "\(schedule.prefix(1).lowercased())\(schedule.dropFirst()), from \(start)"
 	}
 }

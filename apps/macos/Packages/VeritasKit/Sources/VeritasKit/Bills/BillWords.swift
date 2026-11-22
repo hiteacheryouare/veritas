@@ -10,9 +10,20 @@ public enum BillWords {
 		}
 	}
 
-	/// "Nov 12" for `2026-11-12`.
+	/// "Nov 12" for `2026-11-12`, and "Feb 29, 2028" for a date in a later
+	/// year or more than twelve months away, so a far date never reads as a near one.
 	public static func day(_ date: String) -> String {
-		ReportPeriod.interval(date)
+		day(date, today: WorkspaceModel.today())
+	}
+
+	public static func day(_ date: String, today: String) -> String {
+		guard let value = CivilDate.date(date), let now = CivilDate.date(today) else { return ReportPeriod.interval(date) }
+		let calendar = Calendar.current.civil
+		let yearAway = calendar.date(byAdding: .month, value: 12, to: now) ?? now
+		if calendar.component(.year, from: value) > calendar.component(.year, from: now) || value > yearAway {
+			return value.formatted(.dateTime.month(.abbreviated).day().year())
+		}
+		return ReportPeriod.interval(date)
 	}
 
 	static func repeating(_ rule: BillRepeat) -> String {

@@ -20,6 +20,25 @@ struct BillAndRuleWordsTests {
 		#expect(BillWords.postFor("2026-11-12") == "Post for \(BillWords.day("2026-11-12"))")
 	}
 
+	@Test func aScheduleDateConditionReadsAsWordsNotJSON() {
+		// The audit's B3: a rule linked to a bill showed Actual's recurrence JSON.
+		let monthly = #"{"endMode":"after_n_occurrences","endOccurrences":24,"frequency":"monthly","interval":1,"patterns":[],"skipWeekend":false,"start":"2026-01-31","weekendSolveMode":"after"}"#
+		#expect(RuleWords.value(.raw(json: monthly), on: .date, names: .empty, format: MoneyFormat()) == "31st of month, from Jan 31, 2026")
+		let yearly = #"{"endDate":"2030-12-31","endMode":"on_date","frequency":"yearly","interval":1,"patterns":[],"skipWeekend":false,"start":"2024-02-29","weekendSolveMode":"after"}"#
+		#expect(RuleWords.value(.raw(json: yearly), on: .date, names: .empty, format: MoneyFormat()) == "yearly, from Feb 29, 2024")
+		let lastFriday = #"{"frequency":"monthly","interval":2,"patterns":[{"type":"FR","value":-1}],"start":"2026-03-27"}"#
+		#expect(RuleWords.value(.raw(json: lastFriday), on: .date, names: .empty, format: MoneyFormat()) == "every 2 months, last Friday, from Mar 27, 2026")
+		#expect(RuleWords.value(.raw(json: "{not json"), on: .date, names: .empty, format: MoneyFormat()) == "a repeating date")
+		#expect(RuleWords.value(.raw(json: "\"{{imported_payee}} via card\""), on: .notes, names: .empty, format: MoneyFormat()) == "\"{{imported_payee}} via card\"", "other raw values are unchanged")
+	}
+
+	@Test func aNextDateInALaterYearShowsItsYear() {
+		// Fred on M13: yearly from 2024-02-29 next falls on 2028-02-29, which must not read as a near date.
+		#expect(BillWords.day("2028-02-29", today: "2026-11-22") == "Feb 29, 2028")
+		#expect(BillWords.day("2026-12-03", today: "2026-11-22") == "Dec 3")
+		#expect(BillWords.day("2027-01-03", today: "2026-11-22") == "Jan 3, 2027")
+	}
+
 	@Test func postTodayAsksFirstWhenItWontPayTheOccurrence() {
 		#expect(BillWords.postTodayConfirm("2026-11-21") == "This won't pay the \(BillWords.day("2026-11-21")) bill. Post today anyway?")
 	}
