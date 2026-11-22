@@ -142,6 +142,8 @@ For a period, summing over rows with `leg != mirror`:
 
 One function in `veritas-reports`: `classify(row, context) -> { kind, leg, source?, flags }`. `context` carries account budget flags, category effective kinds, the pair lookup and the reconciliation markers. Reports, the Sankey, statements, tax buckets, forecasts and Wrapped call it and never read `is_income` or `offbudget` themselves. A report that decides for itself what counts as spending is a blocker in review.
 
+The on-device assistant's answers (spending, income, category and budget figures) are specified in assistant.md (AI-n). They use these figures and decide nothing themselves.
+
 ## CLS-8 Worked examples
 
 Master scenario (used again in statements.md). Accounts: CHK Checking (on), VISA Visa (on, liability), SAV Savings (off), LOAN Car Loan (off, liability), BRK Brokerage (off), CAR Car asset (off), CD Emergency CD (off, opened Jan 15). Opening balances at 2026-12-31: CHK 200000, VISA 0, SAV 500000, LOAN -980000, BRK 1000000, CAR 0, CD does not exist yet.
