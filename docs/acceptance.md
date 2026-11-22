@@ -1,6 +1,6 @@
 # Acceptance
 
-Each criterion from PLAN §10, with the evidence for it. Last checked on ws/qa at the head of PR #88 (2026-11-21), with dev merged in.
+Each criterion from PLAN §10, with the evidence for it. Last checked on ws/qa at the head of PR #88 (2026-11-22), with dev merged in.
 
 | Status | Meaning |
 |---|---|
@@ -11,7 +11,7 @@ Each criterion from PLAN §10, with the evidence for it. Last checked on ws/qa a
 
 ## Open items
 
-Of the 25 criteria, 22 are proven (D3 and D4 once #84 and #85 land), 2 have a fix in progress (C1, D2), and 1 needs Ryan: A1's real-core import UI test. B2's transaction-field UI test also waits on his run. Perf is partly proven (see [Performance](#performance)). WS-QA's tests found six bugs, all fixed on this branch (see [Bugs found](#bugs-found)).
+Of the 25 criteria, 22 are proven, 2 have a fix in progress (C1, D2), and 1 needs Ryan: A1's real-core import UI test. B2's transaction-field UI test also waits on his run. Perf: R-PERF-2, 3 and 5 pass on the CI runner; five typical reports miss R-PERF-4 there and need a core fix (see [Performance](#performance)). WS-QA's tests found six bugs, all fixed on this branch (see [Bugs found](#bugs-found)).
 
 In progress:
 - **C1:** the report drill-down needs a transfer flag on `ReportTransaction` (core); #87 has the Mac side.
@@ -69,9 +69,9 @@ Paths below are relative to the repo. `plan_journeys` is `crates/veritas-ffi/tes
 |---|---|---|---|
 | D1 | An auto-post bill posts on its date; a confirm-first bill waits in Upcoming and Paid posts an edited amount; both round-trip with the right `posts_transaction`. | `crates/veritas-ffi/tests/bills_rules_journeys.rs`: `a_month_of_bills_posts_the_same_rows_whether_veritas_actual_or_both_open_the_budget`, `paid_with_an_edited_amount_and_date_writes_what_actual_writes_when_you_post_and_edit`, `paying_an_auto_post_bill_by_hand_never_lets_either_app_post_it_again`. The A4 journey checks `posts_transaction` 0 on a confirm-first bill in Actual. | **proven** |
 | D2 | Ryan never sees the word "rule" while creating or editing a bill. | None. | **fix in progress.** #87 changes the bill editor's badge to "Has settings only Actual shows". The Paid and Post messages ("N rules couldn't run here") and "This bill's rule can't be read" are core strings in `crates/veritas-rules` (posting.rs, bill.rs). No test reads the bill flow's words yet. |
-| D3 | Forecasts at 3, 6, 10 and 12 months render with confidence bands; a scenario changes only `veritas_scenario*` tables. | Core: `crates/veritas-forecast/tests/projection.rs` (`r_fc_1_horizons_at_3_6_10_and_12_months`, `r_fc_1_band_is_net_worth_plus_scaled_offsets`), `crates/veritas-ffi/src/forecast.rs::r_fc_2_what_ifs_write_only_scenario_tables_one_undo_step_each`. Screens, on #84 (93583bd): the Forecast page with its horizon picker, band and compare, and the What-ifs page. `VeritasKitTests/RealCoreForecastTests` checks that the model shows the core's forecast unchanged and that a what-if changes only `veritas_scenario*`. UI tests `ForecastJourneyTests` (3 of 3, `notes/ui/ui12.log`). | **proven** once #84 lands. |
-| D4 | Wrapped renders for any full year and exports a redacted image with no amounts. | Core: `crates/veritas-forecast/tests/wrapped.rs` (including `fc_8_redaction_covers_every_card_as_a_share`), `crates/veritas-ffi/tests/insights_journeys.rs`. Screen and image, on #85 (3ddcdbf): `VeritasKitTests/RealCoreWrappedTests.swift::eachYearInTheDataRendersAndHidesItsAmounts` renders every year in all-features from the real core; `WrappedStoryTests.redactedCardsCarryNoMoneyAmount` checks the cards and the text read back from the rendered redacted image; UI tests `WrappedJourneyTests`. `WrappedRedactionWorstCaseTests.aBudgetThatHidesDecimalsShowsNoAmountOnARedactedCard` (saved in `veritas.wt/notes/pr85-wrapped-redaction-worst-case-test.patch`) covers the hardest case to spot: a budget that hides decimals and names no currency, where 1,480.00 reads "1,480". | **proven** once #85 lands. |
-| D5 | With AI off nothing AI-related loads; with it on, no network calls. | On #92 (1ae19b1): FoundationModels lives only in an on-demand plug-in, `PlugIns/VeritasAI.bundle`, which loads when AI is turned on. `VeritasKitTests/AssistantPluginTests.withAIOffNothingAIRelatedLoadsAndTurningItOnLoadsThePlugin` lists the process's dyld images. With AI off, a launch, Settings and the panel add no AI image and never load FoundationModels. Turning AI on loads the plug-in and FoundationModels, and a real question changes no transaction. CI's app job fails if any binary in `Contents/MacOS` links FoundationModels. The model is asked only once AI is on (`AssistantSettingsTests.withTheSettingOffTheModelIsNeverAsked`). Read-only: the journey `AssistantLeavesTheBudgetAloneTests.everyToolAskedAnythingLeavesTheBudgetAsItWas` asks every tool for ordinary, odd and impossible things, then checks that every table, the undo history and the alerts are unchanged. No network: the built Veritas.app is sandboxed with no `network.client` entitlement, so macOS refuses any outgoing connection, and the app's sources make none. | **proven** once #92 lands. The Architect's reading of §10 D5: AppKit itself loads GenerativeModels, Vision, CoreML and Espresso in every app on macOS 27, so D5 means Veritas loads no AI code of its own, and those system images may only not grow. No test watches for network traffic while the model answers; the guarantee is the sandbox entitlement, read off the built app. UI check of Settings › AI and the panel with AI on: Ryan's next session. |
+| D3 | Forecasts at 3, 6, 10 and 12 months render with confidence bands; a scenario changes only `veritas_scenario*` tables. | Core: `crates/veritas-forecast/tests/projection.rs` (`r_fc_1_horizons_at_3_6_10_and_12_months`, `r_fc_1_band_is_net_worth_plus_scaled_offsets`), `crates/veritas-ffi/src/forecast.rs::r_fc_2_what_ifs_write_only_scenario_tables_one_undo_step_each`. Screens (#84): the Forecast page with its horizon picker, band and compare, and the What-ifs page. `VeritasKitTests/RealCoreForecastTests` checks that the model shows the core's forecast unchanged and that a what-if changes only `veritas_scenario*`. UI tests `ForecastJourneyTests` (3 of 3, `notes/ui/ui12.log`). | **proven** |
+| D4 | Wrapped renders for any full year and exports a redacted image with no amounts. | Core: `crates/veritas-forecast/tests/wrapped.rs` (including `fc_8_redaction_covers_every_card_as_a_share`), `crates/veritas-ffi/tests/insights_journeys.rs`. Screen and image (#85): `VeritasKitTests/RealCoreWrappedTests.swift::eachYearInTheDataRendersAndHidesItsAmounts` renders every year in all-features from the real core; `WrappedStoryTests.redactedCardsCarryNoMoneyAmount` checks the cards and the text read back from the rendered redacted image; UI tests `WrappedJourneyTests`. `WrappedRedactionWorstCaseTests.aBudgetThatHidesDecimalsShowsNoAmountOnARedactedCard` (saved in `veritas.wt/notes/pr85-wrapped-redaction-worst-case-test.patch`) covers the hardest case to spot: a budget that hides decimals and names no currency, where 1,480.00 reads "1,480". | **proven** |
+| D5 | With AI off nothing AI-related loads; with it on, no network calls. | Since #92: FoundationModels lives only in an on-demand plug-in, `PlugIns/VeritasAI.bundle`, which loads when AI is turned on. `VeritasKitTests/AssistantPluginTests.withAIOffNothingAIRelatedLoadsAndTurningItOnLoadsThePlugin` lists the process's dyld images. With AI off, a launch, Settings and the panel add no AI image and never load FoundationModels. Turning AI on loads the plug-in and FoundationModels, and a real question changes no transaction. CI's app job fails if any binary in `Contents/MacOS` links FoundationModels. The model is asked only once AI is on (`AssistantSettingsTests.withTheSettingOffTheModelIsNeverAsked`). Read-only: the journey `AssistantLeavesTheBudgetAloneTests.everyToolAskedAnythingLeavesTheBudgetAsItWas` asks every tool for ordinary, odd and impossible things, then checks that every table, the undo history and the alerts are unchanged. No network: the built Veritas.app is sandboxed with no `network.client` entitlement, so macOS refuses any outgoing connection, and the app's sources make none. | **proven.** The Architect's reading of §10 D5: AppKit itself loads GenerativeModels, Vision, CoreML and Espresso in every app on macOS 27, so D5 means Veritas loads no AI code of its own, and those system images may only not grow. No test watches for network traffic while the model answers; the guarantee is the sandbox entitlement, read off the built app. UI check of Settings › AI and the panel with AI on: Ryan's next session. |
 
 ## Performance
 
@@ -79,11 +79,11 @@ Measured on an M3 Pro at `b12a8c2`, release build, perf-100k (100k transactions)
 
 | ID | Budget | Measured | Status |
 |---|---|---|---|
-| R-PERF-1 | Cold launch to an interactive budget ≤ 400 ms | GitHub runner: open until editable, 371 ms (`open_import_export` bench). M3 Pro, for reference: 156 ms. | **partial.** The core passes on the runner, but only 7% under the budget. The app's share of launch isn't measured; Ryan to time a cold launch, or add an `XCTApplicationLaunchMetric` test. |
+| R-PERF-1 | Cold launch to an interactive budget ≤ 400 ms | GitHub runner: open until editable, 212 ms (2026-11-22). M3 Pro, for reference: 134 ms. | **partial.** The core passes on the runner. The app's share of launch isn't measured; Ryan to time a cold launch, or add an `XCTApplicationLaunchMetric` test. |
 | R-PERF-2 | Cell edit to updated screen ≤ 16 ms | GitHub runner: a budget cell edit until the month reads back 1.2 ms, the engine's recompute at most 1.0 ms, an envelope set to its 3-month average 10.4 ms. M3 Pro, for reference: 2.4 ms and 6.7 ms. | **partial.** The core passes, but the redraw isn't measured. Setting every envelope to its average is a bulk action, not a cell edit, so no budget covers it. |
 | R-PERF-3 | Register scrolls at 120 Hz with no hitches | GitHub runner: the next page while scrolling (47,479 rows) takes 0.22 ms. M3 Pro, for reference: 0.10 ms, with the first page after a commit at 18.6 ms and the first page of a search at 63.7 ms. | **partial.** The core fetch fits in a frame. Scrolling smoothness in the table is unmeasured; Ryan to check with Instruments. |
-| R-PERF-4 | Typical report ≤ 100 ms; year-long Sankey or forecast ≤ 500 ms | GitHub runner: the default dashboard 31–46 ms, each card's marginal cost at most 36 ms, the every-card page 131–175 ms. `reports_perf` hasn't run there yet (a failing test stopped it), so the reports' runner numbers come with the next perf run. M3 Pro, for reference, right after an edit: net profit for 12 months 85 ms, net worth 62, cash flow 69, balance sheet 75, owner's equity 67, tax summary 67, a year's Sankey 100, the default dashboard 22, the every-card page 73. | **proven** for the dashboard on the runner, under the Architect's reading of PLAN line 245 (each report, card and the default dashboard ≤ 100 ms; the every-card page ≤ 500 ms). The reports wait for the next perf run. |
-| R-PERF-5 | Import or export of a 100k zip ≤ 3 s | GitHub runner (macos-26-arm64): import 1.75 s, export 3.15 s. M3 Pro, for reference: 0.71 s and 1.34 s. | **gap on the CI runner.** Export is 5% over the budget; it needs a core fix. |
+| R-PERF-4 | Typical report ≤ 100 ms; year-long Sankey or forecast ≤ 500 ms | GitHub runner, 2026-11-22, timed once the open check has finished and right after an edit makes the session classify again: net profit for 12 months 125 ms, net worth 118, cash flow 135, owner's equity 112, tax summary 101, a year's Sankey 161, the default dashboard 47, the every-card page 193. Each card's marginal cost is at most 36 ms. M3 Pro, for reference: net profit 67, net worth 63, cash flow 61, equity 58, tax 58, Sankey 93, the default dashboard 19, the every-card page 69. | **gap on the CI runner.** Under the Architect's reading of PLAN line 245 (each report, card and the default dashboard ≤ 100 ms; the every-card page ≤ 500 ms), the dashboard and the Sankey pass, but five typical reports take 101–135 ms right after an edit. That needs a core fix, such as a cheaper reclassification after an edit. |
+| R-PERF-5 | Import or export of a 100k zip ≤ 3 s | GitHub runner (macos-26-arm64), 2026-11-22: import 1.23 s, export 1.30 s. M3 Pro, for reference: export 0.66 s after the export speed-up. | **proven** on the runner. Export was 3.15 s there before the speed-up. |
 
 **The CI gate.** CI's `perf` job runs `cargo xtask perf` on an Apple Silicon runner, in a release build. Every check runs, and then every budget that was exceeded is listed together.
 - **R-PERF-4:** the job runs the release R-PERF-4 tests (`reports_perf.rs`, `dashboard_perf.rs`), which time the app's own path right after an edit makes the session classify again. They follow PLAN line 245 ("Typical report ≤ 100 ms; year-long Sankey or forecast ≤ 500 ms"), as the Architect read it on 2026-11-21:
@@ -98,17 +98,19 @@ Measured on an M3 Pro at `b12a8c2`, release build, perf-100k (100k transactions)
 
 Reports measured with nothing cached are printed against 100 ms and 500 ms, but they don't gate.
 
-| Measured | M3 Pro, local | GitHub runner (macos-26-arm64), 2026-11-21 |
+| Measured | GitHub runner (macos-26-arm64), 2026-11-22 | M3 Pro, for reference |
 |---|---|---|
-| Open until editable (≤ 400 ms) | 156 ms | 371 ms |
-| Cell edit / envelope average (≤ 16 ms) | 2.4 / 6.7 ms | 1.2 / 10.4 ms |
-| Scrolling page (≤ 8.33 ms) | 0.10 ms | 0.22 ms |
-| Import / export (≤ 3 s) | 0.71 / 1.34 s | 1.75 / **3.15 s, over** |
-| Default dashboard, warm (≤ 100 ms) | 22 ms | 31–46 ms |
-| Every-card page (≤ 500 ms) | 73 ms | 131–175 ms |
-| Reports with nothing cached (shown, not gated) | 68–74 ms | 145–174 ms |
+| Open until editable (≤ 400 ms) | 212 ms | 134 ms |
+| Cell edit / envelope average (≤ 16 ms) | 0.8 / 10.2 ms | 2.4 / 6.7 ms |
+| Scrolling page (≤ 8.33 ms) | 0.17 ms | 0.10 ms |
+| Import / export (≤ 3 s) | 1.23 / 1.30 s | 0.71 / 0.66 s |
+| Typical reports right after an edit (≤ 100 ms) | **101–135 ms, over** | 58–67 ms |
+| A year's Sankey (≤ 500 ms) | 161 ms | 93 ms |
+| Default dashboard (≤ 100 ms) | 47 ms | 19 ms |
+| Every-card page (≤ 500 ms) | 193 ms | 69 ms |
+| Reports with nothing cached (shown, not gated) | 126–151 ms | 68–74 ms |
 
-On the runner, export misses R-PERF-5 by 5%, and open until editable is 7% under its budget. A miss gets a core fix, not a new reading.
+The runner is about 1.8× slower than the M3 Pro. Five typical reports miss R-PERF-4 there, and a miss gets a core fix, not a new reading.
 
 ## Full-size runs
 
