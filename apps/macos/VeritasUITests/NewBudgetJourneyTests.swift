@@ -141,6 +141,35 @@ final class RealCoreNewBudgetTests: XCTestCase {
 		XCTAssertTrue(text(of: visa).contains("612.33"), text(of: visa))
 	}
 
+	/// The other first-launch way in, end to end: Actual's export picked in the open panel, imported by the core.
+	@MainActor
+	func testImportingAnActualExportOpensItThroughTheCore() {
+		let export = URL(filePath: #filePath)
+			.deletingLastPathComponent()
+			.appending(path: "../../../fixtures/synthetic/small.zip")
+			.standardizedFileURL
+		XCTAssertTrue(FileManager.default.fileExists(atPath: export.path), export.path)
+		let app = XCUIApplication()
+		app.launchArguments = ["-ApplePersistenceIgnoreState", "YES", "-VeritasRealCore", "YES"]
+		app.launch()
+		XCTAssertTrue(app.buttons["importFromActual"].waitForExistence(timeout: 10))
+		app.buttons["importFromActual"].click()
+
+		let panel = app.sheets.firstMatch
+		XCTAssertTrue(panel.waitForExistence(timeout: 10), "the open panel")
+		app.typeKey("g", modifierFlags: [.command, .shift])
+		let path = panel.textFields.firstMatch
+		XCTAssertTrue(path.waitForExistence(timeout: 5), "Go to Folder")
+		path.typeText(export.path + "\r")
+		XCTAssertTrue(waitUntil { panel.buttons["Open"].isEnabled })
+		panel.buttons["Open"].click()
+
+		XCTAssertTrue(app.screen("budget").waitForExistence(timeout: 15))
+		attachScreenshot(of: app, named: "real-core-imported")
+		XCTAssertTrue(sidebarAccount(named: "Checking", in: app).exists)
+		XCTAssertTrue(sidebarAccount(named: "Savings", in: app).exists)
+	}
+
 	private func waitUntil(_ condition: @escaping () -> Bool) -> Bool {
 		let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: nil)
 		return XCTWaiter().wait(for: [expectation], timeout: 10) == .completed

@@ -2,6 +2,7 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::thread::ScopedJoinHandle;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use veritas_domain::CoreError;
@@ -95,27 +96,79 @@ fn write_zip(path: &Path, db_path: &Path, metadata: &[u8]) -> Result<(), CoreErr
 
 /// Writes an Actual export of the budget to `to`, shaped like
 /// Actual's own: `db.sqlite` and `metadata.json` at the zip root. The zip is
-/// written beside `to` and renamed into place, so `to` is either the old file
-/// or the complete new one. The invariant audit runs first.
+/// written beside `to` while the invariant audit runs, and renamed into place
+/// only once the audit finds no damage, so nothing unaudited is published and
+/// `to` is either the old file or the complete new one.
 pub fn export_actual_zip(
 	store: &Store,
 	metadata_path: &Path,
 	to: &Path,
 ) -> Result<ExportOutcome, CoreError> {
-	let (_, audit) = store.open_audit()?;
-	if audit.is_corrupt() {
-		return Ok(ExportOutcome::Refused(audit));
-	}
-	let metadata = export_metadata(metadata_path)?;
-	let scratch = ScratchDir::new("export")?;
-	let db_path = scratch.path().join("db.sqlite");
-	store.export_copy(&db_path)?;
+	export(store, None, metadata_path, to)
+}
 
+/// [`export_actual_zip`], cloning `snapshot` instead of vacuuming the database
+/// again. `snapshot` must be a `VACUUM INTO` copy of the store's committed
+/// state with nothing written since, like the session's Export snapshot.
+pub fn export_actual_zip_from_snapshot(
+	store: &Store,
+	snapshot: &Path,
+	metadata_path: &Path,
+	to: &Path,
+) -> Result<ExportOutcome, CoreError> {
+	export(store, Some(snapshot), metadata_path, to)
+}
+
+fn export(
+	store: &Store,
+	snapshot: Option<&Path>,
+	metadata_path: &Path,
+	to: &Path,
+) -> Result<ExportOutcome, CoreError> {
+	let db = store.db_path()?;
+	let scratch = ScratchDir::new("export")?;
 	let partial = partial_path(to)?;
-	let written = write_zip(&partial, &db_path, &metadata)
-		.and_then(|()| std::fs::rename(&partial, to).map_err(|error| io_error(to, &error)));
-	if written.is_err() {
+	let (audit, written) = std::thread::scope(|scope| {
+		let writer = scope.spawn(|| {
+			let metadata = export_metadata(metadata_path)?;
+			let db_copy = scratch.path().join("db.sqlite");
+			veritas_store::export_copy(&db, snapshot, &db_copy)?;
+			write_zip(&partial, &db_copy, &metadata)
+		});
+		let audit = audit(store, &db);
+		(audit, joined(writer))
+	});
+	let published = match audit {
+		Ok(audit) if audit.is_corrupt() => Ok(ExportOutcome::Refused(audit)),
+		Ok(audit) => written
+			.and_then(|()| std::fs::rename(&partial, to).map_err(|error| io_error(to, &error)))
+			.map(|()| ExportOutcome::Exported(audit)),
+		Err(error) => Err(error),
+	};
+	if !matches!(published, Ok(ExportOutcome::Exported(_))) {
 		let _ = std::fs::remove_file(&partial);
 	}
-	written.map(|()| ExportOutcome::Exported(audit))
+	published
+}
+
+/// [`Store::open_audit`], with SQLite's integrity check on a read-only
+/// connection of its own so it runs alongside the load. When the check finds
+/// damage, what was loaded is thrown away and only the damage is reported.
+fn audit(store: &Store, db: &Path) -> Result<AuditReport, CoreError> {
+	std::thread::scope(|scope| {
+		let integrity =
+			scope.spawn(|| veritas_store::integrity_check(&veritas_store::open_read_only(db)?));
+		let loaded = store.load();
+		let problems = joined(integrity)?;
+		if !problems.is_empty() {
+			return Ok(AuditReport::from_integrity(problems));
+		}
+		Ok(veritas_store::audit(&loaded?))
+	})
+}
+
+fn joined<T>(thread: ScopedJoinHandle<'_, Result<T, CoreError>>) -> Result<T, CoreError> {
+	thread
+		.join()
+		.unwrap_or_else(|_| Err(CoreError::Internal("an export thread panicked".to_owned())))
 }

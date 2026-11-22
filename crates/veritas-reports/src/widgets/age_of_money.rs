@@ -274,7 +274,7 @@ pub fn age_of_money(
 	let mut current = 0;
 	let mut insufficient_data = false;
 	for expense in &expenses {
-		let mut remaining = expense.amount.minor().abs();
+		let mut remaining = expense.amount.checked_abs()?.minor();
 		let mut last_bucket: Option<NaiveDate> = None;
 		while remaining > 0 && current < buckets.len() {
 			let bucket = &mut buckets[current];

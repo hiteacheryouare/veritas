@@ -106,6 +106,34 @@ struct RealCoreAccountsTests {
 		}
 	}
 
+	@Test func typingPlusAnAmountAfterATransactionsAmountAddsToIt() async throws {
+		// PLAN §10: the budget cell's "+12.34" works the same in a transaction's amount field.
+		try await RealBudget.with { budget in
+			let workspace = budget.workspace
+			let entry = TransactionEditorModel(workspace: workspace, accountID: Self.checking)
+			await entry.load()
+			entry.typePayee("Hardware Barn")
+			entry.typeAmount("45.10+54.90")
+			entry.categoryID = AllFeatures.groceries
+			#expect(await entry.save(), "\(String(describing: entry.problem))")
+			var rows = try await Self.allRows(workspace, .account(accountId: Self.checking))
+			let saved = try #require(rows.first { $0.payeeName == "Hardware Barn" })
+			#expect(saved.amount == -10_000)
+
+			let edit = TransactionEditorModel(workspace: workspace, accountID: Self.checking, editing: saved)
+			await edit.load()
+			#expect(edit.amount.text == "100.00")
+			edit.typeAmount("+")
+			#expect(edit.amount.text == "100.00+", "typing + over the selected amount keeps it")
+			edit.typeAmount("100.00+12.34")
+			#expect(await edit.save(), "\(String(describing: edit.problem))")
+			rows = try await Self.allRows(workspace, .account(accountId: Self.checking))
+			let edited = try #require(rows.first { $0.id == saved.id })
+			#expect(edited.amount == -11_234, "an expense of 112.34")
+			#expect(edited.categoryId == AllFeatures.groceries)
+		}
+	}
+
 	@Test func moveMoneyShowsBothBalancesBeforeAndAfterAndEditsThePairFromEitherSide() async throws {
 		// R-XFER-1, R-XFER-3.
 		try await RealBudget.with { budget in
