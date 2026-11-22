@@ -97,21 +97,27 @@ public struct WrappedStory: Sendable {
 		let prior = report.priorYear
 		let rows: [WrappedCard.Row] = redacted
 			? [
-				WrappedCard.Row(id: "in", label: "Came in", value: change(prior.totalIn)),
+				change(prior.totalIn).map { WrappedCard.Row(id: "in", label: "Came in", value: $0) },
 				WrappedCard.Row(id: "out", label: "Went out", value: ofIncome(report.shares.outVsIn), note: change(prior.totalOut)),
 				WrappedCard.Row(id: "net", label: netLabel, value: ofIncome(report.shares.net.map(abs)), note: change(prior.net))
-			]
+			].compactMap(\.self)
 			: [
 				WrappedCard.Row(id: "in", label: "Came in", value: money(report.totalIn), note: change(prior.totalIn)),
 				WrappedCard.Row(id: "out", label: "Went out", value: money(report.totalOut), note: change(prior.totalOut)),
 				WrappedCard.Row(id: "net", label: netLabel, value: format.currencyMagnitude(report.net, on: .register), note: change(prior.net))
 			]
+		let span = isYearToDate ? "\(WrappedWords.day(report.first)) to \(WrappedWords.day(report.last))" : nil
 		return WrappedCard(
 			kind: .totals,
 			title: isYearToDate ? "Your \(report.year) so far" : "Your \(report.year)",
-			detail: isYearToDate ? "\(WrappedWords.day(report.first)) to \(WrappedWords.day(report.last))" : nil,
+			detail: [span, partialPriorYear].compactMap(\.self).joined(separator: "\n").nilIfEmpty,
 			rows: rows
 		)
+	}
+
+	/// FC-8: a partial prior year is never compared. The card says so once, in place of every change.
+	private var partialPriorYear: String? {
+		report.priorYear.from.map { "No full prior year to compare. Your budget starts \(WrappedWords.day($0, withYear: true))." }
 	}
 
 	/// A deficit year says so in words, and its figure drops the sign.
@@ -281,17 +287,15 @@ public struct WrappedStory: Sendable {
 		tenths.map { "\(WrappedWords.percent($0, format: format)) of what came in" } ?? WrappedWords.notApplicable
 	}
 
-	/// The prior-year change FC-8 carries: a percentage, "New this year", or
-	/// the "prior year from {date}" label when last year's figures start late.
-	private func change(_ change: YearChange) -> String {
+	/// The prior-year change FC-8 carries: a percentage or "New this year".
+	/// Nothing when last year's figures start late: `partialPriorYear` says why on the card.
+	private func change(_ change: YearChange) -> String? {
+		guard report.priorYear.from == nil else { return nil }
 		switch change {
 		case .newThisYear:
 			return "New this year"
 		case .basisPoints(let value):
 			let amount = WrappedWords.signedBasisPoints(value, format: format)
-			if let from = report.priorYear.from {
-				return "\(amount) vs prior year from \(WrappedWords.day(from, withYear: true))"
-			}
 			return isYearToDate ? "\(amount) vs this point in \(report.year - 1)" : "\(amount) vs \(report.year - 1)"
 		}
 	}
@@ -360,4 +364,8 @@ public enum WrappedWords {
 	public static func monthName(_ month: Month) -> String {
 		month.date()?.formatted(.dateTime.month(.wide)) ?? "\(month.month)"
 	}
+}
+
+private extension String {
+	var nilIfEmpty: String? { isEmpty ? nil : self }
 }

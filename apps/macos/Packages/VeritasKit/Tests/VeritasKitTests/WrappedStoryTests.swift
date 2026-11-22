@@ -144,10 +144,21 @@ struct WrappedStoryTests {
 		#expect(month?.detail == "of spending so far, 56% more than your typical month")
 	}
 
-	@Test func aLateStartCarriesThePriorYearLabel() {
-		let prior = WrappedPriorYear(totalIn: .basisPoints(value: -1_250), totalOut: .newThisYear, net: .newThisYear, from: "2026-08-03")
-		let totals = Self.story(Self.report(prior: prior)).cards(redacted: true)[0]
-		#expect(totals.rows[0].value == "\u{2212}12.5% vs prior year from August 3, 2026")
+	@Test func aPartialPriorYearIsNeverCompared() {
+		// Fred on M14 (FC-8 Prior-year display): 22 days of last year against 326 of this one
+		// makes +530.73%, true arithmetic and a false sentence. The card says why instead, once.
+		let prior = WrappedPriorYear(totalIn: .basisPoints(value: 53_073), totalOut: .basisPoints(value: 92_153), net: .newThisYear, from: "2025-11-01")
+		for redacted in [false, true] {
+			let totals = Self.story(Self.report(prior: prior)).cards(redacted: redacted)[0]
+			#expect(totals.kind == .totals)
+			let words = totals.text.joined(separator: " ")
+			#expect(!words.contains("%") || redacted, "no change percentage: \(words)")
+			#expect(!words.contains("vs"), "\(words)")
+			#expect(!words.contains("New this year"), "\(words)")
+			#expect(totals.detail?.contains("No full prior year to compare. Your budget starts November 1, 2025.") == true, "\(totals.detail ?? "")")
+			#expect(totals.rows.allSatisfy { $0.note == nil })
+			#expect(!totals.rows.contains { $0.value.contains("53") || $0.value.contains("530") })
+		}
 	}
 
 	@Test func anEmptyYearIsOneCard() {
