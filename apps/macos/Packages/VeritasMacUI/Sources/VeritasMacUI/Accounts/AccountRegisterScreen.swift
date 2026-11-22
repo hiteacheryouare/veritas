@@ -18,14 +18,17 @@ struct AccountRegisterScreen: View {
 	@State private var reconcile: ReconcileModel?
 	@State private var search = ""
 
-	init(workspace: WorkspaceModel, accountID: String, register: RegisterModel? = nil) {
+	init(workspace: WorkspaceModel, accountID: String, register: RegisterModel? = nil, accounts: AccountsModel? = nil) {
 		self.workspace = workspace
 		self.accountID = accountID
 		_register = State(initialValue: register ?? RegisterModel(workspace: workspace, scope: .account(accountId: accountID)))
-		_accounts = State(initialValue: AccountsModel(workspace: workspace))
+		_accounts = State(initialValue: accounts ?? AccountsModel(workspace: workspace))
 	}
 
 	private var account: AccountDetail? { accounts.account(accountID) }
+
+	/// No transactions at all, as opposed to none that match the filters.
+	private var isEmpty: Bool { register.hasLoaded && register.total == 0 && register.filter == RegisterModel.unfiltered }
 
 	@ToolbarContentBuilder private var toolbar: some ToolbarContent {
 			ToolbarItemGroup(placement: .primaryAction) {
@@ -65,8 +68,13 @@ struct AccountRegisterScreen: View {
 				}
 			}
 			VStack(alignment: .leading, spacing: Spacing.s3) {
-				BalanceGraph(history: register.history, format: register.format)
-					.frame(height: 140)
+				if let account {
+					BalanceSummary(account: account, format: register.format)
+				}
+				if !isEmpty {
+					BalanceGraph(history: register.history, format: register.format)
+						.frame(height: 120)
+				}
 				RegisterFilters(register: register, search: $search)
 			}
 			.padding(.horizontal, Spacing.s5)
@@ -82,6 +90,18 @@ struct AccountRegisterScreen: View {
 				Task {
 					deletingPayments = await register.paymentsDeleted(with: rows)
 					deleting = rows
+				}
+			}
+			.overlay {
+				if !register.hasLoaded {
+					ScreenState(kind: .loading)
+				} else if isEmpty {
+					ScreenState(
+						kind: .empty(title: "No transactions"),
+						action: ("Add transaction", { editing = TransactionEditorModel(workspace: workspace, accountID: accountID) }),
+						isActionDisabled: register.isReadOnly,
+						identifier: "register.empty"
+					)
 				}
 			}
 		}
@@ -217,20 +237,26 @@ private struct BalanceGraph: View {
 	var body: some View {
 		if let history, history.points.count > 1, let first = history.points.first, let last = history.points.last {
 			ZStack {
+				let domain = Self.domain(history.points.map { Double($0.balance) / 100 })
 				Chart(history.points, id: \.date) { point in
-					AreaMark(x: .value("Day", point.date), y: .value("Balance", Double(point.balance) / 100))
-						.foregroundStyle(Color.textPrimary.opacity(0.06))
+					AreaMark(x: .value("Day", point.date), yStart: .value("Floor", domain.lowerBound), yEnd: .value("Balance", Double(point.balance) / 100))
+						.foregroundStyle(.linearGradient(colors: [Color.textPrimary.opacity(0.10), Color.textPrimary.opacity(0)], startPoint: .top, endPoint: .bottom))
 					LineMark(x: .value("Day", point.date), y: .value("Balance", Double(point.balance) / 100))
 						.foregroundStyle(Color.textPrimary)
+						.lineStyle(StrokeStyle(lineWidth: 1.5))
 				}
 				.chartXAxis(.hidden)
 				.chartYAxis(.hidden)
-				.chartYScale(domain: .automatic(includesZero: false))
-				VStack(alignment: .trailing) {
+				.chartYScale(domain: domain)
+				.padding(.trailing, 140)
+				VStack(alignment: .trailing, spacing: 2) {
 					if let change = history.change {
 						Text(Self.change(change))
-							.font(.text(.heading, weight: .semibold))
+							.font(.figures(.heading, weight: .semibold))
 							.accessibilityIdentifier("register.change")
+						Text("since \(RegisterRow.short(first.date))")
+							.font(.text(.caption))
+							.foregroundStyle(.textSecondary)
 					}
 					Spacer()
 					Text("\(RegisterRow.short(first.date)) – \(RegisterRow.short(last.date))")
@@ -246,6 +272,14 @@ private struct BalanceGraph: View {
 		}
 	}
 
+	/// The balance's range with room above and below, so a flat month draws a
+	/// line through the middle instead of a filled block.
+	static func domain(_ values: [Double]) -> ClosedRange<Double> {
+		guard let low = values.min(), let high = values.max() else { return 0...1 }
+		let pad = max((high - low) * 0.2, max(abs(high), abs(low)) * 0.02, 1)
+		return (low - pad)...(high + pad)
+	}
+
 	/// "+101.4%": the core's fraction, with its sign.
 	static func change(_ fraction: Double) -> String {
 		(fraction > 0 ? "+" : "") + fraction.formatted(.percent.precision(.fractionLength(1)))
@@ -257,6 +291,23 @@ extension RegisterRow {
 		let parts = date.split(separator: "-").compactMap { Int($0) }
 		guard parts.count == 3, let value = CivilDate.date(date) else { return date }
 		return value.formatted(.dateTime.month(.abbreviated).day())
+	}
+}
+
+/// The account's balance as the register mockup heads it: cleared, uncleared and the total.
+private struct BalanceSummary: View {
+	let account: AccountDetail
+	let format: MoneyFormat
+
+	var body: some View {
+		HStack(spacing: Spacing.s5) {
+			LabeledFigure(title: "Balance", value: format.currency(account.total, on: .register))
+			LabeledFigure(title: "Cleared", value: format.amount(account.cleared, on: .register))
+			LabeledFigure(title: "Uncleared", value: format.amount(account.uncleared, on: .register))
+		}
+		.font(.text(.body))
+		.accessibilityElement(children: .combine)
+		.accessibilityIdentifier("register.summary")
 	}
 }
 

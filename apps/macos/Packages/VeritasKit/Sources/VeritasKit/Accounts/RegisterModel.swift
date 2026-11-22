@@ -54,12 +54,15 @@ public final class RegisterModel {
 	public static let pageSize = 250
 
 	public let scope: RegisterScope
-	public var filter = RegisterFilter(search: nil, status: nil, from: nil, to: nil, categoryId: nil, payeeId: nil, uncategorized: false)
+	public static let unfiltered = RegisterFilter(search: nil, status: nil, from: nil, to: nil, categoryId: nil, payeeId: nil, uncategorized: false)
+	public var filter = RegisterModel.unfiltered
 	public var sort = RegisterSort(key: .date, ascending: false)
 	/// The chart above one account's register, over the date filter or the last 30 days.
 	public private(set) var history: BalanceHistory?
 	public private(set) var tags: [TagSummary] = []
 	public private(set) var total = 0
+	/// False until the first load has finished, so the screen can show it's loading.
+	public private(set) var hasLoaded = false
 	/// Goes up whenever the rows change, so the table reloads.
 	public private(set) var revision = 0
 	public var selection: Set<String> = []
@@ -103,6 +106,7 @@ public final class RegisterModel {
 
 	/// Starts over from the first page, as after any change.
 	public func load() async {
+		defer { hasLoaded = true }
 		generation += 1
 		pages = [:]
 		loading = []
