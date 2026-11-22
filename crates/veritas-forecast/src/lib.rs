@@ -30,7 +30,7 @@ pub use goal::{
 };
 pub use history::Side;
 pub use projection::{
-	Comparison, Forecaster, HORIZONS, HorizonForecast, MonthForecast, Projection,
+	Comparison, Forecaster, HORIZONS, HorizonDifference, HorizonForecast, MonthForecast, Projection,
 };
 pub use scenario::{
 	MAX_COMPARED, cadence_dates, in_the_past, validate as validate_scenario, validate_new,
@@ -41,5 +41,5 @@ pub use schedules::{
 pub use suggest::{Basis, Envelope, Suggestion, Suggestions, next_month_envelopes};
 pub use wrapped::{
 	CategoryRank, Change, FunFact, GroupRank, Measure, NoSpend, PayeeRank, PriorYear, Redacted,
-	Streak, Wrapped, wrapped,
+	Streak, Wrapped, wrapped, wrapped_years,
 };

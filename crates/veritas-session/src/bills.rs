@@ -236,7 +236,7 @@ pub fn edit_bill(
 		.rules
 		.get(&schedule.rule)
 		.filter(|rule| !rule.tombstone)
-		.ok_or_else(|| invalid("This bill's rule is missing, so edit it in Actual"))?;
+		.ok_or_else(|| invalid("This bill's settings are missing, so edit this bill in Actual"))?;
 	if bill_from_schedule(schedule, rule, data).is_none() {
 		return Err(invalid(
 			"This bill uses a schedule shape Veritas can't show, so edit it in Actual",

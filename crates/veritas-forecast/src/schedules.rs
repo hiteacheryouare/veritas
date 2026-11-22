@@ -140,7 +140,7 @@ fn bill(rule: &ParsedRule) -> Result<Bill, String> {
 		return Err(reason.clone());
 	}
 	if rule.conditions_op != ConditionsOp::And {
-		return Err("its rule matches any condition, not all of them".to_owned());
+		return Err("it has settings only Actual can apply".to_owned());
 	}
 	let (mut date, mut account, mut payee, mut amount, mut category) =
 		(None, None, None, None, None);
@@ -246,7 +246,7 @@ impl Forecaster<'_> {
 			.get(&schedule.rule)
 			.filter(|rule| !rule.tombstone)
 		else {
-			return Ok(Err("its rule is missing".to_owned()));
+			return Ok(Err("its settings are missing".to_owned()));
 		};
 		let bill = match bill(&ParsedRule::parse(rule)) {
 			Ok(bill) => bill,
