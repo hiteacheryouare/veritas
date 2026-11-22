@@ -32,6 +32,7 @@ final class ForecastJourneyTests: XCTestCase {
 		let notes = element(app, "forecast.method.notes")
 		XCTAssertTrue(notes.waitForExistence(timeout: 5), "FC-4's method opens on request")
 		XCTAssertTrue(app.staticTexts["Revaluations, adjustments and starting balances are taken as zero."].exists)
+		XCTAssertTrue(app.staticTexts["Past months are the Net worth report's month-end figures, revaluations and adjustments included."].exists, "FC-3: the chart's past says what it includes")
 		attachScreenshot(of: app, named: "forecast-method", wholeScreen: true)
 	}
 
@@ -57,6 +58,10 @@ final class ForecastJourneyTests: XCTestCase {
 		XCTAssertTrue(whatIf.waitForExistence(timeout: 5), "a new what-if joins the compare")
 		XCTAssertTrue(whatIf.waitForText("Vacation"), whatIf.debugText)
 		XCTAssertTrue(whatIf.waitForText("$30,000"), "the $2,000 lowers net worth at 12 months: \(whatIf.debugText)")
+		XCTAssertTrue(whatIf.waitForText("\u{2212}$2,000"), "v18: the core's difference from the baseline: \(whatIf.debugText)")
+		let accounts = element(app, "forecast.accounts")
+		XCTAssertTrue(accounts.staticTexts["Vacation"].waitForExistence(timeout: 5), "the what-if gets a column in Accounts")
+		XCTAssertTrue(accounts.staticTexts["\u{2212}$2,000"].exists, "Checking carries the difference")
 		XCTAssertTrue(element(app, "forecast.compare.baseline").waitForText("$32,000"), "the baseline stays put")
 		horizonButton("3 months", in: app).click()
 		XCTAssertTrue(whatIf.waitForText("$24,240"), whatIf.debugText)

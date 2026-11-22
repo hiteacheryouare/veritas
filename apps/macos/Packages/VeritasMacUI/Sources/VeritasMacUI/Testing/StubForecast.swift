@@ -10,8 +10,12 @@ import VeritasKit
 final class StubForecast: @unchecked Sendable {
 	static let netWorthToday: Int64 = 2_418_000
 	static let monthlyGrowth: Int64 = 64_000
-	/// The 80% band's offsets at 3, 6, 10 and 12 months.
-	static let bands: [UInt32: (low: Int64, high: Int64)] = [3: (-91_000, 48_000), 6: (-153_000, 81_000), 10: (-225_000, 119_000), 12: (-257_000, 136_000)]
+	/// The 80% band's offsets at each complete month 1 to 12; 3, 6, 10 and 12 are the horizons'.
+	static let bands: [(low: Int64, high: Int64)] = [
+		(-50_000, 26_000), (-72_000, 38_000), (-91_000, 48_000), (-113_000, 60_000), (-134_000, 71_000), (-153_000, 81_000),
+		(-172_000, 91_000), (-190_000, 101_000), (-208_000, 110_000), (-225_000, 119_000), (-241_000, 128_000), (-257_000, 136_000)
+	]
+	static let liabilities: Int64 = 1_265_340
 	static let bandLabel = "80% band from 14 past months"
 
 	private let lock = NSLock()
@@ -105,13 +109,13 @@ final class StubForecast: @unchecked Sendable {
 			guard let scenario = lock.withLock({ scenarioList.first { $0.id == id } }) else { throw FfiError.NotFound(entity: "scenario", id: id) }
 			return scenario
 		}
-		let baseline = Self.projection(thisMonth: thisMonth, scenario: nil, today: today)
+		let baseline = Self.projection(thisMonth: thisMonth, scenario: nil, today: today, baseline: nil)
 		return Forecast(
 			today: today,
 			netWorthToday: Self.netWorthToday,
 			accountsToday: Self.accounts(growth: 0),
 			baseline: baseline,
-			scenarios: scenarios.map { Self.projection(thisMonth: thisMonth, scenario: $0, today: today) },
+			scenarios: scenarios.map { Self.projection(thisMonth: thisMonth, scenario: $0, today: today, baseline: baseline) },
 			bandMethod: .residuals,
 			bandLabel: Self.bandLabel,
 			baselines: [
@@ -127,8 +131,17 @@ final class StubForecast: @unchecked Sendable {
 			shortfalls: [],
 			possibleDoubleCounts: [ForecastCategory(categoryId: "internet", name: "Internet")],
 			notForecastNote: "Not forecast: $42 a month in uncategorized or hidden spending",
-			assetPurchaseNote: nil
+			assetPurchaseNote: nil,
+			history: Self.history(thisMonth: thisMonth)
 		)
+	}
+
+	/// The 12 month-ends before this month, with a brokerage revaluation in the sixth.
+	private static func history(thisMonth: Month) -> [NetWorthMonth] {
+		(1...12).reversed().map { back in
+			let netWorth = netWorthToday - 58_000 * Int64(back) - (back > 6 ? 40_000 : 0)
+			return NetWorthMonth(month: thisMonth.adding(months: -back), assets: netWorth + liabilities, liabilities: liabilities, netWorth: netWorth)
+		}
 	}
 
 	private static func accounts(growth: Int64) -> [ForecastAccount] {
@@ -140,7 +153,8 @@ final class StubForecast: @unchecked Sendable {
 		]
 	}
 
-	private static func projection(thisMonth: Month, scenario: ScenarioSummary?, today: String) -> ForecastProjection {
+	/// A what-if carries its difference from `baseline` at each horizon, as the core's does.
+	private static func projection(thisMonth: Month, scenario: ScenarioSummary?, today: String, baseline: ForecastProjection?) -> ForecastProjection {
 		let live = scenario?.events.filter { !isInThePast($0.change, today: today) } ?? []
 		var netWorth = netWorthToday
 		var months: [ForecastMonth] = []
@@ -151,15 +165,24 @@ final class StubForecast: @unchecked Sendable {
 			let extra = live.reduce(Int64(0)) { $0 + effect(of: $1.change, in: month) }
 			let net = known + baselined + extra
 			netWorth += net
-			months.append(ForecastMonth(month: month, knownNetIncome: known, baselinedNetFlow: baselined, scenarioNetIncome: extra, netIncome: net, netWorth: netWorth))
+			let band = offset == 0 ? nil : bands[offset - 1]
+			months.append(ForecastMonth(
+				month: month, knownNetIncome: known, baselinedNetFlow: baselined, scenarioNetIncome: extra, netIncome: net, netWorth: netWorth,
+				bandLow: band.map { netWorth + $0.low }, bandHigh: band.map { netWorth + $0.high }
+			))
 		}
 		let horizons = ForecastModel.horizons.map { count in
 			let point = months[Int(count)]
-			let band = bands[count]
+			let base = baseline?.horizons.first { $0.months == count }
+			let accounts = accounts(growth: point.netWorth - netWorthToday).map { account in
+				var account = account
+				account.difference = base?.accounts.first { $0.accountId == account.accountId }.map { account.balance - $0.balance }
+				return account
+			}
 			return ForecastHorizon(
 				months: count, month: point.month, netWorth: point.netWorth,
-				bandLow: band.map { point.netWorth + $0.low }, bandHigh: band.map { point.netWorth + $0.high },
-				accounts: accounts(growth: point.netWorth - netWorthToday)
+				bandLow: point.bandLow, bandHigh: point.bandHigh,
+				accounts: accounts, netWorthDifference: base.map { point.netWorth - $0.netWorth }
 			)
 		}
 		return ForecastProjection(
