@@ -116,6 +116,13 @@ jobs:
       - name: Generate the Swift bindings
         run: cargo xtask bindings
 
+      # The AI plug-in first: VeritasKit's tests load the dylib it builds.
+      - name: AI plug-in tests
+        working-directory: apps/macos/Packages/VeritasAI
+        run: |
+          swift build --product VeritasAIPlugin
+          swift test
+
       - name: Swift tests
         working-directory: apps/macos/Packages/VeritasKit
         run: swift test
@@ -145,12 +152,33 @@ jobs:
       - name: Generate the Swift bindings
         run: cargo xtask bindings
 
+      # The AI plug-in first: VeritasKit's tests load the dylib it builds.
+      - name: AI plug-in tests
+        working-directory: apps/macos/Packages/VeritasAI
+        run: |
+          swift build --product VeritasAIPlugin
+          swift test
+
       - name: Swift tests
         working-directory: apps/macos/Packages/VeritasKit
         run: swift test
 
       - name: Build the app
         run: cargo xtask app
+
+      # §10 D5: with AI off nothing AI-related loads, so only the plug-in links FoundationModels.
+      # Every file in the bundle outside PlugIns is checked; otool skips files that aren't Mach-O.
+      - name: Only the AI plug-in links FoundationModels
+        run: |
+          app=target/xcode/Build/Products/Debug/Veritas.app
+          linked=$(find "$app/Contents" -path "$app/Contents/PlugIns" -prune -o -type f -print0 \
+            | xargs -0 -n1 sh -c 'otool -L "$0" 2>/dev/null | grep -q FoundationModels.framework && echo "$0"; true')
+          if [ -n "$linked" ]; then
+            echo "These link FoundationModels:"
+            echo "$linked"
+            exit 1
+          fi
+          otool -L "$app/Contents/PlugIns/VeritasAI.bundle/Contents/MacOS/VeritasAI" | grep -q FoundationModels.framework
 
       - name: UI tests
         continue-on-error: true

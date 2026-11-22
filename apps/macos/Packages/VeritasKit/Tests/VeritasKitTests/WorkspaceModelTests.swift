@@ -179,6 +179,36 @@ struct WorkspaceModelTests {
 		await model.closeBudget()
 	}
 
+	@Test func aMaintenanceCallCutShortByClosingTheBudgetShowsNoAlert() async throws {
+		// The race behind RealCoreBillsScreenTests' flake: while the open check runs,
+		// the timer's maintain() is in flight when the budget closes, and it fails
+		// because the session it was asked on is gone.
+		let library = FakeLibrary()
+		library.session.checking = true
+		library.session.checkFinishesOnMaintain = .max
+		library.session.holdsTimerMaintain = true
+		let model = WorkspaceModel(library: library, format: MoneyFormat(), maintenanceInterval: .seconds(60), checkingInterval: .milliseconds(5))
+		await model.importActualZip(URL(filePath: "/tmp/a.zip"))
+		var turns = 0
+		while !library.session.isHoldingMaintain, turns < 400 {
+			try await Task.sleep(for: .milliseconds(5))
+			turns += 1
+		}
+		try #require(library.session.isHoldingMaintain, "the timer's maintain() is in flight")
+		await model.closeBudget()
+		turns = 0
+		while !library.session.heldMaintainFailed, turns < 400 {
+			try await Task.sleep(for: .milliseconds(5))
+			turns += 1
+		}
+		try #require(library.session.heldMaintainFailed)
+		try await Task.sleep(for: .milliseconds(20))
+		#expect(model.alert == nil, "a failure from a session the workspace no longer holds isn't the user's: \(String(describing: model.alert))")
+		await model.reopen(directory: URL(filePath: "/tmp/budget"))
+		#expect(model.alert == nil)
+		await model.closeBudget()
+	}
+
 	@Test func exportStaysOffUntilTheCoreCanExport() async {
 		let library = FakeLibrary(canExport: false)
 		let model = WorkspaceModel(library: library, format: MoneyFormat())
@@ -203,6 +233,11 @@ private final class FakeSession: BudgetSession, @unchecked Sendable {
 	var exports = 0
 	var maintained = 0
 	var closed = false
+	/// Holds the timer's maintain() until the session closes, then fails it as a closed core session does.
+	var holdsTimerMaintain = false
+	private(set) var isHoldingMaintain = false
+	private(set) var heldMaintainFailed = false
+	private var held: CheckedContinuation<Void, Never>?
 	var changed: (@Sendable () -> Void)?
 
 	init(readOnly: ReadOnlyKind?, exportError: FfiError?, canExport: Bool) {
@@ -237,6 +272,11 @@ private final class FakeSession: BudgetSession, @unchecked Sendable {
 
 	func maintain() async throws {
 		maintained += 1
+		if holdsTimerMaintain, maintained > 1, !closed {
+			await withCheckedContinuation { held = $0; isHoldingMaintain = true }
+			heldMaintainFailed = true
+			throw FfiError.Storage(message: "the budget couldn't be reopened. Close it and open it again")
+		}
 		if checking, maintained >= checkFinishesOnMaintain {
 			checking = false
 			readOnly = .auditFailed
@@ -255,6 +295,8 @@ private final class FakeSession: BudgetSession, @unchecked Sendable {
 
 	func close() async {
 		closed = true
+		held?.resume()
+		held = nil
 	}
 }
 

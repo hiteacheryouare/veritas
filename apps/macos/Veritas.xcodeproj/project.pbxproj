@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		7E5A00000000000000000042 /* VeritasMacUI in Frameworks */ = {isa = PBXBuildFile; productRef = 7E5A00000000000000000041 /* VeritasMacUI */; };
+		7E5A00000000000000000053 /* VeritasAI in Frameworks */ = {isa = PBXBuildFile; productRef = 7E5A00000000000000000052 /* VeritasAI */; };
+		7E5A0000000000000000005E /* VeritasAI.bundle in Embed PlugIns */ = {isa = PBXBuildFile; fileRef = 7E5A00000000000000000050 /* VeritasAI.bundle */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -18,11 +20,33 @@
 			remoteGlobalIDString = 7E5A00000000000000000010;
 			remoteInfo = Veritas;
 		};
+		7E5A0000000000000000005C /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7E5A00000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 7E5A00000000000000000057;
+			remoteInfo = VeritasAI;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		7E5A0000000000000000005D /* Embed PlugIns */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				7E5A0000000000000000005E /* VeritasAI.bundle in Embed PlugIns */,
+			);
+			name = "Embed PlugIns";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		7E5A00000000000000000004 /* Veritas.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Veritas.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		7E5A00000000000000000005 /* VeritasUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VeritasUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		7E5A00000000000000000050 /* VeritasAI.bundle */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VeritasAI.bundle; sourceTree = BUILT_PRODUCTS_DIR; };
 		7E5A00000000000000000008 /* Veritas.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Veritas.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -55,6 +79,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7E5A00000000000000000054 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7E5A00000000000000000053 /* VeritasAI in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -73,6 +105,7 @@
 			children = (
 				7E5A00000000000000000004 /* Veritas.app */,
 				7E5A00000000000000000005 /* VeritasUITests.xctest */,
+				7E5A00000000000000000050 /* VeritasAI.bundle */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -87,10 +120,12 @@
 				7E5A00000000000000000011 /* Sources */,
 				7E5A00000000000000000012 /* Frameworks */,
 				7E5A00000000000000000013 /* Resources */,
+				7E5A0000000000000000005D /* Embed PlugIns */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				7E5A0000000000000000005B /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				7E5A00000000000000000006 /* Veritas */,
@@ -124,6 +159,26 @@
 			productReference = 7E5A00000000000000000005 /* VeritasUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		7E5A00000000000000000057 /* VeritasAI */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7E5A00000000000000000058 /* Build configuration list for PBXNativeTarget "VeritasAI" */;
+			buildPhases = (
+				7E5A00000000000000000055 /* Sources */,
+				7E5A00000000000000000054 /* Frameworks */,
+				7E5A00000000000000000056 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = VeritasAI;
+			packageProductDependencies = (
+				7E5A00000000000000000052 /* VeritasAI */,
+			);
+			productName = VeritasAI;
+			productReference = 7E5A00000000000000000050 /* VeritasAI.bundle */;
+			productType = "com.apple.product-type.bundle";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -141,6 +196,9 @@
 						CreatedOnToolsVersion = 27.2;
 						TestTargetID = 7E5A00000000000000000010;
 					};
+					7E5A00000000000000000057 = {
+						CreatedOnToolsVersion = 27.2;
+					};
 				};
 			};
 			buildConfigurationList = 7E5A00000000000000000030 /* Build configuration list for PBXProject "Veritas" */;
@@ -154,6 +212,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				7E5A00000000000000000040 /* XCLocalSwiftPackageReference "Packages/VeritasMacUI" */,
+				7E5A00000000000000000051 /* XCLocalSwiftPackageReference "Packages/VeritasAI" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 7E5A00000000000000000003 /* Products */;
@@ -162,6 +221,7 @@
 			targets = (
 				7E5A00000000000000000010 /* Veritas */,
 				7E5A00000000000000000020 /* VeritasUITests */,
+				7E5A00000000000000000057 /* VeritasAI */,
 			);
 		};
 /* End PBXProject section */
@@ -175,6 +235,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		7E5A00000000000000000023 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7E5A00000000000000000056 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -198,6 +265,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7E5A00000000000000000055 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -205,6 +279,11 @@
 			isa = PBXTargetDependency;
 			target = 7E5A00000000000000000010 /* Veritas */;
 			targetProxy = 7E5A00000000000000000027 /* PBXContainerItemProxy */;
+		};
+		7E5A0000000000000000005B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 7E5A00000000000000000057 /* VeritasAI */;
+			targetProxy = 7E5A0000000000000000005C /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -328,6 +407,42 @@
 			};
 			name = Release;
 		};
+		7E5A00000000000000000059 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSPrincipalClass = VeritasAIPlugin;
+				MARKETING_VERSION = 0.1.0;
+				OTHER_LDFLAGS = "-ObjC";
+				PRODUCT_BUNDLE_IDENTIFIER = app.veritas.VeritasAI;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				WRAPPER_EXTENSION = bundle;
+			};
+			name = Debug;
+		};
+		7E5A0000000000000000005A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSPrincipalClass = VeritasAIPlugin;
+				MARKETING_VERSION = 0.1.0;
+				OTHER_LDFLAGS = "-ObjC";
+				PRODUCT_BUNDLE_IDENTIFIER = app.veritas.VeritasAI;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				WRAPPER_EXTENSION = bundle;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -358,12 +473,25 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		7E5A00000000000000000058 /* Build configuration list for PBXNativeTarget "VeritasAI" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7E5A00000000000000000059 /* Debug */,
+				7E5A0000000000000000005A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
 		7E5A00000000000000000040 /* XCLocalSwiftPackageReference "Packages/VeritasMacUI" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/VeritasMacUI;
+		};
+		7E5A00000000000000000051 /* XCLocalSwiftPackageReference "Packages/VeritasAI" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/VeritasAI;
 		};
 /* End XCLocalSwiftPackageReference section */
 
@@ -372,6 +500,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 7E5A00000000000000000040 /* XCLocalSwiftPackageReference "Packages/VeritasMacUI" */;
 			productName = VeritasMacUI;
+		};
+		7E5A00000000000000000052 /* VeritasAI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7E5A00000000000000000051 /* XCLocalSwiftPackageReference "Packages/VeritasAI" */;
+			productName = VeritasAI;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
