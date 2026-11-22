@@ -14,6 +14,8 @@ struct AssistantReadOnlyTests {
 		.standardizedFileURL
 	static let kitAssistant = packages.appending(path: "VeritasKit/Sources/VeritasKit/Assistant")
 	static let uiAssistant = packages.appending(path: "VeritasMacUI/Sources/VeritasMacUI/Assistant")
+	static let plugin = packages.appending(path: "VeritasAI/Sources/VeritasAI")
+	static let bridge = packages.appending(path: "VeritasAI/Sources/VeritasAIBridge")
 
 	static let allowedQueries: Set<String> = [
 		"netProfit(first:last:)",
@@ -39,8 +41,8 @@ struct AssistantReadOnlyTests {
 	}
 
 	@Test func noAssistantSourceNamesAWayToWrite() throws {
-		let files = try Self.sources(in: Self.kitAssistant) + Self.sources(in: Self.uiAssistant)
-		#expect(!files.isEmpty)
+		let files = try [Self.kitAssistant, Self.uiAssistant, Self.plugin, Self.bridge].flatMap(Self.sources)
+		#expect(try Self.sources(in: Self.plugin).count > 0 && Self.sources(in: Self.bridge).count > 0, "the plug-in's sources are read too")
 		for file in files {
 			let text = try Self.text(of: file)
 			for word in Self.forbidden {
