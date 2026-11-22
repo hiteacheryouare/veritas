@@ -189,6 +189,7 @@ fn the_dashboard_with_every_native_card_meets_r_perf_4_on_perf_100k() {
 					text_align: None,
 					formula: None,
 					report_id: None,
+					show_balance: None,
 				},
 			})
 			.unwrap();

@@ -538,6 +538,8 @@ mod tests {
 	};
 
 	use super::*;
+	use crate::posting::{LeftBill, LeftBy};
+	use crate::recur::RecurError;
 
 	fn budget() -> BudgetData {
 		let mut budget = BudgetData::empty(BudgetType::Envelope);
@@ -1239,5 +1241,141 @@ mod tests {
 		assert_eq!(outcome.partial.account, AccountId::new("brokerage"));
 		assert_eq!(outcome.partial.notes.as_deref(), Some("still on budget"));
 		assert_eq!(outcome.partial.cleared, Some(false));
+	}
+
+	/// One rule's reason for being left undetermined, from a real run.
+	fn only_reason(budget: &BudgetData, txn: &RuleTransaction) -> String {
+		let outcome = run(budget, txn);
+		assert_eq!(outcome.reasons.len(), 1, "{:?}", txn.imported_payee);
+		outcome.reasons.into_values().next().unwrap()
+	}
+
+	fn one_rule(conditions: Value, actions: Value) -> BudgetData {
+		let mut budget = budget();
+		add_rule(
+			&mut budget,
+			"r",
+			RuleStage::Default,
+			ConditionsOp::And,
+			conditions,
+			actions,
+		);
+		budget
+	}
+
+	fn one_split_rule(actions: Value) -> BudgetData {
+		let mut budget = budget();
+		split_rule(&mut budget, "r", RuleStage::Default, actions);
+		budget
+	}
+
+	#[test]
+	fn d2_a_bills_note_never_says_rule_whatever_the_skip_reason() {
+		let payee_matches =
+			|pattern: &str| json!([{"op": "matches", "field": "imported_payee", "value": pattern}]);
+		let notes = json!([{"op": "set", "field": "notes", "value": "x"}]);
+		let mut shared_name = budget();
+		let mut twin = shared_name.payees[&PayeeId::new("amazon")].clone();
+		twin.id = PayeeId::new("amazon-2");
+		twin.name = "AMAZON".into();
+		shared_name.payees.insert(twin.id.clone(), twin);
+		add_rule(
+			&mut shared_name,
+			"r",
+			RuleStage::Pre,
+			ConditionsOp::And,
+			json!([{"op": "contains", "field": "imported_payee", "value": "amzn"}]),
+			json!([{"op": "set", "field": "payee_name", "value": "amazon"}]),
+		);
+		let reasons = [
+			(
+				"an unsupported action (gap)",
+				only_reason(
+					&one_rule(
+						json!([{"op": "is", "field": "amount", "value": -4210}]),
+						json!([{"op": "set", "field": "notes", "value": "", "options": {"template": "{{imported_payee}}"}}]),
+					),
+					&transaction("Shop"),
+				),
+			),
+			(
+				"an unsupported condition (gap)",
+				only_reason(
+					&one_rule(
+						json!([{"op": "matches", "field": "notes", "value": "(?=a)"}]),
+						notes.clone(),
+					),
+					&transaction("Shop"),
+				),
+			),
+			(
+				"astral text (EvalError)",
+				only_reason(
+					&one_rule(payee_matches("^coffee"), notes.clone()),
+					&transaction("☕️ Coffee 🍩"),
+				),
+			),
+			(
+				"a non-ASCII \\B (EvalError)",
+				eval_reason(&EvalError::NonBoundary),
+			),
+			(
+				"a recurrence (EvalError)",
+				eval_reason(&EvalError::Recurrence(RecurError::Unbounded)),
+			),
+			(
+				"a split line past the end",
+				only_reason(
+					&one_split_rule(json!([line(2, "remainder", Value::Null)])),
+					&transaction("split me"),
+				),
+			),
+			(
+				"a split while naming a new payee",
+				only_reason(
+					&one_split_rule(json!([
+						{"op": "set", "field": "payee_name", "value": "Corner"},
+						line(1, "remainder", Value::Null),
+					])),
+					&transaction("split me"),
+				),
+			),
+			(
+				"split amounts too large",
+				only_reason(
+					&one_split_rule(json!([
+						line(1, "fixed-percent", json!(1e20)),
+						line(2, "remainder", Value::Null),
+					])),
+					&transaction("split me"),
+				),
+			),
+			(
+				"a payee name two payees share",
+				only_reason(&shared_name, &transaction("AMZN Mktp")),
+			),
+		];
+		for (kind, reason) in reasons {
+			for by in [
+				LeftBy::Service,
+				LeftBy::Paid,
+				LeftBy::PaidWhileDue,
+				LeftBy::PostNow,
+			] {
+				let note = LeftBill {
+					schedule: ScheduleId::new("rent"),
+					by,
+					partial: transaction("Rent"),
+					undetermined: vec![RuleId::new("r")],
+					reasons: BTreeMap::from([(RuleId::new("r"), reason.clone())]),
+				}
+				.note();
+				assert!(note.contains(&format!("({reason})")), "{kind}: {note}");
+				assert!(
+					!note.to_lowercase().contains("rule"),
+					"{kind}, {by:?}: {note}"
+				);
+			}
+		}
 	}
 }

@@ -143,6 +143,9 @@ pub struct SankeyNode {
 	/// for hidden nodes.
 	pub percentage: String,
 	pub color: SankeyColor,
+	/// The amount the graph prints under the node (`SankeyGraph.tsx`), which
+	/// recharts computes, never Actual's spreadsheet: see `node_value`.
+	pub value: Money,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1776,13 +1779,16 @@ fn keep_layers(graph: &mut Graph, from: SankeyLayer, to: SankeyLayer) {
 }
 
 /// `convertToSankeyData`.
-fn convert(graph: &Graph, mut folded: Folded) -> (Vec<SankeyNode>, Vec<SankeyLink>) {
+fn convert(
+	graph: &Graph,
+	mut folded: Folded,
+) -> Result<(Vec<SankeyNode>, Vec<SankeyLink>), CoreError> {
 	let position: HashMap<&str, usize> = graph
 		.iter()
 		.enumerate()
 		.map(|(index, (key, _))| (key, index))
 		.collect();
-	let nodes = graph
+	let mut nodes: Vec<SankeyNode> = graph
 		.iter()
 		.map(|(key, node)| SankeyNode {
 			key: key.to_owned(),
@@ -1793,6 +1799,7 @@ fn convert(graph: &Graph, mut folded: Folded) -> (Vec<SankeyNode>, Vec<SankeyLin
 			}),
 			percentage: node.percentage.clone().unwrap_or_default(),
 			color: node.color.unwrap_or(SankeyColor::Palette(0)),
+			value: Money::ZERO,
 		})
 		.collect();
 	let color_of = |key: &str| graph.get(key).and_then(|node| node.color);
@@ -1832,7 +1839,25 @@ fn convert(graph: &Graph, mut folded: Folded) -> (Vec<SankeyNode>, Vec<SankeyLin
 			});
 		}
 	}
-	(nodes, links)
+	for (index, node) in nodes.iter_mut().enumerate() {
+		node.value = node_value(&links, index)?;
+	}
+	Ok((nodes, links))
+}
+
+/// recharts' `getNodesTree` (`Sankey.tsx`): the larger of a node's incoming
+/// and outgoing link sums, counting -1 links to hidden nodes and links whose
+/// target the layer range cut, exactly as the graph receives them.
+fn node_value(links: &[SankeyLink], index: usize) -> Result<Money, CoreError> {
+	let sum = |linked: &dyn Fn(&SankeyLink) -> bool| {
+		links
+			.iter()
+			.filter(|link| linked(link))
+			.try_fold(Money::ZERO, |sum, link| sum.checked_add(link.value))
+	};
+	let incoming = sum(&|link| link.target == Some(index))?;
+	let outgoing = sum(&|link| link.source == index)?;
+	Ok(incoming.max(outgoing))
 }
 
 fn month_of(text: &str) -> Result<YearMonth, CoreError> {
@@ -1968,7 +1993,7 @@ pub fn sankey_card(
 	add_percentages(&mut graph)?;
 	add_colors(&mut graph);
 	keep_layers(&mut graph, layer_from, layer_to);
-	let (nodes, links) = convert(&graph, folded);
+	let (nodes, links) = convert(&graph, folded)?;
 	Ok(SankeyCard {
 		range,
 		first_month,
