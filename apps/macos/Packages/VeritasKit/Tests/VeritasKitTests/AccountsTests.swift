@@ -69,6 +69,27 @@ struct AccountsTests {
 		return workspace
 	}
 
+	@Test func aDrilledTransferReadsAsItsRegisterRowDoes() {
+		// §10 C1, R-REP-6: the drill-down uses the register's words.
+		func drilled(_ amount: Int64, payee: String?, transfer: String?) -> ReportTransaction {
+			ReportTransaction(
+				id: "t", parentId: nil, date: "2026-10-01", accountId: "checking", accountName: "Checking",
+				payee: payee, category: nil, notes: nil, amount: amount, transferAccountId: transfer
+			)
+		}
+		let out = PayeeText(drilled(-20_000, payee: "Savings", transfer: "savings"))
+		#expect(out == PayeeText(AccountsFakeSession.row("a", amount: -20_000, payee: "Savings", transfer: "savings")))
+		#expect(out.direction == "→")
+		#expect(out.text == "To Savings")
+		let back = PayeeText(drilled(15_000, payee: "Car loan", transfer: "carloan"))
+		#expect(back.direction == "←")
+		#expect(back.text == "From Car loan")
+		let plain = PayeeText(drilled(-100, payee: "Fernwood Market", transfer: nil))
+		#expect(plain.direction == nil)
+		#expect(plain.text == "Fernwood Market")
+		#expect(PayeeText(drilled(-100, payee: nil, transfer: nil)).text == "")
+	}
+
 	@Test func transfersReadAsToAndFromNeverAsAPayee() {
 		// R-XFER-2
 		let out = PayeeText(AccountsFakeSession.row("a", amount: -20_000, payee: "Savings", transfer: "savings"))

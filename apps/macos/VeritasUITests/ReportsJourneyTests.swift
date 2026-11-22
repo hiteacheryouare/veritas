@@ -21,6 +21,14 @@ final class ReportsJourneyTests: XCTestCase {
 		attachScreenshot(of: app, named: "drilldown")
 		sheet.buttons["Done"].click()
 		XCTAssertTrue(sheet.waitForDisappearance())
+
+		// §10 C1: a transfer reads as it does in every register.
+		app.buttons["netProfit.cell.savings.2"].click()
+		XCTAssertTrue(sheet.waitForExistence(timeout: 5))
+		XCTAssertTrue(sheet.staticTexts["→ To Savings"].firstMatch.waitForExistence(timeout: 5))
+		attachScreenshot(of: app, named: "drilldown-transfer")
+		sheet.buttons["Done"].click()
+		XCTAssertTrue(sheet.waitForDisappearance())
 	}
 
 	@MainActor

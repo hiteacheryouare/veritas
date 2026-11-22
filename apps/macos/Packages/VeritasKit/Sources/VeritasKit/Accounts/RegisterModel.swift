@@ -7,16 +7,25 @@ extension PayeeDetail: Identifiable {}
 extension AccountDetail: Identifiable {}
 
 /// How a register row's payee reads (R-XFER-2): a transfer is "→ To Savings"
-/// or "← From Savings", never a bare payee.
+/// or "← From Savings", never a bare payee. A report's drill-down rows read
+/// the same way.
 public struct PayeeText: Hashable, Sendable {
 	public let direction: String?
 	public let text: String
 
 	public init(_ row: RegisterRow) {
-		let name = row.payeeName ?? ""
-		if row.transferAccountId != nil {
-			direction = row.amount < 0 ? "→" : "←"
-			text = row.amount < 0 ? "To \(name)" : "From \(name)"
+		self.init(payee: row.payeeName, amount: row.amount, isTransfer: row.transferAccountId != nil)
+	}
+
+	public init(_ row: ReportTransaction) {
+		self.init(payee: row.payee, amount: row.amount, isTransfer: row.transferAccountId != nil)
+	}
+
+	init(payee: String?, amount: Int64, isTransfer: Bool) {
+		let name = payee ?? ""
+		if isTransfer {
+			direction = amount < 0 ? "→" : "←"
+			text = amount < 0 ? "To \(name)" : "From \(name)"
 		} else {
 			direction = nil
 			text = name

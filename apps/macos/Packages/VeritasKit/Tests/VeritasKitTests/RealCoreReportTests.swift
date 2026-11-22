@@ -43,6 +43,35 @@ struct RealCoreReportTests {
 		}
 	}
 
+	@Test func drilledRowsReadAsTheirRegisterRowsDo() async throws {
+		// §10 C1, R-REP-6, v18: a drilled transfer names its other account
+		// with the register's "→ To" or "← From", and every other row its payee.
+		try await RealBudget.with { budget in
+			let model = NetProfitModel(workspace: budget.workspace, thisMonth: Self.october)
+			await model.setCustom(first: Month(year: 2025, month: 11), last: Self.october)
+			var compared = Set<String>()
+			var transfers = 0
+			for row in model.rows {
+				let total = try #require(row.cells.last)
+				guard total.count > 0 else { continue }
+				let drill = DrilldownModel(workspace: budget.workspace, title: total.title, drill: total.drill)
+				await drill.load()
+				for found in try #require(drill.transactions) where found.parentId == nil && !compared.contains(found.id) {
+					let register = try #require(await budget.workspace.report { try await $0.registerRow(found.id) })
+					#expect(found.transferAccountId == register.transferAccountId, "\(found.payee ?? "") on \(found.date)")
+					#expect(PayeeText(found) == PayeeText(register), "\(found.payee ?? "") on \(found.date)")
+					if let direction = PayeeText(found).direction {
+						#expect(direction == (found.amount < 0 ? "→" : "←"))
+						transfers += 1
+					}
+					compared.insert(found.id)
+				}
+			}
+			#expect(compared.count > 100)
+			#expect(transfers > 0, "the fixture's unreviewed lines are transfers")
+		}
+	}
+
 	@Test func anEditedAndANewCustomReportSurviveAReopenAsPreviewed() async throws {
 		// R-REP-4: edits saved back in Actual's format, filters included.
 		try await RealBudget.with { budget in
