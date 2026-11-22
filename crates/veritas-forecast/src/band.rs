@@ -194,6 +194,43 @@ mod tests {
 		);
 	}
 
+	/// FC-4.2 step 5's BM examples: the band at each projected month is
+	/// `NW_h` plus that month's offsets.
+	fn band_at(band: &Band, horizon: u32, net_worth: i64) -> (i64, i64) {
+		let (low, high) = offsets(band, horizon);
+		(net_worth + low, net_worth + high)
+	}
+
+	#[test]
+	fn bm_1_and_bm_2_the_band_at_the_first_two_projected_months() {
+		let band = Band::from_residuals(RESIDUALS.to_vec(), &[]).unwrap();
+		assert_eq!(offsets(&band, 1), (-8000, 4000));
+		assert_eq!(band_at(&band, 1, 1_000_000), (992_000, 1_004_000));
+		// scale_2 = isqrt(isqrt(8 * 10^16)) = 16817; -13453.6 and 6726.8.
+		assert_eq!(offsets(&band, 2), (-13_454, 6727));
+		assert_eq!(band_at(&band, 2, 1_000_000), (986_546, 1_006_727));
+	}
+
+	#[test]
+	fn bm_3_the_fallback_band_is_scaled_at_every_month_too() {
+		let band = Band::from_residuals(vec![1, 2], &[-1000, 0, 2000]).unwrap();
+		assert_eq!(band.method, BandMethod::Range);
+		// -1000 * 1.6817 = -1681.7, 2000 * 1.6817 = 3363.4.
+		assert_eq!(offsets(&band, 2), (-1682, 3363));
+		assert_eq!(band_at(&band, 2, 1_000_000), (998_318, 1_003_363));
+		for horizon in 1..=12 {
+			assert!(band.offsets(horizon).unwrap().is_some(), "h = {horizon}");
+		}
+	}
+
+	#[test]
+	fn bm_4_no_history_draws_no_band_at_any_month() {
+		let band = Band::from_residuals(Vec::new(), &[]).unwrap();
+		for horizon in 1..=12 {
+			assert_eq!(band.offsets(horizon).unwrap(), None, "h = {horizon}");
+		}
+	}
+
 	#[test]
 	fn fc_4_3_no_history_means_no_band() {
 		let band = Band::from_residuals(Vec::new(), &[]).unwrap();

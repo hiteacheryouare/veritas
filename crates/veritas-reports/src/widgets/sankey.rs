@@ -143,6 +143,9 @@ pub struct SankeyNode {
 	/// for hidden nodes.
 	pub percentage: String,
 	pub color: SankeyColor,
+	/// The amount the graph prints under the node (`SankeyGraph.tsx`), which
+	/// recharts computes, never Actual's spreadsheet: see `node_value`.
+	pub value: Money,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -244,11 +247,14 @@ impl Node {
 			.map(|(_, value)| *value)
 	}
 
-	fn add_link(&mut self, to: &str, value: i64) {
+	fn add_link(&mut self, to: &str, value: i64) -> Result<(), CoreError> {
 		match self.to.iter_mut().find(|(target, _)| target == to) {
-			Some((_, existing)) => *existing = existing.saturating_add(value),
+			Some((_, existing)) => {
+				*existing = existing.checked_add(value).ok_or(CoreError::Overflow)?;
+			}
 			None => self.to.push((to.to_owned(), value)),
 		}
+		Ok(())
 	}
 
 	fn remove_link(&mut self, to: &str) {
@@ -316,9 +322,10 @@ impl Graph {
 		self.add(key, node);
 	}
 
-	fn add_value(&mut self, from: &str, to: &str, value: i64) {
-		if let Some(node) = self.get_mut(from) {
-			node.add_link(to, value);
+	fn add_value(&mut self, from: &str, to: &str, value: i64) -> Result<(), CoreError> {
+		match self.get_mut(from) {
+			Some(node) => node.add_link(to, value),
+			None => Ok(()),
 		}
 	}
 
@@ -480,7 +487,10 @@ fn tarjan(edges: &[Vec<usize>]) -> Vec<usize> {
 
 /// `getNodeValue` for every node: a first-column node's outgoing total,
 /// any other node's incoming total, hidden links aside.
-fn node_values(graph: &Graph, layers: &HashMap<String, usize>) -> HashMap<String, i64> {
+fn node_values(
+	graph: &Graph,
+	layers: &HashMap<String, usize>,
+) -> Result<HashMap<String, i64>, CoreError> {
 	let mut incoming: HashMap<&str, i64> = HashMap::new();
 	for (key, node) in graph.iter() {
 		if is_hidden(key) {
@@ -488,25 +498,26 @@ fn node_values(graph: &Graph, layers: &HashMap<String, usize>) -> HashMap<String
 		}
 		for (target, value) in &node.to {
 			let sum = incoming.entry(target.as_str()).or_insert(0);
-			*sum = sum.saturating_add(*value);
+			*sum = sum.checked_add(*value).ok_or(CoreError::Overflow)?;
 		}
 	}
 	let outgoing = |node: &Node| {
 		node.to
 			.iter()
 			.filter(|(target, _)| !is_hidden(target))
-			.fold(0_i64, |sum, (_, value)| sum.saturating_add(*value))
+			.try_fold(0_i64, |sum, (_, value)| sum.checked_add(*value))
+			.ok_or(CoreError::Overflow)
 	};
 	graph
 		.iter()
 		.map(|(key, node)| {
 			let value = if layers.get(key).copied().unwrap_or(0) == 0 {
-				outgoing(node)
+				outgoing(node)?
 			} else {
 				let value = incoming.get(key).copied().unwrap_or(0);
-				if value < 0 { outgoing(node) } else { value }
+				if value < 0 { outgoing(node)? } else { value }
 			};
-			(key.to_owned(), value)
+			Ok((key.to_owned(), value))
 		})
 		.collect()
 }
@@ -693,7 +704,7 @@ fn spent_entries(
 					group_id: group.id.clone(),
 					category: category.listed.clone(),
 					category_id: category.id.clone(),
-					value: amount.saturating_abs(),
+					value: amount.checked_abs().ok_or(CoreError::Overflow)?,
 					is_income: group.is_income,
 					is_negative: amount < 0,
 					account_name,
@@ -725,7 +736,10 @@ struct TransferPair {
 
 /// `fetchTransferData` and `aggregateTransferPairs`: net transfers between
 /// two on-budget accounts, when both legs pass the card's filter.
-fn transfer_pairs(budget: &BudgetData, rows: &[&Transaction]) -> Vec<TransferPair> {
+fn transfer_pairs(
+	budget: &BudgetData,
+	rows: &[&Transaction],
+) -> Result<Vec<TransferPair>, CoreError> {
 	let mut legs: Vec<&Transaction> = rows
 		.iter()
 		.copied()
@@ -774,13 +788,10 @@ fn transfer_pairs(budget: &BudgetData, rows: &[&Transaction]) -> Vec<TransferPai
 		}
 		let (first, second) = (&from.1, &to.1);
 		let source = if from.2 < 0 { &from.1 } else { &to.1 };
-		let signed = if source == first {
-			from.2.saturating_abs()
-		} else {
-			-from.2.saturating_abs()
-		};
+		let size = from.2.checked_abs().ok_or(CoreError::Overflow)?;
+		let signed = if source == first { size } else { -size };
 		match pairs.iter_mut().find(|(a, b, _)| a == first && b == second) {
-			Some((_, _, sum)) => *sum = sum.saturating_add(signed),
+			Some((_, _, sum)) => *sum = sum.checked_add(signed).ok_or(CoreError::Overflow)?,
 			None => pairs.push((first.clone(), second.clone(), signed)),
 		}
 	}
@@ -793,7 +804,7 @@ fn transfer_pairs(budget: &BudgetData, rows: &[&Transaction]) -> Vec<TransferPai
 			} else {
 				(second, first)
 			};
-			TransferPair {
+			Ok(TransferPair {
 				from_name: account_names
 					.get(from_id.as_str())
 					.map(|name| (*name).to_owned())
@@ -804,8 +815,8 @@ fn transfer_pairs(budget: &BudgetData, rows: &[&Transaction]) -> Vec<TransferPai
 					.unwrap_or_default(),
 				from_id,
 				to_id,
-				amount: value.saturating_abs(),
-			}
+				amount: value.checked_abs().ok_or(CoreError::Overflow)?,
+			})
 		})
 		.collect()
 }
@@ -825,7 +836,7 @@ fn transactions_graph(
 	entries: &[Entry],
 	transfers: &[TransferPair],
 	group_accounts: bool,
-) -> Graph {
+) -> Result<Graph, CoreError> {
 	let mut graph = Graph::default();
 	for entry in entries {
 		if entry.account_id.is_empty()
@@ -849,7 +860,7 @@ fn transactions_graph(
 					SankeyLabel::Name(name.clone()),
 					true,
 				);
-				graph.add_value(&entry.account_id, &negative_key, entry.value);
+				graph.add_value(&entry.account_id, &negative_key, entry.value)?;
 			}
 			(true, false) => {
 				graph.add_node(
@@ -858,23 +869,23 @@ fn transactions_graph(
 					&entry.category,
 				);
 				add_account(&mut graph, &entry.account_id, &entry.account_name);
-				graph.add_value(&entry.category_id, &entry.account_id, entry.value);
+				graph.add_value(&entry.category_id, &entry.account_id, entry.value)?;
 				if !entry.payee_id.is_empty() {
 					graph.add_node(&entry.payee_id, SankeyLayer::IncomePayee, &entry.payee_name);
-					graph.add_value(&entry.payee_id, &entry.category_id, entry.value);
+					graph.add_value(&entry.payee_id, &entry.category_id, entry.value)?;
 				}
 			}
 			(false, true) => {
 				add_account(&mut graph, &entry.account_id, &entry.account_name);
 				graph.add_node(&entry.group_id, SankeyLayer::CategoryGroup, &entry.group);
 				graph.add_node(&entry.category_id, SankeyLayer::Category, &entry.category);
-				graph.add_value(&entry.account_id, &entry.group_id, entry.value);
-				graph.add_value(&entry.group_id, &entry.category_id, entry.value);
+				graph.add_value(&entry.account_id, &entry.group_id, entry.value)?;
+				graph.add_value(&entry.group_id, &entry.category_id, entry.value)?;
 			}
 			(false, false) => {
 				graph.add_node(&negative_key, SankeyLayer::IncomeCategory, &entry.category);
 				add_account(&mut graph, &entry.account_id, &entry.account_name);
-				graph.add_value(&negative_key, &entry.account_id, entry.value);
+				graph.add_value(&negative_key, &entry.account_id, entry.value)?;
 			}
 		}
 	}
@@ -882,10 +893,10 @@ fn transactions_graph(
 		for pair in transfers {
 			add_account(&mut graph, &pair.from_id, &pair.from_name);
 			add_account(&mut graph, &pair.to_id, &pair.to_name);
-			graph.add_value(&pair.from_id, &pair.to_id, pair.amount);
+			graph.add_value(&pair.from_id, &pair.to_id, pair.amount)?;
 		}
 	}
-	graph
+	Ok(graph)
 }
 
 struct Aggregated {
@@ -923,13 +934,13 @@ fn budget_graph(entries: &[Entry], aggregated: &Aggregated) -> Result<Graph, Cor
 				SankeyLayer::IncomeCategory,
 				&entry.category,
 			);
-			graph.add_value(&entry.category_id, AVAILABLE_INCOME, entry.value);
+			graph.add_value(&entry.category_id, AVAILABLE_INCOME, entry.value)?;
 		} else if entry.value >= 0 {
 			graph.add_node(&entry.group_id, SankeyLayer::CategoryGroup, &entry.group);
 			graph.add_node(&entry.category_id, SankeyLayer::Category, &entry.category);
-			graph.add_value(&entry.group_id, &entry.category_id, entry.value);
-			graph.add_value(BUDGETED, &entry.group_id, entry.value);
-			graph.add_value(AVAILABLE_INCOME, BUDGETED, entry.value);
+			graph.add_value(&entry.group_id, &entry.category_id, entry.value)?;
+			graph.add_value(BUDGETED, &entry.group_id, entry.value)?;
+			graph.add_value(AVAILABLE_INCOME, BUDGETED, entry.value)?;
 		} else {
 			graph.add_labeled(
 				&entry.category_id,
@@ -937,8 +948,9 @@ fn budget_graph(entries: &[Entry], aggregated: &Aggregated) -> Result<Graph, Cor
 				SankeyLabel::FromCategory(entry.category.clone()),
 				true,
 			);
-			graph.add_value(&entry.category_id, BUDGETED, entry.value.saturating_abs());
-			graph.add_value(AVAILABLE_INCOME, BUDGETED, entry.value);
+			let size = entry.value.checked_abs().ok_or(CoreError::Overflow)?;
+			graph.add_value(&entry.category_id, BUDGETED, size)?;
+			graph.add_value(AVAILABLE_INCOME, BUDGETED, entry.value)?;
 		}
 	}
 	if aggregated.to_budget > 0 {
@@ -948,7 +960,7 @@ fn budget_graph(entries: &[Entry], aggregated: &Aggregated) -> Result<Graph, Cor
 			SankeyLabel::ToBudget,
 			false,
 		);
-		graph.add_value(AVAILABLE_INCOME, TO_BUDGET, aggregated.to_budget);
+		graph.add_value(AVAILABLE_INCOME, TO_BUDGET, aggregated.to_budget)?;
 	} else {
 		graph.add_labeled(
 			TO_BUDGET,
@@ -956,12 +968,12 @@ fn budget_graph(entries: &[Entry], aggregated: &Aggregated) -> Result<Graph, Cor
 			SankeyLabel::Overbudgeted,
 			true,
 		);
-		graph.add_value(TO_BUDGET, BUDGETED, aggregated.to_budget.saturating_abs());
-		graph.add_value(
-			AVAILABLE_INCOME,
-			BUDGETED,
-			-aggregated.to_budget.saturating_abs(),
-		);
+		let overbudgeted = aggregated
+			.to_budget
+			.checked_abs()
+			.ok_or(CoreError::Overflow)?;
+		graph.add_value(TO_BUDGET, BUDGETED, overbudgeted)?;
+		graph.add_value(AVAILABLE_INCOME, BUDGETED, -overbudgeted)?;
 	}
 	graph.add_labeled(
 		FROM_PREVIOUS_MONTH,
@@ -973,14 +985,14 @@ fn budget_graph(entries: &[Entry], aggregated: &Aggregated) -> Result<Graph, Cor
 		FROM_PREVIOUS_MONTH,
 		AVAILABLE_INCOME,
 		aggregated.from_previous_month,
-	);
+	)?;
 	graph.add_labeled(
 		FOR_NEXT_MONTH,
 		SankeyLayer::Budget,
 		SankeyLabel::ForMonth(aggregated.last_month.offset(1)?),
 		false,
 	);
-	graph.add_value(AVAILABLE_INCOME, FOR_NEXT_MONTH, aggregated.for_next_month);
+	graph.add_value(AVAILABLE_INCOME, FOR_NEXT_MONTH, aggregated.for_next_month)?;
 	graph.add(
 		LAST_MONTH_OVERSPENT,
 		Node::new(
@@ -992,8 +1004,11 @@ fn budget_graph(entries: &[Entry], aggregated: &Aggregated) -> Result<Graph, Cor
 	graph.add_value(
 		AVAILABLE_INCOME,
 		LAST_MONTH_OVERSPENT,
-		aggregated.last_month_overspent.saturating_abs(),
-	);
+		aggregated
+			.last_month_overspent
+			.checked_abs()
+			.ok_or(CoreError::Overflow)?,
+	)?;
 	Ok(graph)
 }
 
@@ -1158,9 +1173,9 @@ fn budgeted_entries(
 	let from_previous_month = summary(first).map_or(0, |summary| summary.from_last_month.minor());
 	let mut last_month_overspent = 0_i64;
 	for month in &months {
-		last_month_overspent = last_month_overspent.saturating_add(
-			summary(*month).map_or(0, |summary| summary.last_month_overspent.minor()),
-		);
+		last_month_overspent = last_month_overspent
+			.checked_add(summary(*month).map_or(0, |summary| summary.last_month_overspent.minor()))
+			.ok_or(CoreError::Overflow)?;
 	}
 	let next_from_last = summary(next).map_or(0, |summary| summary.from_last_month.minor());
 
@@ -1196,7 +1211,7 @@ fn budgeted_entries(
 				} else {
 					cell.map_or(0, |cell| cell.budgeted.minor())
 				};
-				value = value.saturating_add(amount);
+				value = value.checked_add(amount).ok_or(CoreError::Overflow)?;
 			}
 			if value == 0 {
 				continue;
@@ -1222,7 +1237,9 @@ fn budgeted_entries(
 			to_budget,
 			from_previous_month,
 			last_month_overspent,
-			for_next_month: next_from_last.saturating_sub(to_budget),
+			for_next_month: next_from_last
+				.checked_sub(to_budget)
+				.ok_or(CoreError::Overflow)?,
 			first_month: first,
 			last_month: last,
 		},
@@ -1239,9 +1256,14 @@ fn note_folded(folded: &mut Folded, from: &str, to: &str, name: &str, value: i64
 }
 
 /// `moveToOther`.
-fn move_to_other(graph: &mut Graph, key: &str, folded: &mut Folded, global: bool) {
+fn move_to_other(
+	graph: &mut Graph,
+	key: &str,
+	folded: &mut Folded,
+	global: bool,
+) -> Result<(), CoreError> {
 	let Some(node) = graph.get(key).cloned() else {
-		return;
+		return Ok(());
 	};
 	let to_keys: Vec<String> = node.to.iter().map(|(target, _)| target.clone()).collect();
 	let from_keys: Vec<String> = graph
@@ -1280,7 +1302,7 @@ fn move_to_other(graph: &mut Graph, key: &str, folded: &mut Folded, global: bool
 		if let Some(value) = value
 			&& *from != other
 		{
-			graph.add_value(from, &other, value);
+			graph.add_value(from, &other, value)?;
 			note_folded(folded, from, &other, &name, value);
 		}
 	}
@@ -1289,7 +1311,7 @@ fn move_to_other(graph: &mut Graph, key: &str, folded: &mut Folded, global: bool
 		if let Some(value) = value
 			&& other != *to
 		{
-			graph.add_value(&other, to, value);
+			graph.add_value(&other, to, value)?;
 			note_folded(folded, &other, to, &name, value);
 		}
 	}
@@ -1299,11 +1321,12 @@ fn move_to_other(graph: &mut Graph, key: &str, folded: &mut Folded, global: bool
 		}
 	}
 	graph.remove(key);
+	Ok(())
 }
 
 /// `groupOtherCategories`: per column, the smallest nodes fold into Other
 /// until the column has `top_n` nodes.
-fn group_other(graph: &mut Graph, top_n: f64, global: bool) -> Folded {
+fn group_other(graph: &mut Graph, top_n: f64, global: bool) -> Result<Folded, CoreError> {
 	let mut folded = Folded::new();
 	for layer in LAYERS {
 		loop {
@@ -1322,7 +1345,7 @@ fn group_other(graph: &mut Graph, top_n: f64, global: bool) -> Folded {
 			if count <= top_n || top_n.is_nan() {
 				break;
 			}
-			let values = node_values(graph, &layers(graph));
+			let values = node_values(graph, &layers(graph))?;
 			let mut smallest: Option<(&String, i64)> = None;
 			for key in &ordinary {
 				let value = values.get(key.as_str()).copied().unwrap_or(0);
@@ -1334,10 +1357,10 @@ fn group_other(graph: &mut Graph, top_n: f64, global: bool) -> Folded {
 				break;
 			};
 			let key = key.clone();
-			move_to_other(graph, &key, &mut folded, global);
+			move_to_other(graph, &key, &mut folded, global)?;
 		}
 	}
-	folded
+	Ok(folded)
 }
 
 fn move_to_end(entries: &mut Vec<String>, key: &str) {
@@ -1427,8 +1450,8 @@ fn place_around_anchors(
 }
 
 /// `sortGraph`.
-fn sort_graph(graph: Graph, sort: SankeySort, groups: &[GroupView]) -> Graph {
-	let values = node_values(&graph, &layers(&graph));
+fn sort_graph(graph: Graph, sort: SankeySort, groups: &[GroupView]) -> Result<Graph, CoreError> {
+	let values = node_values(&graph, &layers(&graph))?;
 	let value = |key: &String| values.get(key).copied().unwrap_or(0);
 	let by_value = || {
 		let mut keys = graph.keys();
@@ -1507,7 +1530,7 @@ fn sort_graph(graph: Graph, sort: SankeySort, groups: &[GroupView]) -> Graph {
 	move_to_end(&mut entries, FOR_NEXT_MONTH);
 	move_to_end(&mut entries, FROM_PREVIOUS_MONTH);
 	let mut graph = graph;
-	Graph::from_entries(
+	Ok(Graph::from_entries(
 		entries
 			.into_iter()
 			.filter_map(|key| {
@@ -1516,7 +1539,7 @@ fn sort_graph(graph: Graph, sort: SankeySort, groups: &[GroupView]) -> Graph {
 				Some((key, node))
 			})
 			.collect(),
-	)
+	))
 }
 
 /// `cleanUpNodes`: zero links go, then nodes left without any link.
@@ -1539,7 +1562,7 @@ fn clean_up(graph: &mut Graph) {
 }
 
 /// `addHiddenNodes`.
-fn add_hidden_nodes(graph: &mut Graph) {
+fn add_hidden_nodes(graph: &mut Graph) -> Result<(), CoreError> {
 	let mut by_type: Vec<(SankeyLayer, Vec<String>)> = Vec::new();
 	for (key, node) in graph.iter() {
 		match by_type.iter_mut().find(|(layer, _)| *layer == node.layer) {
@@ -1574,7 +1597,7 @@ fn add_hidden_nodes(graph: &mut Graph) {
 				for parent_layer in active[..at].iter().rev() {
 					let parent = format!("{key}_{}{HIDDEN}", parent_layer.key());
 					graph.add_node(&parent, *parent_layer, "");
-					graph.add_value(&parent, &child, -1);
+					graph.add_value(&parent, &child, -1)?;
 					child = parent;
 				}
 			}
@@ -1583,17 +1606,17 @@ fn add_hidden_nodes(graph: &mut Graph) {
 				for child_layer in &active[at + 1..] {
 					let child = format!("{key}_{}{HIDDEN}", child_layer.key());
 					graph.add_node(&child, *child_layer, "");
-					graph.add_value(&parent, &child, -1);
+					graph.add_value(&parent, &child, -1)?;
 					parent = child;
 				}
 			}
 		}
 	}
-	category_groups_after_accounts(graph);
+	category_groups_after_accounts(graph)
 }
 
 /// `ensureCategoryGroupsFollowAccountLayers`.
-fn category_groups_after_accounts(graph: &mut Graph) {
+fn category_groups_after_accounts(graph: &mut Graph) -> Result<(), CoreError> {
 	let mut computed = layers(graph);
 	let Some(deepest_account) = graph
 		.iter()
@@ -1601,7 +1624,7 @@ fn category_groups_after_accounts(graph: &mut Graph) {
 		.filter_map(|(key, _)| computed.get(key).copied())
 		.max()
 	else {
-		return;
+		return Ok(());
 	};
 	let to_push: Vec<String> = graph
 		.iter()
@@ -1640,11 +1663,12 @@ fn category_groups_after_accounts(graph: &mut Graph) {
 			guard -= 1;
 			let hidden = format!("{key}_{}_{current}{HIDDEN}", SankeyLayer::Account.key());
 			graph.add_node(&hidden, SankeyLayer::Account, "");
-			graph.add_value(&parent, &hidden, -1);
-			graph.add_value(&hidden, &key, -1);
+			graph.add_value(&parent, &hidden, -1)?;
+			graph.add_value(&hidden, &key, -1)?;
 			computed = layers(graph);
 		}
 	}
+	Ok(())
 }
 
 /// JS `Number.prototype.toFixed(1)`: the nearest tenth, ties away from zero.
@@ -1666,9 +1690,9 @@ fn to_fixed_1(x: f64) -> String {
 
 /// `addPercentageLabels`: each node's share of its column's total.
 #[allow(clippy::cast_precision_loss)]
-fn add_percentages(graph: &mut Graph) {
+fn add_percentages(graph: &mut Graph) -> Result<(), CoreError> {
 	let computed = layers(graph);
-	let values = node_values(graph, &computed);
+	let values = node_values(graph, &computed)?;
 	let mut sums: HashMap<usize, i64> = HashMap::new();
 	for (key, _) in graph.iter() {
 		if is_hidden(key) {
@@ -1676,7 +1700,9 @@ fn add_percentages(graph: &mut Graph) {
 		}
 		if let Some(layer) = computed.get(key) {
 			let sum = sums.entry(*layer).or_insert(0);
-			*sum = sum.saturating_add(values.get(key).copied().unwrap_or(0));
+			*sum = sum
+				.checked_add(values.get(key).copied().unwrap_or(0))
+				.ok_or(CoreError::Overflow)?;
 		}
 	}
 	for (key, node) in graph.iter_mut() {
@@ -1695,6 +1721,7 @@ fn add_percentages(graph: &mut Graph) {
 			})
 		};
 	}
+	Ok(())
 }
 
 /// `colorIndexFromKey`: the key's first three hex digits pick a palette
@@ -1752,13 +1779,16 @@ fn keep_layers(graph: &mut Graph, from: SankeyLayer, to: SankeyLayer) {
 }
 
 /// `convertToSankeyData`.
-fn convert(graph: &Graph, mut folded: Folded) -> (Vec<SankeyNode>, Vec<SankeyLink>) {
+fn convert(
+	graph: &Graph,
+	mut folded: Folded,
+) -> Result<(Vec<SankeyNode>, Vec<SankeyLink>), CoreError> {
 	let position: HashMap<&str, usize> = graph
 		.iter()
 		.enumerate()
 		.map(|(index, (key, _))| (key, index))
 		.collect();
-	let nodes = graph
+	let mut nodes: Vec<SankeyNode> = graph
 		.iter()
 		.map(|(key, node)| SankeyNode {
 			key: key.to_owned(),
@@ -1769,6 +1799,7 @@ fn convert(graph: &Graph, mut folded: Folded) -> (Vec<SankeyNode>, Vec<SankeyLin
 			}),
 			percentage: node.percentage.clone().unwrap_or_default(),
 			color: node.color.unwrap_or(SankeyColor::Palette(0)),
+			value: Money::ZERO,
 		})
 		.collect();
 	let color_of = |key: &str| graph.get(key).and_then(|node| node.color);
@@ -1808,7 +1839,25 @@ fn convert(graph: &Graph, mut folded: Folded) -> (Vec<SankeyNode>, Vec<SankeyLin
 			});
 		}
 	}
-	(nodes, links)
+	for (index, node) in nodes.iter_mut().enumerate() {
+		node.value = node_value(&links, index)?;
+	}
+	Ok((nodes, links))
+}
+
+/// recharts' `getNodesTree` (`Sankey.tsx`): the larger of a node's incoming
+/// and outgoing link sums, counting -1 links to hidden nodes and links whose
+/// target the layer range cut, exactly as the graph receives them.
+fn node_value(links: &[SankeyLink], index: usize) -> Result<Money, CoreError> {
+	let sum = |linked: &dyn Fn(&SankeyLink) -> bool| {
+		links
+			.iter()
+			.filter(|link| linked(link))
+			.try_fold(Money::ZERO, |sum, link| sum.checked_add(link.value))
+	};
+	let incoming = sum(&|link| link.target == Some(index))?;
+	let outgoing = sum(&|link| link.source == index)?;
+	Ok(incoming.max(outgoing))
 }
 
 fn month_of(text: &str) -> Result<YearMonth, CoreError> {
@@ -1927,24 +1976,24 @@ pub fn sankey_card(
 				.collect::<Result<Vec<_>, _>>()?;
 			let entries = spent_entries(budget, &groups, &rows, group_accounts)?;
 			let transfers = if flag("showTransfers") {
-				transfer_pairs(budget, &rows)
+				transfer_pairs(budget, &rows)?
 			} else {
 				Vec::new()
 			};
-			transactions_graph(&entries, &transfers, group_accounts)
+			transactions_graph(&entries, &transfers, group_accounts)?
 		}
 		_ => Graph::default(),
 	};
 
 	let mut graph = graph;
-	let folded = group_other(&mut graph, top_n, sort == SankeySort::Global);
-	let mut graph = sort_graph(graph, sort, &groups);
+	let folded = group_other(&mut graph, top_n, sort == SankeySort::Global)?;
+	let mut graph = sort_graph(graph, sort, &groups)?;
 	clean_up(&mut graph);
-	add_hidden_nodes(&mut graph);
-	add_percentages(&mut graph);
+	add_hidden_nodes(&mut graph)?;
+	add_percentages(&mut graph)?;
 	add_colors(&mut graph);
 	keep_layers(&mut graph, layer_from, layer_to);
-	let (nodes, links) = convert(&graph, folded);
+	let (nodes, links) = convert(&graph, folded)?;
 	Ok(SankeyCard {
 		range,
 		first_month,

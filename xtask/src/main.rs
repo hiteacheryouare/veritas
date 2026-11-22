@@ -12,7 +12,9 @@ commands:
 	bindings           build the core and generate its Swift bindings into VeritasKit
 	app                build the macOS app into target/xcode
 	app-test           run the macOS app's UI tests
-	ci                 run every check CI runs, plus the app build";
+	ci                 run every check CI runs, plus the app build
+	perf               fail if a core-measurable R-PERF budget is exceeded on perf-100k
+	shadow <zip>       compare a real Actual export with Actual, printing only counts";
 
 const FIXTURE_SPECS: [&str; 3] = ["small", "all-features", "perf-100k"];
 
@@ -29,6 +31,8 @@ fn main() -> ExitCode {
 		Some("app") => xcodebuild("build"),
 		Some("app-test") => xcodebuild("test"),
 		Some("ci") => ci(),
+		Some("perf") => perf(),
+		Some("shadow") => shadow(&args[1..]),
 		_ => Err(USAGE.to_owned()),
 	};
 	match outcome {
@@ -390,4 +394,341 @@ fn ci() -> Result {
 		eprintln!("skipping oracle tests: run `cargo xtask oracle setup` to include them");
 	}
 	Ok(())
+}
+
+/// A scratch folder for the shadow run, readable only by its owner and
+/// removed when this value drops, on success, error or panic. An interrupted
+/// run's folder is swept by the next one.
+struct ShadowScratch(PathBuf);
+
+impl ShadowScratch {
+	const PREFIX: &str = "veritas-shadow-";
+
+	fn new() -> Result<ShadowScratch> {
+		use std::os::unix::fs::PermissionsExt;
+		let path = std::env::temp_dir().join(format!("{}{}", Self::PREFIX, std::process::id()));
+		std::fs::create_dir(&path)
+			.map_err(|_| "shadow: couldn't make a scratch folder".to_owned())?;
+		let scratch = ShadowScratch(path);
+		std::fs::set_permissions(&scratch.0, std::fs::Permissions::from_mode(0o700))
+			.map_err(|_| "shadow: couldn't lock down the scratch folder".to_owned())?;
+		std::fs::create_dir(scratch.0.join("tmp"))
+			.map_err(|_| "shadow: couldn't make a scratch folder".to_owned())?;
+		Ok(scratch)
+	}
+
+	/// Folders left by a run whose process is gone.
+	fn sweep() {
+		let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
+			return;
+		};
+		for entry in entries.flatten() {
+			let name = entry.file_name();
+			let Some(pid) = name.to_str().and_then(|n| n.strip_prefix(Self::PREFIX)) else {
+				continue;
+			};
+			let alive = Command::new("kill")
+				.args(["-0", pid])
+				.stderr(std::process::Stdio::null())
+				.status()
+				.is_ok_and(|status| status.success());
+			if !alive {
+				let _ = std::fs::remove_dir_all(entry.path());
+			}
+		}
+	}
+}
+
+impl Drop for ShadowScratch {
+	fn drop(&mut self) {
+		let _ = std::fs::remove_dir_all(&self.0);
+	}
+}
+
+/// The shadow run (tools/shadow) on `args[0]`, an Actual export. Every file
+/// it makes, its own and the oracle's (through `TMPDIR`), goes in a scratch
+/// folder deleted afterwards; it prints counts only, and its stderr, which a
+/// crash could fill with budget data, is dropped. The export's path is never
+/// echoed either.
+fn shadow(args: &[String]) -> Result {
+	let [zip] = args else {
+		return Err("usage: cargo xtask shadow <path to an Actual export .zip>".to_owned());
+	};
+	let zip =
+		std::fs::canonicalize(zip).map_err(|_| "shadow: the export isn't readable".to_owned())?;
+	let root = root();
+	run(
+		&root,
+		"cargo",
+		&["build", "--release", "--quiet", "-p", "veritas-shadow"],
+	)?;
+	ShadowScratch::sweep();
+	let scratch = ShadowScratch::new()?;
+	let status = Command::new("cargo")
+		.args(["run", "--release", "--quiet", "-p", "veritas-shadow", "--"])
+		.arg(&zip)
+		.env("VERITAS_SHADOW_DIR", &scratch.0)
+		.env("TMPDIR", scratch.0.join("tmp"))
+		.current_dir(&root)
+		.stdin(std::process::Stdio::null())
+		.stderr(std::process::Stdio::null())
+		.status()
+		.map_err(|_| "shadow: couldn't start".to_owned())?;
+	drop(scratch);
+	if status.success() {
+		Ok(())
+	} else {
+		Err("shadow: not every check passed".to_owned())
+	}
+}
+
+/// A core-measurable R-PERF budget: criterion benches whose id starts with
+/// `prefix`, and the most their median may take.
+struct Budget {
+	id: &'static str,
+	prefix: &'static str,
+	most_ms: f64,
+}
+
+/// One frame at 120 Hz (R-PERF-3).
+const FRAME_MS: f64 = 1000.0 / 120.0;
+
+const BUDGETS: [Budget; 8] = [
+	Budget {
+		id: "R-PERF-1",
+		prefix: "perf-100k/R-PERF-1 open until editable",
+		most_ms: 400.0,
+	},
+	Budget {
+		id: "R-PERF-2",
+		prefix: "perf-100k/R-PERF-2 budget cell edit until the month reads back",
+		most_ms: 16.0,
+	},
+	Budget {
+		id: "R-PERF-2",
+		prefix: "R-PERF-2 budget edit in the first month",
+		most_ms: 16.0,
+	},
+	Budget {
+		id: "R-PERF-2",
+		prefix: "R-PERF-2 budget edit in the current month",
+		most_ms: 16.0,
+	},
+	Budget {
+		id: "R-PERF-2",
+		prefix: "R-PERF-2 set one envelope to its 3-month average",
+		most_ms: 16.0,
+	},
+	Budget {
+		id: "R-PERF-3",
+		prefix: "perf-100k/R-PERF-3 scrolling a register",
+		most_ms: FRAME_MS,
+	},
+	Budget {
+		id: "R-PERF-5",
+		prefix: "perf-100k/R-PERF-5 import an Actual zip",
+		most_ms: 3000.0,
+	},
+	Budget {
+		id: "R-PERF-5",
+		prefix: "perf-100k/R-PERF-5 export an Actual zip",
+		most_ms: 3000.0,
+	},
+];
+
+/// Reports with nothing cached, classified afresh each time. Shown against
+/// R-PERF-4's 100 ms and 500 ms, but the gate is `reports_perf`, which times
+/// the app's own path (see docs/acceptance.md, Performance).
+const COLD_REPORTS: [(&str, f64); 7] = [
+	("perf-100k/net profit, one year", 100.0),
+	("perf-100k/balance sheet", 100.0),
+	("perf-100k/owner's equity, one year", 100.0),
+	("perf-100k/cash flow, one year", 100.0),
+	("perf-100k/net worth, every month", 100.0),
+	("perf-100k/tax summary, one year", 100.0),
+	("perf-100k/sankey, one year", 500.0),
+];
+
+/// The perf gate (PLAN §10: every R-PERF budget passes in CI on perf-100k).
+/// Criterion runs each bench for many samples after a warm-up, and the gate
+/// reads its median, which one slow sample on a shared runner doesn't move.
+/// R-PERF-4 is the release-mode reports_perf and dashboard_perf tests, which
+/// assert their own budgets. Fails if any median is over its budget. It also
+/// runs the formula stack-margin tests in release, the build the app ships,
+/// on a 512 KiB stack like Swift's secondary threads.
+fn perf() -> Result {
+	let root = root();
+	let stack = run(
+		&root,
+		"cargo",
+		&[
+			"test",
+			"--release",
+			"-p",
+			"veritas-reports",
+			"--test",
+			"formula",
+			"small_stack_",
+		],
+	);
+	// R-PERF-4 (PLAN line 245: "Typical report ≤ 100 ms; year-long Sankey or forecast ≤ 500 ms")
+	// asserts its own budgets: each report, each card and the default dashboard within 100 ms,
+	// the page with every card within 500 ms. A failure is reported with the benches below.
+	let reports = run(
+		&root,
+		"cargo",
+		&[
+			"test",
+			"--release",
+			"--no-fail-fast",
+			"-p",
+			"veritas-ffi",
+			"--test",
+			"reports_perf",
+			"--test",
+			"dashboard_perf",
+			"--",
+			"--include-ignored",
+			"--nocapture",
+			"--test-threads=1",
+		],
+	);
+	run(
+		&root,
+		"cargo",
+		&[
+			"bench",
+			"-p",
+			"veritas-session",
+			"--bench",
+			"open_import_export",
+			"--",
+			"--noplot",
+		],
+	)?;
+	run(
+		&root,
+		"cargo",
+		&[
+			"bench",
+			"-p",
+			"veritas-engine",
+			"--bench",
+			"sheet",
+			"--",
+			"--noplot",
+			"R-PERF-2",
+		],
+	)?;
+	run(
+		&root,
+		"cargo",
+		&[
+			"bench",
+			"-p",
+			"veritas-reports",
+			"--bench",
+			"perf",
+			"--",
+			"--noplot",
+			"perf-100k/",
+		],
+	)?;
+
+	let target =
+		std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| root.join("target"), PathBuf::from);
+	let medians = criterion_medians(&target.join("criterion"));
+	let mut over = Vec::new();
+	if stack.is_err() {
+		over.push(
+			"formula stack margin: a small_stack_ test failed in release (see its output above)"
+				.to_owned(),
+		);
+	}
+	if reports.is_err() {
+		over.push(
+			"R-PERF-4: reports_perf or dashboard_perf is over budget (see its output above)"
+				.to_owned(),
+		);
+	}
+	for budget in &BUDGETS {
+		let found: Vec<&(String, f64)> = medians
+			.iter()
+			.filter(|(id, _)| id.starts_with(budget.prefix))
+			.collect();
+		if found.is_empty() {
+			over.push(format!(
+				"{}: no bench result for \"{}\"",
+				budget.id, budget.prefix
+			));
+		}
+		for (id, ms) in found {
+			let verdict = if *ms <= budget.most_ms { "ok" } else { "OVER" };
+			eprintln!(
+				"{verdict:>4}  {}  {id}: median {ms:.2} ms, budget {:.2} ms",
+				budget.id, budget.most_ms
+			);
+			if *ms > budget.most_ms {
+				over.push(format!(
+					"{} {id}: {ms:.2} ms > {:.2} ms",
+					budget.id, budget.most_ms
+				));
+			}
+		}
+	}
+	for (prefix, most) in COLD_REPORTS {
+		for (id, ms) in medians.iter().filter(|(id, _)| id == prefix) {
+			let note = if *ms <= most {
+				""
+			} else {
+				" (over, with nothing cached)"
+			};
+			eprintln!("cold  R-PERF-4  {id}: median {ms:.2} ms, budget {most:.0} ms{note}");
+		}
+	}
+	if over.is_empty() {
+		Ok(())
+	} else {
+		Err(format!("R-PERF budgets exceeded:\n{}", over.join("\n")))
+	}
+}
+
+/// Every criterion bench's full id and median in milliseconds, from the
+/// `benchmark.json` and `estimates.json` it writes for its newest run.
+fn criterion_medians(dir: &Path) -> Vec<(String, f64)> {
+	let mut found = Vec::new();
+	let Ok(entries) = std::fs::read_dir(dir) else {
+		return found;
+	};
+	for entry in entries.flatten() {
+		let path = entry.path();
+		if path.is_dir() {
+			found.extend(criterion_medians(&path));
+			continue;
+		}
+		if path.file_name().and_then(|n| n.to_str()) != Some("benchmark.json")
+			|| path
+				.parent()
+				.and_then(Path::file_name)
+				.and_then(|n| n.to_str())
+				!= Some("new")
+		{
+			continue;
+		}
+		let read = |file: &Path| -> Option<serde_json::Value> {
+			serde_json::from_slice(&std::fs::read(file).ok()?).ok()
+		};
+		let (Some(benchmark), Some(estimates)) =
+			(read(&path), read(&path.with_file_name("estimates.json")))
+		else {
+			continue;
+		};
+		if let (Some(id), Some(ns)) = (
+			benchmark["full_id"].as_str(),
+			estimates["median"]["point_estimate"].as_f64(),
+		) {
+			found.push((id.to_owned(), ns / 1_000_000.0));
+		}
+	}
+	found
 }

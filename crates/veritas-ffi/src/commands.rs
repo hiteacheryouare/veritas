@@ -131,8 +131,9 @@ pub enum Command {
 		hidden: bool,
 	},
 	/// A goal as a new envelope at the top of the Goals group, created if the
-	/// budget has none. `target_date` is `YYYY-MM-DD`. The goal's id comes back
-	/// in the `Change` (R-GOAL-1, D36).
+	/// budget has none. `target_date` is `YYYY-MM-DD`; `icon` is checked as
+	/// `SetGoalIcon` checks it (v18). The goal's id comes back in the `Change`
+	/// (R-GOAL-1, D36).
 	CreateGoal {
 		name: String,
 		target: i64,
@@ -164,6 +165,12 @@ pub enum Command {
 		goal_id: String,
 		target: i64,
 		target_date: Option<String>,
+	},
+	/// v18: the goal's icon, an SF Symbol name or exactly one emoji, kept only
+	/// in Veritas's goal table; `None` or empty clears it. Moves no money.
+	SetGoalIcon {
+		goal_id: String,
+		icon: Option<String>,
 	},
 	/// A new account at the end of its list, with its transfer payee and, for
 	/// a non-zero balance, a starting-balance row (R-ACC-1, §4.8). The id is
@@ -520,11 +527,20 @@ impl veritas_session::Command for Command {
 		self.plan_with_sheet(data, &sheet)
 	}
 
-	/// R-REL-3: a merge repoints every row of the merged payees, and clearing
-	/// several rows at once is a bulk edit.
+	/// R-REL-3: a bulk edit is one command that rewrites or deletes many of
+	/// the user's transactions, budget cells or dashboard widgets at once.
+	/// Single-row edits and flags that a second toggle restores rely on undo.
 	fn snapshot_first(&self) -> Option<SnapshotReason> {
 		match self {
-			Command::MergePayees { .. } => Some(SnapshotReason::BulkEdit),
+			Command::MergePayees { .. }
+			| Command::DeleteCategoryMovingHistory { .. }
+			| Command::ApplySuggestions { .. }
+			| Command::FinishReconcile { .. }
+			| Command::DeleteDashboard { .. } => Some(SnapshotReason::BulkEdit),
+			Command::CloseGoal {
+				also_move_later: true,
+				..
+			} => Some(SnapshotReason::BulkEdit),
 			Command::SetCleared {
 				transaction_ids, ..
 			} if transaction_ids.len() > 1 => Some(SnapshotReason::BulkEdit),
@@ -549,6 +565,7 @@ impl veritas_session::Command for Command {
 				| Command::ReopenGoal { .. }
 				| Command::DismissGoalActivity { .. }
 				| Command::RetargetGoal { .. }
+				| Command::SetGoalIcon { .. }
 				| Command::CreateAccount { .. }
 				| Command::CloseAccount { .. }
 				| Command::AddTransaction { .. }
@@ -702,6 +719,9 @@ impl veritas_session::Command for Command {
 			}
 			Command::DismissGoalActivity { goal_id } => {
 				goals::dismiss_goal_activity(data, sheet, &GoalId::new(goal_id.as_str()))
+			}
+			Command::SetGoalIcon { goal_id, icon } => {
+				goals::set_goal_icon(data, &GoalId::new(goal_id.as_str()), icon.as_deref())
 			}
 			Command::RetargetGoal {
 				goal_id,

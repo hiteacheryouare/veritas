@@ -2,7 +2,7 @@
 //! three what-ifs, next month's budget suggestions, goal ETAs, and the
 //! what-if scenarios themselves (docs/finance/forecasting.md).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use veritas_domain::{
@@ -11,13 +11,14 @@ use veritas_domain::{
 };
 use veritas_engine::{EnvelopeSheet, register_currency_text};
 use veritas_forecast::{
-	BandMethod, Basis, Certainty, ESTIMATED_SPLIT, EtaStatus, FlowKind, GoalEta, KnownFlow,
-	NO_INTEREST_LINE, Projection,
+	BandMethod, Basis, Certainty, ESTIMATED_SPLIT, EtaStatus, FlowKind, GoalEta, HorizonDifference,
+	KnownFlow, NO_INTEREST_LINE, Projection,
 };
 use veritas_session::forecast::{self as core, ForecastView};
 
 use crate::blocking::{CancelToken as CancelHandle, run};
 use crate::budget::{civil_date, year_month};
+use crate::reports::NetWorthMonth;
 use crate::session::{Core, Session};
 use crate::{FfiError, Month};
 
@@ -28,6 +29,11 @@ pub struct ForecastAccount {
 	pub name: String,
 	pub off_budget: bool,
 	pub balance: i64,
+	/// v18, FC-3: in a what-if's horizon, `balance` less the baseline's at
+	/// the same horizon, positive when the what-if leaves more; `nil` for the
+	/// baseline and for today's balances.
+	#[uniffi(default = None)]
+	pub difference: Option<i64>,
 }
 
 /// One month of a projection: the current month's remainder first, then
@@ -44,6 +50,12 @@ pub struct ForecastMonth {
 	pub net_income: i64,
 	/// At the end of the month.
 	pub net_worth: i64,
+	/// v18, FC-4.2 step 5: the band around `net_worth` at this month, `nil`
+	/// for the current month's remainder and with no history.
+	#[uniffi(default = None)]
+	pub band_low: Option<i64>,
+	#[uniffi(default = None)]
+	pub band_high: Option<i64>,
 }
 
 /// FC-3's horizon, 3, 6, 10 or 12 complete months after the current month.
@@ -56,6 +68,10 @@ pub struct ForecastHorizon {
 	pub band_low: Option<i64>,
 	pub band_high: Option<i64>,
 	pub accounts: Vec<ForecastAccount>,
+	/// v18, FC-3: in a what-if, `netWorth` less the baseline's at this
+	/// horizon; `nil` for the baseline.
+	#[uniffi(default = None)]
+	pub net_worth_difference: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -242,6 +258,11 @@ pub struct Forecast {
 	pub not_forecast_note: Option<String>,
 	/// FC-3's "N asset purchase(s) excluded: $X".
 	pub asset_purchase_note: Option<String>,
+	/// v18, FC-3: net worth at the end of each of the up to 12 complete
+	/// months before today's month, oldest first, exactly the `netWorth`
+	/// report's figures; months before the budget's first row are left out.
+	#[uniffi(default = [])]
+	pub history: Vec<NetWorthMonth>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -562,10 +583,20 @@ fn category_name(data: &BudgetData, id: &CategoryId) -> String {
 		.unwrap_or_default()
 }
 
-fn accounts(data: &BudgetData, balances: &BTreeMap<AccountId, Money>) -> Vec<ForecastAccount> {
-	let mut rows: Vec<_> = balances
-		.iter()
-		.filter_map(|(id, balance)| {
+/// A what-if lists every account either projection holds, so an account only
+/// the baseline holds still shows its difference, with a balance of 0.
+fn accounts(
+	data: &BudgetData,
+	balances: &BTreeMap<AccountId, Money>,
+	differences: Option<&BTreeMap<AccountId, Money>>,
+) -> Vec<ForecastAccount> {
+	let ids: BTreeSet<&AccountId> = balances
+		.keys()
+		.chain(differences.into_iter().flat_map(BTreeMap::keys))
+		.collect();
+	let mut rows: Vec<_> = ids
+		.into_iter()
+		.filter_map(|id| {
 			let account = data.accounts.get(id).filter(|account| !account.tombstone)?;
 			Some((
 				(account.off_budget, account.sort_order),
@@ -573,7 +604,10 @@ fn accounts(data: &BudgetData, balances: &BTreeMap<AccountId, Money>) -> Vec<For
 					account_id: id.to_string(),
 					name: account.name.clone(),
 					off_budget: account.off_budget,
-					balance: balance.minor(),
+					balance: balances.get(id).copied().unwrap_or(Money::ZERO).minor(),
+					difference: differences.map(|differences| {
+						differences.get(id).copied().unwrap_or(Money::ZERO).minor()
+					}),
 				},
 			))
 		})
@@ -627,6 +661,7 @@ fn projection(
 	projection: &Projection,
 	name: String,
 	etas: &[GoalEta],
+	differences: &[HorizonDifference],
 ) -> ForecastProjection {
 	ForecastProjection {
 		scenario_id: projection.scenario.as_ref().map(ToString::to_string),
@@ -641,18 +676,30 @@ fn projection(
 				scenario_net_income: month.scenario_net_income.minor(),
 				net_income: month.net_income.minor(),
 				net_worth: month.net_worth.minor(),
+				band_low: month.band.map(|(low, _)| low.minor()),
+				band_high: month.band.map(|(_, high)| high.minor()),
 			})
 			.collect(),
 		horizons: projection
 			.horizons
 			.iter()
-			.map(|horizon| ForecastHorizon {
-				months: horizon.months,
-				month: horizon.month.into(),
-				net_worth: horizon.net_worth.minor(),
-				band_low: horizon.band.map(|(low, _)| low.minor()),
-				band_high: horizon.band.map(|(_, high)| high.minor()),
-				accounts: accounts(data, &horizon.balances),
+			.map(|horizon| {
+				let difference = differences
+					.iter()
+					.find(|difference| difference.months == horizon.months);
+				ForecastHorizon {
+					months: horizon.months,
+					month: horizon.month.into(),
+					net_worth: horizon.net_worth.minor(),
+					band_low: horizon.band.map(|(low, _)| low.minor()),
+					band_high: horizon.band.map(|(_, high)| high.minor()),
+					accounts: accounts(
+						data,
+						&horizon.balances,
+						difference.map(|difference| &difference.balances),
+					),
+					net_worth_difference: difference.map(|difference| difference.net_worth.minor()),
+				}
 			})
 			.collect(),
 		events_in_the_past: projection
@@ -746,25 +793,37 @@ fn loans(data: &BudgetData, view: &ForecastView) -> Vec<LoanForecast> {
 		.collect()
 }
 
-fn forecast_screen(data: &BudgetData, today: CivilDate, view: &ForecastView) -> Forecast {
+fn forecast_screen(
+	data: &BudgetData,
+	today: CivilDate,
+	view: &ForecastView,
+) -> Result<Forecast, CoreError> {
 	let baseline = &view.comparison.baseline;
 	let empty = Vec::new();
 	let etas = |index: usize| view.goal_etas.get(index).unwrap_or(&empty);
-	Forecast {
+	let mut scenarios = Vec::new();
+	for (index, (projected, scenario)) in view
+		.comparison
+		.scenarios
+		.iter()
+		.zip(&view.scenarios)
+		.enumerate()
+	{
+		let differences = view.comparison.differences(projected)?;
+		scenarios.push(projection(
+			data,
+			projected,
+			scenario.name.clone(),
+			etas(index + 1),
+			&differences,
+		));
+	}
+	Ok(Forecast {
 		today: today.to_string(),
 		net_worth_today: baseline.net_worth_today.minor(),
-		accounts_today: accounts(data, &baseline.balances_today),
-		baseline: projection(data, baseline, String::new(), etas(0)),
-		scenarios: view
-			.comparison
-			.scenarios
-			.iter()
-			.zip(&view.scenarios)
-			.enumerate()
-			.map(|(index, (projected, scenario))| {
-				projection(data, projected, scenario.name.clone(), etas(index + 1))
-			})
-			.collect(),
+		accounts_today: accounts(data, &baseline.balances_today, None),
+		baseline: projection(data, baseline, String::new(), etas(0), &[]),
+		scenarios,
 		band_method: match baseline.band.method {
 			BandMethod::Residuals => ForecastBandMethod::Residuals,
 			BandMethod::Range => ForecastBandMethod::Range,
@@ -830,7 +889,17 @@ fn forecast_screen(data: &BudgetData, today: CivilDate, view: &ForecastView) -> 
 			.collect(),
 		not_forecast_note: baseline.not_forecast_note(&data.format),
 		asset_purchase_note: baseline.asset_purchase_note(&data.format),
-	}
+		history: view
+			.history
+			.iter()
+			.map(|point| NetWorthMonth {
+				month: point.month.into(),
+				assets: point.assets.minor(),
+				liabilities: point.liabilities.minor(),
+				net_worth: point.net_worth.minor(),
+			})
+			.collect(),
+	})
 }
 
 fn suggestion_list(
@@ -885,7 +954,7 @@ impl<B: veritas_session::Backend> Core<B> {
 				.collect();
 			session.with_sheet(today, |data, sheet| {
 				let view = core::forecast(data, sheet, today, &ids, cancel)?;
-				Ok(forecast_screen(data, today, &view))
+				forecast_screen(data, today, &view)
 			})
 		})
 	}
@@ -1064,6 +1133,45 @@ mod tests {
 			category_id: Some(category.to_owned()),
 			amount: -200_000,
 		}
+	}
+
+	#[test]
+	fn fc_3_an_account_only_the_baseline_holds_keeps_its_difference() {
+		let (_scratch, core) = imported("all-features");
+		let data = data(&core);
+		let mut open = data
+			.accounts
+			.values()
+			.filter(|account| !account.tombstone)
+			.map(|account| account.id.clone());
+		let (kept, dropped) = (open.next().unwrap(), open.next().unwrap());
+		let scenario = BTreeMap::from([(kept.clone(), Money::from_minor(1_245_000))]);
+		let differences = BTreeMap::from([
+			(kept.clone(), Money::from_minor(45_000)),
+			(dropped.clone(), Money::from_minor(300_000)),
+		]);
+
+		let rows = accounts(&data, &scenario, Some(&differences));
+
+		let row = |id: &AccountId| {
+			rows.iter()
+				.find(|row| row.account_id == id.to_string())
+				.unwrap_or_else(|| panic!("{id} is missing from the what-if's accounts"))
+		};
+		assert_eq!(rows.len(), 2);
+		assert_eq!(
+			(row(&kept).balance, row(&kept).difference),
+			(1_245_000, Some(45_000))
+		);
+		assert_eq!(
+			(row(&dropped).balance, row(&dropped).difference),
+			(0, Some(300_000))
+		);
+		assert_eq!(
+			accounts(&data, &scenario, None).len(),
+			1,
+			"the baseline lists only its own accounts"
+		);
 	}
 
 	#[test]
@@ -1348,7 +1456,31 @@ mod tests {
 		let forecast = core.forecast(TODAY, &[id], &token()).unwrap();
 		let what_if = &forecast.scenarios[0];
 		assert_eq!(forecast.baseline.months, what_if.months);
-		assert_eq!(forecast.baseline.horizons, what_if.horizons);
+		// v18: the what-if's horizons differ from the baseline's by exactly 0,
+		// and otherwise match it field for field.
+		let undifferenced: Vec<ForecastHorizon> = what_if
+			.horizons
+			.iter()
+			.map(|horizon| {
+				assert_eq!(horizon.net_worth_difference, Some(0));
+				ForecastHorizon {
+					net_worth_difference: None,
+					accounts: horizon
+						.accounts
+						.iter()
+						.map(|account| {
+							assert_eq!(account.difference, Some(0));
+							ForecastAccount {
+								difference: None,
+								..account.clone()
+							}
+						})
+						.collect(),
+					..horizon.clone()
+				}
+			})
+			.collect();
+		assert_eq!(forecast.baseline.horizons, undifferenced);
 		let eta = |projection: &ForecastProjection| {
 			projection
 				.goal_etas

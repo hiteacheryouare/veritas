@@ -65,9 +65,9 @@ pub(super) fn check(node: &Node) -> Outcome<()> {
 			Ok(())
 		}
 		Node::Plus(inner) | Node::Minus(inner) | Node::Percent(inner) => check(inner),
-		Node::Binary(_, left, right) => {
-			check(left)?;
-			check(right)
+		Node::Chain(first, rest) => {
+			check(first)?;
+			rest.iter().try_for_each(|(_, operand)| check(operand))
 		}
 		Node::Number(_) | Node::Text(_) | Node::Fault(_) | Node::Name(_) => Ok(()),
 	}
@@ -93,11 +93,16 @@ impl Evaluator<'_> {
 				let number = value::to_number(&self.evaluate(inner)?)?;
 				Ok(Value::Number(number / 100.0))
 			}
-			Node::Binary(operator, left, right) => {
-				// Both sides are evaluated before either's error counts.
-				let left = self.evaluate(left);
-				let right = self.evaluate(right);
-				binary(*operator, &left?, &right?)
+			Node::Chain(first, rest) => {
+				// Left to right, as nested binary operators would run: each
+				// operand is evaluated before the error so far counts, and
+				// an error on the left wins over one on the right.
+				let mut result = self.evaluate(first);
+				for (operator, operand) in rest {
+					let right = self.evaluate(operand);
+					result = result.and_then(|left| binary(*operator, &left, &right?));
+				}
+				result
 			}
 			Node::Call(name, arguments) => self.call(name, arguments),
 		}

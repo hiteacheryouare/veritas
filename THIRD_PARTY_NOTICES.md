@@ -52,6 +52,22 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 | `crates/veritas-reports/src/widgets/formula/functions.rs` (QUERY, QUERY_EXTRACT_CATEGORIES, QUERY_EXTRACT_TIMEFRAME_START and _END, BUDGET_QUERY only; the rest of the formula engine is clean-room, D75) | `query`, `queryExtractCategories`, `queryExtractTimeframeStart`, `queryExtractTimeframeEnd`, `budgetQuery`, `categoryRangeToIds` and `createBudgetQueryPrefetchKey` in `packages/loot-core/src/shared/formulas/customFunctions.ts` |
 | `tools/actual-oracle/src/widgets.ts` (test tooling, not shipped) | verbatim copies of `simpleCashFlow`, the non-React flow of `useFormulaExecution.ts`, `topNNodes` and `getDefaultLayerRange` from `Sankey.tsx`, and the stacked order of `NetWorthGraph.tsx` |
 
+## recharts
+
+`node_value` in `crates/veritas-reports/src/widgets/sankey.rs` ports the node value of `getNodesTree` in recharts' `src/chart/Sankey.tsx` (https://github.com/recharts/recharts), which Actual's Sankey graph prints under each node, and `withRechartsValues` in `tools/actual-oracle/src/widgets.ts` (test tooling, not shipped) copies it. recharts is distributed under the following license.
+
+```
+The MIT License (MIT)
+
+Copyright (c) 2015-present recharts
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
 ## fdlibm
 
 `crates/veritas-reports/src/widgets/monte_carlo/fdlibm.rs` ports `__ieee754_log`, `__kernel_cos`, `__kernel_sin`, `__ieee754_rem_pio2` and `cos` from fdlibm as V8 adapts it in `src/base/ieee754.cc`, so the Monte Carlo card's random draws match Actual's to the bit. fdlibm's notice, as V8 keeps it:

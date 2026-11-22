@@ -132,10 +132,11 @@ impl Backend for ReadPath {
 
 	fn export_actual_zip(
 		&self,
+		snapshot: Option<&Path>,
 		metadata: &Path,
 		to: &Path,
 	) -> Result<veritas_interop::ExportOutcome, CoreError> {
-		veritas_interop::export_actual_zip(&self.store, metadata, to)
+		<veritas_store::Store as Backend>::export_actual_zip(&self.store, snapshot, metadata, to)
 	}
 
 	fn create(
