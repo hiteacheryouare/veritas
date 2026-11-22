@@ -88,88 +88,87 @@ final class ScriptedAnswerer: AssistantAnswering {
 	}
 }
 
-/// Closing the panel or switching budgets stops a slow answer mid-stream.
+/// Closing the panel or switching budgets stops an answer mid-stream. The
+/// test holds the stream's continuation, so it decides when each word
+/// arrives, and a word sent after the stop is refused by the stream itself.
+/// Nothing here waits on a clock.
 @MainActor
 struct AssistantPanelCancelTests {
 	private func context() -> AssistantContext? {
 		AssistantContext(queries: RecordingQueries(), format: MoneyFormat(), today: "2026-11-18")
 	}
 
-	private func waitUntil(_ condition: () -> Bool) async {
-		for _ in 0..<200 where !condition() {
-			try? await Task.sleep(for: .milliseconds(10))
+	/// Lets the panel's answering task run, on the main actor, until `condition` holds.
+	private func letThePanelRun(until condition: () -> Bool) async {
+		for _ in 0..<10_000 where !condition() {
+			await Task.yield()
 		}
 	}
 
+	private func refused(_ result: AsyncThrowingStream<String, any Error>.Continuation.YieldResult) -> Bool {
+		if case .terminated = result { true } else { false }
+	}
+
 	@Test func closingThePanelStopsTheAnswerAndNoMoreTextLands() async throws {
-		let answerer = SlowAnswerer()
+		let answerer = GatedAnswerer()
 		let panel = AssistantPanelModel(makeAnswerer: { _ in answerer }, context: context)
 		panel.draft = "What changed?"
 		panel.ask()
-		await waitUntil { panel.exchanges.first?.answer == "Net" }
+		await letThePanelRun { answerer.continuation != nil }
+		let stream = try #require(answerer.continuation)
+		stream.yield("Net")
+		await letThePanelRun { panel.exchanges.first?.answer == "Net" }
 		try #require(panel.exchanges.first?.answer == "Net")
+
 		panel.stop()
+		#expect(answerer.terminated, "stopping cancels the model's stream before stop() returns")
+		#expect(refused(stream.yield("Net Profit")), "so the stream refuses any later word")
 		await panel.settle()
-		await waitUntil { answerer.log.terminated }
-		#expect(answerer.log.terminated, "the model's stream is cancelled")
-		let yielded = answerer.log.yielded
-		try await Task.sleep(for: .milliseconds(150))
-		#expect(answerer.log.yielded == yielded, "nothing more is produced")
+		await letThePanelRun { false }
 		#expect(panel.exchanges.first?.answer == "Net", "no more text lands")
 		#expect(panel.exchanges.first?.state == .failed(AssistantPanelModel.stopped))
 		#expect(!panel.isAnswering)
 	}
 
 	@Test func switchingBudgetsDropsThePanelAndStopsTheAnswer() async throws {
-		let answerer = SlowAnswerer()
+		let answerer = GatedAnswerer()
 		var panel: AssistantPanelModel? = AssistantPanelModel(makeAnswerer: { _ in answerer }, context: context)
 		panel?.draft = "What changed?"
 		panel?.ask()
-		await waitUntil { panel?.exchanges.first?.answer == "Net" }
+		await letThePanelRun { answerer.continuation != nil }
+		let stream = try #require(answerer.continuation)
+		stream.yield("Net")
+		await letThePanelRun { panel?.exchanges.first?.answer == "Net" }
 		try #require(panel?.exchanges.first?.answer == "Net")
+
 		weak let dropped = panel
 		panel = nil
-		await waitUntil { answerer.log.terminated }
 		#expect(dropped == nil, "the old budget's panel is gone")
-		#expect(answerer.log.terminated, "and its model stream is cancelled")
-		let yielded = answerer.log.yielded
-		try await Task.sleep(for: .milliseconds(150))
-		#expect(answerer.log.yielded == yielded)
+		#expect(answerer.terminated, "and dropping it cancelled its model stream")
+		#expect(refused(stream.yield("Net Profit")))
 	}
 }
 
-/// Streams one word, then another every 50 ms, recording what it produced and when it was cancelled.
+/// Hands the test the stream's continuation instead of producing words itself.
 @MainActor
-final class SlowAnswerer: AssistantAnswering {
-	final class Log: Sendable {
-		private let state = Mutex<(yielded: Int, terminated: Bool)>((0, false))
-		var yielded: Int { state.withLock { $0.yielded } }
-		var terminated: Bool { state.withLock { $0.terminated } }
-		func didYield() { state.withLock { $0.yielded += 1 } }
-		func didTerminate() { state.withLock { $0.terminated = true } }
+final class GatedAnswerer: AssistantAnswering {
+	final class Ended: Sendable {
+		private let flag = Mutex(false)
+		var value: Bool { flag.withLock { $0 } }
+		func set() { flag.withLock { $0 = true } }
 	}
 
-	let log = Log()
+	private(set) var continuation: AsyncThrowingStream<String, any Error>.Continuation?
+	private let ended = Ended()
+
+	var terminated: Bool { ended.value }
 
 	func answer(_ question: String) -> AsyncThrowingStream<String, any Error> {
-		let log = log
-		return AsyncThrowingStream { continuation in
-			let producer = Task {
-				var text = ""
-				for word in ["Net", "Profit", "for", "October", "2026", "was", "412.50."] {
-					text = text.isEmpty ? word : "\(text) \(word)"
-					continuation.yield(text)
-					log.didYield()
-					try? await Task.sleep(for: .milliseconds(50))
-					if Task.isCancelled { return }
-				}
-				continuation.finish()
-			}
-			continuation.onTermination = { _ in
-				producer.cancel()
-				log.didTerminate()
-			}
-		}
+		let (stream, continuation) = AsyncThrowingStream.makeStream(of: String.self, throwing: (any Error).self)
+		let ended = ended
+		continuation.onTermination = { _ in ended.set() }
+		self.continuation = continuation
+		return stream
 	}
 
 	func reset() {}
