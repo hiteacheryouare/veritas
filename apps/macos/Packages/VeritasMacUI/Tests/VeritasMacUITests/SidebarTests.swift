@@ -5,7 +5,8 @@ import VeritasDesign
 import VeritasKit
 @testable import VeritasMacUI
 
-/// The sidebar is a table that draws its own neutral selection (the audit's B1).
+/// The sidebar is the native list with the system highlight off and the
+/// neutral fill drawn by the current row (the audit's B1).
 @MainActor
 struct SidebarTests {
 	private func workspace() async -> WorkspaceModel {
@@ -14,68 +15,72 @@ struct SidebarTests {
 		return workspace
 	}
 
-	/// The table inside a hosted sidebar, after a layout pass.
-	private func table(_ workspace: WorkspaceModel) throws -> (NSTableView, NSWindow) {
+	private func host(_ workspace: WorkspaceModel) -> (NSView, NSWindow) {
 		let host = NSHostingView(rootView: SidebarView(model: workspace).frame(width: 252, height: 900))
 		let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 252, height: 900), styleMask: [.borderless], backing: .buffered, defer: false)
 		window.isReleasedWhenClosed = false
 		window.contentView = host
 		host.layoutSubtreeIfNeeded()
+		RunLoop.main.run(until: .now.addingTimeInterval(0.3))
+		return (host, window)
+	}
+
+	private func settle(_ host: NSView) {
+		host.layoutSubtreeIfNeeded()
 		RunLoop.main.run(until: .now.addingTimeInterval(0.2))
-		func find(_ view: NSView) -> NSTableView? {
-			if let table = view as? NSTableView { return table }
-			return view.subviews.lazy.compactMap(find).first
-		}
-		return (try #require(find(host)), window)
 	}
 
-	@Test func theSelectedRowIsNeutralAndKeepsItsTextColour() throws {
-		let row = SidebarRowView()
-		row.isSelected = true
-		row.isEmphasized = true
-		#expect(row.interiorBackgroundStyle == .normal, "selected text never turns white on the light fill")
-		for (name, token) in [(NSAppearance.Name.aqua, ColorToken.surfaceSelected.light), (.darkAqua, ColorToken.surfaceSelected.dark)] {
-			var drawn: NSColor?
-			NSAppearance(named: name)?.performAsCurrentDrawingAppearance { drawn = SidebarRowView.fill.usingColorSpace(.sRGB) }
-			let fill = try #require(drawn)
-			#expect(abs(fill.alphaComponent - token.alpha) < 0.01, "\(name)")
-			#expect(abs(fill.redComponent - token.red) < 0.01, "\(name)")
-		}
+	private func tables(in view: NSView) -> [NSTableView] {
+		(view as? NSTableView).map { [$0] } ?? view.subviews.flatMap(tables)
 	}
 
-	@Test func insightsHeadsItsPagesAndCantBeSelected() async throws {
+	@Test func theListsOwnHighlightIsOffAndStaysOff() async throws {
 		let workspace = await workspace()
-		let items = SidebarItem.items(for: workspace)
-		let insights = try #require(items.firstIndex(of: .insights))
-		#expect(SidebarItem.insights.destination == nil)
-		#expect(Array(items[(insights + 1)...].prefix(5)) == Screen.insights.pages.map(SidebarItem.page))
-		#expect(items.filter { if case .groupName = $0 { true } else { false } }.allSatisfy { $0.destination == nil })
-	}
-
-	@Test func theTableSelectsTheCurrentPlaceAndTypeSelectsByName() async throws {
-		let workspace = await workspace()
+		let (host, window) = host(workspace)
+		defer { window.close() }
+		let table = try #require(tables(in: host).first)
+		#expect(table.selectionHighlightStyle == .none, "only the neutral row fill marks the current row")
+		#expect(table.numberOfSelectedRows == 1, "selection is still the list's")
 		workspace.go(to: .account(id: "savings"))
-		let (table, window) = try table(workspace)
-		defer { window.close() }
-		let items = SidebarItem.items(for: workspace)
-		#expect(table.numberOfRows == items.count)
+		settle(host)
+		#expect(table.selectionHighlightStyle == .none)
 		#expect(table.numberOfSelectedRows == 1)
-		#expect(items[table.selectedRow] == items.first { $0.destination == .account(id: "savings") })
-		let delegate = try #require(table.delegate)
-		let header = try #require(items.firstIndex(of: .insights))
-		#expect(delegate.tableView?(table, shouldSelectRow: header) == false)
-		let goals = try #require(items.firstIndex(of: .section(.goals)))
-		#expect(delegate.tableView?(table, typeSelectStringFor: nil, row: goals) == "Goals")
-		#expect(table.rowView(atRow: goals, makeIfNecessary: true)?.accessibilityIdentifier() == "sidebar.goals")
 	}
 
-	@Test func choosingARowGoesThere() async throws {
-		let workspace = await workspace()
-		let (table, window) = try table(workspace)
-		defer { window.close() }
-		let items = SidebarItem.items(for: workspace)
-		let bills = try #require(items.firstIndex(of: .section(.bills)))
-		table.selectRowIndexes(IndexSet(integer: bills), byExtendingSelection: false)
-		#expect(workspace.destination == .screen(.bills))
+	@Test func theFinderNeverReachesAScreensTable() {
+		// The register is a table too; the finder takes the nearest one, the list's.
+		let list = NSView()
+		let finder = NoSystemHighlight.Finder()
+		let near = NSTableView()
+		list.addSubview(finder)
+		list.addSubview(near)
+		let window = NSView()
+		window.addSubview(NSTableView())
+		window.addSubview(list)
+		#expect(NoSystemHighlight.Finder.nearestTable(from: finder) === near)
+	}
+
+	@Test func theSelectedRowsTextReadsAtSevenToOne() {
+		// The fill sits on the sidebar; the current row's text is primary.
+		for dark in [false, true] {
+			let fill = dark ? ColorToken.surfaceSelected.dark : ColorToken.surfaceSelected.light
+			let sidebar = dark ? ColorToken.surfaceSidebar.dark : ColorToken.surfaceSidebar.light
+			let text = dark ? ColorToken.textPrimary.dark : ColorToken.textPrimary.light
+			let base = Self.over(sidebar, dark ? ColorToken.surfaceWindow.dark : RGBA(0xffffff))
+			#expect(Self.contrast(text, Self.over(fill, base)) >= 7, "dark \(dark)")
+		}
+	}
+
+	private static func over(_ top: RGBA, _ bottom: RGBA) -> RGBA {
+		func mix(_ a: Double, _ b: Double) -> Double { a * top.alpha + b * (1 - top.alpha) }
+		let hex = [mix(top.red, bottom.red), mix(top.green, bottom.green), mix(top.blue, bottom.blue)].map { UInt32(($0 * 255).rounded()) }
+		return RGBA(hex[0] << 16 | hex[1] << 8 | hex[2])
+	}
+
+	private static func contrast(_ a: RGBA, _ b: RGBA) -> Double {
+		func channel(_ c: Double) -> Double { c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4) }
+		func luminance(_ c: RGBA) -> Double { 0.2126 * channel(c.red) + 0.7152 * channel(c.green) + 0.0722 * channel(c.blue) }
+		let (high, low) = (max(luminance(a), luminance(b)), min(luminance(a), luminance(b)))
+		return (high + 0.05) / (low + 0.05)
 	}
 }
