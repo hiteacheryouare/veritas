@@ -376,6 +376,7 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 	func statementEntity() async throws -> StatementEntity { StatementEntity(name: name, customName: nil) }
 	func incomeStatement(first: String, last: String) async throws -> IncomeStatement { try StubStatements.incomeStatement(first: first, last: last) }
 	func wrapped(year: Int32, today: String) async throws -> WrappedReport { try StubWrapped.report(year: year, today: today) }
+	func wrappedYears(today: String) async throws -> [Int32] { StubWrapped.years }
 	func balanceSheet(asOf: String) async throws -> BalanceSheet { try StubStatements.balanceSheet(asOf: asOf) }
 	func ownersEquity(first: String, last: String) async throws -> OwnersEquity { try StubStatements.ownersEquity(first: first, last: last) }
 	func taxSummary(year: Int32) async throws -> TaxSummary { try StubTax.summary(year: year) }

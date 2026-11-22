@@ -32,25 +32,54 @@ public struct WrappedCard: Identifiable, Hashable, Sendable {
 		}
 	}
 
+	/// One month of the biggest-month card's chart, FC-8's monthly series.
+	public struct Bar: Identifiable, Hashable, Sendable {
+		public let id: String
+		/// "M" for March.
+		public let letter: String
+		/// The core's share of total out in tenths of a percent, negative for
+		/// a refund month. Bars are drawn against the tallest on the card.
+		public let share: Int64
+		public let isBiggest: Bool
+		/// The biggest month's amount over its bar; `nil` everywhere else and
+		/// with amounts hidden.
+		public let value: String?
+		/// What VoiceOver reads for the bar.
+		public let spoken: String
+
+		public init(id: String, letter: String, share: Int64, isBiggest: Bool, value: String?, spoken: String) {
+			self.id = id
+			self.letter = letter
+			self.share = share
+			self.isBiggest = isBiggest
+			self.value = value
+			self.spoken = spoken
+		}
+	}
+
 	public let kind: Kind
 	public let title: String
 	public let figure: String?
 	public let detail: String?
 	public let rows: [Row]
+	public let bars: [Bar]
 
-	public init(kind: Kind, title: String, figure: String? = nil, detail: String? = nil, rows: [Row] = []) {
+	public init(kind: Kind, title: String, figure: String? = nil, detail: String? = nil, rows: [Row] = [], bars: [Bar] = []) {
 		self.kind = kind
 		self.title = title
 		self.figure = figure
 		self.detail = detail
 		self.rows = rows
+		self.bars = bars
 	}
 
 	public var id: String { kind.rawValue }
 
 	/// Every piece of text on the card, in reading order.
 	public var text: [String] {
-		[title, figure, detail].compactMap { $0 } + rows.flatMap { [$0.label, $0.value, $0.note].compactMap { $0 } }
+		[title, figure, detail].compactMap { $0 }
+			+ rows.flatMap { [$0.label, $0.value, $0.note].compactMap { $0 } }
+			+ bars.flatMap { [$0.letter, $0.value, $0.spoken].compactMap { $0 } }
 	}
 }
 
@@ -186,8 +215,28 @@ public struct WrappedStory: Sendable {
 			kind: .biggestMonth,
 			title: "\(WrappedWords.monthName(month.month)) was your biggest month for spending.",
 			figure: redacted ? share(report.shares.biggestMonth) : money(month.total),
-			detail: detail
+			detail: detail,
+			bars: bars(biggest: month, redacted)
 		)
+	}
+
+	/// FC-8's months, drawn by the core's shares; none when total out is 0 or less.
+	private func bars(biggest: WrappedMonth, _ redacted: Bool) -> [WrappedCard.Bar] {
+		report.months.compactMap { month in
+			guard let share = month.share else { return nil }
+			let name = WrappedWords.monthName(month.month)
+			let isBiggest = month.month == biggest.month
+			return WrappedCard.Bar(
+				id: "\(month.month.year)-\(month.month.month)",
+				letter: month.month.date()?.formatted(.dateTime.month(.narrow)) ?? "",
+				share: share,
+				isBiggest: isBiggest,
+				value: isBiggest && !redacted ? format.wholeCurrency(month.total, on: .register) : nil,
+				spoken: redacted
+					? "\(name), \(WrappedWords.percent(share, format: format)) of total out"
+					: "\(name), \(money(month.total))"
+			)
+		}
 	}
 
 	private func debtAndSavings(_ redacted: Bool) -> WrappedCard? {

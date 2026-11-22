@@ -54,6 +54,10 @@ struct WrappedCardView: View {
 					.accessibilityIdentifier("wrapped.detail")
 			}
 			Spacer(minLength: Spacing.s4)
+			if !card.bars.isEmpty {
+				WrappedBars(bars: card.bars, colors: colors)
+					.frame(height: 190)
+			}
 			VStack(alignment: .leading, spacing: Spacing.s3) {
 				ForEach(card.rows) { row in
 					VStack(alignment: .leading, spacing: 2) {
@@ -95,14 +99,73 @@ struct WrappedColors {
 	let card: Color
 	let ink: Color
 	let page: Color
+	/// The biggest month's bar.
+	let highlight: Color
 
-	static let window = WrappedColors(card: .accentFill, ink: .textOnAccent, page: .surfaceWindow)
+	static let window = WrappedColors(card: .accentFill, ink: .textOnAccent, page: .surfaceWindow, highlight: .moneyAvailableFill)
 
 	static let image = WrappedColors(
 		card: Color(rgba: ColorToken.accentFill.light),
 		ink: Color(rgba: ColorToken.textOnAccent.light),
-		page: Color(rgba: ColorToken.surfaceWindow.light)
+		page: Color(rgba: ColorToken.surfaceWindow.light),
+		highlight: Color(rgba: ColorToken.moneyAvailableFill.light)
 	)
+}
+
+/// The biggest-month card's chart (design/mockups/wrapped.html): twelve
+/// slots from January, each bar as tall as the core's share against the
+/// tallest on the card, and a refund month below the line.
+private struct WrappedBars: View {
+	static let slots = 12
+	static let gap: CGFloat = 6
+	static let labelHeight: CGFloat = 20
+	static let valueHeight: CGFloat = 20
+
+	let bars: [WrappedCard.Bar]
+	let colors: WrappedColors
+
+	var body: some View {
+		GeometryReader { proxy in
+			let width = (proxy.size.width - Self.gap * CGFloat(Self.slots - 1)) / CGFloat(Self.slots)
+			let up = CGFloat(bars.map(\.share).max().map { max($0, 0) } ?? 0)
+			let down = CGFloat(bars.map(\.share).min().map { max(-$0, 0) } ?? 0)
+			let plot = proxy.size.height - Self.labelHeight - Self.valueHeight
+			let scale = up + down > 0 ? plot / (up + down) : 0
+			let axis = Self.valueHeight + up * scale
+			ZStack(alignment: .topLeading) {
+				ForEach(Array(bars.enumerated()), id: \.element.id) { index, bar in
+					let x = CGFloat(index) * (width + Self.gap)
+					let height = max(CGFloat(abs(bar.share)) * scale, bar.share == 0 ? 0 : 2)
+					let top = bar.share >= 0 ? axis - height : axis
+					RoundedRectangle(cornerRadius: 4)
+						.fill(bar.isBiggest ? colors.highlight : colors.ink.opacity(0.4))
+						.overlay {
+							if bar.isBiggest {
+								RoundedRectangle(cornerRadius: 4).strokeBorder(colors.ink, lineWidth: 2)
+							}
+						}
+						.frame(width: width, height: height)
+						.offset(x: x, y: top)
+					if let value = bar.value {
+						Text(value)
+							.font(.system(size: 12, weight: .bold, design: .rounded))
+							.monospacedDigit()
+							.fixedSize()
+							.frame(width: width)
+							.offset(x: x, y: top - Self.valueHeight + 2)
+					}
+					Text(bar.letter)
+						.font(.text(.caption, weight: bar.isBiggest ? .bold : .regular))
+						.opacity(bar.isBiggest ? 1 : 0.75)
+						.frame(width: width)
+						.offset(x: x, y: proxy.size.height - Self.labelHeight + 4)
+				}
+			}
+		}
+		.accessibilityElement(children: .ignore)
+		.accessibilityLabel(bars.map(\.spoken).joined(separator: "; "))
+		.accessibilityIdentifier("wrapped.bars")
+	}
 }
 
 private extension Color {

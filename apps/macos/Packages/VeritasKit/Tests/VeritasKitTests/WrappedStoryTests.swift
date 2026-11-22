@@ -40,6 +40,12 @@ struct WrappedStoryTests {
 				.biggestMonthVsTypical(month: Month(year: 2027, month: 3), basisPoints: 5_600),
 				.topCategoryShare(categoryId: "groceries", tenths: 374),
 				.noSpendShare(days: 5, evaluatedDays: 16, tenths: 313)
+			],
+			months: [
+				WrappedSpendingMonth(month: Month(year: 2027, month: 1), total: 20_000, share: 174),
+				WrappedSpendingMonth(month: Month(year: 2027, month: 2), total: -5_000, share: -43),
+				WrappedSpendingMonth(month: Month(year: 2027, month: 3), total: 30_000, share: 261),
+				WrappedSpendingMonth(month: Month(year: 2027, month: 4), total: 0, share: 0)
 			]
 		)
 	}
@@ -110,6 +116,28 @@ struct WrappedStoryTests {
 		#expect(cards[.netWorth]?.title == "Net worth went up.")
 		#expect(cards[.netWorth]?.figure == "+$3,983.00")
 		#expect(cards[.netWorth]?.rows.map(\.label) == ["Start of 2027", "End of 2027"])
+	}
+
+	@Test func theBiggestMonthDrawsTheCoresMonthsByShare() {
+		// v18, FC-8: one bar per month the core sends, by its share; a refund
+		// month stays negative, and only the biggest month carries its amount.
+		let shown = Self.story().cards(redacted: false).first { $0.kind == .biggestMonth }
+		let bars = shown?.bars ?? []
+		#expect(bars.map(\.share) == [174, -43, 261, 0])
+		#expect(bars.map(\.letter) == ["J", "F", "M", "A"])
+		#expect(bars.map(\.isBiggest) == [false, false, true, false])
+		#expect(bars.map(\.value) == [nil, nil, "$300", nil])
+		#expect(bars.map(\.spoken) == ["January, $200.00", "February, \u{2212}$50.00", "March, $300.00", "April, $0.00"])
+
+		let hidden = Self.story().cards(redacted: true).first { $0.kind == .biggestMonth }
+		#expect(hidden?.bars.map(\.share) == [174, -43, 261, 0], "the same bars with amounts hidden")
+		#expect(hidden?.bars.allSatisfy { $0.value == nil } == true, "bars only, no figures")
+		#expect(hidden?.bars.first?.spoken == "January, 17.4% of total out")
+		#expect(hidden?.bars[1].spoken == "February, \u{2212}4.3% of total out")
+
+		var noOut = Self.report()
+		noOut.months = noOut.months.map { WrappedSpendingMonth(month: $0.month, total: $0.total, share: nil) }
+		#expect(Self.story(noOut).cards(redacted: true).first { $0.kind == .biggestMonth }?.bars.isEmpty == true, "no share, no bars")
 	}
 
 	@Test func countsAndDatesReadTheSameEitherWay() {

@@ -43,6 +43,33 @@ struct RealCoreWrappedTests {
 		}
 	}
 
+	@Test func thePickerListsTheCoresYearsAndEachDrawsItsMonths() async throws {
+		// v18: wrappedYears is the picker, and the biggest-month card draws
+		// FC-8's monthly series by the core's shares.
+		try await RealBudget.with { budget in
+			let model = WrappedModel(workspace: budget.workspace, today: Self.today)
+			await model.load()
+			let listed = try #require(await budget.workspace.report { try await $0.wrappedYears(today: Self.today) })
+			#expect(model.years == listed)
+			#expect(listed == listed.sorted(by: >), "newest first")
+			#expect(!listed.contains(2024), "the fixture starts in August 2025")
+			for year in model.years {
+				await model.choose(year)
+				let report = try #require(model.report)
+				#expect(report.hasData, "a listed year never reads No data: \(year)")
+				#expect(report.months.last?.month == (year == 2026 ? Month(year: 2026, month: 11) : Month(year: year, month: 12)))
+				let card = try #require(model.cards(redacted: false).first { $0.kind == .biggestMonth }, "\(year)")
+				let drawn = report.months.filter { $0.share != nil }
+				#expect(card.bars.map(\.share) == drawn.compactMap(\.share))
+				#expect(card.bars.filter(\.isBiggest).count == 1)
+				#expect(card.bars.first(where: \.isBiggest)?.value == model.format.wholeCurrency(report.biggestMonth?.total ?? 0, on: .register))
+				let hidden = try #require(model.cards(redacted: true).first { $0.kind == .biggestMonth })
+				#expect(hidden.bars.map(\.share) == card.bars.map(\.share))
+				#expect(hidden.bars.allSatisfy { $0.value == nil })
+			}
+		}
+	}
+
 	@Test func aYearBeforeTheDataSaysSo() async throws {
 		try await RealBudget.with { budget in
 			let model = WrappedModel(workspace: budget.workspace, today: Self.today)
