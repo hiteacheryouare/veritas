@@ -28,6 +28,7 @@ struct ScreenState: View {
 						isLoadingShown = true
 					}
 					.accessibilityLabel("Loading")
+					.accessibilityHidden(!isLoadingShown)
 			case .empty(let title, let message):
 				Text(title)
 					.font(.text(.heading, weight: .semibold))

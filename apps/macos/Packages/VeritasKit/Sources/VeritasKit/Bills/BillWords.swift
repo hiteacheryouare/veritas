@@ -10,6 +10,34 @@ public enum BillWords {
 		}
 	}
 
+	/// A bill's whole schedule in one phrase, for a rule's date condition:
+	/// "31st of month, from Jan 31, 2026, 24 times, a weekend date moves to the Friday before".
+	public static func sentence(_ date: BillDate) -> String {
+		switch date {
+		case .once(let date):
+			return "once, \(long(date))"
+		case .repeat(let rule):
+			let schedule = repeating(rule)
+			var parts = ["\(schedule.prefix(1).lowercased())\(schedule.dropFirst())", "from \(long(rule.start))"]
+			switch rule.end {
+			case .never: break
+			case .afterOccurrences(let count): parts.append(count == 1 ? "once" : "\(count) times")
+			case .onDate(let date): parts.append("until \(long(date))")
+			}
+			switch rule.weekend {
+			case .fridayBefore: parts.append("a weekend date moves to the Friday before")
+			case .mondayAfter: parts.append("a weekend date moves to the Monday after")
+			case nil: break
+			}
+			return parts.joined(separator: ", ")
+		}
+	}
+
+	/// "Jan 31, 2026".
+	static func long(_ date: String) -> String {
+		CivilDate.date(date)?.formatted(.dateTime.month(.abbreviated).day().year()) ?? date
+	}
+
 	/// "Nov 12" for `2026-11-12`, and "Feb 29, 2028" for a date in a later
 	/// year or more than twelve months away, so a far date never reads as a near one.
 	public static func day(_ date: String) -> String {
