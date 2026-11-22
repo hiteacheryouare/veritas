@@ -212,11 +212,13 @@ struct DashboardCompactionTests {
 		#expect(sheet.rows == ["a": 0, "b": 0, "worth": 2, "month": 4, "avg": 4])
 	}
 
-	@Test func aCardOnlyRisesAsFarAsTheCardAboveItsColumns() {
+	@Test func aCardMovedDownARowStillMoves() {
+		// Ryan's UI run: Move ▸ Down on Net worth must move it while Cash flow holds the row.
 		let sheet = DashboardSheet(id: "p", name: "Main", cards: [
-			card("tall", x: 0, y: 0, width: 4, height: 4), card("short", x: 4, y: 0, width: 4, height: 1),
-			card("under", x: 2, y: 5, width: 4, height: 2)
+			card("a", x: 0, y: 0, width: 6, height: 2), card("flow", x: 6, y: 2, width: 6, height: 2),
+			card("worth", x: 0, y: 3, width: 6, height: 2)
 		])
-		#expect(sheet.rows["under"] == 4, "it overlaps the tall card's columns")
+		#expect(sheet.rows["worth"] == 3)
+		#expect(sheet.rows["flow"] == 2)
 	}
 }

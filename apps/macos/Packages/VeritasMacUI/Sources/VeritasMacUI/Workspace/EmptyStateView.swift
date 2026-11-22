@@ -1,7 +1,7 @@
 import SwiftUI
 import VeritasDesign
 
-/// First launch, or after Close Budget: two equal ways in (D53).
+/// First launch, or after Close Budget: two equal ways in (D53), so neither is the default button.
 struct EmptyStateView: View {
 	let isWorking: Bool
 	let newBudget: () -> Void
@@ -18,8 +18,7 @@ struct EmptyStateView: View {
 				.multilineTextAlignment(.center)
 			HStack(spacing: Spacing.s3) {
 				Button("New budget…", action: newBudget)
-					.buttonStyle(.borderedProminent)
-					.keyboardShortcut(.defaultAction)
+					.buttonStyle(.bordered)
 					.accessibilityIdentifier("newBudget")
 				Button("Import from Actual…", action: importActualZip)
 					.buttonStyle(.bordered)
