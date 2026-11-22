@@ -211,10 +211,66 @@ mod tests {
 		);
 	}
 
+	/// R-REL-3: a prune never loses the newest snapshot of a kept period or a
+	/// recent pre-operation snapshot, never keeps more than the limits allow,
+	/// and a second prune deletes nothing more.
+	fn prunes_within_its_contract(
+		taken: &[(i64, SnapshotReason)],
+		policy: &RetentionPolicy,
+		now: i64,
+	) -> Result<(), TestCaseError> {
+		let snapshots: Vec<Snapshot> = taken
+			.iter()
+			.enumerate()
+			.map(|(index, &(millis, reason))| snapshot(index, millis, reason))
+			.collect();
+		let now = Utc.timestamp_millis_opt(now).unwrap();
+		let gone = expired(&snapshots, policy, now);
+		let gone_paths: BTreeSet<&Path> = gone.iter().map(|s| s.path.as_path()).collect();
+		let kept: Vec<Snapshot> = snapshots
+			.iter()
+			.filter(|s| !gone_paths.contains(s.path.as_path()))
+			.cloned()
+			.collect();
+
+		prop_assert_eq!(gone_paths.len(), gone.len());
+		prop_assert_eq!(kept.len() + gone.len(), snapshots.len());
+
+		if let Some(newest) = newest_per_period(&snapshots, Tier::Hour, 1).first() {
+			prop_assert!(!gone_paths.contains(newest.path.as_path()));
+		}
+		let tiers = [
+			(Tier::Hour, policy.hourly),
+			(Tier::Day, policy.daily),
+			(Tier::Month, policy.monthly),
+		];
+		for (tier, limit) in tiers {
+			for newest in newest_per_period(&snapshots, tier, limit) {
+				prop_assert!(!gone_paths.contains(newest.path.as_path()));
+			}
+		}
+
+		let window = TimeDelta::days(policy.operation_days);
+		let recent_operations: Vec<&Snapshot> = snapshots
+			.iter()
+			.filter(|s| !s.reason.is_routine() && now - s.taken_at < window)
+			.collect();
+		for snapshot in &recent_operations {
+			prop_assert!(!gone_paths.contains(snapshot.path.as_path()));
+		}
+
+		// `expired` keeps the newest snapshot, every recent pre-operation
+		// snapshot, and the newest of up to each tier's limit of periods.
+		// Where those overlap it keeps fewer, never more.
+		let allowed = (1 + policy.hourly + policy.daily + policy.monthly + recent_operations.len())
+			.min(snapshots.len());
+		prop_assert!(kept.len() <= allowed);
+
+		prop_assert!(expired(&kept, policy, now).is_empty());
+		Ok(())
+	}
+
 	proptest! {
-		// R-REL-3: random snapshot histories never lose the newest snapshot of
-		// a kept period or a recent pre-operation snapshot, never keep more
-		// than the limits allow, and a second prune deletes nothing more.
 		#[test]
 		fn pruning_never_loses_the_newest_of_any_tier(
 			taken in prop::collection::vec(
@@ -227,47 +283,25 @@ mod tests {
 			operation_days in 0i64..60,
 			now in 1_700_000_000_000i64..1_850_000_000_000,
 		) {
-			let snapshots: Vec<Snapshot> = taken
-				.iter()
-				.enumerate()
-				.map(|(index, &(millis, reason))| snapshot(index, millis, reason))
-				.collect();
-			let now = Utc.timestamp_millis_opt(now).unwrap();
 			let policy = RetentionPolicy { hourly, daily, monthly, operation_days };
-			let gone = expired(&snapshots, &policy, now);
-			let gone_paths: BTreeSet<&Path> = gone.iter().map(|s| s.path.as_path()).collect();
-			let kept: Vec<Snapshot> = snapshots
-				.iter()
-				.filter(|s| !gone_paths.contains(s.path.as_path()))
-				.cloned()
-				.collect();
-
-			prop_assert_eq!(gone_paths.len(), gone.len());
-			prop_assert_eq!(kept.len() + gone.len(), snapshots.len());
-
-			if let Some(newest) = newest_per_period(&snapshots, Tier::Hour, 1).first() {
-				prop_assert!(!gone_paths.contains(newest.path.as_path()));
-			}
-			for (tier, limit) in [(Tier::Hour, hourly), (Tier::Day, daily), (Tier::Month, monthly)] {
-				for newest in newest_per_period(&snapshots, tier, limit) {
-					prop_assert!(!gone_paths.contains(newest.path.as_path()));
-				}
-			}
-
-			let recent_operations: Vec<&Snapshot> = snapshots
-				.iter()
-				.filter(|s| !s.reason.is_routine() && now - s.taken_at < TimeDelta::days(operation_days))
-				.collect();
-			for snapshot in &recent_operations {
-				prop_assert!(!gone_paths.contains(snapshot.path.as_path()));
-			}
-
-			let allowed = (hourly + daily + monthly + recent_operations.len())
-				.max(1)
-				.min(snapshots.len());
-			prop_assert!(kept.len() <= allowed);
-
-			prop_assert!(expired(&kept, &policy, now).is_empty());
+			prunes_within_its_contract(&taken, &policy, now)?;
 		}
+	}
+
+	#[test]
+	fn with_every_tier_at_zero_the_newest_and_a_recent_import_are_both_kept() {
+		// The case the property test found when its bound left out the newest
+		// snapshot, which is kept on top of the recent pre-operation ones.
+		let taken = [
+			(1_767_553_226_335, SnapshotReason::Open),
+			(1_734_228_614_172, SnapshotReason::Import),
+		];
+		let policy = RetentionPolicy {
+			hourly: 0,
+			daily: 0,
+			monthly: 0,
+			operation_days: 19,
+		};
+		prunes_within_its_contract(&taken, &policy, 1_700_000_000_000).unwrap();
 	}
 }

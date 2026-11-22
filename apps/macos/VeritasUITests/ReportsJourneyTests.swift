@@ -71,7 +71,10 @@ final class ReportsJourneyTests: XCTestCase {
 		worth.rightClick()
 		app.menuItems["Move"].hover()
 		app.menuItems["Down"].click()
-		XCTAssertTrue(waitUntil { worth.frame.minY > before.minY })
+		let moved = waitUntil { worth.frame.minY > before.minY }
+		if !moved { attachScreenshot(of: app, named: "dashboard-move-failed") }
+		let detail = app.descendants(matching: .any)["screen.cardDetail"].exists
+		XCTAssertTrue(moved, "widget.worth \(worth.exists ? "stayed at \(worth.frame), from \(before)" : "is gone"); card detail \(detail ? "open" : "closed")")
 		app.descendants(matching: .any)["dashboard.edit"].click()
 		attachScreenshot(of: app, named: "dashboard-editing")
 	}

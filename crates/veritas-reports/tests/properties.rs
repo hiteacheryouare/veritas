@@ -16,8 +16,8 @@ use veritas_domain::{
 };
 use veritas_reports::{
 	Bucket, Classification, Leg, NetProfit, NodeKind, Period, Sankey, Section, balance_sheet,
-	cash_flow, cash_flow_by_month, extract_tags, net_profit, net_worth_by_month, owners_equity,
-	sankey, tax_summary,
+	cash_flow, cash_flow_by_month, classify_on, extract_tags, net_profit, net_worth_by_month,
+	owners_equity, sankey, tax_summary,
 };
 
 // Index ACCOUNTS names an account that is never created, so rows there are
@@ -554,6 +554,21 @@ proptest! {
 			if row.adjustment_source().is_some() {
 				prop_assert_eq!(row.kind(), TransactionKind::Adjustment);
 			}
+		}
+	}
+
+	/// Large budgets classify on several threads. Splitting the rows must
+	/// not change a single one, including a transfer whose two legs land in
+	/// different chunks.
+	#[test]
+	fn classifying_on_several_threads_matches_one(scenario in scenario(), threads in 2usize..6) {
+		let book = build(&scenario);
+		let one = classify_on(&book.budget, 1);
+		let several = classify_on(&book.budget, threads);
+		prop_assert_eq!(one.rows(), several.rows());
+		prop_assert_eq!(one.orphans(), several.orphans());
+		for row in one.rows() {
+			prop_assert_eq!(one.get(&row.id), several.get(&row.id));
 		}
 	}
 

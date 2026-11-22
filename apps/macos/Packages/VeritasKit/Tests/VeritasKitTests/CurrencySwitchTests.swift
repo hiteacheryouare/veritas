@@ -19,6 +19,7 @@ struct CurrencySwitchTests {
 			// The Budget screen keeps its model in @State, so one made before
 			// the switch must not keep the old budget's places.
 			let screen = BudgetScreenModel(workspace: workspace)
+			let goals = GoalsScreenModel(workspace: workspace)
 
 			let placesWhenShown = Self.placesWhenOpen(workspace, named: Self.yen.name)
 			await workspace.createBudget(Self.yen)
@@ -34,7 +35,8 @@ struct CurrencySwitchTests {
 			#expect(try await budget.monthFromDisk(screen.month).row(envelope.id).budgeted == 5_000)
 			#expect(workspace.format.currency(budgeted, on: .budget) == "¥5,000")
 			#expect(screen.sheet?.mixedScaleNote != nil, "CLS-12.10's line shows in a 0-place budget")
-			#expect(workspace.mixedScaleNote != nil, "and on its goals")
+			await goals.load()
+			#expect(goals.mixedScaleNote == screen.sheet?.mixedScaleNote, "and on its goals, from the core")
 
 			screen.beginEditing(envelope.id)
 			#expect(screen.editing?.text == "5,000", "the field opens on the row's own figure")
@@ -42,7 +44,8 @@ struct CurrencySwitchTests {
 
 			await workspace.reopen(directory: dollars)
 			#expect(workspace.budgetDecimalPlaces == 2)
-			#expect(workspace.mixedScaleNote == nil)
+			await goals.load()
+			#expect(goals.mixedScaleNote == nil)
 			let back = BudgetScreenModel(workspace: workspace, month: AllFeatures.october)
 			await back.load()
 			#expect(back.sheet?.mixedScaleNote == nil)

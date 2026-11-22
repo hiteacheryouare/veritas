@@ -1,55 +1,27 @@
 import Foundation
 import VeritasCore
 
-// TEMPORARY. Contract v13's `ruleChoices()` now hands these menus over; the
-// copy below, named apart from the core's `RuleChoices`, goes once the
-// editor reads the core's lists instead.
-// Adapted from Actual (MIT): RuleEditor.tsx, loot-core/src/shared/rules.ts and desktop-client/src/util/rule.ts.
-
-/// What the sentence editor's menus offer, copied from Actual's rule editor:
-/// `FIELD_INFO` and `TYPE_INFO` in loot-core/src/shared/rules.ts, and
-/// `conditionFields`, `getActionFields` and `getSplitActionFields` in
-/// RuleEditor.tsx. The core still decides whether a draft is valid.
+/// What the sentence editor's menus offer, from the core's `ruleChoices()`,
+/// which ports Actual's rule editor tables. The core still decides whether a
+/// draft is valid.
 public enum RuleMenus {
-	public static let conditionFields: [RuleField] = [
-		.importedPayee, .account, .category, .categoryGroup, .date, .payee, .notes, .amount, .amountInflow, .amountOutflow, .cleared
-	]
+	static let choices: RuleChoices? = try? ruleChoices()
 
-	/// Actual's `getValidOps`, with inflow and outflow losing `isBetween` as its editor does.
+	public static var conditionFields: [RuleField] {
+		choices?.conditionFields.map(\.field) ?? []
+	}
+
 	public static func ops(for field: RuleField) -> [RuleConditionOp] {
-		let text: [RuleConditionOp] = [.is, .contains, .matches, .oneOf, .isNot, .doesNotContain, .notOneOf]
-		let number: [RuleConditionOp] = [.is, .isApprox, .isBetween, .gt, .gte, .lt, .lte]
-		switch field {
-		case .importedPayee, .payeeName, .payee, .category, .categoryGroup: return text
-		case .account: return text + [.onBudget, .offBudget]
-		case .notes: return [.is, .contains, .matches, .isNot, .doesNotContain, .hasTags, .hasAnyTag]
-		case .date: return [.is, .isApprox, .gt, .gte, .lt, .lte]
-		case .amount: return number
-		case .amountInflow, .amountOutflow: return number.filter { $0 != .isBetween }
-		case .cleared, .reconciled, .transfer, .parent, .saved: return [.is]
-		}
+		opChoices(field).map(\.op)
 	}
 
-	/// An empty value of the kind the contract asks for with this field and op.
+	private static func opChoices(_ field: RuleField) -> [RuleOpChoice] {
+		choices?.conditionFields.first { $0.field == field }?.ops ?? []
+	}
+
+	/// An empty value of the kind the core gives this field and op.
 	public static func blank(_ field: RuleField, _ op: RuleConditionOp, today: String) -> RuleValue {
-		switch op {
-		case .onBudget, .offBudget, .and: return .nothing
-		case .contains, .doesNotContain, .matches, .hasTags, .hasAnyTag: return .text(text: "")
-		case .oneOf, .notOneOf: return holdsIds(field) ? .ids(ids: []) : .texts(texts: [])
-		case .isBetween: return .amountRange(num1: 0, num2: 0)
-		case .is, .isNot, .isApprox, .gt, .gte, .lt, .lte:
-			switch field {
-			case .payee, .account, .category, .categoryGroup, .saved: return .id(id: nil)
-			case .amount, .amountInflow, .amountOutflow: return .amount(amount: 0)
-			case .date: return .date(date: today)
-			case .cleared, .reconciled, .transfer, .parent: return .bool(value: true)
-			case .importedPayee, .payeeName, .notes: return .text(text: "")
-			}
-		}
-	}
-
-	public static func holdsIds(_ field: RuleField) -> Bool {
-		[.payee, .account, .category, .categoryGroup].contains(field)
+		FilterChoices.blank(opChoices(field).first { $0.op == op }?.value, today: today)
 	}
 
 	/// One choice in an action's menu: `set` names its field.
@@ -60,44 +32,59 @@ public enum RuleMenus {
 		case deleteTransaction
 
 		public init?(_ action: RuleAction) {
-			switch action.op {
-			case .set:
+			if action.op == .set {
 				guard let field = action.field else { return nil }
 				self = .set(field)
+			} else {
+				self.init(op: action.op)
+			}
+		}
+
+		init?(op: RuleActionOp) {
+			switch op {
 			case .prependNotes: self = .prependNotes
 			case .appendNotes: self = .appendNotes
 			case .deleteTransaction: self = .deleteTransaction
-			case .setSplitAmount, .linkSchedule: return nil
+			case .set, .setSplitAmount, .linkSchedule: return nil
+			}
+		}
+
+		var op: RuleActionOp {
+			switch self {
+			case .set: .set
+			case .prependNotes: .prependNotes
+			case .appendNotes: .appendNotes
+			case .deleteTransaction: .deleteTransaction
 			}
 		}
 	}
 
-	public static let actions: [ActionKind] = [
-		.set(.category), .set(.payee), .set(.notes), .set(.cleared), .set(.account), .set(.date), .set(.amount),
-		.prependNotes, .appendNotes, .deleteTransaction
-	]
+	/// The transaction's own actions: `set` on each of its fields, then the other ops, in the core's order.
+	public static var actions: [ActionKind] {
+		guard let choices else { return [] }
+		return choices.actionOps.flatMap { choice -> [ActionKind] in
+			choice.op == .set ? choices.actionFields.map { .set($0.field) } : ActionKind(op: choice.op).map { [$0] } ?? []
+		}
+	}
 
-	public static let splitLineActions: [ActionKind] = [.set(.category), .set(.payee), .set(.notes)]
+	public static var splitLineActions: [ActionKind] {
+		choices?.splitLineFields.map { .set($0.field) } ?? []
+	}
 
 	public static func blank(_ kind: ActionKind, line: UInt32, today: String) -> RuleAction {
 		switch kind {
 		case .set(let field):
-			let value: RuleValue = switch field {
-			case .payee, .account, .category, .categoryGroup, .saved: .id(id: nil)
-			case .amount, .amountInflow, .amountOutflow: .amount(amount: 0)
-			case .date: .date(date: today)
-			case .cleared, .reconciled, .transfer, .parent: .bool(value: true)
-			case .importedPayee, .payeeName, .notes: .text(text: "")
-			}
+			let fields = line == 0 ? choices?.actionFields : choices?.splitLineFields
+			let value = FilterChoices.blank(fields?.first { $0.field == field }?.value, today: today)
 			return RuleAction(op: .set, field: field, value: value, splitIndex: line)
-		case .prependNotes: return RuleAction(op: .prependNotes, field: nil, value: .text(text: ""), splitIndex: line)
-		case .appendNotes: return RuleAction(op: .appendNotes, field: nil, value: .text(text: ""), splitIndex: line)
-		case .deleteTransaction: return RuleAction(op: .deleteTransaction, field: nil, value: .nothing, splitIndex: line)
+		default:
+			let value = FilterChoices.blank(choices?.actionOps.first { $0.op == kind.op }?.value, today: today)
+			return RuleAction(op: kind.op, field: nil, value: value, splitIndex: line)
 		}
 	}
 
-	/// How a split line takes its share, as Actual's allocation menu lists them.
-	public enum Allocation: CaseIterable, Hashable, Sendable {
+	/// How a split line takes its share.
+	public enum Allocation: Hashable, Sendable {
 		case fixedAmount
 		case percent
 		case remainder
@@ -110,6 +97,15 @@ public enum RuleMenus {
 			}
 		}
 
+		init?(_ kind: RuleValueKind) {
+			switch kind {
+			case .amount: self = .fixedAmount
+			case .percent: self = .percent
+			case .nothing: self = .remainder
+			default: return nil
+			}
+		}
+
 		public var blank: RuleValue {
 			switch self {
 			case .fixedAmount: .amount(amount: 0)
@@ -117,6 +113,11 @@ public enum RuleMenus {
 			case .remainder: .nothing
 			}
 		}
+	}
+
+	/// The allocation menu, in the core's order.
+	public static var allocations: [Allocation] {
+		choices?.splitAmounts.compactMap(Allocation.init) ?? []
 	}
 }
 
@@ -144,7 +145,7 @@ public extension RuleEditing {
 	}
 
 	mutating func setField(_ field: RuleField, ofCondition index: Int, today: String) {
-		guard draft.conditions.indices.contains(index) else { return }
+		guard draft.conditions.indices.contains(index), draft.conditions[index].field != field else { return }
 		let ops = RuleMenus.ops(for: field)
 		let current = draft.conditions[index].op
 		let op = ops.contains(current) ? current : ops.first ?? .is
@@ -153,7 +154,7 @@ public extension RuleEditing {
 
 	/// A new op keeps the value when it takes the same kind of value.
 	mutating func setOp(_ op: RuleConditionOp, ofCondition index: Int, today: String) {
-		guard draft.conditions.indices.contains(index) else { return }
+		guard draft.conditions.indices.contains(index), draft.conditions[index].op != op else { return }
 		let condition = draft.conditions[index]
 		let blank = RuleMenus.blank(condition.field, op, today: today)
 		draft.conditions[index].op = op

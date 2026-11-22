@@ -56,7 +56,9 @@ struct CurrencyEdgeTests {
 			let format = budget.workspace.format
 			#expect(format.currencySymbol == "")
 			#expect(budget.workspace.budgetDecimalPlaces == 2)
-			#expect(budget.workspace.mixedScaleNote == nil)
+			let goals = GoalsScreenModel(workspace: budget.workspace)
+			await goals.load()
+			#expect(goals.mixedScaleNote == nil)
 			let screen = BudgetScreenModel(workspace: budget.workspace, month: F.october)
 			await screen.load()
 			#expect(format.currency(try #require(screen.sheet).toBudget, on: .budget) == "45,052.29")
@@ -78,7 +80,9 @@ struct CurrencyEdgeTests {
 			#expect(!format.symbolFirst)
 			#expect(format.symbolSpace)
 			#expect(format.decimalPlaces == 0)
-			#expect(workspace.mixedScaleNote != nil)
+			let goals = GoalsScreenModel(workspace: workspace)
+			await goals.load()
+			#expect(goals.mixedScaleNote != nil, "the core's CLS-12.10 line comes with the goals")
 
 			let screen = BudgetScreenModel(workspace: workspace)
 			await screen.load()
@@ -93,7 +97,6 @@ struct CurrencyEdgeTests {
 			#expect(format.currency(-budgeted, on: .budget) == "\u{2212}250,000\u{202F}\u{FDFC}")
 			#expect(format.currency(148_050, on: .register) == "1,481\u{202F}\u{FDFC}", "a register amount is a hundredth, rounded")
 
-			let goals = GoalsScreenModel(workspace: workspace)
 			let target = AmountFieldModel(amount: 0, style: goals.numberStyle, reader: goals.reader)
 			target.type("1500000")
 			let amount = try #require(await target.commit())

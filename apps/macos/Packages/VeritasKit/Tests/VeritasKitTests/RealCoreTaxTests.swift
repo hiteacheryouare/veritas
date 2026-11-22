@@ -55,6 +55,28 @@ struct RealCoreTaxTests {
 		}
 	}
 
+	@Test func aRefundBiggerThanThePurchaseLeavesTheBucketNegativeWithTheNote() async throws {
+		// TAX-4: a +38.00 refund tagged #medical against the 23.00 pharmacy purchase reads -15.00, never clamped.
+		try await RealBudget.with { budget in
+			try await tagged(budget)
+			#expect(await budget.workspace.perform(.addTransaction(transaction: TransactionDraft(
+				id: nil, accountId: AllFeatures.checking, date: "2026-06-15", amount: 3_800, payeeId: nil, payeeName: "Pharmacy",
+				categoryId: AllFeatures.groceries, notes: "Refund #medical", cleared: true, splits: []
+			))))
+			let model = TaxSummaryModel(workspace: budget.workspace, thisYear: 2026)
+			await model.load()
+			let summary = try #require(model.summary)
+			let medical = try #require(model.buckets.first { $0.bucket == .medical })
+			#expect(medical.total == -1_500)
+			#expect(medical.count == 2)
+			#expect(TaxBuckets.note(for: medical) == "Refunds or reversals exceed what was counted.")
+			#expect(summary.summaryCsv.contains(",medical,outflow,-1500,"))
+			for bucket in model.buckets where bucket.bucket != .medical {
+				#expect(TaxBuckets.note(for: bucket) == nil, "\(bucket.bucket)")
+			}
+		}
+	}
+
 	@Test func eachExportWritesTheCoresCsvByteForByte() async throws {
 		try await RealBudget.with { budget in
 			try await tagged(budget)

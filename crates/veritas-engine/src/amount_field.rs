@@ -51,22 +51,26 @@ pub fn edit_text_at(
 	hide_fraction: bool,
 	places: u8,
 ) -> String {
+	let digits = magnitude_text(amount.minor().unsigned_abs(), format, hide_fraction, places);
+	if amount.is_negative() && digits.bytes().any(|b| b.is_ascii_digit() && b != b'0') {
+		format!("-{digits}")
+	} else {
+		digits
+	}
+}
+
+/// The digits of a magnitude, without a sign.
+fn magnitude_text(magnitude: u64, format: NumberFormat, hide_fraction: bool, places: u8) -> String {
 	// No currency has more than 3 places; 10^18 still fits a u64.
 	let places = places.min(18);
 	let scale = 10u64.pow(u32::from(places));
-	let minor = amount.minor();
-	let magnitude = minor.unsigned_abs();
 	let (whole, fraction) = if hide_fraction || places == 0 {
 		// Intl rounds half away from zero.
 		((magnitude + scale / 2) / scale, None)
 	} else {
 		(magnitude / scale, Some(magnitude % scale))
 	};
-	let mut text = String::new();
-	if minor < 0 && (whole > 0 || fraction.is_some_and(|f| f > 0)) {
-		text.push('-');
-	}
-	text.push_str(&group_digits(whole, format));
+	let mut text = group_digits(whole, format);
 	if let Some(fraction) = fraction {
 		text.push(format.decimal_separator());
 		text.push_str(&format!("{fraction:0width$}", width = usize::from(places)));
@@ -89,8 +93,7 @@ pub fn register_currency_text(amount: Money, prefs: &FormatPrefs) -> String {
 /// drops the fraction, rounding half away from zero.
 pub fn currency_text_at(amount: Money, prefs: &FormatPrefs, places: u8, whole: bool) -> String {
 	let format = NumberFormat::from_preference(prefs.number_format.as_deref().unwrap_or(""));
-	let magnitude = Money::from_minor(amount.minor().saturating_abs());
-	let digits = edit_text_at(magnitude, format, whole, places);
+	let digits = magnitude_text(amount.minor().unsigned_abs(), format, whole, places);
 	let shown_zero = digits.chars().all(|c| !c.is_ascii_digit() || c == '0');
 	let sign = if amount.is_negative() && !shown_zero {
 		"\u{2212}"
@@ -231,6 +234,16 @@ mod tests {
 			"no currency, no symbol"
 		);
 		assert_eq!(text(-40, &yen), "¥0", "no minus on a figure shown as zero");
+	}
+
+	#[test]
+	fn copy_shows_the_extreme_amounts_exactly() {
+		let text =
+			|minor| register_currency_text(Money::from_minor(minor), &FormatPrefs::default());
+		assert_eq!(text(i64::MIN), "\u{2212}92,233,720,368,547,758.08");
+		assert_eq!(text(i64::MAX), "92,233,720,368,547,758.07");
+		let edit = |minor| edit_text(Money::from_minor(minor), NumberFormat::CommaDot, false);
+		assert_eq!(edit(i64::MIN), "-92,233,720,368,547,758.08");
 	}
 
 	#[test]

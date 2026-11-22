@@ -65,6 +65,16 @@ struct GoalWordsTests {
 		#expect(fresh.note == "Budget ¥2,143 a month")
 	}
 
+	@Test func aYenGoalWithSpendingSaysSoAndOffersNoFigure() {
+		// D77: outside a 2-place budget, recorded spending leaves no suggestion and no pace figure.
+		let yen = MoneyFormat(currencySymbol: "¥", decimalPlaces: 0)
+		let goal = StubBudget.goal("japan", "Japan trip", target: 600_000, available: 231_000, date: "2027-03-01", state: .active, monthly: nil, pace: .spendingRecorded, zeroPlaces: true)
+		let words = GoalWords(goal, format: yen, thisMonth: november)
+		#expect(words.note == "No ETA: spending recorded")
+		#expect(words.detail == nil)
+		#expect(words.tone == .neutral)
+	}
+
 	@Test func aReachedGoalSpentPastZeroReadsOverAndOneWithMoneyLeftReadsLeft() {
 		let over = GoalWords(StubBudget.goal("tires", "Winter tires", target: 85_000, available: -2_000, date: nil, state: .reachedSpent, spent: 87_000), format: MoneyFormat())
 		#expect(over.note == "Reached → Spent, overspent")

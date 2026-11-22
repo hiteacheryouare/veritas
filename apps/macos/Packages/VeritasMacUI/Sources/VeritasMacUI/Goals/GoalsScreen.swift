@@ -47,7 +47,7 @@ struct GoalsScreen: View {
 						}
 					}
 				}
-				if let note = workspace.mixedScaleNote {
+				if let note = goals.mixedScaleNote {
 					MixedScaleNote(text: note)
 				}
 			}

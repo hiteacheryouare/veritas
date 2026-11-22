@@ -1,8 +1,10 @@
 use std::collections::{BTreeMap, HashMap};
+use std::hash::{BuildHasherDefault, Hasher};
+use std::num::NonZero;
 
 use veritas_domain::{
-	AccountId, BudgetData, CategoryId, CategoryKind, CivilDate, Money, SplitRole, Transaction,
-	TransactionId, TransactionKind,
+	AccountId, BudgetData, CategoryId, CategoryKind, CivilDate, Money, Payee, PayeeId, SplitRole,
+	Transaction, TransactionId, TransactionKind,
 };
 
 use crate::Period;
@@ -239,47 +241,105 @@ impl Classification {
 	}
 }
 
-pub fn classify(budget: &BudgetData) -> Classification {
-	let mut orphans = Vec::new();
-	let mut candidates = Vec::with_capacity(budget.transactions.len());
-	for transaction in budget.transactions.values() {
-		if !is_row(budget, transaction) {
-			continue;
-		}
-		match Candidate::new(budget, transaction) {
-			Some(candidate) => candidates.push(candidate),
-			None => orphans.push(transaction.id.clone()),
-		}
+/// Below this many transactions a classification runs on one thread.
+const PARALLEL_FROM: usize = 8192;
+const MOST_THREADS: usize = 4;
+
+/// `work` over `items` in consecutive chunks, one per thread, with each
+/// chunk's offset into `items`. The results come back in chunk order.
+fn in_chunks<'i, T: Sync, R: Send>(
+	items: &'i [T],
+	threads: usize,
+	work: impl Fn(usize, &'i [T]) -> R + Sync,
+) -> Vec<R> {
+	if threads <= 1 || items.is_empty() {
+		return vec![work(0, items)];
 	}
-	let index: HashMap<&TransactionId, usize> = candidates
-		.iter()
-		.enumerate()
-		.map(|(position, candidate)| (&candidate.transaction.id, position))
-		.collect();
+	let size = items.len().div_ceil(threads);
+	let work = &work;
+	std::thread::scope(|scope| {
+		let running: Vec<_> = items
+			.chunks(size)
+			.enumerate()
+			.map(|(index, chunk)| {
+				let offset = index * size;
+				(offset, chunk, scope.spawn(move || work(offset, chunk)))
+			})
+			.collect();
+		running
+			.into_iter()
+			.map(|(offset, chunk, thread)| thread.join().unwrap_or_else(|_| work(offset, chunk)))
+			.collect()
+	})
+}
+
+pub fn classify(budget: &BudgetData) -> Classification {
+	let threads = if budget.transactions.len() < PARALLEL_FROM {
+		1
+	} else {
+		std::thread::available_parallelism()
+			.map_or(1, NonZero::get)
+			.min(MOST_THREADS)
+	};
+	classify_on(budget, threads)
+}
+
+/// [`classify`] with its row-by-row work split across `threads` threads.
+/// The result is the same for any count.
+pub fn classify_on(budget: &BudgetData, threads: usize) -> Classification {
+	let transactions: Vec<&Transaction> = budget.transactions.values().collect();
+	let mut orphans = Vec::new();
+	let mut candidates = Vec::with_capacity(transactions.len());
+	for (chunk_candidates, chunk_orphans) in in_chunks(&transactions, threads, |_, chunk| {
+		let mut lookups = Lookups::new(budget);
+		let mut candidates = Vec::with_capacity(chunk.len());
+		let mut orphans = Vec::new();
+		for &transaction in chunk {
+			if !is_row(budget, transaction) {
+				continue;
+			}
+			match Candidate::new(budget, &mut lookups, transaction) {
+				Some(candidate) => candidates.push(candidate),
+				None => orphans.push(transaction.id.clone()),
+			}
+		}
+		(candidates, orphans)
+	}) {
+		candidates.extend(chunk_candidates);
+		orphans.extend(chunk_orphans);
+	}
 
 	let mut decided: Vec<Option<ClassifiedRow>> = Vec::with_capacity(candidates.len());
 	let mut mirrors = Vec::new();
-	for (position, candidate) in candidates.iter().enumerate() {
-		let partner = partner(&candidates, &index, candidate);
-		let partner_candidate = partner.and_then(|other| candidates.get(other));
-		let row = ClassifiedRow {
-			partner: partner_candidate.map(|other| Partner {
-				id: other.transaction.id.clone(),
-				date: other.transaction.date,
-			}),
-			..candidate.row()
-		};
-		match decide(budget, candidate, partner_candidate) {
-			Outcome::Decided(decision, flags) => decided.push(Some(ClassifiedRow {
-				decision,
-				flags,
-				..row
-			})),
-			Outcome::Mirror => {
-				decided.push(None);
-				mirrors.push((position, row, partner));
+	for (chunk_decided, chunk_mirrors) in in_chunks(&candidates, threads, |offset, chunk| {
+		let mut decided = Vec::with_capacity(chunk.len());
+		let mut mirrors = Vec::new();
+		for (index, candidate) in chunk.iter().enumerate() {
+			let partner = partner(&candidates, candidate);
+			let partner_candidate = partner.and_then(|other| candidates.get(other));
+			let row = ClassifiedRow {
+				partner: partner_candidate.map(|other| Partner {
+					id: other.transaction.id.clone(),
+					date: other.transaction.date,
+				}),
+				..candidate.row()
+			};
+			match decide(candidate, partner_candidate) {
+				Outcome::Decided(decision, flags) => decided.push(Some(ClassifiedRow {
+					decision,
+					flags,
+					..row
+				})),
+				Outcome::Mirror => {
+					decided.push(None);
+					mirrors.push((offset + index, row, partner));
+				}
 			}
 		}
+		(decided, mirrors)
+	}) {
+		decided.extend(chunk_decided);
+		mirrors.extend(chunk_mirrors);
 	}
 	for (position, row, primary) in mirrors {
 		let primary = primary
@@ -306,16 +366,16 @@ pub fn classify(budget: &BudgetData) -> Classification {
 		}
 	}
 
-	// Rows arrive in id order, so a stable sort by date gives date-then-id.
-	let mut order: Vec<usize> = (0..decided.len()).collect();
-	order.sort_by_key(|&position| {
-		decided
-			.get(position)
-			.and_then(Option::as_ref)
-			.map(|row| row.date)
-	});
+	// Rows arrive in id order, so sorting by date then position gives
+	// date-then-id.
+	let mut order: Vec<(Option<CivilDate>, usize)> = decided
+		.iter()
+		.enumerate()
+		.map(|(position, row)| (row.as_ref().map(|row| row.date), position))
+		.collect();
+	order.sort_unstable();
 	let mut by_id = vec![0; decided.len()];
-	for (sorted, &position) in order.iter().enumerate() {
+	for (sorted, &(_, position)) in order.iter().enumerate() {
 		if let Some(slot) = by_id.get_mut(position) {
 			*slot = sorted;
 		}
@@ -323,12 +383,98 @@ pub fn classify(budget: &BudgetData) -> Classification {
 	let mut slots: Vec<Option<ClassifiedRow>> = decided;
 	let rows = order
 		.iter()
-		.filter_map(|&position| slots.get_mut(position).and_then(Option::take))
+		.filter_map(|&(_, position)| slots.get_mut(position).and_then(Option::take))
 		.collect();
 	Classification {
 		rows,
 		by_id,
 		orphans,
+	}
+}
+
+/// A multiply-rotate hash that takes ids eight bytes at a time. The maps
+/// below are keyed by ids from the budget itself, and std's SipHash costs
+/// more than the lookups they save.
+#[derive(Default)]
+struct IdHasher(u64);
+
+impl Hasher for IdHasher {
+	fn finish(&self) -> u64 {
+		self.0
+	}
+
+	fn write(&mut self, bytes: &[u8]) {
+		let (words, tail) = bytes.as_chunks::<8>();
+		for &word in words {
+			self.add(u64::from_le_bytes(word));
+		}
+		let tail = tail
+			.iter()
+			.fold(0, |tail, &byte| (tail << 8) | u64::from(byte));
+		self.add(tail);
+	}
+}
+
+impl IdHasher {
+	fn add(&mut self, word: u64) {
+		self.0 = (self.0.rotate_left(5) ^ word).wrapping_mul(0x517c_c1b7_2722_0a95);
+	}
+}
+
+type IdMap<K, V> = HashMap<K, V, BuildHasherDefault<IdHasher>>;
+
+/// A category after `category_mapping`, with its effective kind and kind
+/// conflict (CLS-3.1).
+type ResolvedCategory<'a> = (&'a CategoryId, (CategoryKind, bool));
+
+/// A row's account, category and payee, resolved through the budget's
+/// mappings. Thousands of rows share each one, so each id is resolved once
+/// per classification instead of once per row.
+struct Lookups<'a> {
+	budget: &'a BudgetData,
+	/// Whether each account is on budget. `None` when the budget lacks it.
+	accounts: IdMap<&'a AccountId, Option<bool>>,
+	categories: IdMap<&'a CategoryId, Option<ResolvedCategory<'a>>>,
+	payees: IdMap<&'a PayeeId, Option<&'a Payee>>,
+}
+
+impl<'a> Lookups<'a> {
+	fn new(budget: &'a BudgetData) -> Self {
+		Lookups {
+			budget,
+			accounts: IdMap::default(),
+			categories: IdMap::default(),
+			payees: IdMap::default(),
+		}
+	}
+
+	fn on_budget(&mut self, id: &'a AccountId) -> Option<bool> {
+		let budget = self.budget;
+		*self
+			.accounts
+			.entry(id)
+			.or_insert_with(|| budget.accounts.get(id).map(|account| !account.off_budget))
+	}
+
+	/// The category a row reports under, after `category_mapping`, with its
+	/// effective kind. `None` when it isn't one of the budget's categories.
+	fn category(&mut self, id: &'a CategoryId) -> Option<ResolvedCategory<'a>> {
+		let budget = self.budget;
+		*self.categories.entry(id).or_insert_with(|| {
+			budget
+				.resolve_category(id)
+				.filter(|category| budget.categories.contains_key(*category))
+				.map(|category| (category, budget.effective_category_kind(category)))
+		})
+	}
+
+	fn payee(&mut self, id: &'a PayeeId) -> Option<&'a Payee> {
+		let budget = self.budget;
+		*self.payees.entry(id).or_insert_with(|| {
+			budget
+				.resolve_payee(id)
+				.and_then(|payee| budget.payees.get(payee))
+		})
 	}
 }
 
@@ -357,7 +503,9 @@ struct Transfer {
 /// A live row and the facts the decision table reads, before pairing.
 struct Candidate<'a> {
 	transaction: &'a Transaction,
-	category: Option<CategoryId>,
+	category: Option<&'a CategoryId>,
+	/// The category's effective kind and kind conflict (CLS-3.1).
+	category_kind: Option<(CategoryKind, bool)>,
 	on_budget: bool,
 	transfer: Option<Transfer>,
 	starting_balance: bool,
@@ -366,27 +514,25 @@ struct Candidate<'a> {
 
 impl<'a> Candidate<'a> {
 	/// `None` when the row's own account is missing: an orphaned row.
-	fn new(budget: &BudgetData, transaction: &'a Transaction) -> Option<Self> {
-		let on_budget = !budget.accounts.get(&transaction.account)?.off_budget;
+	fn new(
+		budget: &BudgetData,
+		lookups: &mut Lookups<'a>,
+		transaction: &'a Transaction,
+	) -> Option<Self> {
+		let on_budget = lookups.on_budget(&transaction.account)?;
 		let category = transaction
 			.category
 			.as_ref()
-			.and_then(|category| budget.resolve_category(category))
-			.filter(|category| budget.categories.contains_key(*category))
-			.cloned();
+			.and_then(|category| lookups.category(category));
 		let payee = transaction
 			.payee
 			.as_ref()
-			.and_then(|payee| budget.resolve_payee(payee))
-			.and_then(|payee| budget.payees.get(payee));
+			.and_then(|payee| lookups.payee(payee));
 		let transfer = payee
-			.and_then(|payee| payee.transfer_account.clone())
+			.and_then(|payee| payee.transfer_account.as_ref())
 			.map(|account| Transfer {
-				other_on_budget: budget
-					.accounts
-					.get(&account)
-					.is_some_and(|account| !account.off_budget),
-				account,
+				other_on_budget: lookups.on_budget(account).unwrap_or(false),
+				account: account.clone(),
 			});
 		let reconciliation = budget
 			.transaction_meta
@@ -398,7 +544,8 @@ impl<'a> Candidate<'a> {
 				&& transaction.notes.as_deref() == Some(RECONCILIATION_NOTE));
 		Some(Candidate {
 			transaction,
-			category,
+			category: category.map(|(category, _)| category),
+			category_kind: category.map(|(_, kind)| kind),
 			on_budget,
 			transfer,
 			starting_balance: transaction.starting_balance,
@@ -421,7 +568,7 @@ impl<'a> Candidate<'a> {
 			account: transaction.account.clone(),
 			date: transaction.date,
 			amount: transaction.amount,
-			category: self.category.clone(),
+			category: self.category.cloned(),
 			on_budget: self.on_budget,
 			transfer_account: self
 				.transfer
@@ -438,15 +585,14 @@ impl<'a> Candidate<'a> {
 /// The other leg, only when the link is reciprocal (each row points at the
 /// other and sits in the other's transfer account) and the amounts net to
 /// zero. Dates may differ.
-fn partner(
-	candidates: &[Candidate],
-	index: &HashMap<&TransactionId, usize>,
-	candidate: &Candidate,
-) -> Option<usize> {
+/// `candidates` are in id order, as the budget's transactions are keyed.
+fn partner(candidates: &[Candidate], candidate: &Candidate) -> Option<usize> {
 	let own = candidate.transaction;
 	let transfer = candidate.transfer.as_ref()?;
 	let id = own.transfer.as_ref().filter(|id| *id != &own.id)?;
-	let position = *index.get(id)?;
+	let position = candidates
+		.binary_search_by(|other| other.transaction.id.cmp(id))
+		.ok()?;
 	let other = candidates.get(position)?;
 	let points_back = other.transaction.transfer.as_ref() == Some(&own.id);
 	let other_points_here = other
@@ -469,12 +615,9 @@ enum Outcome {
 	Mirror,
 }
 
-fn decide(budget: &BudgetData, candidate: &Candidate, partner: Option<&Candidate>) -> Outcome {
+fn decide(candidate: &Candidate, partner: Option<&Candidate>) -> Outcome {
 	let mut flags = Flags::default();
-	let category_kind = candidate
-		.category
-		.as_ref()
-		.map(|category| budget.effective_category_kind(category));
+	let category_kind = candidate.category_kind;
 
 	let Some(transfer) = &candidate.transfer else {
 		let decision = if candidate.starting_balance {

@@ -106,6 +106,34 @@ struct RealCoreAccountsTests {
 		}
 	}
 
+	@Test func typingPlusAnAmountAfterATransactionsAmountAddsToIt() async throws {
+		// PLAN §10: the budget cell's "+12.34" works the same in a transaction's amount field.
+		try await RealBudget.with { budget in
+			let workspace = budget.workspace
+			let entry = TransactionEditorModel(workspace: workspace, accountID: Self.checking)
+			await entry.load()
+			entry.typePayee("Hardware Barn")
+			entry.typeAmount("45.10+54.90")
+			entry.categoryID = AllFeatures.groceries
+			#expect(await entry.save(), "\(String(describing: entry.problem))")
+			var rows = try await Self.allRows(workspace, .account(accountId: Self.checking))
+			let saved = try #require(rows.first { $0.payeeName == "Hardware Barn" })
+			#expect(saved.amount == -10_000)
+
+			let edit = TransactionEditorModel(workspace: workspace, accountID: Self.checking, editing: saved)
+			await edit.load()
+			#expect(edit.amount.text == "100.00")
+			edit.typeAmount("+")
+			#expect(edit.amount.text == "100.00+", "typing + over the selected amount keeps it")
+			edit.typeAmount("100.00+12.34")
+			#expect(await edit.save(), "\(String(describing: edit.problem))")
+			rows = try await Self.allRows(workspace, .account(accountId: Self.checking))
+			let edited = try #require(rows.first { $0.id == saved.id })
+			#expect(edited.amount == -11_234, "an expense of 112.34")
+			#expect(edited.categoryId == AllFeatures.groceries)
+		}
+	}
+
 	@Test func moveMoneyShowsBothBalancesBeforeAndAfterAndEditsThePairFromEitherSide() async throws {
 		// R-XFER-1, R-XFER-3.
 		try await RealBudget.with { budget in
@@ -184,6 +212,95 @@ struct RealCoreAccountsTests {
 			#expect(shown.envelopes.contains { $0.id == envelope && $0.name == "Savings" })
 			let leg = try #require(try await Self.allRows(workspace, .account(accountId: Self.checking)).first { $0.transferAccountId == Self.brokerage && $0.amount == -25_000 })
 			#expect(leg.categoryId == envelope, "the on-budget side is filed under it (CLS-1)")
+		}
+	}
+
+	@Test func aHiddenSavingsEnvelopeIsShownAgainInsteadOfMakingASecond() async throws {
+		// CLS-4.1: the only savings envelope is hidden, so the answer revives it.
+		try await RealBudget.with { budget in
+			let workspace = budget.workspace
+			let month = try #require(Month(date: WorkspaceModel.today()))
+			let first = MoveMoneyModel(workspace: workspace, fromID: Self.checking)
+			await first.load()
+			first.toID = Self.brokerage
+			first.typeAmount("100")
+			await first.refreshPreview()
+			first.purpose.answer = .saving
+			await first.purpose.chooseNewEnvelope()
+			#expect(await first.save())
+			guard case .one(let envelope) = try #require(await workspace.report({ try await $0.kindTarget(.savings) })) else {
+				Issue.record("the first move made the savings envelope")
+				return
+			}
+			#expect(await workspace.perform(.setCategoryHidden(categoryId: envelope, hidden: true)))
+
+			let move = MoveMoneyModel(workspace: workspace, fromID: Self.checking)
+			await move.load()
+			move.toID = Self.brokerage
+			move.typeAmount("250")
+			await move.refreshPreview()
+			move.purpose.answer = .saving
+			#expect(move.purpose.revival?.categoryId == envelope, "the hidden envelope is offered")
+			#expect(!move.purpose.canCreateEnvelope)
+			#expect(move.purpose.confirmation?.title == "Show \"Savings\" again and use it?")
+			#expect(await move.save(), "saved after the person confirms")
+
+			let target = try #require(await workspace.report { try await $0.kindTarget(.savings) })
+			#expect(target == .one(categoryId: envelope), "still one savings envelope, shown again")
+			let sheet = try #require(await workspace.budgetMonth(month))
+			#expect(sheet.groups.flatMap(\.envelopes).contains { $0.id == envelope && !$0.hidden })
+			let leg = try #require(try await Self.allRows(workspace, .account(accountId: Self.checking)).first { $0.transferAccountId == Self.brokerage && $0.amount == -25_000 })
+			#expect(leg.categoryId == envelope)
+		}
+	}
+
+	@Test func aRefusedSaveLeavesTheEnvelopeHiddenAndOneUndoTakesBackBoth() async throws {
+		// CLS-4.1 through v13's saveTransactionWithEnvelope: the revive and the transaction are one step.
+		try await RealBudget.with { budget in
+			let workspace = budget.workspace
+			let month = try #require(Month(date: WorkspaceModel.today()))
+			let first = MoveMoneyModel(workspace: workspace, fromID: Self.checking)
+			await first.load()
+			first.toID = Self.brokerage
+			first.typeAmount("100")
+			await first.refreshPreview()
+			first.purpose.answer = .saving
+			await first.purpose.chooseNewEnvelope()
+			#expect(await first.save())
+			guard case .one(let envelope) = try #require(await workspace.report({ try await $0.kindTarget(.savings) })) else {
+				Issue.record("the first move made the savings envelope")
+				return
+			}
+			#expect(await workspace.perform(.setCategoryHidden(categoryId: envelope, hidden: true)))
+			let rowsBefore = try await Self.allRows(workspace, .account(accountId: Self.checking)).count
+			func isHidden() async throws -> Bool {
+				let sheet = try #require(await workspace.budgetMonth(month))
+				return try #require(sheet.groups.flatMap(\.envelopes).first { $0.id == envelope }).hidden
+			}
+
+			let move = MoveMoneyModel(workspace: workspace, fromID: Self.checking)
+			await move.load()
+			move.toID = Self.brokerage
+			move.typeAmount("250")
+			await move.refreshPreview()
+			move.purpose.answer = .saving
+			try #require(move.purpose.revival?.categoryId == envelope)
+			let payee = try #require(await workspace.report { try await $0.payees() }?.first { $0.transferAccountId == Self.brokerage }).id
+			let refused = TransactionDraft(
+				id: UUID().uuidString.lowercased(), accountId: Self.checking, date: "2026-02-30", amount: -25_000, payeeId: payee, payeeName: nil,
+				categoryId: nil, notes: nil, cleared: false, splits: []
+			)
+			#expect(!(await workspace.perform(move.purpose.command(saving: refused, editing: nil))), "the core refuses a date that doesn't exist")
+			#expect(try await isHidden(), "the refused save left the envelope hidden")
+			#expect(try await Self.allRows(workspace, .account(accountId: Self.checking)).count == rowsBefore, "and wrote no transaction")
+			#expect(try await workspace.report { try await $0.kindTarget(.savings) } == .oneHidden(category: try #require(move.purpose.revival)))
+
+			#expect(await move.save())
+			#expect(try await !isHidden())
+			#expect(try await Self.allRows(workspace, .account(accountId: Self.checking)).count == rowsBefore + 1)
+			await workspace.undo()
+			#expect(try await isHidden(), "one undo hides it again")
+			#expect(try await Self.allRows(workspace, .account(accountId: Self.checking)).count == rowsBefore, "and removes the transaction with it")
 		}
 	}
 

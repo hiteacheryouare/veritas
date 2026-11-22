@@ -246,8 +246,25 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 			}
 		case .saveCustomReport(let settings): try reports.save(settings)
 		case .placeWidget(let id, let x, let y, let width, let height): try dashboardStore.place(id, x: x, y: y, width: width, height: height)
+		case .saveTransactionWithEnvelope(let envelope, let transactionID, let draft):
+			var filed = draft
+			filed.categoryId = try await envelopeID(envelope)
+			try await perform(transactionID.map { .editTransaction(transactionId: $0, transaction: filed) } ?? .addTransaction(transaction: filed))
 		default:
 			if try !accountStore.perform(command) { try budget.perform(command) }
+		}
+	}
+
+	/// The stub has no hidden or archived envelope of any kind, so a revive is refused as the core would refuse it.
+	private func envelopeID(_ change: EnvelopeChange) async throws -> String {
+		switch change {
+		case .setKind(let categoryID, let kind):
+			try await setCategoryKind(categoryID, kind: kind)
+			return categoryID
+		case .createKind(let kind, let name, let unhideGroup):
+			return try await createKindCategory(kind: kind, name: name, unhideGroup: unhideGroup)
+		case .revive:
+			throw FfiError.Invalid(message: "That category isn't a hidden or archived one of this kind. Pick another.")
 		}
 	}
 
@@ -257,8 +274,7 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 	}
 	/// A row the Accounts stub doesn't hold may be one of the Rules stub's preview rows; any other id is NotFound.
 	func registerRow(_ id: String) async throws -> RegisterRow {
-		if let row = try? accountStore.registerRow(id) { return row }
-		return try ruleStore.registerRow(id)
+		try accountStore.registerRow(id)
 	}
 	/// The Accounts stub's payees, then the Bills stub's own; one they share, such as `to-carloan`, is listed once.
 	func payees() async throws -> [PayeeDetail] {

@@ -14,7 +14,7 @@ pub use canonical::{
 	canonical_dump_of_actual_tables, canonical_dump_to_vec,
 };
 pub use create::create_budget;
-pub use export::{ExportOutcome, export_actual_zip};
+pub use export::{ExportOutcome, export_actual_zip, export_actual_zip_from_snapshot};
 pub use import::{ImportOutcome, ImportedBudget, import_actual_zip, open_budget};
 pub use manifest::{Access, Manifest};
 pub use metadata::{last_schedule_run, set_last_schedule_run};

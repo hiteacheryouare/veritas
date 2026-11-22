@@ -58,6 +58,24 @@ jobs:
           VERITAS_REQUIRE_ORACLE: 1
         run: cargo test --workspace
 
+  # PLAN §10: every core-measurable R-PERF budget on perf-100k, in a release
+  # build. `cargo xtask perf` reads criterion's median of each bench and fails
+  # when one is over its budget (docs/acceptance.md, Performance).
+  perf:
+    name: perf
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Toolchain
+        run: rustup show active-toolchain
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: R-PERF budgets
+        run: cargo xtask perf
+
   scripts:
     name: scripts
     runs-on: ubuntu-latest

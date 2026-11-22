@@ -90,6 +90,17 @@ struct AccountsTests {
 		#expect(PayeeText(drilled(-100, payee: nil, transfer: nil)).text == "")
 	}
 
+	@Test func billAndRulePickersListATransferPayeeAsRegistersDo() {
+		// §10 C1: a bill may pay a loan, so its payee is "→ To Car loan", never a bare account name.
+		let names = BudgetNames(payees: [
+			PayeeDetail(id: "fernwood", name: "Fernwood Market", transferAccountId: nil, favorite: false, learnCategories: true, transactions: 3),
+			PayeeDetail(id: "to-loan", name: "Car loan", transferAccountId: "carloan", favorite: false, learnCategories: false, transactions: 1)
+		], accounts: [], categoryGroups: [])
+		#expect(names.payees.map(names.payeeLabel) == ["Fernwood Market", "→ To Car loan"])
+		let register = PayeeText(AccountsFakeSession.row("a", amount: -20_000, payee: "Car loan", transfer: "carloan"))
+		#expect(register.label == "→ To Car loan", "the register's own words")
+	}
+
 	@Test func transfersReadAsToAndFromNeverAsAPayee() {
 		// R-XFER-2
 		let out = PayeeText(AccountsFakeSession.row("a", amount: -20_000, payee: "Savings", transfer: "savings"))
