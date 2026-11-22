@@ -248,6 +248,8 @@ public final class DashboardModel {
 	public static let columns: Int64 = 12
 
 	public private(set) var sheets: [DashboardSheet] = []
+	/// False until the first load has finished, so the screen can show it's loading.
+	public private(set) var hasLoaded = false
 	public var pageID: String?
 	public var isEditing = false
 	/// Payees, accounts and categories, for the widget filter editor's pickers.
@@ -270,6 +272,7 @@ public final class DashboardModel {
 	}
 
 	public func load() async {
+		defer { hasLoaded = true }
 		let today = WorkspaceModel.today()
 		guard let sheets = await workspace.report({ try await $0.dashboardSheets(today: today) }) else { return }
 		self.sheets = sheets

@@ -8,6 +8,8 @@ import VeritasCore
 @Observable
 public final class GoalsScreenModel {
 	public private(set) var goals: [GoalSummary] = []
+	/// False until the first load has finished, so the screen can show it's loading.
+	public private(set) var hasLoaded = false
 	/// The goal the arrow keys and the Goal menu act on.
 	public var selection: String?
 
@@ -35,6 +37,7 @@ public final class GoalsScreenModel {
 	@ObservationIgnored private var loadGeneration = 0
 
 	public func load() async {
+		defer { hasLoaded = true }
 		loadGeneration += 1
 		let generation = loadGeneration
 		let loaded = await workspace.goals()

@@ -55,6 +55,8 @@ public struct RuleApplying: Hashable, Sendable {
 @Observable
 public final class RulesModel {
 	public private(set) var rules: [RuleSentence] = []
+	/// False until the first load has finished, so the screen can show it's loading.
+	public private(set) var hasLoaded = false
 	public private(set) var names = BudgetNames.empty
 	public var editing: RuleEditing?
 	public var applying: RuleApplying?
@@ -73,6 +75,7 @@ public final class RulesModel {
 	public var isReadOnly: Bool { workspace.readOnly != nil }
 
 	public func load() async {
+		defer { hasLoaded = true }
 		async let names = workspace.budgetNames()
 		let loaded = await workspace.report { try await $0.rules() }
 		self.names = await names

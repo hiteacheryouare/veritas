@@ -41,6 +41,7 @@ struct RulesScreen: View {
 			.padding(Spacing.s5)
 			.frame(maxWidth: .infinity, alignment: .leading)
 		}
+		.overlay { if !model.hasLoaded { ScreenState(kind: .loading) } }
 		.background(.surfaceWindow)
 		.toolbar {
 			ToolbarItem(placement: .primaryAction) {
