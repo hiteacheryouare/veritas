@@ -20,10 +20,33 @@ pub struct SheetLine {
 	pub deleted: bool,
 }
 
+/// ST-9.2's placement by type. The balance sheet heads its sections with these
+/// only when the budget has no account groups at all (ST-3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum TypeHeading {
+	Cash,
+	Credit,
+	Investments,
+	Loans,
+}
+
+impl TypeHeading {
+	pub fn title(self) -> &'static str {
+		match self {
+			Self::Cash => "Cash",
+			Self::Credit => "Credit",
+			Self::Investments => "Investments & Other assets",
+			Self::Loans => "Loans",
+		}
+	}
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct AccountGroupSection {
 	/// `None` holds the accounts outside any account group.
 	pub group: Option<AccountGroupId>,
+	/// Set instead of `group` when the budget has no account groups (ST-3).
+	pub heading: Option<TypeHeading>,
 	pub accounts: Vec<SheetLine>,
 	pub total: Money,
 }
@@ -64,28 +87,33 @@ fn sections(
 	balances: &[&AccountBalance],
 	side: Side,
 ) -> Result<Vec<AccountGroupSection>, CoreError> {
-	let mut groups: BTreeMap<Option<AccountGroupId>, Vec<SheetLine>> = BTreeMap::new();
+	let by_type = budget.account_groups.values().all(|group| group.tombstone);
+	let mut groups: BTreeMap<(Option<TypeHeading>, Option<AccountGroupId>), Vec<SheetLine>> =
+		BTreeMap::new();
 	for line in balances.iter().filter(|line| line.side == side) {
 		let amount = match side {
 			Side::Asset => line.balance,
 			Side::Liability => line.balance.checked_neg()?,
 		};
-		groups
-			.entry(line.group.clone())
-			.or_default()
-			.push(SheetLine {
-				account: line.account.clone(),
-				amount,
-				closed: line.closed,
-				deleted: line.deleted,
-			});
+		let key = if by_type {
+			(Some(type_heading(budget, line)), None)
+		} else {
+			(None, line.group.clone())
+		};
+		groups.entry(key).or_default().push(SheetLine {
+			account: line.account.clone(),
+			amount,
+			closed: line.closed,
+			deleted: line.deleted,
+		});
 	}
 	let mut sections = groups
 		.into_iter()
-		.map(|(group, accounts)| {
+		.map(|((heading, group), accounts)| {
 			Ok(AccountGroupSection {
 				total: Money::checked_sum(accounts.iter().map(|line| line.amount))?,
 				group,
+				heading,
 				accounts,
 			})
 		})
@@ -96,13 +124,29 @@ fn sections(
 			.and_then(|id| budget.account_groups.get(id))
 			.map(|group| group.sort_order)
 	};
-	sections.sort_by(|a, b| match (order(&a.group), order(&b.group)) {
-		(None, None) => std::cmp::Ordering::Equal,
-		(None, Some(_)) => std::cmp::Ordering::Greater,
-		(Some(_), None) => std::cmp::Ordering::Less,
-		(Some(x), Some(y)) => x.total_cmp(&y).then_with(|| a.group.cmp(&b.group)),
+	sections.sort_by(|a, b| {
+		a.heading
+			.cmp(&b.heading)
+			.then_with(|| match (order(&a.group), order(&b.group)) {
+				(None, None) => std::cmp::Ordering::Equal,
+				(None, Some(_)) => std::cmp::Ordering::Greater,
+				(Some(_), None) => std::cmp::Ordering::Less,
+				(Some(x), Some(y)) => x.total_cmp(&y).then_with(|| a.group.cmp(&b.group)),
+			})
 	});
 	Ok(sections)
+}
+
+/// ST-9.2's heading for an account on the side ST-2 put it: the side stays
+/// the balance's, and only the on-budget flag and ST-9.1 pick the heading.
+fn type_heading(budget: &BudgetData, line: &AccountBalance) -> TypeHeading {
+	let (liability, _) = balances::placement(budget, &line.account, line.balance);
+	match (line.on_budget, liability) {
+		(true, false) => TypeHeading::Cash,
+		(true, true) => TypeHeading::Credit,
+		(false, false) => TypeHeading::Investments,
+		(false, true) => TypeHeading::Loans,
+	}
 }
 
 /// One category group on the income statement, its categories in budget order.

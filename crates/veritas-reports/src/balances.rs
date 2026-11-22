@@ -118,3 +118,24 @@ pub(crate) fn totals(balances: &[AccountBalance]) -> Result<(Money, Money), Core
 	}
 	Ok((assets, owed.checked_neg()?))
 }
+
+/// ST-9.1: explicit kind, then loan fields, then a negative balance. Returns
+/// whether the account is a liability, and whether only the balance said so.
+pub fn placement(data: &BudgetData, id: &AccountId, balance: Money) -> (bool, bool) {
+	let meta = data.account_meta.get(id);
+	match meta.and_then(|meta| meta.kind) {
+		Some(AccountKind::Liability) => return (true, false),
+		Some(AccountKind::Asset) => return (false, false),
+		None => {}
+	}
+	let has_loan = meta.is_some_and(|meta| {
+		meta.loan_rate_bps.is_some() || meta.loan_payment.is_some() || meta.lender.is_some()
+	});
+	if has_loan {
+		(true, false)
+	} else if balance.is_negative() {
+		(true, true)
+	} else {
+		(false, false)
+	}
+}

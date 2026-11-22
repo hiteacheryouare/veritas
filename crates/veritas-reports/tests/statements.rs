@@ -10,9 +10,9 @@ use support::*;
 use veritas_domain::{AccountId, AccountKind, AccountMeta, Money, YearMonth};
 use veritas_reports::Period;
 use veritas_reports::{
-	BalanceSheet, IncomeStatement, OwnersEquity, Side, account_balances, balance_sheet, cash_flow,
-	cash_flow_by_month, income_statement, net_profit_by_month, net_worth, net_worth_by_month,
-	owners_equity,
+	AccountGroupSection, BalanceSheet, IncomeStatement, OwnersEquity, Side, TypeHeading,
+	account_balances, balance_sheet, cash_flow, cash_flow_by_month, income_statement,
+	net_profit_by_month, net_worth, net_worth_by_month, owners_equity,
 };
 
 fn sheet(book: &Book, on: &str) -> BalanceSheet {
@@ -196,9 +196,10 @@ fn st7_s1_closed_account_with_a_balance_stays_on_the_sheet() {
 		"a zero-balance closed account is omitted"
 	);
 	assert!(assets.contains(&("CD".to_owned(), 0)), "open accounts stay");
-	let line = sheet.assets[0]
-		.accounts
+	let line = sheet
+		.assets
 		.iter()
+		.flat_map(|section| &section.accounts)
 		.find(|line| line.account == AccountId::new("SAV"))
 		.unwrap();
 	assert!(line.closed);
@@ -500,6 +501,83 @@ fn st3_balance_sheet_groups_accounts_by_account_group() {
 			(Some("Cash".to_owned()), 908_800),
 			(None, 150_000),
 		]
+	);
+}
+
+#[test]
+fn st3_a_budget_with_no_account_groups_falls_back_to_the_st9_type_headings() {
+	let book = master();
+	assert!(book.budget.account_groups.is_empty());
+	let sheet = sheet(&book, "2027-01-31");
+	let headings = |sections: &[AccountGroupSection]| -> Vec<(Option<TypeHeading>, i64)> {
+		sections
+			.iter()
+			.map(|section| (section.heading, section.total.minor()))
+			.collect()
+	};
+	for section in sheet.assets.iter().chain(&sheet.liabilities) {
+		assert!(section.group.is_none());
+		assert!(
+			section.heading.is_some(),
+			"no account sits outside a heading"
+		);
+		assert_eq!(
+			Money::checked_sum(section.accounts.iter().map(|line| line.amount)).unwrap(),
+			section.total
+		);
+	}
+	let assets = headings(&sheet.assets);
+	assert!(
+		assets.windows(2).all(|pair| pair[0].0 < pair[1].0),
+		"ST-9.2 order, one section each: {assets:?}"
+	);
+	let balances = account_balances(&book.budget, &book.classify(), date("2027-01-31")).unwrap();
+	let on_budget_assets: i64 = balances
+		.iter()
+		.filter(|line| line.side == Side::Asset && line.on_budget)
+		.map(|line| line.balance.minor())
+		.sum();
+	assert_eq!(
+		assets
+			.iter()
+			.find(|(heading, _)| *heading == Some(TypeHeading::Cash))
+			.map(|(_, total)| *total),
+		Some(on_budget_assets)
+	);
+	let summed: i64 = assets.iter().map(|(_, total)| total).sum();
+	assert_eq!(
+		summed,
+		sheet.total_assets.minor(),
+		"the headings never change a total"
+	);
+	let summed: i64 = headings(&sheet.liabilities)
+		.iter()
+		.map(|(_, total)| total)
+		.sum();
+	assert_eq!(summed, sheet.total_liabilities.minor());
+}
+
+#[test]
+fn st3_one_account_group_turns_the_type_headings_off() {
+	let mut book = master();
+	book.account_group("Cash", 1.0);
+	book.budget
+		.accounts
+		.get_mut(&AccountId::new("CHK"))
+		.unwrap()
+		.group = Some(veritas_domain::AccountGroupId::new("Cash"));
+	let sheet = sheet(&book, "2027-01-31");
+	assert!(
+		sheet
+			.assets
+			.iter()
+			.chain(&sheet.liabilities)
+			.all(|section| section.heading.is_none())
+	);
+	assert_eq!(
+		sheet.assets.last().map(|section| section.group.is_none()),
+		Some(true),
+		"ungrouped accounts come last"
 	);
 }
 

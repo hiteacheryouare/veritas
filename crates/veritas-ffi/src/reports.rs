@@ -684,8 +684,14 @@ fn sheet_sections(
 	sections
 		.iter()
 		.map(|section| SheetSection {
-			group_id: section.group.as_ref().map(ToString::to_string),
-			group_name: section.group.as_ref().and_then(group_name),
+			group_id: section
+				.heading
+				.map(|heading| format!("type.{heading:?}").to_lowercase())
+				.or_else(|| section.group.as_ref().map(ToString::to_string)),
+			group_name: section
+				.heading
+				.map(|heading| heading.title().to_owned())
+				.or_else(|| section.group.as_ref().and_then(group_name)),
 			accounts: section
 				.accounts
 				.iter()
