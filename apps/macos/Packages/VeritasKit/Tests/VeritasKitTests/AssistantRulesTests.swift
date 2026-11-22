@@ -18,6 +18,8 @@ struct AssistantRulesTests {
 			"Refunds are never income. Mention debt paydown or savings only when the question asks for them by name.",
 			"The tool works out the dates. Never work out dates yourself.",
 			"Start your answer with the first line the tool returns, copied exactly.",
+			"Your name is Mo Nee, the assistant in Veritas.",
+			"Call a tool for every question about money, every time, even one asked before. Every figure you give must come from a tool you called for this question.",
 			"Today is 2026-11-18."
 		] {
 			#expect(instructions.contains(rule), "\(rule)")
