@@ -4,6 +4,17 @@ import VeritasCore
 import VeritasDesign
 import VeritasKit
 
+extension GoalIcon {
+	/// The picker's symbols this Mac can draw.
+	static var drawableSymbols: [String] {
+		symbols.filter(isDrawable)
+	}
+
+	static func isDrawable(_ name: String) -> Bool {
+		NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil
+	}
+}
+
 /// A goal's icon: an SF Symbol drawn as an image, an emoji drawn as text. A
 /// symbol name this Mac doesn't have draws nothing.
 struct GoalIconView: View {
@@ -13,7 +24,7 @@ struct GoalIconView: View {
 	var body: some View {
 		switch icon {
 		case .symbol(let name):
-			if NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil {
+			if GoalIcon.isDrawable(name) {
 				Image(systemName: name)
 					.font(.system(size: size, weight: .medium))
 					.foregroundStyle(.textSecondary)
@@ -58,7 +69,7 @@ struct GoalIconSheet: View {
 			Text("Icon for \(goal.name)")
 				.font(.text(.title, weight: .semibold))
 			LazyVGrid(columns: Array(repeating: GridItem(.fixed(40), spacing: Spacing.s2), count: 8), spacing: Spacing.s2) {
-				ForEach(GoalIcon.symbols, id: \.self) { name in
+				ForEach(GoalIcon.drawableSymbols, id: \.self) { name in
 					SymbolTile(name: name, isSelected: emoji.isEmpty && symbol == name) {
 						symbol = name
 						emoji = ""
@@ -120,6 +131,12 @@ private struct SymbolTile: View {
 	let action: () -> Void
 
 	var body: some View {
+		if GoalIcon.isDrawable(name) {
+			button
+		}
+	}
+
+	private var button: some View {
 		Button(action: action) {
 			Image(systemName: name)
 				.font(.system(size: 17))

@@ -17,7 +17,7 @@ struct NewGoalSheet: View {
 	@FocusState private var isNameFocused: Bool
 	@Environment(\.dismiss) private var dismiss
 
-	static let icons = Array(GoalIcon.symbols.prefix(8))
+	static let icons = Array(GoalIcon.drawableSymbols.prefix(8))
 
 	init(goals: GoalsScreenModel) {
 		self.goals = goals
