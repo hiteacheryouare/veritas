@@ -1755,7 +1755,10 @@ fn keep_layers(graph: &mut Graph, from: SankeyLayer, to: SankeyLayer) {
 }
 
 /// `convertToSankeyData`.
-fn convert(graph: &Graph, mut folded: Folded) -> (Vec<SankeyNode>, Vec<SankeyLink>) {
+fn convert(
+	graph: &Graph,
+	mut folded: Folded,
+) -> Result<(Vec<SankeyNode>, Vec<SankeyLink>), CoreError> {
 	let position: HashMap<&str, usize> = graph
 		.iter()
 		.enumerate()
@@ -1813,24 +1816,24 @@ fn convert(graph: &Graph, mut folded: Folded) -> (Vec<SankeyNode>, Vec<SankeyLin
 		}
 	}
 	for (index, node) in nodes.iter_mut().enumerate() {
-		node.value = node_value(&links, index);
+		node.value = node_value(&links, index)?;
 	}
-	(nodes, links)
+	Ok((nodes, links))
 }
 
 /// recharts' `getNodesTree` (`Sankey.tsx`): the larger of a node's incoming
 /// and outgoing link sums, counting -1 links to hidden nodes and links whose
 /// target the layer range cut, exactly as the graph receives them.
-fn node_value(links: &[SankeyLink], index: usize) -> Money {
+fn node_value(links: &[SankeyLink], index: usize) -> Result<Money, CoreError> {
 	let sum = |linked: &dyn Fn(&SankeyLink) -> bool| {
 		links
 			.iter()
 			.filter(|link| linked(link))
-			.fold(0_i64, |sum, link| sum.saturating_add(link.value.minor()))
+			.try_fold(Money::ZERO, |sum, link| sum.checked_add(link.value))
 	};
-	let incoming = sum(&|link| link.target == Some(index));
-	let outgoing = sum(&|link| link.source == index);
-	Money::from_minor(incoming.max(outgoing))
+	let incoming = sum(&|link| link.target == Some(index))?;
+	let outgoing = sum(&|link| link.source == index)?;
+	Ok(incoming.max(outgoing))
 }
 
 fn month_of(text: &str) -> Result<YearMonth, CoreError> {
@@ -1966,7 +1969,7 @@ pub fn sankey_card(
 	add_percentages(&mut graph);
 	add_colors(&mut graph);
 	keep_layers(&mut graph, layer_from, layer_to);
-	let (nodes, links) = convert(&graph, folded);
+	let (nodes, links) = convert(&graph, folded)?;
 	Ok(SankeyCard {
 		range,
 		first_month,
