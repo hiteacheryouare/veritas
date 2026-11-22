@@ -82,23 +82,28 @@ pub struct NetProfitReport {
 	pub total: NetProfitColumn,
 }
 
-/// One category group's share of a Net Profit section: the sum of its
-/// categories' lines, so a group's figure always adds up to what they show.
+/// One category group's share of a Net Profit section. A section holds rows
+/// of one kind only (CLS-6), so a group's figure counts only that kind.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct ReportGroup {
 	pub group_id: String,
 	pub name: String,
+	/// The group's own `hidden` and `deleted` (ST-10.3).
+	pub labels: ReportLabels,
 	pub total: i64,
 	pub count: u64,
 }
 
-/// Net Profit for any inclusive date range, with the income and expense
-/// sections also totalled by category group, in budget order.
+/// Net Profit for any inclusive date range, with each section also totalled
+/// by category group, in budget order. A line whose category has no group,
+/// and the uncategorized line, are in no group.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct NetProfitPeriod {
 	pub column: NetProfitColumn,
 	pub income_groups: Vec<ReportGroup>,
 	pub expense_groups: Vec<ReportGroup>,
+	pub debt_paydown_groups: Vec<ReportGroup>,
+	pub savings_groups: Vec<ReportGroup>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
@@ -462,38 +467,19 @@ pub(crate) fn net_profit_report(
 	})
 }
 
-/// The uncategorized line has no group, so it is in no group's total.
-fn groups(budget: &BudgetData, from: &reports::Section) -> Result<Vec<ReportGroup>, CoreError> {
-	let mut groups: Vec<(veritas_domain::CategoryGroupId, Money, u64)> = Vec::new();
-	for line in &from.categories {
-		let Some(group) = line
-			.category
-			.as_ref()
-			.and_then(|id| budget.categories.get(id))
-			.map(|category| category.group.clone())
-		else {
-			continue;
-		};
-		let count = line.rows.len() as u64;
-		match groups.iter_mut().find(|(id, _, _)| *id == group) {
-			Some((_, total, rows)) => {
-				*total = total.checked_add(line.total)?;
-				*rows += count;
-			}
-			None => groups.push((group, line.total, count)),
-		}
-	}
-	Ok(groups
+fn groups(budget: &BudgetData, section: &reports::Section) -> Result<Vec<ReportGroup>, CoreError> {
+	Ok(reports::group_lines(budget, section)?
 		.into_iter()
-		.map(|(id, total, count)| ReportGroup {
+		.map(|line| ReportGroup {
 			name: budget
 				.category_groups
-				.get(&id)
+				.get(&line.group)
 				.map(|group| group.name.clone())
 				.unwrap_or_default(),
-			group_id: id.to_string(),
-			total: total.minor(),
-			count,
+			group_id: line.group.to_string(),
+			labels: line.labels.into(),
+			total: line.total.minor(),
+			count: line.rows.len() as u64,
 		})
 		.collect())
 }
@@ -507,6 +493,8 @@ pub(crate) fn net_profit_period(
 	Ok(NetProfitPeriod {
 		income_groups: groups(budget, &report.income)?,
 		expense_groups: groups(budget, &report.expenses)?,
+		debt_paydown_groups: groups(budget, &report.debt_paydown)?,
+		savings_groups: groups(budget, &report.savings)?,
 		column: net_profit_column(budget, &report),
 	})
 }
@@ -1133,6 +1121,8 @@ mod tests {
 		for (groups, section) in [
 			(&range.expense_groups, &range.column.expenses),
 			(&range.income_groups, &range.column.income),
+			(&range.debt_paydown_groups, &range.column.debt_paydown),
+			(&range.savings_groups, &range.column.savings),
 		] {
 			for group in groups {
 				let lines: Vec<_> = section

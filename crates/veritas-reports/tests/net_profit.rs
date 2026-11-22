@@ -7,7 +7,7 @@ use support::*;
 use veritas_domain::{
 	CategoryKind, CivilDate, Goal, GoalId, GoalStatus, Money, PayeeId, TransactionId,
 };
-use veritas_reports::{NetProfit, Period, Section};
+use veritas_reports::{NetProfit, Period, Section, group_lines};
 
 fn totals(report: &NetProfit) -> [i64; 7] {
 	[
@@ -394,4 +394,105 @@ fn an_overflowing_period_is_an_error_not_a_panic() {
 		.in_category("Paycheck");
 	let result = veritas_reports::net_profit(&book.budget, &book.classify(), month("2027-02"));
 	assert!(matches!(result, Err(veritas_domain::CoreError::Overflow)));
+}
+
+/// R-AI-1 (docs/finance/assistant.md AI-2.2, AI-3.1): a group's figure in a
+/// section counts only rows of that section's kind, so a group that mixes a
+/// principal category with an expense category never puts principal into
+/// Expenses. The groups plus the ungrouped lines add up to the section.
+#[test]
+fn group_lines_sum_rows_of_the_sections_kind_only() {
+	let mut book = Book::new();
+	book.account("CHK", false)
+		.account("LOAN", true)
+		.group("Savings and Debt", false)
+		.group("Everyday", false)
+		.category(
+			"Loan principal",
+			"Savings and Debt",
+			Some(CategoryKind::DebtPrincipal),
+		)
+		.category("Loan fees", "Savings and Debt", None)
+		.category("Groceries", "Everyday", None);
+	book.transfer("P1", "CHK", "LOAN", "2027-01-05", -30_000)
+		.in_category("Loan principal");
+	book.row("F1", "CHK", "2027-01-05", -1_000)
+		.in_category("Loan fees");
+	book.row("M1", "CHK", "2027-01-06", -500)
+		.in_category("Loan principal");
+	book.row("G1", "CHK", "2027-01-07", -41_200)
+		.in_category("Groceries");
+	book.row("U1", "CHK", "2027-01-08", 4_000);
+	let report = book.net_profit(month("2027-01"));
+	let budget = &book.budget;
+
+	let totals = |section: &Section| {
+		group_lines(budget, section)
+			.unwrap()
+			.into_iter()
+			.map(|line| (line.group.to_string(), line.total.minor(), line.rows.len()))
+			.collect::<Vec<_>>()
+	};
+	assert_eq!(
+		totals(&report.expenses),
+		[
+			("Savings and Debt".to_owned(), 1_500, 2),
+			("Everyday".to_owned(), 41_200, 1),
+		],
+		"the fee and the misfiled purchase (CLS-4 row 14) are spending; the principal is not"
+	);
+	assert_eq!(
+		totals(&report.debt_paydown),
+		[("Savings and Debt".to_owned(), 30_000, 1)]
+	);
+
+	let grouped: i64 = group_lines(budget, &report.expenses)
+		.unwrap()
+		.iter()
+		.map(|line| line.total.minor())
+		.sum();
+	let ungrouped: Vec<_> = report
+		.expenses
+		.categories
+		.iter()
+		.filter(|line| line.category.is_none())
+		.collect();
+	assert_eq!(ungrouped.len(), 1);
+	assert!(ungrouped[0].labels.needs_review);
+	assert_eq!(
+		ungrouped[0].total.minor(),
+		-4_000,
+		"an uncategorized deposit (row 15)"
+	);
+	assert_eq!(
+		grouped + ungrouped[0].total.minor(),
+		report.expenses.total.minor()
+	);
+	assert_eq!(report.expenses.total.minor(), 38_700);
+}
+
+/// A category whose group record is gone is in no group, and a hidden or
+/// deleted group carries its own labels.
+#[test]
+fn a_group_line_carries_the_groups_labels_and_a_lost_group_is_no_group() {
+	let mut book = Book::new();
+	book.account("CHK", false)
+		.group("Old", false)
+		.group("Gone", false)
+		.category("Gym", "Old", None)
+		.category("Hobby", "Gone", None)
+		.hide_group("Old");
+	book.row("G1", "CHK", "2027-01-05", -2_000)
+		.in_category("Gym");
+	book.row("H1", "CHK", "2027-01-06", -700)
+		.in_category("Hobby");
+	book.budget
+		.category_groups
+		.remove(&veritas_domain::CategoryGroupId::new("Gone"));
+	let report = book.net_profit(month("2027-01"));
+	let lines = group_lines(&book.budget, &report.expenses).unwrap();
+	assert_eq!(lines.len(), 1);
+	assert_eq!(lines[0].group.to_string(), "Old");
+	assert!(lines[0].labels.hidden);
+	assert_eq!(lines[0].total.minor(), 2_000);
 }

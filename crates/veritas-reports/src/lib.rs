@@ -32,7 +32,8 @@ pub use dashboard::{
 pub use filter::TransactionFilter;
 pub use json::Json;
 pub use net_profit::{
-	CategoryLabels, CategoryLine, Line, NetProfit, Section, labels as category_labels, net_profit,
+	CategoryLabels, CategoryLine, GroupLine, Line, NetProfit, Section, group_lines,
+	labels as category_labels, net_profit,
 };
 pub use period::{Period, months};
 pub use report_eval::{
