@@ -79,7 +79,7 @@ struct UpcomingRow: View {
 		.accessibilityLabel("\(name), \(BillWords.day(item.date)), \(BillWords.status(item.status, isIncome: item.isIncome))")
 		.accessibilityAddTraits(isSelected ? .isSelected : [])
 		.accessibilityIdentifier("upcoming.\(item.billId)")
-		.confirmationDialog(BillWords.postTodayConfirm(item.date), isPresented: $confirmsPostToday, titleVisibility: .visible) {
+		.confirmationDialog(BillWords.postTodayConfirm(item.date, isIncome: item.isIncome), isPresented: $confirmsPostToday, titleVisibility: .visible) {
 			Button("Post today") { postToday() }
 			Button("Cancel", role: .cancel) {}
 		}

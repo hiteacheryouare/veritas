@@ -23,7 +23,15 @@ public struct PayeeText: Hashable, Sendable {
 		}
 	}
 
+	/// A payee picked for money going out, as bills and rules pick one: a
+	/// transfer payee reads "→ To Car loan".
+	public init(_ payee: PayeeDetail) {
+		direction = payee.transferAccountId == nil ? nil : "→"
+		text = payee.transferAccountId == nil ? payee.name : "To \(payee.name)"
+	}
+
 	public var spoken: String { text }
+	public var label: String { [direction, text].compactMap(\.self).joined(separator: " ") }
 }
 
 public extension RegisterRow {

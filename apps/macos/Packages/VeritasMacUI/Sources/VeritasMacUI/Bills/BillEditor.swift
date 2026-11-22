@@ -40,7 +40,7 @@ struct BillEditor: View {
 				Text(title)
 					.font(.text(.title, weight: .semibold))
 				if customRule {
-					Text("Has extra rule parts")
+					Text(BillWords.customParts)
 						.font(.text(.caption))
 						.foregroundStyle(.textSecondary)
 						.padding(.horizontal, Spacing.s2)
@@ -117,7 +117,7 @@ struct BillEditor: View {
 				Picker("Payee", selection: $editing.draft.payeeId) {
 					Text("None").tag(String?.none)
 					ForEach(model.names.payees, id: \.id) { payee in
-						Text(payee.name).tag(String?.some(payee.id))
+						Text(model.names.payeeLabel(payee)).tag(String?.some(payee.id))
 					}
 				}
 				.labelsHidden()

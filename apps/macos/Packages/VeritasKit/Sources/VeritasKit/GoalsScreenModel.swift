@@ -8,6 +8,8 @@ import VeritasCore
 @Observable
 public final class GoalsScreenModel {
 	public private(set) var goals: [GoalSummary] = []
+	/// The core's CLS-12.10 line, set only in a 0-place budget (`GoalList.mixedScaleNote`).
+	public private(set) var mixedScaleNote: String?
 	/// The goal the arrow keys and the Goal menu act on.
 	public var selection: String?
 
@@ -37,9 +39,10 @@ public final class GoalsScreenModel {
 	public func load() async {
 		loadGeneration += 1
 		let generation = loadGeneration
-		let loaded = await workspace.goals()
+		let loaded = await workspace.goalList()
 		guard generation == loadGeneration else { return }
-		goals = loaded
+		goals = loaded.goals
+		mixedScaleNote = loaded.mixedScaleNote
 		if let selection, !goals.contains(where: { $0.id == selection }) {
 			self.selection = nil
 		}

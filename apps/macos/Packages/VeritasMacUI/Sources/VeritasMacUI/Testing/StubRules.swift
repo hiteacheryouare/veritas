@@ -76,7 +76,8 @@ final class StubRules: @unchecked Sendable {
 					RuleFieldChange(field: .category, before: .id(id: from), after: category),
 					id == Self.reconciledRow ? RuleFieldChange(field: .amount, before: .amount(amount: amount), after: .amount(amount: -2_499)) : nil
 				].compactMap { $0 },
-				splitLines: []
+				splitLines: [],
+				reconciled: id == Self.reconciledRow
 			)
 		}
 		return [
@@ -84,17 +85,6 @@ final class StubRules: @unchecked Sendable {
 			row("tx-2", "2026-10-28", -1_899, from: "gifts", notes: nil),
 			row(Self.reconciledRow, "2026-09-14", -2_999, from: "hobbies", notes: "AMZN Digital")
 		]
-	}
-
-	/// Only the preview's own rows; any other id is NotFound, as the core answers.
-	func registerRow(_ id: String) throws -> RegisterRow {
-		guard ["tx-1", "tx-2", Self.reconciledRow].contains(id) else { throw FfiError.NotFound(entity: "transaction", id: id) }
-		return RegisterRow(
-			id: id, accountId: "visa", accountName: "Visa", date: "2026-09-14", amount: -2_999, payeeId: "amazon", payeeName: "Amazon",
-			categoryId: nil, categoryName: nil, notes: nil, tags: [], cleared: true, reconciled: id == Self.reconciledRow,
-			transferAccountId: nil, counterpartId: nil, counterpartParentId: nil, lines: [], splitDifference: nil, startingBalance: false,
-			scheduleId: nil, needsActual: nil, runningBalance: nil
-		)
 	}
 
 	/// Applies a rule command. Returns false for a command that isn't a rule's.

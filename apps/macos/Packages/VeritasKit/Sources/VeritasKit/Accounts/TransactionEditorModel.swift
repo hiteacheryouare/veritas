@@ -173,19 +173,13 @@ public final class TransactionEditorModel: Identifiable {
 			return false
 		}
 		guard let ends = transferEnds, let payee = payees.first(where: { $0.transferAccountId == ends.to }) else { return false }
-		let purpose = transferPurpose
 		let typed = notes.trimmingCharacters(in: .whitespaces)
 		let draft = TransactionDraft(
 			id: UUID().uuidString.lowercased(), accountId: ends.from, date: Self.civilDate(date), amount: -magnitude,
 			payeeId: payee.id, payeeName: nil, categoryId: nil, notes: typed.isEmpty ? nil : typed, cleared: cleared, splits: []
 		)
 		problem = nil
-		return await workspace.change { session -> Bool in
-			var filed = draft
-			filed.categoryId = try await purpose.resolve(using: session)
-			try await session.perform(.addTransaction(transaction: filed))
-			return true
-		} ?? false
+		return await workspace.perform(transferPurpose.command(saving: draft, editing: nil))
 	}
 
 	public func unlock() async {
