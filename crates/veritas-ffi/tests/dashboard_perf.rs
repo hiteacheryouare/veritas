@@ -87,6 +87,16 @@ fn the_dashboard_with_every_native_card_meets_r_perf_4_on_perf_100k() {
 		CancelToken::new(),
 	))
 	.unwrap();
+	// As in reports_perf: time the dashboard once the background open check
+	// has finished, not against it for the CPU.
+	let opened = Instant::now();
+	while session.state().unwrap().checking {
+		assert!(
+			opened.elapsed() < Duration::from_secs(120),
+			"the open check never finished"
+		);
+		std::thread::sleep(Duration::from_millis(20));
+	}
 	let today = "2026-10-31".to_owned();
 	let pages = block_on(session.dashboards(today.clone(), CancelToken::new())).unwrap();
 	let page = pages[0].id.clone();
