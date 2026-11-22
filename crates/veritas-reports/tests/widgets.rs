@@ -860,6 +860,7 @@ fn sankey_as_actual(ours: &SankeyCard, theirs: &Value) -> Value {
 				"name": name,
 				"percentageLabel": node.percentage,
 				"color": sankey_color(node.color),
+				"value": node.value.minor(),
 			})
 		})
 		.collect();

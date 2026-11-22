@@ -8,11 +8,13 @@ mod support;
 use support::*;
 use veritas_domain::{
 	Cadence, CoreError, GoalId, IncomeDelta, Scenario, ScenarioChange, ScenarioId, ScheduleId,
+	TransactionId,
 };
 use veritas_forecast::{
 	BandMethod, Certainty, FlowKind, Forecaster, KnownFlow, LoanPayment, Projection,
 	ScheduleAmount, cadence_dates,
 };
+use veritas_reports::{Json, classify, net_worth_by_month, net_worth_card};
 
 const TODAY: &str = "2027-01-15";
 
@@ -130,6 +132,45 @@ fn r_fc_1_band_is_net_worth_plus_scaled_offsets() {
 }
 
 #[test]
+fn fc_4_2_step_5_the_band_at_every_projected_month() {
+	let mut book = Book::household();
+	book.opening("CHK", "2025-12-31", 1_000_000);
+	let values: [i64; 12] = [
+		41000, 45000, 43000, 39000, 47000, 43000, 42000, 44000, 40000, 46000, 43000, 43000,
+	];
+	for (step, x) in values.iter().enumerate() {
+		let month = ym("2026-01").offset(step as i32).unwrap();
+		book.spend("Groceries", &format!("{month}-15"), -x);
+	}
+	let projection = project(&book, &[], None);
+	assert_eq!(
+		projection.months[0].band, None,
+		"the current month's remainder has no band"
+	);
+	for (complete, month) in projection.months.iter().enumerate().skip(1) {
+		let (low, high) = projection.band.offsets(complete as u32).unwrap().unwrap();
+		assert_eq!(
+			month.band,
+			Some((
+				cents(month.net_worth.minor() + low.minor()),
+				cents(month.net_worth.minor() + high.minor())
+			)),
+			"h = {complete}"
+		);
+	}
+	for horizon in &projection.horizons {
+		assert_eq!(
+			Some(horizon.band),
+			projection
+				.months
+				.get(horizon.months as usize)
+				.map(|month| month.band),
+			"the horizons are points of the same series"
+		);
+	}
+}
+
+#[test]
 fn r_fc_1_no_history_means_no_band() {
 	let mut book = Book::household();
 	book.opening("CHK", "2027-01-02", 50000);
@@ -141,6 +182,7 @@ fn r_fc_1_no_history_means_no_band() {
 			.iter()
 			.all(|horizon| horizon.band.is_none())
 	);
+	assert!(projection.months.iter().all(|month| month.band.is_none()));
 }
 
 #[test]
@@ -438,6 +480,291 @@ fn r_fc_2_goal_contributions_never_move_money() {
 	let projection = project(&book, &flows, Some(&scenario));
 	assert_eq!(projection.months, baseline.months);
 	assert_eq!(projection.horizons, baseline.horizons);
+}
+
+#[test]
+fn fc_3_a_what_ifs_difference_from_the_baseline_at_each_horizon() {
+	let book = fc_3_book();
+	let flows = fc_3_flows();
+	let car = scenario(
+		"Car and side job",
+		vec![
+			ScenarioChange::OneTime {
+				date: date("2027-05-10"),
+				account: acct("CHK"),
+				category: None,
+				amount: cents(-2_000_000),
+			},
+			ScenarioChange::Recurring {
+				start: date("2027-01-22"),
+				end_month: Some(ym("2027-02")),
+				cadence: Cadence::EveryWeeks(2),
+				account: acct("CHK"),
+				category: Some(cat("Side gigs")),
+				amount: cents(10000),
+			},
+		],
+	);
+	let laptop = scenario(
+		"Save for a laptop",
+		vec![ScenarioChange::GoalContribution {
+			goal: GoalId::new("laptop"),
+			amount: cents(25000),
+			start_month: ym("2027-02"),
+			end_month: None,
+		}],
+	);
+	let comparison = Forecaster::new(&book.budget)
+		.unwrap()
+		.compare(date(TODAY), &flows, &[&car, &laptop])
+		.unwrap();
+
+	let differences = comparison.differences(&comparison.scenarios[0]).unwrap();
+	let net_worth: Vec<(u32, i64)> = differences
+		.iter()
+		.map(|difference| (difference.months, difference.net_worth.minor()))
+		.collect();
+	assert_eq!(
+		net_worth,
+		[
+			(3, 30000),
+			(6, 30000 - 2_000_000),
+			(10, 30000 - 2_000_000),
+			(12, 30000 - 2_000_000)
+		],
+		"three paychecks by April, then the car in May"
+	);
+	for difference in &differences {
+		assert_eq!(difference.balances[&acct("CHK")], difference.net_worth);
+		for (account, amount) in &difference.balances {
+			if *account != acct("CHK") {
+				assert_eq!(*amount, cents(0), "{account}");
+			}
+		}
+		let horizon = comparison.scenarios[0]
+			.horizons
+			.iter()
+			.find(|horizon| horizon.months == difference.months)
+			.unwrap();
+		let base = comparison
+			.baseline
+			.horizons
+			.iter()
+			.find(|base| base.months == difference.months)
+			.unwrap();
+		assert_eq!(
+			difference.net_worth.minor(),
+			horizon.net_worth.minor() - base.net_worth.minor()
+		);
+	}
+
+	let sn_5 = comparison.differences(&comparison.scenarios[1]).unwrap();
+	assert_eq!(sn_5.len(), 4);
+	for difference in &sn_5 {
+		assert_eq!(
+			difference.net_worth,
+			cents(0),
+			"SN-5: goal money never moves net worth"
+		);
+		assert!(
+			difference
+				.balances
+				.values()
+				.all(|amount| *amount == cents(0))
+		);
+	}
+	assert!(
+		comparison
+			.differences(&comparison.baseline)
+			.unwrap()
+			.iter()
+			.all(|difference| difference.net_worth == cents(0))
+	);
+}
+
+/// NH-1: the first row's own month is a history month, and nothing before
+/// it is drawn, not even 0.
+#[test]
+fn nh_1_net_worth_history_starts_at_the_first_rows_month() {
+	let mut book = Book::household();
+	book.opening("CHK", "2027-03-14", 500_000);
+	let history = Forecaster::new(&book.budget)
+		.unwrap()
+		.net_worth_history(date("2027-06-10"))
+		.unwrap();
+	let months: Vec<(String, i64)> = history
+		.iter()
+		.map(|point| (point.month.to_string(), point.net_worth.minor()))
+		.collect();
+	assert_eq!(
+		months,
+		[
+			("2027-03".to_owned(), 500_000),
+			("2027-04".to_owned(), 500_000),
+			("2027-05".to_owned(), 500_000)
+		]
+	);
+}
+
+/// NH-2: the history dates each transfer leg on its own day (ST-2), so money
+/// in transit at April's end lowers April; the net worth card moves it to
+/// the later side (ST-10.10) and shows no dip.
+#[test]
+fn nh_2_net_worth_history_uses_st_2_dating_not_the_cards() {
+	let mut book = Book::new();
+	book.account("CHK", false).account("SAV", false);
+	book.opening("CHK", "2027-04-29", 1_000_000);
+	book.opening("SAV", "2027-04-29", 2_000_000);
+	let sent = book
+		.transfer("CHK", "SAV", "2027-04-30", -50_000)
+		.id
+		.clone();
+	book.budget
+		.transactions
+		.get_mut(&TransactionId::new(format!("{sent}m")))
+		.unwrap()
+		.date = date("2027-05-02");
+	let today = date("2027-06-10");
+
+	let history = Forecaster::new(&book.budget)
+		.unwrap()
+		.net_worth_history(today)
+		.unwrap();
+	let months: Vec<(String, i64)> = history
+		.iter()
+		.map(|point| (point.month.to_string(), point.net_worth.minor()))
+		.collect();
+	assert_eq!(
+		months,
+		[
+			("2027-04".to_owned(), 2_950_000),
+			("2027-05".to_owned(), 3_000_000)
+		]
+	);
+
+	let april = Json::parse(r#"{"timeFrame":{"start":"2027-04","end":"2027-04","mode":"static"}}"#)
+		.unwrap();
+	let card = net_worth_card(&book.budget, Some(&april), today.naive(), 0).unwrap();
+	let last = card.periods.last().unwrap();
+	assert_eq!(last.start, date("2027-04-01").naive());
+	assert_eq!(last.net_worth.minor(), 3_000_000, "the card shows no dip");
+}
+
+/// SN-6 and SN-7: a what-if's difference is scenario less baseline in the
+/// balances' own sign, so paying 50000 off a loan reads +50000 on the loan.
+#[test]
+fn sn_6_and_sn_7_what_if_differences_in_cents() {
+	let mut book = Book::household();
+	book.opening("CHK", "2026-06-30", 1_500_000);
+	book.opening("LOAN", "2026-06-30", -300_000);
+	let raise = scenario(
+		"Bonus",
+		vec![ScenarioChange::OneTime {
+			date: date("2027-02-10"),
+			account: acct("CHK"),
+			category: Some(cat("Side gigs")),
+			amount: cents(45_000),
+		}],
+	);
+	let paydown = scenario(
+		"Pay down the loan",
+		vec![ScenarioChange::OneTimeTransfer {
+			date: date("2027-02-10"),
+			from: acct("CHK"),
+			to: acct("LOAN"),
+			amount: cents(50_000),
+		}],
+	);
+	let comparison = Forecaster::new(&book.budget)
+		.unwrap()
+		.compare(date(TODAY), &[], &[&raise, &paydown])
+		.unwrap();
+	let at_3 = |projection: &Projection| {
+		projection
+			.horizons
+			.iter()
+			.find(|horizon| horizon.months == 3)
+			.unwrap()
+			.clone()
+	};
+	let difference_at_3 = |scenario: &Projection| {
+		comparison
+			.differences(scenario)
+			.unwrap()
+			.into_iter()
+			.find(|difference| difference.months == 3)
+			.unwrap()
+	};
+
+	let base = at_3(&comparison.baseline);
+	assert_eq!(base.net_worth, cents(1_200_000));
+	assert_eq!(at_3(&comparison.scenarios[0]).net_worth, cents(1_245_000));
+	assert_eq!(
+		difference_at_3(&comparison.scenarios[0]).net_worth,
+		cents(45_000)
+	);
+
+	assert_eq!(base.balances[&acct("LOAN")], cents(-300_000));
+	assert_eq!(
+		at_3(&comparison.scenarios[1]).balances[&acct("LOAN")],
+		cents(-250_000)
+	);
+	let sn_7 = difference_at_3(&comparison.scenarios[1]);
+	assert_eq!(
+		sn_7.balances[&acct("LOAN")],
+		cents(50_000),
+		"better off, not -50000"
+	);
+	assert_eq!(sn_7.balances[&acct("CHK")], cents(-50_000));
+	assert_eq!(sn_7.net_worth, cents(0));
+}
+
+#[test]
+fn fc_3_net_worth_history_is_the_net_worth_reports_months() {
+	let book = fc_3_book();
+	let forecaster = Forecaster::new(&book.budget).unwrap();
+	let history = forecaster.net_worth_history(date(TODAY)).unwrap();
+	let months: Vec<String> = history
+		.iter()
+		.map(|point| point.month.to_string())
+		.collect();
+	assert_eq!(
+		months,
+		[
+			"2026-06", "2026-07", "2026-08", "2026-09", "2026-10", "2026-11", "2026-12"
+		],
+		"from the first row's month, before today's month"
+	);
+	let report = net_worth_by_month(
+		&book.budget,
+		&classify(&book.budget),
+		ym("2026-06"),
+		ym("2026-12"),
+	)
+	.unwrap();
+	assert_eq!(history, report);
+	assert_eq!(history[0].net_worth, cents(531800));
+
+	let mut long = fc_3_book();
+	long.opening("SAV", "2024-02-10", 100000);
+	let history = Forecaster::new(&long.budget)
+		.unwrap()
+		.net_worth_history(date(TODAY))
+		.unwrap();
+	assert_eq!(history.len(), 12, "at most 12 complete months");
+	assert_eq!(history[0].month, ym("2026-01"));
+	assert_eq!(history[11].month, ym("2026-12"));
+
+	let mut new = Book::household();
+	new.opening("CHK", "2027-01-02", 50000);
+	assert!(
+		Forecaster::new(&new.budget)
+			.unwrap()
+			.net_worth_history(date(TODAY))
+			.unwrap()
+			.is_empty(),
+		"no complete month before today's"
+	);
 }
 
 #[test]

@@ -5,7 +5,9 @@ use veritas_domain::{
 	Scenario, ScenarioEventId, ScenarioId, ScheduleId, TransactionKind, YearMonth,
 };
 use veritas_engine::currency_text_at;
-use veritas_reports::{Classification, Decision, Period, classify, net_worth};
+use veritas_reports::{
+	Classification, Decision, NetWorthPoint, Period, classify, net_worth, net_worth_by_month,
+};
 
 use crate::band::{Band, band};
 use crate::baseline::{Baseline, SEASON_MIN, WINDOW, complete_months};
@@ -29,6 +31,10 @@ pub struct MonthForecast {
 	pub net_income: Money,
 	/// At the end of the month.
 	pub net_worth: Money,
+	/// FC-4.2 step 5: `[NW + lo_h, NW + hi_h]` with `h` the complete months
+	/// after the current one; absent for the current month's remainder and
+	/// with no history.
+	pub band: Option<(Money, Money)>,
 	pub balances: BTreeMap<AccountId, Money>,
 }
 
@@ -147,6 +153,50 @@ fn whole_dollars(amount: Money) -> i128 {
 pub struct Comparison {
 	pub baseline: Projection,
 	pub scenarios: Vec<Projection>,
+}
+
+/// FC-3's what-if difference at one horizon: the what-if less the baseline,
+/// positive when the what-if leaves more.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HorizonDifference {
+	pub months: u32,
+	pub net_worth: Money,
+	/// Every account either projection holds, a missing one as 0.
+	pub balances: BTreeMap<AccountId, Money>,
+}
+
+impl Comparison {
+	/// `scenario` against the baseline at each horizon both have. The band
+	/// isn't differenced: a what-if never moves its offsets (FC-3).
+	pub fn differences(&self, scenario: &Projection) -> Result<Vec<HorizonDifference>, CoreError> {
+		let mut differences = Vec::new();
+		for horizon in &scenario.horizons {
+			let Some(base) = self
+				.baseline
+				.horizons
+				.iter()
+				.find(|base| base.months == horizon.months)
+			else {
+				continue;
+			};
+			let mut balances = BTreeMap::new();
+			for account in horizon.balances.keys().chain(base.balances.keys()) {
+				let of = |balances: &BTreeMap<AccountId, Money>| {
+					balances.get(account).copied().unwrap_or(Money::ZERO)
+				};
+				balances.insert(
+					account.clone(),
+					of(&horizon.balances).checked_sub(of(&base.balances))?,
+				);
+			}
+			differences.push(HorizonDifference {
+				months: horizon.months,
+				net_worth: horizon.net_worth.checked_sub(base.net_worth)?,
+				balances,
+			});
+		}
+		Ok(differences)
+	}
 }
 
 /// Reads one budget for every forecast. It only ever borrows the budget, so
@@ -359,6 +409,17 @@ impl<'a> Forecaster<'a> {
 
 			let net_income = add(add(known_net, baselined)?, scenario_net)?;
 			worth = add(worth, net_income)?;
+			let offsets = match u32::try_from(step) {
+				Ok(complete) if complete > 0 => band.offsets(complete)?,
+				_ => None,
+			};
+			let month_band = match offsets {
+				Some((low, high)) => Some((
+					Money::from_minor(worth).checked_add(low)?,
+					Money::from_minor(worth).checked_add(high)?,
+				)),
+				None => None,
+			};
 			months.push(MonthForecast {
 				month,
 				known_net_income: Money::from_minor(known_net),
@@ -366,6 +427,7 @@ impl<'a> Forecaster<'a> {
 				scenario_net_income: Money::from_minor(scenario_net),
 				net_income: Money::from_minor(net_income),
 				net_worth: Money::from_minor(worth),
+				band: month_band,
 				balances: money_map(&running),
 			});
 		}
@@ -375,18 +437,11 @@ impl<'a> Forecaster<'a> {
 			let Some(month) = months.get(usize::try_from(horizon).unwrap_or(0)) else {
 				continue;
 			};
-			let band = match band.offsets(horizon)? {
-				Some((low, high)) => Some((
-					month.net_worth.checked_add(low)?,
-					month.net_worth.checked_add(high)?,
-				)),
-				None => None,
-			};
 			horizons.push(HorizonForecast {
 				months: horizon,
 				month: month.month,
 				net_worth: month.net_worth,
-				band,
+				band: month.band,
 				balances: month.balances.clone(),
 			});
 		}
@@ -422,6 +477,27 @@ impl<'a> Forecaster<'a> {
 			months,
 			horizons,
 		})
+	}
+
+	/// FC-3's net worth history: ST-2's month-end figures, from the net worth
+	/// report's own function, for the up to 12 complete months before
+	/// today's month. Months before the first row's month are left out.
+	pub fn net_worth_history(&self, today: CivilDate) -> Result<Vec<NetWorthPoint>, CoreError> {
+		let current = today.year_month();
+		let Some(first_row) = self
+			.classification
+			.rows()
+			.first()
+			.map(|row| row.date.year_month())
+		else {
+			return Ok(Vec::new());
+		};
+		let first = first_row.max(current.offset(-LAST_HORIZON)?);
+		let last = current.offset(-1)?;
+		if first > last {
+			return Ok(Vec::new());
+		}
+		net_worth_by_month(self.budget, &self.classification, first, last)
 	}
 
 	/// The baseline and up to `MAX_COMPARED` scenarios over the same inputs.

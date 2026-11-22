@@ -51,6 +51,18 @@ const run = async (spreadsheet: (sheet: unknown, setData: (data: unknown) => voi
 // NetWorthGraph.tsx:295-325, which Node can't load as TSX: the accounts with
 // a balance, by their balances summed over the points, smallest first, each
 // colored by its place in getColorScale('qualitative').
+// The amount SankeyGraph.tsx prints under a node is recharts' node value, not
+// the spreadsheet's: getNodesTree in recharts' Sankey.tsx (MIT), verbatim.
+const withRechartsValues = (nodes: Array<Record<string, unknown>>, links: Array<{ source: number; target: number; value: number }>) => {
+	const getValue = (entry: { value: number } | undefined) => (entry && entry.value) || 0;
+	const getSumOfIds = (ids: number[]) => ids.reduce((result, id) => result + getValue(links[id]), 0);
+	return nodes.map((node, index) => {
+		const incoming = links.flatMap((link, id) => (link.target === index ? [id] : []));
+		const outgoing = links.flatMap((link, id) => (link.source === index ? [id] : []));
+		return { ...node, value: Math.max(getSumOfIds(incoming), getSumOfIds(outgoing)) };
+	});
+};
+
 const stackedAccounts = (accounts: Array<{ id: string; name: string }>, points: Array<Record<string, unknown>>) => {
 	const totals: Record<string, number> = {};
 	for (const account of accounts) {
@@ -236,7 +248,7 @@ export const widgetData = async ({ internal }: ActualSession, requests: WidgetRe
 			const layerFrom = layered ? meta.layerFrom : mode === 'budgeted' ? 'income_category' : 'payee';
 			const layerTo = layered ? meta.layerTo : 'category';
 			const data = sankey.buildSankeyData(baseGraph, topN, categories, meta?.categorySort ?? 'per-group', layerFrom, layerTo);
-			return { start, end, boundedStart, boundedEnd, data };
+			return { start, end, boundedStart, boundedEnd, data: { ...data, nodes: withRechartsValues(data.nodes, data.links) } };
 		},
 		'calendar-card': async ({ meta, firstDayOfWeekIdx }) => {
 			const { calendarSpreadsheet } = await loadSource(`${REPORTS}/spreadsheets/calendar-spreadsheet.ts`);

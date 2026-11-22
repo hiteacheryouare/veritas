@@ -98,10 +98,6 @@ impl LeftBill {
 			.iter()
 			.filter_map(|rule| self.reasons.get(rule).map(String::as_str))
 			.collect();
-		let rules = match self.undetermined.len() {
-			1 => "1 rule".to_owned(),
-			n => format!("{n} rules"),
-		};
 		let why = if reasons.is_empty() {
 			String::new()
 		} else {
@@ -112,16 +108,16 @@ impl LeftBill {
 		// due yet, waits for Ryan in Actual.
 		match self.by {
 			LeftBy::Service => format!(
-				"Veritas left this bill for Actual: {rules} couldn't run here{why}. Actual posts it the next time it opens this budget."
+				"Veritas left this bill for Actual: it has settings only Actual can apply{why}. Actual posts it the next time it opens this budget."
 			),
 			LeftBy::Paid => format!(
-				"Veritas didn't record this payment: {rules} couldn't run here{why}. Enter the payment in Actual instead."
+				"Veritas didn't record this payment: this bill has settings only Actual can apply{why}. Enter the payment in Actual instead."
 			),
 			LeftBy::PaidWhileDue => format!(
-				"Veritas didn't record this payment: {rules} couldn't run here{why}. Actual posts this bill at its scheduled amount the next time it opens this budget, so don't enter it there as well. Change the amount on that transaction if you paid a different amount."
+				"Veritas didn't record this payment: this bill has settings only Actual can apply{why}. Actual posts this bill at its scheduled amount the next time it opens this budget, so don't enter it there as well. Change the amount on that transaction if you paid a different amount."
 			),
 			LeftBy::PostNow => format!(
-				"Veritas didn't post this bill: {rules} couldn't run here{why}. Use Post transaction on it in Actual instead."
+				"Veritas didn't post this bill: it has settings only Actual can apply{why}. Use Post transaction on it in Actual instead."
 			),
 		}
 	}
@@ -981,7 +977,7 @@ mod tests {
 		assert_eq!(left.undetermined, [RuleId::new("template")]);
 		assert_eq!(
 			left.note(),
-			"Veritas left this bill for Actual: 1 rule couldn't run here (a template action). Actual posts it the next time it opens this budget."
+			"Veritas left this bill for Actual: it has settings only Actual can apply (a template action). Actual posts it the next time it opens this budget."
 		);
 	}
 
@@ -1057,7 +1053,7 @@ mod tests {
 		assert_eq!(paid.left[0].by, LeftBy::Paid);
 		assert_eq!(
 			paid.left[0].note(),
-			"Veritas didn't record this payment: 1 rule couldn't run here (a template action). Enter the payment in Actual instead."
+			"Veritas didn't record this payment: this bill has settings only Actual can apply (a template action). Enter the payment in Actual instead."
 		);
 		let posted = post_now(&book, &budget, &mut payees, &id, None).unwrap();
 		assert_eq!(posted.left[0].by, LeftBy::PostNow);
@@ -1100,8 +1096,36 @@ mod tests {
 		assert_eq!(due.by, LeftBy::PaidWhileDue);
 		assert_eq!(
 			due.note(),
-			"Veritas didn't record this payment: 1 rule couldn't run here (a template action). Actual posts this bill at its scheduled amount the next time it opens this budget, so don't enter it there as well. Change the amount on that transaction if you paid a different amount."
+			"Veritas didn't record this payment: this bill has settings only Actual can apply (a template action). Actual posts this bill at its scheduled amount the next time it opens this budget, so don't enter it there as well. Change the amount on that transaction if you paid a different amount."
 		);
+	}
+
+	#[test]
+	fn d2_a_bill_amount_problem_never_says_rule_in_the_note() {
+		for amount in ["\"lots\"", "-1500.5"] {
+			let mut budget = budget_with(&bill(monthly(), true), "2026-10-15");
+			let rule = budget.rules.get_mut(&RuleId::new("rule")).unwrap();
+			rule.conditions_json = rule.conditions_json.replace("-150000", amount);
+			let book = RuleBook::new(&budget);
+			let mut payees = BudgetPayees::new(&budget, || PayeeId::new("made"));
+			let mut left = advance_schedules(&book, &budget, &mut payees, day("2026-10-15"))
+				.left
+				.remove(0);
+			for by in [
+				LeftBy::Service,
+				LeftBy::Paid,
+				LeftBy::PaidWhileDue,
+				LeftBy::PostNow,
+			] {
+				left.by = by;
+				let note = left.note();
+				assert!(note.contains("a bill amount"), "{note}");
+				assert!(
+					!note.to_lowercase().contains("rule"),
+					"{amount}, {by:?}: {note}"
+				);
+			}
+		}
 	}
 
 	#[test]

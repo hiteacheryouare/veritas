@@ -233,6 +233,10 @@ pub struct ReportTransaction {
 	pub category: Option<String>,
 	pub notes: Option<String>,
 	pub amount: i64,
+	/// v18: for a transfer, the other account (the one `payee` names), so
+	/// the drill-down can draw "To X" or "From X" by the sign of `amount`.
+	#[uniffi(default = None)]
+	pub transfer_account_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -674,7 +678,12 @@ fn drill_rows(
 	}
 }
 
-fn payee_name(budget: &BudgetData, transaction: &veritas_domain::Transaction) -> Option<String> {
+/// The row's payee through the payee mapping; a split line without one
+/// takes its parent's.
+fn payee_of<'a>(
+	budget: &'a BudgetData,
+	transaction: &veritas_domain::Transaction,
+) -> Option<&'a veritas_domain::Payee> {
 	let parent = match &transaction.split {
 		veritas_domain::SplitRole::Child { parent } => budget.transactions.get(parent),
 		_ => None,
@@ -684,7 +693,11 @@ fn payee_name(budget: &BudgetData, transaction: &veritas_domain::Transaction) ->
 		.as_ref()
 		.or_else(|| parent.and_then(|parent| parent.payee.as_ref()))?;
 	let id = budget.resolve_payee(id).unwrap_or(id);
-	let payee = budget.payees.get(id)?;
+	budget.payees.get(id)
+}
+
+fn payee_name(budget: &BudgetData, transaction: &veritas_domain::Transaction) -> Option<String> {
+	let payee = payee_of(budget, transaction)?;
 	match &payee.transfer_account {
 		Some(account) => budget
 			.accounts
@@ -717,6 +730,10 @@ pub(crate) fn report_transactions(
 				category: row.category.as_ref().map(|id| category_name(budget, id)),
 				notes: transaction.and_then(|transaction| transaction.notes.clone()),
 				amount: row.amount.minor(),
+				transfer_account_id: transaction
+					.and_then(|transaction| payee_of(budget, transaction))
+					.and_then(|payee| payee.transfer_account.as_ref())
+					.map(ToString::to_string),
 			})
 		})
 		.collect()
