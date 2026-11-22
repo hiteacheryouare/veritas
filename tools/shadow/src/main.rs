@@ -446,24 +446,8 @@ fn widgets(
 	// budget scale, so Actual's card code reads it after the register-scale ops.
 	let currency = session
 		.overview()
-		.ok()
-		.and_then(|overview| overview.number_format)
-		.and_then(|format| format.currency);
-	// Fail closed: without Actual's currency list, or for a currency it doesn't
-	// list, the card comparison can't know the budget's scale, so it stops.
-	let zero_places = match currency {
-		None => false,
-		Some(code) => {
-			let known =
-				veritas_ffi::currencies().map_err(|_| Stopped("reading the currency list"))?;
-			known
-				.iter()
-				.find(|known| known.code == code)
-				.ok_or(Stopped("a currency Actual doesn't list"))?
-				.decimal_places
-				== 0
-		}
-	};
+		.map(|overview| overview.number_format.and_then(|format| format.currency));
+	let zero_places = zero_place_budget(currency, veritas_ffi::currencies)?;
 	let actuals_zip = if zero_places {
 		let ops = scratch.join("register-scale.ops.json");
 		let scaled = scratch.join("register-scale.zip");
@@ -647,4 +631,103 @@ fn sorted(rows: &[QueryRow]) -> Vec<String> {
 		.collect();
 	keys.sort();
 	keys
+}
+
+/// Whether the budget's currency has no decimal places. It fails closed:
+/// an overview that can't be read, a currency list that can't be read, or a
+/// currency the list doesn't name stops the run rather than guess a scale.
+/// A budget with no currency is on the 2-place path, as in Actual.
+fn zero_place_budget<E, F>(
+	currency: Result<Option<String>, E>,
+	currencies: impl FnOnce() -> Result<Vec<veritas_ffi::Currency>, F>,
+) -> Checked<bool> {
+	let Some(code) = currency.map_err(|_| Stopped("reading the budget's currency"))? else {
+		return Ok(false);
+	};
+	let known = currencies().map_err(|_| Stopped("reading the currency list"))?;
+	let listed = known
+		.iter()
+		.find(|known| known.code == code)
+		.ok_or(Stopped("a currency Actual doesn't list"))?;
+	Ok(listed.decimal_places == 0)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn currency(code: &str, places: u8) -> veritas_ffi::Currency {
+		veritas_ffi::Currency {
+			code: code.to_owned(),
+			name: code.to_owned(),
+			symbol: String::new(),
+			decimal_places: places,
+			number_format: veritas_ffi::NumberStyle::CommaDot,
+			symbol_first: true,
+		}
+	}
+
+	fn listed() -> Result<Vec<veritas_ffi::Currency>, ()> {
+		Ok(vec![
+			currency("USD", 2),
+			currency("JPY", 0),
+			currency("", 2),
+		])
+	}
+
+	fn stopped(result: Checked<bool>) -> Option<&'static str> {
+		result.err().map(|Stopped(check)| check)
+	}
+
+	#[test]
+	fn a_budget_whose_overview_cant_be_read_stops_the_run() {
+		assert_eq!(
+			stopped(zero_place_budget(Err::<Option<String>, ()>(()), listed)),
+			Some("reading the budget's currency")
+		);
+	}
+
+	#[test]
+	fn a_currency_list_that_cant_be_read_stops_the_run() {
+		assert_eq!(
+			stopped(zero_place_budget(
+				Ok::<_, ()>(Some("USD".to_owned())),
+				|| Err::<Vec<_>, ()>(())
+			)),
+			Some("reading the currency list")
+		);
+	}
+
+	#[test]
+	fn a_currency_actual_doesnt_list_stops_the_run() {
+		assert_eq!(
+			stopped(zero_place_budget(
+				Ok::<_, ()>(Some("XQQ".to_owned())),
+				listed
+			)),
+			Some("a currency Actual doesn't list")
+		);
+	}
+
+	#[test]
+	fn listed_currencies_and_no_currency_give_their_scale() {
+		assert!(matches!(
+			zero_place_budget(Ok::<_, ()>(Some("JPY".to_owned())), listed),
+			Ok(true)
+		));
+		assert!(matches!(
+			zero_place_budget(Ok::<_, ()>(Some("USD".to_owned())), listed),
+			Ok(false)
+		));
+		assert!(matches!(
+			zero_place_budget(Ok::<_, ()>(Some(String::new())), listed),
+			Ok(false)
+		));
+		assert!(matches!(
+			zero_place_budget(Ok::<_, ()>(None), || -> Result<Vec<_>, ()> {
+				panic!("no currency needs no list")
+			}),
+			Ok(false)
+		));
+	}
 }
