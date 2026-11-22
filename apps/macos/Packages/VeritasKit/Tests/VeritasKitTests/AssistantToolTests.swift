@@ -30,10 +30,10 @@ struct AssistantToolTests {
 				let text = try await tool.call(arguments: .init(period: period))
 				#expect(!Self.hasStatementParentheses(text), "\(text)")
 				let netProfit = try #require(model.rows.first { $0.line == .netProfit }?.cells.last)
-				#expect(text.hasPrefix("Net Profit, May to October 2026: \(format.amount(netProfit.amount, on: .register))\n"), "\(text)")
+				#expect(text.hasPrefix("Net Profit, May to October 2026: \(format.currency(netProfit.amount, on: .register))\n"), "\(text)")
 				for row in model.rows where row.line != .netProfit {
 					let total = try #require(row.cells.last)
-					#expect(text.contains("\n\(row.title): \(format.amount(total.amount, on: .register))"), "\(row.title)")
+					#expect(text.contains("\n\(row.title), May to October 2026: \(format.currency(total.amount, on: .register))"), "\(row.title)")
 				}
 			}
 		}
@@ -50,13 +50,13 @@ struct AssistantToolTests {
 			let groups = screen.groups.filter { !$0.isIncome }
 			#expect(!groups.isEmpty)
 			for group in groups {
-				#expect(text.contains("Group \(group.name): budgeted \(format.amount(group.budgeted, on: .budget)), activity \(format.amount(-group.spent, on: .budget)), available \(format.amount(group.available, on: .budget))"))
+				#expect(text.contains("Group \(group.name): budgeted \(format.currency(group.budgeted, on: .budget)), activity \(format.currency(-group.spent, on: .budget)), available \(format.currency(group.available, on: .budget))"))
 				for envelope in group.envelopes {
-					#expect(text.contains("\n\(envelope.name): budgeted \(format.amount(envelope.budgeted, on: .budget)), activity \(format.amount(-envelope.spent, on: .budget)), available \(format.amount(envelope.available, on: .budget))"))
+					#expect(text.contains("\n\(envelope.name): budgeted \(format.currency(envelope.budgeted, on: .budget)), activity \(format.currency(-envelope.spent, on: .budget)), available \(format.currency(envelope.available, on: .budget))"))
 				}
 			}
 			for envelope in screen.groups.filter(\.isIncome).flatMap(\.envelopes) {
-				#expect(text.contains("\n\(envelope.name): received \(format.amount(envelope.spent, on: .budget))"))
+				#expect(text.contains("\n\(envelope.name): received \(format.currency(envelope.spent, on: .budget))"))
 			}
 			let hidden = sheet.groups.flatMap(\.envelopes).filter(\.hidden)
 			for envelope in hidden where !screen.groups.flatMap(\.envelopes).contains(where: { $0.name == envelope.name }) {

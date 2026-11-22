@@ -13,7 +13,9 @@ struct AssistantRulesTests {
 			"Use each tool's own words for its figures. Call a figure Income, Expenses, Spending or Net Profit only when the tool names it that. Never call a balance, a saved report's total or a budget figure by those words.",
 			"If a result includes a note about scales, repeat it with the figures.",
 			"A question about now, such as a current balance or net worth, uses today's date.",
-			"Transfers, card payments, net cash flow, debt paydown and savings are never spending, and refunds are never income. Mention debt paydown or savings only when the question asks for them by name.",
+			"Never give a figure for a time range a tool did not return. If a tool refuses the range, say so.",
+			"Transfers, card payments, net cash flow, debt paydown and savings are never spending.",
+			"Refunds are never income. Mention debt paydown or savings only when the question asks for them by name.",
 			"The tool works out the dates. Never work out dates yourself.",
 			"Start your answer with the first line the tool returns, copied exactly.",
 			"Today is 2026-11-18."

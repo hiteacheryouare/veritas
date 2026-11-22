@@ -32,7 +32,7 @@ struct AssistantPeriod: Hashable, Sendable {
 		return first == month.firstDay && last == month.lastDay ? month : nil
 	}
 
-	/// "November 2026", "2026", "November 1 to 22, 2026",
+	/// "November 2026", "2026", "May to October 2026", "November 1 to 22, 2026",
 	/// "January 1 to November 22, 2026", "December 15, 2025 to January 3, 2026".
 	var title: String {
 		let (start, end) = (firstMonth, lastMonth)
@@ -59,7 +59,7 @@ struct AssistantPeriod: Hashable, Sendable {
 		let written = text.matches(of: /\d+-\d+-\d+/).map { AssistantDates.day(String($0.output)) }
 		if !written.isEmpty {
 			let dates = written.compactMap(\.self)
-			guard dates.count == written.count else { return nil }
+			guard dates.count == written.count, dates.count == 1 || dates[0] <= dates[1] else { return nil }
 			return AssistantPeriod(first: dates[0], last: dates.count > 1 ? dates[1] : dates[0])
 		}
 		if let match = text.firstMatch(of: /\d+-\d+/) {
@@ -80,12 +80,16 @@ struct AssistantPeriod: Hashable, Sendable {
 			let start = Month(year: end.year, month: first).latest(notAfter: end)
 			return AssistantPeriod(first: start.firstDay, last: end.lastDay).endingToday(toDate, today: today)
 		}
+		let thisMonthNamed = ["this month", "same month", "current month"].contains { text.contains($0) }
+		if let year, thisMonthNamed {
+			return AssistantPeriod(month: Month(year: year, month: thisMonth.month)).endingToday(toDate, today: today)
+		}
 		if ["last month", "previous month", "past month"].contains(where: { text.contains($0) }) {
 			return AssistantPeriod(month: thisMonth.adding(months: -1))
 		}
 		if let year { return AssistantPeriod(year: year).endingToday(toDate, today: today) }
 		if text == "today" { return AssistantPeriod(first: today, last: today) }
-		if text.isEmpty || toDate || ["this month", "current month", "month to date", "mtd"].contains(where: { text.contains($0) }) {
+		if text.isEmpty || toDate || thisMonthNamed || ["month to date", "mtd"].contains(where: { text.contains($0) }) {
 			return AssistantPeriod(month: thisMonth).endingToday(toDate, today: today)
 		}
 		return nil

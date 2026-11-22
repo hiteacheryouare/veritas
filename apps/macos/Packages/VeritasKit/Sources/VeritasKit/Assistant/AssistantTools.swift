@@ -110,16 +110,23 @@ struct NetProfitTool: AssistantTool {
 		return Self.text(report.column, period: period, format: context.format)
 	}
 
-	static let lines: [NetProfitLine] = [.income, .expenses, .debtPaydown, .savings, .netCashFlow]
+	static let lines: [NetProfitLine] = [.netProfit, .income, .expenses, .debtPaydown, .savings, .netCashFlow, .unreviewed]
+	static let negativeDebtPaydown = "Negative means more was borrowed than paid down."
+	static let negativeSavings = "Negative means more was withdrawn than saved."
 
+	/// AI-9: every line carries the range, and debt paydown and savings say they aren't spending.
 	static func text(_ column: NetProfitColumn, period: AssistantPeriod, format: MoneyFormat) -> String {
-		func amount(_ line: NetProfitLine) -> String {
-			format.amount(NetProfitModel.value(line, in: column).total, on: .register)
+		lines.compactMap { line -> String? in
+			let total = NetProfitModel.value(line, in: column).total
+			let figure = "\(ReportWords.line(line)), \(period.title): \(format.currency(total, on: .register))"
+			switch line {
+			case .debtPaydown: return "\(figure). It is not spending.\(total < 0 ? " \(negativeDebtPaydown)" : "")"
+			case .savings: return "\(figure). It is not spending.\(total < 0 ? " \(negativeSavings)" : "")"
+			case .unreviewed: return total == 0 ? nil : "\(figure). Not in Net cash flow."
+			default: return figure
+			}
 		}
-		var shown = lines
-		if column.unreviewed.total != 0 { shown.append(.unreviewed) }
-		return (["Net Profit, \(period.title): \(amount(.netProfit))", "Net Profit report, \(period.title):"]
-			+ shown.map { "\(ReportWords.line($0)): \(amount($0))" }).joined(separator: "\n")
+		.joined(separator: "\n")
 	}
 }
 
@@ -148,11 +155,11 @@ struct BudgetMonthTool: AssistantTool {
 	/// The Budget screen with hidden envelopes left out, as it opens. AI-7:
 	/// its figures say "activity", never "spent".
 	static func text(_ sheet: BudgetMonth, format: MoneyFormat) -> String {
-		func amount(_ value: Int64) -> String { format.amount(value, on: .budget) }
+		func amount(_ value: Int64) -> String { format.currency(value, on: .budget) }
 		var text = sheet.mixedScaleNote.map { [$0] } ?? []
 		text += [
 			"Budget screen figures for \(ReportPeriod.monthYear(sheet.month))",
-			"To Budget: \(format.currency(sheet.toBudget, on: .budget))"
+			"To Budget: \(amount(sheet.toBudget))"
 		]
 		if sheet.forNextMonth != 0 { text.append("Held for next month: \(amount(sheet.forNextMonth))") }
 		for group in sheet.groups where !group.hidden {
