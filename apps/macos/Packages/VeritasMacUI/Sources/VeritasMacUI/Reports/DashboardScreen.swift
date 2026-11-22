@@ -159,7 +159,7 @@ struct DashboardScreen: View {
 	}
 }
 
-private struct DashboardGrid: View {
+struct DashboardGrid: View {
 	let sheet: DashboardSheet
 	let model: DashboardModel
 	let open: (DashboardCard) -> Void

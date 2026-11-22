@@ -520,9 +520,12 @@ public final class WorkspaceModel {
 				guard !Task.isCancelled, let self, self.session === session else { return }
 				do {
 					try await session.maintain()
+					guard !Task.isCancelled, self.session === session else { return }
 					await self.refresh()
 					await self.settings?.backUpIfDue()
 				} catch {
+					// Closing or reopening can cut a call short; that failure belongs to a session that's gone.
+					guard !Task.isCancelled, self.session === session else { return }
 					self.present(error)
 				}
 			}

@@ -9,7 +9,7 @@ public final class AssistantSettings {
 	public static let storageKey = "assistantEnabled"
 
 	/// Nil until the model is first asked about. With the setting off it is
-	/// never asked, so nothing in FoundationModels loads (QA §10 D5).
+	/// never asked, so the AI plug-in, and FoundationModels with it, never loads (§10 D5).
 	public private(set) var availability: AssistantAvailability?
 	private var stored: Bool
 
@@ -19,8 +19,8 @@ public final class AssistantSettings {
 
 	public init(
 		defaults: UserDefaults = .standard,
-		availability checker: any AssistantAvailabilityChecking = SystemModelAvailability(),
-		makeAnswerer: @escaping @MainActor (AssistantContext) -> any AssistantAnswering = { FoundationModelsAssistant(context: $0) }
+		availability checker: any AssistantAvailabilityChecking = PluginAvailability(),
+		makeAnswerer: @escaping @MainActor (AssistantContext) -> any AssistantAnswering = { PluginAssistant(context: $0) }
 	) {
 		self.defaults = defaults
 		self.checker = checker
