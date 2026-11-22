@@ -47,17 +47,34 @@ struct SidebarTests {
 		#expect(table.numberOfSelectedRows == 1)
 	}
 
-	@Test func theFinderNeverReachesAScreensTable() {
-		// The register is a table too; the finder takes the nearest one, the list's.
-		let list = NSView()
-		let finder = NoSystemHighlight.Finder()
-		let near = NSTableView()
-		list.addSubview(finder)
-		list.addSubview(near)
-		let window = NSView()
-		window.addSubview(NSTableView())
-		window.addSubview(list)
-		#expect(NoSystemHighlight.Finder.nearestTable(from: finder) === near)
+	@Test func theFinderLeavesAScreensTableAloneUntilTheListsTableExists() {
+		// The reviewer at a9017b6: reopening straight into a register, the register's
+		// table exists before the List's. The finder must wait for the table that spans the List's columns.
+		let root = NSView(frame: CGRect(x: 0, y: 0, width: 1000, height: 800))
+		let finder = NoSystemHighlight.Finder(frame: CGRect(x: 0, y: 50, width: 252, height: 750))
+		root.addSubview(finder)
+		let register = Self.scrolledTable(frame: CGRect(x: 252, y: 0, width: 748, height: 800))
+		let fullWidth = Self.scrolledTable(frame: root.bounds)
+		root.addSubview(fullWidth.scroll)
+		root.addSubview(register.scroll)
+		finder.apply()
+		#expect(register.table.selectionHighlightStyle == .regular, "a screen's table is never touched")
+		#expect(fullWidth.table.selectionHighlightStyle == .regular, "nor one that only covers the List")
+		// The List's scroll view runs under the pinned Settings row, so it's taller than the List.
+		let list = Self.scrolledTable(frame: CGRect(x: 0, y: 0, width: 252, height: 800))
+		root.addSubview(list.scroll)
+		finder.apply()
+		#expect(list.table.selectionHighlightStyle == .none, "the List's table, once it exists")
+		#expect(register.table.selectionHighlightStyle == .regular)
+		#expect(fullWidth.table.selectionHighlightStyle == .regular)
+	}
+
+	private static func scrolledTable(frame: CGRect) -> (scroll: NSScrollView, table: NSTableView) {
+		let scroll = NSScrollView(frame: frame)
+		let table = NSTableView(frame: CGRect(origin: .zero, size: frame.size))
+		table.selectionHighlightStyle = .regular
+		scroll.documentView = table
+		return (scroll, table)
 	}
 
 	@Test func theSelectedRowsTextReadsAtSevenToOne() {

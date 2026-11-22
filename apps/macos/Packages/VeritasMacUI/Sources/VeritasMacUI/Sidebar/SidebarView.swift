@@ -63,6 +63,11 @@ struct NoSystemHighlight: NSViewRepresentable {
 		(view as? Finder)?.apply()
 	}
 
+	/// Sits behind the List, so it has the List's frame. It accepts only a table
+	/// whose scroll view spans exactly the List's columns and covers its frame
+	/// (the scroll view also runs under the pinned Settings row), so a screen's
+	/// table, such as the register, is never touched. Until the List's table
+	/// exists it does nothing, and tries again on the next layout pass or update.
 	final class Finder: NSView {
 		override func viewDidMoveToWindow() {
 			super.viewDidMoveToWindow()
@@ -76,27 +81,30 @@ struct NoSystemHighlight: NSViewRepresentable {
 		}
 
 		func apply() {
-			guard let table = Self.nearestTable(from: self), table.selectionHighlightStyle != .none else { return }
+			guard let table = listTable(), table.selectionHighlightStyle != .none else { return }
 			table.selectionHighlightStyle = .none
 		}
 
-		/// The closest table that shares an ancestor with this view: the list's,
-		/// never a screen's table elsewhere in the window.
-		static func nearestTable(from view: NSView) -> NSTableView? {
-			var ancestor = view.superview
-			while let current = ancestor {
-				if let table = firstTable(in: current) { return table }
-				ancestor = current.superview
+		func listTable() -> NSTableView? {
+			guard !bounds.isEmpty else { return nil }
+			let root = window?.contentView ?? Self.root(of: self)
+			let mine = convert(bounds, to: nil)
+			return Self.tables(in: root).first { table in
+				guard let scroll = table.enclosingScrollView else { return false }
+				let theirs = scroll.convert(scroll.bounds, to: nil)
+				return abs(theirs.minX - mine.minX) <= 1 && abs(theirs.width - mine.width) <= 1
+					&& theirs.insetBy(dx: -1, dy: -1).contains(mine)
 			}
-			return nil
 		}
 
-		private static func firstTable(in view: NSView) -> NSTableView? {
-			if let table = view as? NSTableView { return table }
-			for subview in view.subviews {
-				if let table = firstTable(in: subview) { return table }
-			}
-			return nil
+		private static func root(of view: NSView) -> NSView {
+			var top = view
+			while let parent = top.superview { top = parent }
+			return top
+		}
+
+		private static func tables(in view: NSView) -> [NSTableView] {
+			(view as? NSTableView).map { [$0] } ?? view.subviews.flatMap(tables)
 		}
 	}
 }
