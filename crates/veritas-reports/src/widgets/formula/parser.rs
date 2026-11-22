@@ -45,7 +45,11 @@ pub(super) enum Node {
 	Plus(Box<Node>),
 	Minus(Box<Node>),
 	Percent(Box<Node>),
-	Binary(Operator, Box<Node>, Box<Node>),
+	/// A left-to-right run of operators of one precedence level: the first
+	/// operand, then each operator with the operand to its right. `1-2+3`
+	/// is `(1-2)+3`. One node however long the run, so a long chain costs no
+	/// height.
+	Chain(Box<Node>, Vec<(Operator, Node)>),
 	/// The name as written, and each argument, `None` where it was left
 	/// empty.
 	Call(String, Vec<Option<Node>>),
@@ -229,13 +233,22 @@ fn is_r1c1(word: &str) -> bool {
 		.is_some_and(|digits| digits.bytes().all(|b| b.is_ascii_digit()))
 }
 
-/// Past this depth Veritas refuses rather than risk its stack.
-const MAX_DEPTH: usize = 200;
+/// Past this depth Veritas refuses rather than risk its stack. Real formulas
+/// nest a few levels; 64 matches the settings JSON limit, and the formula
+/// tests evaluate the deepest formula it allows on a small stack.
+const MAX_DEPTH: usize = 64;
+
+/// The tallest tree Veritas keeps, on the same stack budget: evaluating or
+/// dropping the tree recurses once per level. A run of operators is one
+/// level however long it is.
+const MAX_HEIGHT: usize = MAX_DEPTH;
 
 struct Parser {
 	tokens: Vec<Token>,
 	at: usize,
 	depth: usize,
+	/// The height of the node the last parse step returned.
+	height: usize,
 }
 
 pub(super) fn parse(text: &str) -> Result<Node, ParseError> {
@@ -243,6 +256,7 @@ pub(super) fn parse(text: &str) -> Result<Node, ParseError> {
 		tokens: tokenize(text)?,
 		at: 0,
 		depth: 0,
+		height: 0,
 	};
 	let node = parser.expression()?;
 	if parser.at == parser.tokens.len() {
@@ -279,6 +293,32 @@ impl Parser {
 		}
 	}
 
+	fn grown(&mut self, height: usize) -> Result<(), ParseError> {
+		if height > MAX_HEIGHT {
+			return Err(ParseError::Refuse(unsupported(
+				"a formula this long".to_owned(),
+			)));
+		}
+		self.height = height;
+		Ok(())
+	}
+
+	/// `first` alone, or a chain over it and `rest`. `tallest` is the
+	/// height of the tallest operand.
+	fn chained(
+		&mut self,
+		first: Node,
+		rest: Vec<(Operator, Node)>,
+		tallest: usize,
+	) -> Result<Node, ParseError> {
+		if rest.is_empty() {
+			self.height = tallest;
+			return Ok(first);
+		}
+		self.grown(tallest + 1)?;
+		Ok(Node::Chain(Box::new(first), rest))
+	}
+
 	fn expression(&mut self) -> Result<Node, ParseError> {
 		self.depth += 1;
 		if self.depth > MAX_DEPTH {
@@ -291,86 +331,91 @@ impl Parser {
 		node
 	}
 
+	/// One precedence level: `operand` parses the next level down, and
+	/// `operator` reads the next operator of this level, if there is one.
+	fn run(
+		&mut self,
+		operand: fn(&mut Self) -> Result<Node, ParseError>,
+		operator: fn(&mut Self) -> Option<Operator>,
+	) -> Result<Node, ParseError> {
+		let first = operand(self)?;
+		let mut tallest = self.height;
+		let mut rest = Vec::new();
+		while let Some(operator) = operator(self) {
+			let right = operand(self)?;
+			tallest = tallest.max(self.height);
+			rest.push((operator, right));
+		}
+		self.chained(first, rest, tallest)
+	}
+
 	fn comparison(&mut self) -> Result<Node, ParseError> {
-		let mut node = self.concatenation()?;
-		loop {
-			let comparison = match self.peek() {
+		self.run(Self::concatenation, |parser| {
+			let comparison = match parser.peek() {
 				Some(Token::Symbol("=")) => Comparison::Equal,
 				Some(Token::Symbol("<>")) => Comparison::NotEqual,
 				Some(Token::Symbol("<")) => Comparison::Less,
 				Some(Token::Symbol("<=")) => Comparison::LessOrEqual,
 				Some(Token::Symbol(">")) => Comparison::Greater,
 				Some(Token::Symbol(">=")) => Comparison::GreaterOrEqual,
-				_ => return Ok(node),
+				_ => return None,
 			};
-			self.at += 1;
-			let right = self.concatenation()?;
-			node = Node::Binary(
-				Operator::Compare(comparison),
-				Box::new(node),
-				Box::new(right),
-			);
-		}
+			parser.at += 1;
+			Some(Operator::Compare(comparison))
+		})
 	}
 
 	fn concatenation(&mut self) -> Result<Node, ParseError> {
-		let mut node = self.additive()?;
-		while self.eat("&") {
-			let right = self.additive()?;
-			node = Node::Binary(Operator::Concat, Box::new(node), Box::new(right));
-		}
-		Ok(node)
+		self.run(Self::additive, |parser| {
+			parser.eat("&").then_some(Operator::Concat)
+		})
 	}
 
 	fn additive(&mut self) -> Result<Node, ParseError> {
-		let mut node = self.multiplicative()?;
-		loop {
-			let operator = if self.eat("+") {
-				Operator::Add
-			} else if self.eat("-") {
-				Operator::Subtract
+		self.run(Self::multiplicative, |parser| {
+			if parser.eat("+") {
+				Some(Operator::Add)
+			} else if parser.eat("-") {
+				Some(Operator::Subtract)
 			} else {
-				return Ok(node);
-			};
-			let right = self.multiplicative()?;
-			node = Node::Binary(operator, Box::new(node), Box::new(right));
-		}
+				None
+			}
+		})
 	}
 
 	fn multiplicative(&mut self) -> Result<Node, ParseError> {
-		let mut node = self.power()?;
-		loop {
-			let operator = if self.eat("*") {
-				Operator::Multiply
-			} else if self.eat("/") {
-				Operator::Divide
+		self.run(Self::power, |parser| {
+			if parser.eat("*") {
+				Some(Operator::Multiply)
+			} else if parser.eat("/") {
+				Some(Operator::Divide)
 			} else {
-				return Ok(node);
-			};
-			let right = self.power()?;
-			node = Node::Binary(operator, Box::new(node), Box::new(right));
-		}
+				None
+			}
+		})
 	}
 
 	/// `^` groups left to right, and prefix minus binds tighter, so
 	/// `-2^2` is 4 and `2^3^2` is 64.
 	fn power(&mut self) -> Result<Node, ParseError> {
-		let mut node = self.prefix()?;
-		while self.eat("^") {
-			let right = self.prefix()?;
-			node = Node::Binary(Operator::Power, Box::new(node), Box::new(right));
-		}
-		Ok(node)
+		self.run(Self::prefix, |parser| {
+			parser.eat("^").then_some(Operator::Power)
+		})
 	}
 
 	fn prefix(&mut self) -> Result<Node, ParseError> {
 		if self.eat("+") {
-			Ok(Node::Plus(Box::new(self.nested_prefix()?)))
+			let operand = self.nested_prefix()?;
+			self.grown(self.height + 1)?;
+			Ok(Node::Plus(Box::new(operand)))
 		} else if self.eat("-") {
-			Ok(Node::Minus(Box::new(self.nested_prefix()?)))
+			let operand = self.nested_prefix()?;
+			self.grown(self.height + 1)?;
+			Ok(Node::Minus(Box::new(operand)))
 		} else {
 			let node = self.primary()?;
 			if self.eat("%") {
+				self.grown(self.height + 1)?;
 				Ok(Node::Percent(Box::new(node)))
 			} else {
 				Ok(node)
@@ -391,6 +436,7 @@ impl Parser {
 	}
 
 	fn primary(&mut self) -> Result<Node, ParseError> {
+		self.height = 1;
 		match self.next() {
 			Some(Token::Number(value, integer)) => {
 				if integer && self.peek() == Some(&Token::Symbol(":")) {
@@ -466,6 +512,7 @@ impl Parser {
 			return Err(ParseError::Syntax);
 		}
 		let mut arguments = Vec::new();
+		let mut tallest = 0;
 		if self.eat(")") {
 			return Ok(Node::Call(name, arguments));
 		}
@@ -474,9 +521,12 @@ impl Parser {
 			arguments.push(if empty {
 				None
 			} else {
-				Some(self.expression()?)
+				let argument = self.expression()?;
+				tallest = tallest.max(self.height);
+				Some(argument)
 			});
 			if self.eat(")") {
+				self.grown(tallest + 1)?;
 				return Ok(Node::Call(name, arguments));
 			}
 			self.expect(",")?;
@@ -485,6 +535,7 @@ impl Parser {
 
 	fn array(&mut self) -> Result<Node, ParseError> {
 		let mut rows = vec![vec![self.expression()?]];
+		let mut tallest = self.height;
 		loop {
 			if self.eat("}") {
 				break;
@@ -495,12 +546,14 @@ impl Parser {
 				self.expect(",")?;
 			}
 			let element = self.expression()?;
+			tallest = tallest.max(self.height);
 			if let Some(row) = rows.last_mut() {
 				row.push(element);
 			}
 		}
 		let width = rows.first().map_or(0, Vec::len);
 		if rows.iter().all(|row| row.len() == width) {
+			self.grown(tallest + 1)?;
 			Ok(Node::Array(rows))
 		} else {
 			Err(ParseError::Syntax)

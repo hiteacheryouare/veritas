@@ -53,7 +53,7 @@ fn month_totals(
 	sheet: &EnvelopeSheet,
 	month: YearMonth,
 	categories: &[&Category],
-) -> Totals {
+) -> Result<Totals, CoreError> {
 	let mut totals = Totals::default();
 	for category in categories {
 		let group_live = budget
@@ -71,15 +71,19 @@ fn month_totals(
 		if budgeted != 0 || spent != 0 || balance != 0 {
 			totals.has_data = true;
 		}
-		totals.budgeted += budgeted;
-		totals.spent += spent;
+		totals.budgeted = plus(totals.budgeted, budgeted)?;
+		totals.spent = plus(totals.spent, spent)?;
 		if balance > 0 || (balance < 0 && cell.carryover) {
-			totals.carryover += balance;
+			totals.carryover = plus(totals.carryover, balance)?;
 		} else if balance < 0 {
-			totals.overspending += balance;
+			totals.overspending = plus(totals.overspending, balance)?;
 		}
 	}
-	totals
+	Ok(totals)
+}
+
+fn plus(a: i64, b: i64) -> Result<i64, CoreError> {
+	a.checked_add(b).ok_or(CoreError::Overflow)
 }
 
 enum Test {
@@ -267,23 +271,26 @@ pub fn budget_analysis(
 
 	let first = YearMonth::new(start.year(), start.month())?;
 	let last = YearMonth::new(end.year(), end.month())?;
-	let mut running = month_totals(budget, sheet, first.offset(-1)?, &included).carryover;
+	let mut running = month_totals(budget, sheet, first.offset(-1)?, &included)?.carryover;
 	let mut overspending_before = 0_i64;
 	let (mut total_budgeted, mut total_spent, mut total_adjustment) = (0_i64, 0_i64, 0_i64);
 	let mut months = Vec::new();
 	let mut month = first;
 	while month <= last {
-		let totals = month_totals(budget, sheet, month, &included);
-		let balance = totals.budgeted + totals.spent + running;
-		total_budgeted += totals.budgeted;
-		total_spent += totals.spent;
-		total_adjustment += overspending_before.abs();
+		let totals = month_totals(budget, sheet, month, &included)?;
+		let balance = plus(plus(totals.budgeted, totals.spent)?, running)?;
+		let adjustment = overspending_before
+			.checked_abs()
+			.ok_or(CoreError::Overflow)?;
+		total_budgeted = plus(total_budgeted, totals.budgeted)?;
+		total_spent = plus(total_spent, totals.spent)?;
+		total_adjustment = plus(total_adjustment, adjustment)?;
 		months.push(BudgetAnalysisMonth {
 			month,
 			budgeted: Money::from_minor(totals.budgeted),
 			spent: Money::from_minor(totals.spent),
 			balance: Money::from_minor(balance),
-			overspending_adjustment: Money::from_minor(overspending_before.abs()),
+			overspending_adjustment: Money::from_minor(adjustment),
 		});
 		if totals.has_data {
 			running = totals.carryover;

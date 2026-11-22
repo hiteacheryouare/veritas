@@ -53,8 +53,16 @@ pub trait Backend: Store + Sized {
 	/// Tables from a newer Veritas return `ReadOnly(NewerVeritasSchema)`.
 	fn adopt(&mut self) -> Result<(), CoreError>;
 	fn load(&self) -> Result<Loaded, CoreError>;
-	/// Writes an Actual zip of the budget to `to`, after the invariant audit.
-	fn export_actual_zip(&self, metadata: &Path, to: &Path) -> Result<ExportOutcome, CoreError>;
+	/// Writes an Actual zip of the budget to `to`, published only after the
+	/// invariant audit. `snapshot`, when given, is a snapshot of the committed
+	/// state taken just now, which the export clones instead of copying the
+	/// database again.
+	fn export_actual_zip(
+		&self,
+		snapshot: Option<&Path>,
+		metadata: &Path,
+		to: &Path,
+	) -> Result<ExportOutcome, CoreError>;
 	/// Builds a complete new budget (db.sqlite and metadata.json) in `dir`,
 	/// which exists and is empty. The session builds in a hidden folder and
 	/// renames it into place, so this needn't be atomic itself.
@@ -626,9 +634,9 @@ impl<B: Backend> Session<B> {
 	}
 
 	/// Writes an Actual zip of the budget to `to` (R-IO-2). A writable budget
-	/// is snapshotted first. The invariant audit runs before anything is
-	/// written: SQLite damage refuses the export, and other findings come
-	/// back with it.
+	/// is snapshotted first, and the export is made from that snapshot. The
+	/// invariant audit runs before anything is published: SQLite damage
+	/// refuses the export, and other findings come back with it.
 	pub fn export_actual_zip(&mut self, to: &Path) -> Result<AuditReport, CoreError> {
 		self.export_actual_zip_until(to, &CancelToken::default())
 	}
@@ -641,9 +649,13 @@ impl<B: Backend> Session<B> {
 		cancel: &CancelToken,
 	) -> Result<AuditReport, CoreError> {
 		self.poll();
-		if self.ensure_writer().is_ok() {
-			self.snapshot(SnapshotReason::Export)?;
-		}
+		let snapshot = if self.ensure_writer().is_ok() {
+			Some(self.snapshot(SnapshotReason::Export)?.path)
+		} else {
+			None
+		};
+		// A prune can remove an Export snapshot dated before newer ones.
+		let snapshot = snapshot.filter(|path| path.is_file());
 		let metadata = self.dir.join(METADATA_FILE);
 		let parent = to.parent().unwrap_or(Path::new("."));
 		let name = to
@@ -654,7 +666,10 @@ impl<B: Backend> Session<B> {
 		drop(reserved);
 		let exported = self
 			.bus()
-			.and_then(|bus| bus.store().export_actual_zip(&metadata, &aside))
+			.and_then(|bus| {
+				bus.store()
+					.export_actual_zip(snapshot.as_deref(), &metadata, &aside)
+			})
 			.and_then(|outcome| match outcome {
 				ExportOutcome::Exported(report) => Ok(report),
 				ExportOutcome::Refused(report) => Err(CoreError::AuditFailed {
@@ -720,7 +735,7 @@ impl<B: Backend> Session<B> {
 		let metadata = self.dir.join(METADATA_FILE);
 		let bytes = self
 			.bus()
-			.and_then(|bus| bus.store().export_actual_zip(&metadata, &scratch))
+			.and_then(|bus| bus.store().export_actual_zip(None, &metadata, &scratch))
 			.and_then(|outcome| match outcome {
 				ExportOutcome::Exported(_) => {
 					std::fs::read(&scratch).map_err(io_error("read", &scratch))
@@ -957,10 +972,26 @@ fn inspect<B: Backend>(db: &Path) -> Result<(B, Loaded, Option<ReadOnlyReason>),
 		veritas_interop::Access::ReadWrite => None,
 		veritas_interop::Access::ReadOnly(reason) => Some(reason),
 	};
-	if reason.is_none() && !reader.quick_problems()?.is_empty() {
+	// The quick check reads every page and the load every row, so the quick
+	// check runs on a reader of its own alongside the load.
+	let (quick_problems, loaded) = std::thread::scope(|scope| {
+		let quick = reason.is_none().then(|| {
+			scope.spawn(|| {
+				B::open(db, StoreAccess::ReadOnly(ReadOnlyReason::OpenElsewhere))?.quick_problems()
+			})
+		});
+		let loaded = reader.load();
+		let problems = quick.map_or(Ok(Vec::new()), |thread| {
+			thread
+				.join()
+				.unwrap_or_else(|_| Err(CoreError::Internal("the quick check panicked".to_owned())))
+		});
+		(problems, loaded)
+	});
+	if !quick_problems?.is_empty() {
 		reason = Some(ReadOnlyReason::AuditFailed);
 	}
-	let loaded = reader.load()?;
+	let loaded = loaded?;
 	if reason.is_none() && loaded.data.budget_type == BudgetType::Tracking {
 		reason = Some(ReadOnlyReason::TrackingBudget);
 	}
