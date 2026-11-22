@@ -1101,6 +1101,34 @@ mod tests {
 	}
 
 	#[test]
+	fn d2_a_bill_amount_problem_never_says_rule_in_the_note() {
+		for amount in ["\"lots\"", "-1500.5"] {
+			let mut budget = budget_with(&bill(monthly(), true), "2026-10-15");
+			let rule = budget.rules.get_mut(&RuleId::new("rule")).unwrap();
+			rule.conditions_json = rule.conditions_json.replace("-150000", amount);
+			let book = RuleBook::new(&budget);
+			let mut payees = BudgetPayees::new(&budget, || PayeeId::new("made"));
+			let mut left = advance_schedules(&book, &budget, &mut payees, day("2026-10-15"))
+				.left
+				.remove(0);
+			for by in [
+				LeftBy::Service,
+				LeftBy::Paid,
+				LeftBy::PaidWhileDue,
+				LeftBy::PostNow,
+			] {
+				left.by = by;
+				let note = left.note();
+				assert!(note.contains("a bill amount"), "{note}");
+				assert!(
+					!note.to_lowercase().contains("rule"),
+					"{amount}, {by:?}: {note}"
+				);
+			}
+		}
+	}
+
+	#[test]
 	fn an_amount_veritas_cannot_read_says_so() {
 		let mut budget = budget_with(&bill(monthly(), true), "2026-10-15");
 		let rule = budget.rules.get_mut(&RuleId::new("rule")).unwrap();
