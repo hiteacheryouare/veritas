@@ -445,7 +445,7 @@ public final class WorkspaceModel {
 	public var pendingBillID: String?
 
 	public func go(to destination: Destination) {
-		self.destination = destination
+		self.destination = destination == .screen(.insights) ? .screen(.forecast) : destination
 		isFindShown = false
 	}
 
