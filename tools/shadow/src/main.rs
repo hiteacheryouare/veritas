@@ -449,12 +449,21 @@ fn widgets(
 		.ok()
 		.and_then(|overview| overview.number_format)
 		.and_then(|format| format.currency);
-	let zero_places = currency.is_some_and(|code| {
-		veritas_ffi::currencies()
-			.unwrap_or_default()
-			.iter()
-			.any(|known| known.code == code && known.decimal_places == 0)
-	});
+	// Fail closed: without Actual's currency list, or for a currency it doesn't
+	// list, the card comparison can't know the budget's scale, so it stops.
+	let zero_places = match currency {
+		None => false,
+		Some(code) => {
+			let known =
+				veritas_ffi::currencies().map_err(|_| Stopped("reading the currency list"))?;
+			known
+				.iter()
+				.find(|known| known.code == code)
+				.ok_or(Stopped("a currency Actual doesn't list"))?
+				.decimal_places
+				== 0
+		}
+	};
 	let actuals_zip = if zero_places {
 		let ops = scratch.join("register-scale.ops.json");
 		let scaled = scratch.join("register-scale.zip");
