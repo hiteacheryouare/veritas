@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use veritas_domain::{AccountId, BudgetData, CivilDate, CoreError, Money};
+use veritas_domain::{AccountId, AccountKind, BudgetData, CivilDate, CoreError, Money};
 use veritas_reports::{account_balances, classify};
 
 use veritas_domain::NumberFormat;
@@ -101,16 +101,31 @@ pub fn account_groups(
 	Ok(groups)
 }
 
-/// ST-9.1, shared with the balance sheet's no-groups headings (ST-3).
+/// ST-9.1: explicit kind, then loan fields, then a negative balance. Returns
+/// whether the account is a liability, and whether only the balance said so.
 pub(crate) fn placement(data: &BudgetData, id: &AccountId, balance: Money) -> (bool, bool) {
-	veritas_reports::placement(data, id, balance)
+	let meta = data.account_meta.get(id);
+	match meta.and_then(|meta| meta.kind) {
+		Some(AccountKind::Liability) => return (true, false),
+		Some(AccountKind::Asset) => return (false, false),
+		None => {}
+	}
+	let has_loan = meta.is_some_and(|meta| {
+		meta.loan_rate_bps.is_some() || meta.loan_payment.is_some() || meta.lender.is_some()
+	});
+	if has_loan {
+		(true, false)
+	} else if balance.is_negative() {
+		(true, true)
+	} else {
+		(false, false)
+	}
 }
 
 #[cfg(test)]
 mod tests {
 	use veritas_domain::{
-		Account, AccountKind, AccountMeta, BudgetType, CategoryId, SplitRole, Transaction,
-		TransactionId,
+		Account, AccountMeta, BudgetType, CategoryId, SplitRole, Transaction, TransactionId,
 	};
 
 	use super::*;

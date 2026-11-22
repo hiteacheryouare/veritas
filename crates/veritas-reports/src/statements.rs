@@ -20,8 +20,9 @@ pub struct SheetLine {
 	pub deleted: bool,
 }
 
-/// ST-9.2's placement by type. The balance sheet heads its sections with these
-/// only when the budget has no account groups at all (ST-3).
+/// ST-9.2's four headings. The balance sheet heads its sections with these
+/// only when the budget has no live account groups (ST-3), choosing within
+/// ST-2's side by the on-budget flag.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum TypeHeading {
 	Cash,
@@ -37,6 +38,17 @@ impl TypeHeading {
 			Self::Credit => "Credit",
 			Self::Investments => "Investments & Other assets",
 			Self::Loans => "Loans",
+		}
+	}
+
+	/// The section's stable id across the FFI (contracts/ffi.md, `balanceSheet`).
+	/// Never an account group's id, which are UUIDs.
+	pub fn id(self) -> &'static str {
+		match self {
+			Self::Cash => "type.cash",
+			Self::Credit => "type.credit",
+			Self::Investments => "type.investments",
+			Self::Loans => "type.loans",
 		}
 	}
 }
@@ -96,7 +108,7 @@ fn sections(
 			Side::Liability => line.balance.checked_neg()?,
 		};
 		let key = if by_type {
-			(Some(type_heading(budget, line)), None)
+			(Some(type_heading(line)), None)
 		} else {
 			(None, line.group.clone())
 		};
@@ -137,15 +149,15 @@ fn sections(
 	Ok(sections)
 }
 
-/// ST-9.2's heading for an account on the side ST-2 put it: the side stays
-/// the balance's, and only the on-budget flag and ST-9.1 pick the heading.
-fn type_heading(budget: &BudgetData, line: &AccountBalance) -> TypeHeading {
-	let (liability, _) = balances::placement(budget, &line.account, line.balance);
-	match (line.on_budget, liability) {
-		(true, false) => TypeHeading::Cash,
-		(true, true) => TypeHeading::Credit,
-		(false, false) => TypeHeading::Investments,
-		(false, true) => TypeHeading::Loans,
+/// ST-3's fallback heading: the side is ST-2's, and the on-budget flag picks
+/// the heading within it. ST-9.1 doesn't, so an overpaid off-budget loan is
+/// an asset under Investments & Other assets, never Loans.
+fn type_heading(line: &AccountBalance) -> TypeHeading {
+	match (line.side, line.on_budget) {
+		(Side::Asset, true) => TypeHeading::Cash,
+		(Side::Asset, false) => TypeHeading::Investments,
+		(Side::Liability, true) => TypeHeading::Credit,
+		(Side::Liability, false) => TypeHeading::Loans,
 	}
 }
 

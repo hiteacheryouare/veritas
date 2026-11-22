@@ -20,7 +20,7 @@ mod tax;
 mod widget_meta;
 mod widgets;
 
-pub use balances::{AccountBalance, Side, account_balances, net_worth, placement};
+pub use balances::{AccountBalance, Side, account_balances, net_worth};
 pub use classify::{
 	AdjustmentSource, Classification, ClassifiedRow, Decision, Flags, Leg, Partner,
 	RECONCILIATION_NOTE, classify, classify_on,

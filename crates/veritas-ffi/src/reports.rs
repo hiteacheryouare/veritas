@@ -686,7 +686,7 @@ fn sheet_sections(
 		.map(|section| SheetSection {
 			group_id: section
 				.heading
-				.map(|heading| format!("type.{heading:?}").to_lowercase())
+				.map(|heading| heading.id().to_owned())
 				.or_else(|| section.group.as_ref().map(ToString::to_string)),
 			group_name: section
 				.heading

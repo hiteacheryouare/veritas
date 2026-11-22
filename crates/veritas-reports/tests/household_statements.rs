@@ -236,9 +236,9 @@ fn december_overpays_the_car_loan_into_an_asset_and_saves_across_the_year_end() 
 			("CU", 25_000, false),
 			("HYSA", 1_441_230, false),
 			("401K", 3_287_500, false),
+			("AUTO", 500, true),
 			("BRK", 804_135, false),
 			("OLDSAV", 1_000, true),
-			("AUTO", 500, true),
 		])
 	);
 	assert_eq!(

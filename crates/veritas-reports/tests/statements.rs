@@ -582,6 +582,94 @@ fn st3_one_account_group_turns_the_type_headings_off() {
 }
 
 #[test]
+fn st3_the_fallback_heading_is_chosen_within_st2s_side() {
+	// Option B: an off-budget loan paid past zero is an asset by ST-2, so it
+	// sits under Investments & Other assets, never Loans, and totals don't move.
+	let mut book = master();
+	book.budget
+		.account_meta
+		.entry(AccountId::new("LOAN"))
+		.or_default()
+		.kind = Some(AccountKind::Liability);
+	book.row("Payoff", "LOAN", "2027-01-30", 2_000_000);
+	let sheet = sheet(&book, "2027-01-31");
+	let loan = |sections: &[AccountGroupSection]| {
+		sections
+			.iter()
+			.find(|section| {
+				section
+					.accounts
+					.iter()
+					.any(|line| line.account == AccountId::new("LOAN"))
+			})
+			.and_then(|section| section.heading)
+	};
+	assert_eq!(loan(&sheet.assets), Some(TypeHeading::Investments));
+	assert_eq!(loan(&sheet.liabilities), None);
+	assert!(sheet.assets.iter().all(|section| matches!(
+		section.heading,
+		Some(TypeHeading::Cash | TypeHeading::Investments)
+	)));
+	assert!(sheet.liabilities.iter().all(|section| matches!(
+		section.heading,
+		Some(TypeHeading::Credit | TypeHeading::Loans)
+	)));
+	assert_eq!(
+		sheet
+			.total_assets
+			.checked_sub(sheet.total_liabilities)
+			.unwrap(),
+		sheet.net_worth
+	);
+}
+
+#[test]
+fn st3_deleted_account_groups_dont_count_for_the_fallback() {
+	let mut book = master();
+	book.account_group("Old", 1.0);
+	book.budget
+		.account_groups
+		.get_mut(&veritas_domain::AccountGroupId::new("Old"))
+		.unwrap()
+		.tombstone = true;
+	book.budget
+		.accounts
+		.get_mut(&AccountId::new("CHK"))
+		.unwrap()
+		.group = Some(veritas_domain::AccountGroupId::new("Old"));
+	let sheet = sheet(&book, "2027-01-31");
+	assert!(
+		sheet
+			.assets
+			.iter()
+			.chain(&sheet.liabilities)
+			.all(|section| section.heading.is_some() && section.group.is_none()),
+		"a file whose only group is deleted has no account groups"
+	);
+}
+
+#[test]
+fn st3_type_heading_ids_are_stable() {
+	let ids: Vec<_> = [
+		TypeHeading::Cash,
+		TypeHeading::Credit,
+		TypeHeading::Investments,
+		TypeHeading::Loans,
+	]
+	.map(|heading| (heading.id(), heading.title()))
+	.into();
+	assert_eq!(
+		ids,
+		[
+			("type.cash", "Cash"),
+			("type.credit", "Credit"),
+			("type.investments", "Investments & Other assets"),
+			("type.loans", "Loans"),
+		]
+	);
+}
+
+#[test]
 fn cls1_orphaned_rows_count_in_no_balance() {
 	let mut book = master_book();
 	book.row("Ghost", "GONE", "2027-01-04", -500);
