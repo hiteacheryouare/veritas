@@ -22,6 +22,12 @@ struct AssistantEvaluationTests {
 		let question: String
 		let expected: String
 		let context: AssistantContext
+		/// The tool output whose category and group names are the only ones the
+		/// answer may use (AI-1.6). Empty for cases with no names to check.
+		/// The period the tool's first line states (AI-1.2): any month or year
+		/// the answer's headline names must be one of these.
+		var label: String? = nil
+		var sources: [String] = []
 		/// Nil checks that the answer leads with `expected`; otherwise this decides.
 		var passes: (@Sendable (String) -> Bool)? = nil
 	}
@@ -73,6 +79,10 @@ struct AssistantEvaluationTests {
 		let budgeted = try #require(screen.sheet).row(AllFeatures.groceries).budgeted
 		#expect(firstHalf.column.expenses.total != (try total(.expenses, in: october)), "mid-month, so far and this month differ")
 		let septemberTotal = amount(try total(.expenses, in: september))
+		func spentOn(_ name: String, _ period: String, _ context: AssistantContext) async throws -> [String] {
+			[try await CategorySpendingTool(context: context).call(arguments: .init(name: name, period: period))]
+		}
+		let habitsText = try await BudgetHabitsTool(context: AssistantContext(queries: queries, format: format, today: "2026-11-22")).call(arguments: .init())
 		let byCategory = try await SpendingByCategoryTool(context: end).call(arguments: .init(period: "last month")).components(separatedBy: "\n")
 		let topSeptember = try #require(byCategory.dropFirst(3).first)
 		let topSeptemberFigure = try #require(AssistantEvaluationCheck.figures(in: String(topSeptember.split(separator: ":").last ?? "")).first)
@@ -81,21 +91,21 @@ struct AssistantEvaluationTests {
 		let spendingFigures = AssistantEvaluationCheck.figures(in: spendingText)
 		let everydayFigure = try #require(AssistantEvaluationCheck.figures(in: String(spendingText.split(separator: "\n").first { $0.hasPrefix("\(everydayName):") } ?? "")).first)
 		return [
-			Case(question: "What did I spend last month?", expected: amount(try total(.expenses, in: september)), context: end),
-			Case(question: "How much did I spend in October 2026?", expected: amount(try total(.expenses, in: october)), context: end),
-			Case(question: "How much have I spent so far this month?", expected: amount(try total(.expenses, in: october)), context: end),
-			Case(question: "How much did I spend on \(groceriesInSeptember.name) last month?", expected: amount(groceriesInSeptember.total), context: end),
-			Case(question: "how much did i spend on \(busiest.name.lowercased()) so far this month?", expected: amount(busiest.total), context: end),
-			Case(question: "How much did I spend on \(groceriesInOctober.name.uppercased()) in October?", expected: amount(groceriesInOctober.total), context: end),
-			Case(question: "What did I spend on \(everydayName) last month?", expected: amount(everyday.reduce(0) { $0 + $1.total }), context: end),
-			Case(question: "What was my income this year?", expected: amount(try total(.income, in: year)), context: end),
-			Case(question: "How much did I earn last month?", expected: amount(try total(.income, in: september)), context: end),
-			Case(question: "How much did I budget for \(groceriesInOctober.name) this month?", expected: format.currency(budgeted, on: .budget), context: end),
-			Case(question: "What was my Net Profit in October 2026?", expected: amount(try total(.netProfit, in: october)), context: end),
-			Case(question: "How much have I spent so far this month?", expected: amount(firstHalf.column.expenses.total), context: middle),
-			Case(question: "What is my spending for this month?", expected: amount(try total(.expenses, in: october)), context: middle),
-			Case(question: "How much have I spent on \(busiest.name) so far this month?", expected: amount(busiestFirstHalf), context: middle),
-			Case(question: "How can I improve my money habits?", expected: "Household, \(format.currency(121, on: .budget)) a month", context: AssistantContext(queries: queries, format: format, today: "2026-11-22")) { answer in
+			Case(question: "What did I spend last month?", expected: amount(try total(.expenses, in: september)), context: end, label: "September 2026"),
+			Case(question: "How much did I spend in October 2026?", expected: amount(try total(.expenses, in: october)), context: end, label: "October 2026"),
+			Case(question: "How much have I spent so far this month?", expected: amount(try total(.expenses, in: october)), context: end, label: "October 2026"),
+			Case(question: "How much did I spend on \(groceriesInSeptember.name) last month?", expected: amount(groceriesInSeptember.total), context: end, label: "September 2026", sources: try await spentOn(groceriesInSeptember.name, "last month", end)),
+			Case(question: "how much did i spend on \(busiest.name.lowercased()) so far this month?", expected: amount(busiest.total), context: end, label: "October 2026", sources: try await spentOn(busiest.name, "so far this month", end)),
+			Case(question: "How much did I spend on \(groceriesInOctober.name.uppercased()) in October?", expected: amount(groceriesInOctober.total), context: end, label: "October 2026", sources: try await spentOn(groceriesInOctober.name, "October", end)),
+			Case(question: "What did I spend on \(everydayName) last month?", expected: amount(everyday.reduce(0) { $0 + $1.total }), context: end, label: "September 2026", sources: try await spentOn(everydayName, "last month", end)),
+			Case(question: "What was my income this year?", expected: amount(try total(.income, in: year)), context: end, label: "2026"),
+			Case(question: "How much did I earn last month?", expected: amount(try total(.income, in: september)), context: end, label: "September 2026"),
+			Case(question: "How much did I budget for \(groceriesInOctober.name) this month?", expected: format.currency(budgeted, on: .budget), context: end, label: "October 2026"),
+			Case(question: "What was my Net Profit in October 2026?", expected: amount(try total(.netProfit, in: october)), context: end, label: "October 2026"),
+			Case(question: "How much have I spent so far this month?", expected: amount(firstHalf.column.expenses.total), context: middle, label: "October 1 to 15, 2026"),
+			Case(question: "What is my spending for this month?", expected: amount(try total(.expenses, in: october)), context: middle, label: "October 2026"),
+			Case(question: "How much have I spent on \(busiest.name) so far this month?", expected: amount(busiestFirstHalf), context: middle, label: "October 1 to 15, 2026", sources: try await spentOn(busiest.name, "so far this month", middle)),
+			Case(question: "How can I improve my money habits?", expected: "Household, \(format.currency(121, on: .budget)) a month", context: AssistantContext(queries: queries, format: format, today: "2026-11-22"), sources: [habitsText]) { answer in
 				answer.contains("Household") && AssistantEvaluationCheck.figures(in: answer).contains("1.21") && Self.clean(answer)
 			},
 			Case(question: "What is the best index fund to invest in?", expected: AssistantPrompt.redirect, context: end) { answer in
@@ -104,17 +114,17 @@ struct AssistantEvaluationTests {
 			Case(question: "What should I change about my investments?", expected: AssistantPrompt.redirect, context: end) { answer in
 				Self.redirected(answer)
 			},
-			Case(question: "What should I change in my budget?", expected: "Household, \(format.currency(121, on: .budget)) a month", context: AssistantContext(queries: queries, format: format, today: "2026-11-22")) { answer in
+			Case(question: "What should I change in my budget?", expected: "Household, \(format.currency(121, on: .budget)) a month", context: AssistantContext(queries: queries, format: format, today: "2026-11-22"), sources: [habitsText]) { answer in
 				answer.contains("Household") && AssistantEvaluationCheck.figures(in: answer).contains("1.21") && Self.clean(answer)
 			},
-			Case(question: "What did I spend last month by category?", expected: topSeptember, context: end) { answer in
+			Case(question: "What did I spend last month by category?", expected: topSeptember, context: end, label: "September 2026", sources: [byCategory.joined(separator: "\n")]) { answer in
 				let figures = AssistantEvaluationCheck.figures(in: answer)
 				return figures.contains(topSeptemberFigure) && figures.isSubset(of: byCategoryFigures) && !answer.lowercased().contains("which one") && Self.clean(answer)
 			},
-			Case(question: "What did I spend the most on last month?", expected: topSeptember, context: end) { answer in
+			Case(question: "What did I spend the most on last month?", expected: topSeptember, context: end, label: "September 2026", sources: [byCategory.joined(separator: "\n")]) { answer in
 				AssistantEvaluationCheck.figures(in: answer).contains(topSeptemberFigure) && Self.clean(answer)
 			},
-			Case(question: "Break down my spending by group for last month.", expected: "the group lines of spending", context: end) { answer in
+			Case(question: "Break down my spending by group for last month.", expected: "the group lines of spending", context: end, label: "September 2026", sources: [spendingText]) { answer in
 				let figures = AssistantEvaluationCheck.figures(in: answer)
 				return answer.contains(everydayName) && figures.contains(everydayFigure) && figures.isSubset(of: spendingFigures) && !answer.contains("Everything else") && Self.clean(answer)
 			}
@@ -126,7 +136,8 @@ struct AssistantEvaluationTests {
 	private func nothingOverCase() -> Case {
 		let sheets = AssistantHabitsTests.sheets(Array(AssistantHabitsTests.scenarioH.suffix(2)), months: AssistantHabitsTests.window, firstMonth: Month(year: 2026, month: 1))
 		let context = AssistantContext(queries: AssistantHabitsTests.SheetQueries(sheets: sheets), format: MoneyFormat(), today: "2026-11-22")
-		return Case(question: "Which categories ran over budget lately?", expected: "no category ran over", context: context) { answer in
+		let habits = BudgetHabits.text(sheets: sheets, goalCategories: [], format: MoneyFormat())
+		return Case(question: "Which categories ran over budget lately?", expected: "no category ran over", context: context, sources: [habits]) { answer in
 			let said = answer.lowercased()
 			return said.contains("no category ran over") && !said.contains("groceries ran over") && !said.contains("gas ran over") && !said.contains("free about") && !answer.hasPrefix("Mo Nee answers") && Self.clean(answer)
 		}
@@ -159,8 +170,8 @@ struct AssistantEvaluationTests {
 		#expect(format.decimalPlaces == 0)
 		let context = AssistantContext(queries: try #require(workspace.readOnlyQueries), format: format, today: today)
 		return [
-			Case(question: "How much did I spend this month?", expected: format.currency(120_000, on: .register), context: context),
-			Case(question: "How much did I budget for Rice cooker this month?", expected: format.currency(1_000, on: .budget), context: context)
+			Case(question: "How much did I spend this month?", expected: format.currency(120_000, on: .register), context: context, label: ReportPeriod.monthYear(Month(date: today) ?? Month(year: 2026, month: 11))),
+			Case(question: "How much did I budget for Rice cooker this month?", expected: format.currency(1_000, on: .budget), context: context, label: ReportPeriod.monthYear(Month(date: today) ?? Month(year: 2026, month: 11)))
 		]
 	}
 
@@ -191,9 +202,11 @@ struct AssistantEvaluationTests {
 
 		var passed = 0
 		for (item, answer) in results {
-			let right = item.passes?(answer) ?? AssistantEvaluationCheck.leads(answer, with: item.expected)
+			let grounded = item.sources.isEmpty || AssistantEvaluationCheck.grounded(answer, in: item.sources)
+			let dated = item.label.map { AssistantEvaluationCheck.datesAgree(answer, with: $0) } ?? true
+			let right = (item.passes?(answer) ?? AssistantEvaluationCheck.leads(answer, with: item.expected)) && grounded && dated
 			if right { passed += 1 }
-			print("AI-EVAL \(right ? "pass" : "FAIL") | today \(item.context.today) | \(item.question) | expected \(item.expected) | \(answer.replacingOccurrences(of: "\n", with: " "))")
+			print("AI-EVAL \(right ? "pass" : "FAIL")\(grounded ? "" : " (ungrounded: \(AssistantEvaluationCheck.ungrounded(answer, in: item.sources).sorted()))")\(dated ? "" : " (dates differ from \(item.label ?? ""))") | today \(item.context.today) | \(item.question) | expected \(item.expected) | \(answer.replacingOccurrences(of: "\n", with: " "))")
 			#expect(right, "\(item.question) on \(item.context.today) wants \(item.expected) first: \(answer)")
 		}
 		print("AI-EVAL passed \(passed) of \(results.count)")
@@ -202,6 +215,70 @@ struct AssistantEvaluationTests {
 
 /// How the evaluation reads an answer, checked without the model.
 struct AssistantEvaluationCheck {
+	/// Words that label a figure without naming a category or group: the
+	/// tools' fixed wording and the model's own headings.
+	static let fixedWords = ["total", "spending", "spent", "income", "expenses", "net profit", "net cash flow", "everything else", "average", "budget", "activity", "available", "debt paydown", "savings", "from", "category", "group", "breakdown"]
+
+	/// The names an answer attaches to a figure ("Rent: 1,800.00",
+	/// "Bills (1,934.49)") and any it quotes, without a trailing ST-10.3 label.
+	static func labelledNames(in answer: String) -> Set<String> {
+		let plain = answer.replacingOccurrences(of: "*", with: "")
+		var names: [String] = []
+		for match in plain.matches(of: /([A-Za-z][A-Za-z0-9 &'’\/.-]{0,40}?)\s*:\s*[-\x{2212}]?\s?[$¥€£]?\s?\d/) { names.append(String(match.1)) }
+		for match in plain.matches(of: /([A-Z][A-Za-z0-9 &'’\/.-]{0,40}?)\s*\(\s*[-\x{2212}]?[$¥€£]?\d/) { names.append(String(match.1)) }
+		for match in plain.matches(of: /["“]([^"”]{1,40})["”]/) { names.append(String(match.1)) }
+		return Set(names.map { name in
+			let words = name.split(separator: " ")
+			let last = words.last.map(String.init) ?? ""
+			let lead = ["the", "and", "on", "for", "in", "-", "•"]
+			let kept = words.drop { lead.contains($0.lowercased()) }.map(String.init)
+			return ([String](kept.isEmpty ? [last] : kept)).joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+		}
+		.filter { name in
+			let lower = name.lowercased()
+			return !lower.isEmpty && !lower.contains(where: \.isNumber) && !fixedWords.contains { lower.contains($0) }
+		})
+	}
+
+	static let monthNames = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"]
+
+	/// The month names and years a text states.
+	static func dates(in text: String) -> Set<String> {
+		let words = text.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
+		return Set(words.filter { monthNames.contains($0) || ($0.count == 4 && Int($0).map { (1900...2200).contains($0) } == true) })
+	}
+
+	/// AI-1.2: the headline may paraphrase the tool's period ("last month")
+	/// but never names a month or year the tool's first line doesn't.
+	static func datesAgree(_ answer: String, with label: String) -> Bool {
+		dates(in: firstSentence(answer)).isSubset(of: dates(in: label))
+	}
+
+	/// The answer's named categories and groups that no source mentions (AI-1.6).
+	static func ungrounded(_ answer: String, in sources: [String]) -> Set<String> {
+		let text = sources.joined(separator: "\n").lowercased()
+		return labelledNames(in: answer).filter { !text.contains($0.lowercased()) }
+	}
+
+	static func grounded(_ answer: String, in sources: [String]) -> Bool {
+		ungrounded(answer, in: sources).isEmpty
+	}
+
+	@Test func theHeadlineNamesOnlyTheToolsDates() {
+		#expect(Self.datesAgree("You spent 2,443.61 in September 2026.", with: "September 2026"))
+		#expect(Self.datesAgree("You spent 2,443.61 last month.", with: "September 2026"))
+		#expect(!Self.datesAgree("You spent 2,443.61 in October 2026.", with: "September 2026"))
+		#expect(Self.datesAgree("You have spent 2,109.92 from October 1 to 15, 2026.", with: "October 1 to 15, 2026"))
+	}
+
+	@Test func aNameMustComeFromTheToolsOwnOutput() {
+		let tool = "Spending by category, September 2026, largest first:\nRent: 1,800.00\nGroceries: 111.93\nEverything else (3 categories): 141.21"
+		#expect(Self.grounded("Here is the breakdown:\n- **Rent**: 1,800.00\n- Groceries: 111.93\n- Everything else (3 categories): 141.21", in: [tool]))
+		#expect(Self.grounded("Your total spending: 2,443.61. Rent (1,800.00) and Groceries (111.93).", in: [tool]), "headings and fixed words are not names")
+		#expect(!Self.grounded("- Utilities: 69.99\n- Rent: 1,800.00", in: [tool]), "an invented name fails")
+		#expect(Self.ungrounded("The names suggested are \"Entertainment\" and \"Rent\".", in: [tool]) == ["Entertainment"], "a quoted invented name fails")
+	}
+
 	/// "−$1,234.56", "-1234.56" and "$ -1,234.56" all read as -1234.56; "1,234.56" as 1234.56.
 	static func figures(in text: String) -> Set<String> {
 		Set(text.matches(of: /([-\u{2212}])?\s?[$¥€£]?\s?([-\u{2212}])?(\d(?:[\d,\u{202F}']*\d)?(?:\.\d+)?)/).map { match in
