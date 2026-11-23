@@ -268,9 +268,11 @@ The negative sentences of AI-5.3 follow a negative Debt paydown or Savings line.
 
   When no line is left after zero lines are omitted (no expense rows at all, or rows that net to zero), lines 1 and 2 are followed by `No spending lines in <range>.` and no heading. The wording holds in both cases. A currency without 2 places needs no refusal: spending and its category lines are all register-scale figures, as in AI-8 example 14, and no budget figure is read. So the CLS-12.10 note does not apply here, and the figures print as `spending` prints them.
 - **AI-12.7** **Routing.** The model's instructions carry these three sentences exactly, in place of the two that choose between `spending` and `categorySpending`. Budget words win: a question with them goes to `budgetHabits` first, and only otherwise does a breakdown go to `spendingByCategory`.
-  - "For questions about being over budget, overspending, improving money habits or what to change, use budgetHabits. For any other question about spending by category, a breakdown, or what was spent the most on, use spendingByCategory."
+  - "For questions about being over budget, overspending, improving money habits or what to change in my budget, use budgetHabits. For any other question about spending by category, a breakdown, or what was spent the most on, use spendingByCategory."
   - "For a total, or spending by group, use spending."
   - "Use categorySpending only when the question names a category or group. If it names more than one, call categorySpending once for each name and never add the figures together."
+
+  Routing examples: "What should I change in my budget?" goes to `budgetHabits`. "What should I change about my investments?" is outside the data, so it gets the AI-11.4 redirect, copied exactly, and no figure. "What did I spend the most on?" goes to `spendingByCategory`. "Break down my spending by group" goes to `spending`.
 
   A question that names two categories therefore gets two answers and no combined figure (AI-1.1). `categorySpending` with no name keeps asking for one (AI-3.6) and never guesses.
 - **AI-12.8** **Worked examples (tests).** Today is 2026-11-22, a 2-place currency, amounts in cents in the data.
