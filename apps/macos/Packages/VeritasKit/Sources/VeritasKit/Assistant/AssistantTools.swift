@@ -9,9 +9,11 @@ public enum AssistantTools {
 	public static func all(_ context: AssistantContext) -> [any AssistantTool] {
 		[
 			SpendingTool(context: context),
+			SpendingByCategoryTool(context: context),
 			CategorySpendingTool(context: context),
 			IncomeTool(context: context),
 			BudgetTool(context: context),
+			BudgetHabitsTool(context: context),
 			NetProfitTool(context: context),
 			BudgetMonthTool(context: context),
 			AccountsTool(context: context),
