@@ -12,17 +12,19 @@ public enum TourStep: String, CaseIterable, Sendable {
 }
 
 /// What the open budget has for the tour to point at. A step with nothing
-/// to point at is left out.
+/// to point at is left out, and so is a step that edits a read-only budget.
 public struct TourBudget: Hashable, Sendable {
 	public var hasToBudget: Bool
 	public var hasBudgetCell: Bool
 	/// The register the account steps open.
 	public var accountID: String?
+	public var isReadOnly: Bool
 
-	public init(hasToBudget: Bool, hasBudgetCell: Bool, accountID: String?) {
+	public init(hasToBudget: Bool, hasBudgetCell: Bool, accountID: String?, isReadOnly: Bool) {
 		self.hasToBudget = hasToBudget
 		self.hasBudgetCell = hasBudgetCell
 		self.accountID = accountID
+		self.isReadOnly = isReadOnly
 	}
 }
 
@@ -69,8 +71,9 @@ public final class GuidedTour {
 		TourStep.allCases.filter { step in
 			switch step {
 			case .toBudget: budget.hasToBudget
-			case .budgetCell: budget.hasBudgetCell
-			case .openAccount, .addTransaction, .quickEntry: budget.accountID != nil
+			case .budgetCell: budget.hasBudgetCell && !budget.isReadOnly
+			case .openAccount: budget.accountID != nil
+			case .addTransaction, .quickEntry: budget.accountID != nil && !budget.isReadOnly
 			}
 		}
 	}
@@ -142,7 +145,8 @@ extension WorkspaceModel {
 		return TourBudget(
 			hasToBudget: sheet != nil && readOnly != .trackingBudget,
 			hasBudgetCell: hasCell,
-			accountID: overview?.accounts.first { !$0.isInactive }?.id
+			accountID: overview?.accounts.first { !$0.isInactive }?.id,
+			isReadOnly: readOnly != nil
 		)
 	}
 }

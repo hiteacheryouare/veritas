@@ -6,7 +6,7 @@ import VeritasKit
 /// The first-launch tour (D79).
 @MainActor
 struct GuidedTourTests {
-	static let everything = TourBudget(hasToBudget: true, hasBudgetCell: true, accountID: "checking")
+	static let everything = TourBudget(hasToBudget: true, hasBudgetCell: true, accountID: "checking", isReadOnly: false)
 
 	private func scratchDefaults() -> (UserDefaults, String) {
 		let suite = "veritas-tour-tests-\(UUID().uuidString)"
@@ -126,19 +126,40 @@ struct GuidedTourTests {
 	}
 
 	@Test func stepsWithNothingToPointAtAreLeftOut() {
-		let noAccounts = TourBudget(hasToBudget: true, hasBudgetCell: true, accountID: nil)
+		let noAccounts = TourBudget(hasToBudget: true, hasBudgetCell: true, accountID: nil, isReadOnly: false)
 		#expect(GuidedTour.steps(for: noAccounts) == [.toBudget, .budgetCell])
-		let noEnvelopes = TourBudget(hasToBudget: true, hasBudgetCell: false, accountID: "checking")
+		let noEnvelopes = TourBudget(hasToBudget: true, hasBudgetCell: false, accountID: "checking", isReadOnly: false)
 		#expect(GuidedTour.steps(for: noEnvelopes) == [.toBudget, .openAccount, .addTransaction, .quickEntry])
-		let tracking = TourBudget(hasToBudget: false, hasBudgetCell: true, accountID: "checking")
-		#expect(GuidedTour.steps(for: tracking).first == .budgetCell)
+	}
+
+	@Test func aReadOnlyBudgetLeavesOutEveryStepThatEdits() {
+		let readOnly = TourBudget(hasToBudget: true, hasBudgetCell: true, accountID: "checking", isReadOnly: true)
+		#expect(GuidedTour.steps(for: readOnly) == [.toBudget, .openAccount])
+		let tracking = TourBudget(hasToBudget: false, hasBudgetCell: true, accountID: "checking", isReadOnly: true)
+		#expect(GuidedTour.steps(for: tracking) == [.openAccount])
+		let nothingToRead = TourBudget(hasToBudget: false, hasBudgetCell: true, accountID: nil, isReadOnly: true)
+		#expect(GuidedTour.steps(for: nothingToRead).isEmpty)
+	}
+
+	@Test func aReadOnlyTourCountsOnlyItsStepsAndEndsAfterOpeningAnAccount() {
+		let (defaults, suite) = scratchDefaults()
+		defer { defaults.removePersistentDomain(forName: suite) }
+		let tour = GuidedTour(defaults: defaults)
+		#expect(tour.offer(TourBudget(hasToBudget: true, hasBudgetCell: true, accountID: "checking", isReadOnly: true)))
+		#expect(TourWords.position(tour.number ?? 0, of: tour.steps.count) == "1 of 2")
+		tour.next()
+		#expect(tour.current == .openAccount)
+		#expect(tour.isLastStep)
+		tour.follow(.account(id: "visa"))
+		#expect(tour.current == nil)
+		#expect(tour.isFinished)
 	}
 
 	@Test func anEmptyBudgetCountsOnlyItsOwnSteps() {
 		let (defaults, suite) = scratchDefaults()
 		defer { defaults.removePersistentDomain(forName: suite) }
 		let tour = GuidedTour(defaults: defaults)
-		#expect(tour.offer(TourBudget(hasToBudget: true, hasBudgetCell: false, accountID: nil)))
+		#expect(tour.offer(TourBudget(hasToBudget: true, hasBudgetCell: false, accountID: nil, isReadOnly: false)))
 		#expect(tour.steps == [.toBudget])
 		#expect(tour.isLastStep)
 		#expect(TourWords.position(tour.number ?? 0, of: tour.steps.count) == "1 of 1")
@@ -148,7 +169,7 @@ struct GuidedTourTests {
 		let (defaults, suite) = scratchDefaults()
 		defer { defaults.removePersistentDomain(forName: suite) }
 		let tour = GuidedTour(defaults: defaults)
-		#expect(!tour.offer(TourBudget(hasToBudget: false, hasBudgetCell: false, accountID: nil)))
+		#expect(!tour.offer(TourBudget(hasToBudget: false, hasBudgetCell: false, accountID: nil, isReadOnly: false)))
 		#expect(tour.current == nil)
 		#expect(!tour.isFinished)
 	}
@@ -156,24 +177,35 @@ struct GuidedTourTests {
 	@Test func readsWhatTheOpenBudgetHas() async {
 		let full = WorkspaceModel(library: TourFakeLibrary(session: TourFakeSession()), format: MoneyFormat())
 		await full.reopen(directory: URL(filePath: "/tmp/budget"))
-		#expect(await full.tourBudget() == TourBudget(hasToBudget: true, hasBudgetCell: true, accountID: "checking"))
+		#expect(await full.tourBudget() == TourBudget(hasToBudget: true, hasBudgetCell: true, accountID: "checking", isReadOnly: false))
 
 		let empty = WorkspaceModel(library: TourFakeLibrary(session: TourFakeSession(hasEnvelopes: false, hasAccounts: false)), format: MoneyFormat())
 		await empty.reopen(directory: URL(filePath: "/tmp/budget"))
-		#expect(await empty.tourBudget() == TourBudget(hasToBudget: true, hasBudgetCell: false, accountID: nil))
+		#expect(await empty.tourBudget() == TourBudget(hasToBudget: true, hasBudgetCell: false, accountID: nil, isReadOnly: false))
 
 		let tracking = WorkspaceModel(library: TourFakeLibrary(session: TourFakeSession(readOnly: .trackingBudget)), format: MoneyFormat())
 		await tracking.reopen(directory: URL(filePath: "/tmp/budget"))
-		#expect(await tracking.tourBudget().hasToBudget == false)
+		#expect(await tracking.tourBudget() == TourBudget(hasToBudget: false, hasBudgetCell: true, accountID: "checking", isReadOnly: true))
+
+		let newerActual = WorkspaceModel(library: TourFakeLibrary(session: TourFakeSession(readOnly: .newerActualVersion)), format: MoneyFormat())
+		await newerActual.reopen(directory: URL(filePath: "/tmp/budget"))
+		#expect(GuidedTour.steps(for: await newerActual.tourBudget()) == [.toBudget, .openAccount])
 	}
 
 	@Test func everyStepSaysSomethingShortWithItsPosition() {
 		for step in TourStep.allCases {
 			let text = TourWords.text(step)
 			let sentences = text.split(separator: ". ").count
-			#expect((1 ... 2).contains(sentences), "\(step): \(text)")
+			#expect((1 ... 3).contains(sentences), "\(step): \(text)")
 			#expect(TourWords.spoken(step, number: 2, of: 5) == "Tour, step 2 of 5. \(text)")
 		}
+	}
+
+	/// Fred's wording (docs/finance): To Budget counts budget accounts only and can go negative,
+	/// and in a Budgeted cell Return moves on just as Tab does.
+	@Test func theBudgetStepsSayWhatToBudgetAndTheCellReallyDo() {
+		#expect(TourWords.text(.toBudget) == "To Budget is the money in your budget accounts that isn't in an envelope yet. Give it to envelopes until it reads zero. If it goes negative, you've given out more than you have.")
+		#expect(TourWords.text(.budgetCell) == "Click a Budgeted amount and type what this envelope gets this month. Return or Tab saves it and moves to the next envelope.")
 	}
 }
 
