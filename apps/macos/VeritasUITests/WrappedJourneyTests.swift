@@ -35,6 +35,38 @@ final class WrappedJourneyTests: XCTestCase {
 	}
 
 	@MainActor
+	func testTheBiggestMonthDrawsEveryMonthAndHidesItsFigures() {
+		// R-WRAP-1, R-WRAP-2, v18: FC-8's months as bars; with amounts hidden, bars only.
+		let app = openWrapped()
+		let title = app.staticTexts["wrapped.title"]
+		XCTAssertTrue(title.waitForExistence(timeout: 5))
+		for _ in 0..<4 { app.buttons["wrapped.next"].click() }
+		XCTAssertTrue(waitUntil { self.text(title) == "March was your biggest month for spending." }, text(title))
+		let bars = app.descendants(matching: .any)["wrapped.bars"]
+		XCTAssertTrue(bars.waitForExistence(timeout: 5))
+		XCTAssertTrue(bars.label.hasPrefix("January, $5,400.00; February, $4,980.00; March, $8,120.00"), bars.label)
+		attachScreenshot(of: app, named: "wrapped-biggest-month")
+		app.descendants(matching: .any)["wrapped.hideAmounts"].click()
+		XCTAssertTrue(waitUntil { bars.label.hasPrefix("January, 8.8% of total out") }, bars.label)
+		XCTAssertFalse(bars.label.contains("$"), bars.label)
+		attachScreenshot(of: app, named: "wrapped-biggest-month-hidden")
+	}
+
+	@MainActor
+	func testTheYearPickerListsOnlyYearsWithData() {
+		let app = openWrapped()
+		let picker = app.descendants(matching: .any)["wrapped.yearPicker"]
+		XCTAssertTrue(picker.waitForExistence(timeout: 5))
+		picker.click()
+		XCTAssertTrue(app.menuItems["2026 so far"].waitForExistence(timeout: 5))
+		XCTAssertTrue(app.menuItems["2025"].exists)
+		XCTAssertFalse(app.menuItems["2024"].exists, "the core lists 2025 as the first year with data")
+		app.menuItems["2025"].click()
+		let title = app.staticTexts["wrapped.title"]
+		XCTAssertTrue(waitUntil { self.text(title) == "Your 2025" }, text(title))
+	}
+
+	@MainActor
 	func testTheRedactedImageExportOpensASavePanel() {
 		let app = openWrapped()
 		export("Image without amounts…", in: app)

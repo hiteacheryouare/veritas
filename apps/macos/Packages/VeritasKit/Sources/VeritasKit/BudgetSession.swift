@@ -225,6 +225,8 @@ public protocol BudgetSession: AnyObject, Sendable {
 	func incomeStatement(first: String, last: String) async throws -> IncomeStatement
 	/// One year's Wrapped, or this year's to `today` (R-WRAP-1, FC-8).
 	func wrapped(year: Int32, today: String) async throws -> WrappedReport
+	/// The years whose Wrapped has data, newest first (FC-8, v18).
+	func wrappedYears(today: String) async throws -> [Int32]
 	/// The balance sheet at the end of `asOf`, `YYYY-MM-DD` (R-REP-7).
 	func balanceSheet(asOf: String) async throws -> BalanceSheet
 	/// Owner's equity over inclusive `YYYY-MM-DD` dates (R-REP-7).

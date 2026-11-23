@@ -131,14 +131,14 @@ final class StubDashboards: @unchecked Sendable {
 			return .spending(mode: .singleMonth, compare: november, compareTo: november.adding(months: -1), averageFirst: nil, averageLast: nil, days: days, headlineDay: 17, difference: -91_852)
 		case .sankey:
 			let nodes = [
-				SankeyCardNode(key: "employer", label: .name(name: "Employer"), percentage: "100%", color: .palette(index: 0)),
-				SankeyCardNode(key: "paycheck", label: .name(name: "Paycheck"), percentage: "100%", color: .palette(index: 0)),
-				SankeyCardNode(key: "accounts", label: .allAccounts, percentage: "100%", color: .blue),
-				SankeyCardNode(key: "housing", label: .name(name: "Housing and utilities"), percentage: "55.1%", color: .palette(index: 1)),
-				SankeyCardNode(key: "everyday", label: .name(name: "Everyday"), percentage: "21.9%", color: .palette(index: 2)),
-				SankeyCardNode(key: "everyday-other", label: .other, percentage: "8.8%", color: .gray),
-				SankeyCardNode(key: "rent", label: .name(name: "Rent"), percentage: "51.2%", color: .palette(index: 1)),
-				SankeyCardNode(key: "groceries", label: .name(name: "Groceries"), percentage: "13.1%", color: .palette(index: 2))
+				SankeyCardNode(key: "employer", label: .name(name: "Employer"), percentage: "100%", color: .palette(index: 0), value: 322_400),
+				SankeyCardNode(key: "paycheck", label: .name(name: "Paycheck"), percentage: "100%", color: .palette(index: 0), value: 322_400),
+				SankeyCardNode(key: "accounts", label: .allAccounts, percentage: "100%", color: .blue, value: 322_400),
+				SankeyCardNode(key: "housing", label: .name(name: "Housing and utilities"), percentage: "55.1%", color: .palette(index: 1), value: 177_600),
+				SankeyCardNode(key: "everyday", label: .name(name: "Everyday"), percentage: "21.9%", color: .palette(index: 2), value: 70_590),
+				SankeyCardNode(key: "everyday-other", label: .other, percentage: "8.8%", color: .gray, value: 28_380),
+				SankeyCardNode(key: "rent", label: .name(name: "Rent"), percentage: "51.2%", color: .palette(index: 1), value: 165_000),
+				SankeyCardNode(key: "groceries", label: .name(name: "Groceries"), percentage: "13.1%", color: .palette(index: 2), value: 42_210)
 			]
 			let links = [
 				SankeyCardLink(source: 0, target: 1, value: 322_400, folded: [], color: nil),

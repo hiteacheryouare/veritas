@@ -7,9 +7,6 @@ import VeritasCore
 public struct MoneyFormat: Hashable, Sendable {
 	public static let minus = "\u{2212}"
 
-	/// CLS-12.10's line for a 0-place budget, whose envelope and goal numbers add both scales.
-	public static let mixedScaleNote = "Spending is recorded at 2 places and budgets at 0, so these numbers mix both, as in Actual."
-
 	/// D63 stores a 0-place budget's numbers on two scales 100 times apart, so
 	/// every call names the scale of the number it shows (CLS-12.9).
 	public enum Scale: Hashable, Sendable {

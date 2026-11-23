@@ -135,12 +135,37 @@ final class ReportFakeSession: BudgetSession, @unchecked Sendable {
 	func exportActualZip(to destination: URL) async throws -> [AuditFinding] { [] }
 	func observeChanges(_ changed: @escaping @Sendable () -> Void) async throws {}
 	func close() async {}
-	func perform(_ command: Command) async throws { commands.append(command) }
+	func perform(_ command: Command) async throws {
+		commands.append(command)
+		if case .placeWidget(let id, let x, let y, let width, let height) = command {
+			for page in dashboard.indices {
+				for index in dashboard[page].widgets.indices where dashboard[page].widgets[index].id == id {
+					(dashboard[page].widgets[index].x, dashboard[page].widgets[index].y) = (x, y)
+					(dashboard[page].widgets[index].width, dashboard[page].widgets[index].height) = (width, height)
+				}
+			}
+		}
+	}
 	func netProfit(first: Month, last: Month) async throws -> NetProfitReport {
 		asked.append(ReportPeriod(first: first, last: last))
 		return report
 	}
-	func dashboards(today: String) async throws -> [DashboardPage] { dashboard }
+	/// Holds the next read with what it read, until `releaseDashboards`, as a slow load would.
+	var holdsNextDashboards = false
+	private(set) var isHoldingDashboards = false
+	private var heldDashboards: CheckedContinuation<Void, Never>?
+	func dashboards(today: String) async throws -> [DashboardPage] {
+		let read = dashboard
+		if holdsNextDashboards {
+			holdsNextDashboards = false
+			await withCheckedContinuation { heldDashboards = $0; isHoldingDashboards = true }
+		}
+		return read
+	}
+	func releaseDashboards() {
+		heldDashboards?.resume()
+		heldDashboards = nil
+	}
 	var flows: [CashFlowColumn] = []
 	func cashFlow(first: Month, last: Month) async throws -> [CashFlowColumn] { flows }
 	func cashFlowStatement(first: String, last: String) async throws -> CashFlowColumn {
@@ -318,6 +343,28 @@ struct DashboardModelTests {
 
 	static func netWorth(_ range: WidgetRange) -> WidgetView {
 		.netWorth(range: range, interval: .monthly, points: [], netWorth: 0, change: 0, lowest: nil, highest: nil, hasNegative: false, accounts: [], series: [])
+	}
+
+	@Test func aSlowLoadThatStartedBeforeAMoveNeverPutsTheCardBack() async throws {
+		// The Reports journey's Move › Down: a load the screen started just before the
+		// move read the old layout, finished last, and drew the card where it had been.
+		let session = ReportFakeSession()
+		session.dashboard = [DashboardPage(id: "main", name: "Main", widgets: [
+			DashboardWidget(id: "w", kind: "net-worth-card", x: 0, y: 2, width: 6, height: 3, minWidth: 3, minHeight: 2, config: .named("Net worth"), view: .markdown(text: "", align: nil))
+		])]
+		let workspace = WorkspaceModel(library: ReportFakeLibrary(session: session), format: MoneyFormat())
+		await workspace.reopen(directory: URL(filePath: "/tmp/budget"))
+		let model = DashboardModel(workspace: workspace)
+		await model.load()
+		let widget = try #require(model.sheet?.cards.first)
+		session.holdsNextDashboards = true
+		let slow = Task { await model.load() }
+		while !session.isHoldingDashboards { await Task.yield() }
+		await model.move(widget, rows: 1)
+		#expect(model.sheet?.cards.first?.y == 3)
+		session.releaseDashboards()
+		await slow.value
+		#expect(model.sheet?.cards.first?.y == 3, "the older load's layout never lands after the move's")
 	}
 
 	@Test func placingAWidgetClampsToTheGridAndSendsOneCommand() async {

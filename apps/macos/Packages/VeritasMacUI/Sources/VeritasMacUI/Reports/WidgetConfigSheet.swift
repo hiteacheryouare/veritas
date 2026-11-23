@@ -52,6 +52,10 @@ struct WidgetConfigSheet: View {
 						TextField("Formula", text: Binding(get: { config.formula ?? "" }, set: { config.formula = $0 }), prompt: Text("=1-(SPENT/INCOME)"))
 							.font(.mono(.body))
 					}
+					if kind == .budgetAnalysis {
+						Toggle("Show balance", isOn: Binding(get: { config.showBalance ?? true }, set: { config.showBalance = $0 }))
+							.accessibilityIdentifier("widgetConfig.showBalance")
+					}
 					if kind == .customReport {
 						Picker("Report", selection: Binding(get: { config.reportId ?? "" }, set: { config.reportId = $0 })) {
 							ForEach(reports) { Text($0.name).tag($0.id) }

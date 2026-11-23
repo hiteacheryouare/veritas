@@ -14,8 +14,13 @@ struct GoalCard: View {
 		HStack(spacing: Spacing.s3) {
 			GoalRing(goal: goal, tone: words.tone, size: Size.ring, lineWidth: 5)
 			VStack(alignment: .leading, spacing: 2) {
-				Text(goal.name)
-					.font(.text(.body, weight: .semibold))
+				HStack(spacing: Spacing.s1) {
+					if let icon = GoalIcon(goal.icon) {
+						GoalIconView(icon: icon, size: 13)
+					}
+					Text(goal.name)
+						.font(.text(.body, weight: .semibold))
+				}
 				GoalProgress(goal: goal, format: format)
 				Label {
 					Text(words.note)

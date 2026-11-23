@@ -28,6 +28,31 @@ final class GoalsAndEnvelopesJourneyTests: XCTestCase {
 	}
 
 	@MainActor
+	func testChoosingAGoalIconShowsTheCoresRefusalInline() {
+		// R-GOAL-1, v18: a symbol from the grid or one emoji, and nothing else.
+		let app = openGoals()
+		let laptop = app.descendants(matching: .any)["goal.laptop"]
+		XCTAssertTrue(laptop.waitForExistence(timeout: 5))
+		XCTAssertTrue(app.descendants(matching: .any)["goal.laptop.icon.laptopcomputer"].exists)
+		XCTAssertTrue(app.descendants(matching: .any)["goal.japan.icon.🗾"].exists, "an emoji is drawn as text")
+		laptop.rightClick()
+		contextItem(app, "Change Icon…")?.click()
+		let sheet = app.descendants(matching: .any)["sheet.goalIcon"]
+		XCTAssertTrue(sheet.waitForExistence(timeout: 5))
+		let emoji = sheet.textFields["goalIcon.emoji"]
+		emoji.click()
+		emoji.typeText("Car")
+		sheet.buttons["goalIcon.save"].click()
+		XCTAssertTrue(sheet.staticTexts["Choose a symbol or one emoji."].waitForExistence(timeout: 5))
+		attachScreenshot(of: app, named: "goal-icon-refused")
+		sheet.buttons["goalIcon.symbol.car"].click()
+		XCTAssertFalse(sheet.staticTexts["Choose a symbol or one emoji."].exists, "a new choice clears the refusal")
+		sheet.buttons["goalIcon.save"].click()
+		XCTAssertTrue(sheet.waitForDisappearance())
+		XCTAssertTrue(app.descendants(matching: .any)["goal.laptop.icon.car"].waitForExistence(timeout: 5))
+	}
+
+	@MainActor
 	func testClosingASpentGoalMovesItToTheArchive() {
 		let app = openGoals()
 		let close = app.buttons["goal.tires.close"]

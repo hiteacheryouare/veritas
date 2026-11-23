@@ -113,7 +113,7 @@ public final class MoveMoneyModel: Identifiable {
 		envelopes = await workspace.budgetMonth(month)?.groups.filter { !$0.hidden } ?? []
 		if let editing, editing.amount > 0, let counterpart = editing.counterpartId {
 			leg = await workspace.report { try await $0.registerRow(counterpart) }
-			if let category = leg?.categoryId { purpose.categoryID = category }
+			if let category = leg?.categoryId { purpose.restore(category) }
 		}
 		if canPlan { await purpose.load(envelopes: envelopes) }
 		await startFromLoan()
@@ -232,24 +232,19 @@ public final class MoveMoneyModel: Identifiable {
 			problem = "\(self.account(other)?.name ?? "That account") has no transfer payee. Reopen the budget and try again."
 			return false
 		}
-		let asks = asksPurpose && !ownSide
-		let purpose = purpose
 		let rowID = (leg ?? editing)?.id
-		let cleared = (leg ?? editing)?.cleared ?? false
-		let payeeID = payee.id
-		return await workspace.change { session -> Bool in
-			let category = asks ? try await purpose.resolve(using: session) : nil
-			let draft = TransactionDraft(
-				id: rowID == nil ? UUID().uuidString.lowercased() : nil,
-				accountId: account, date: day, amount: ownSide ? moved : -moved, payeeId: payeeID, payeeName: nil,
-				categoryId: category, notes: note, cleared: cleared, splits: []
-			)
-			if let rowID {
-				try await session.perform(.editTransaction(transactionId: rowID, transaction: draft))
-			} else {
-				try await session.perform(.addTransaction(transaction: draft))
-			}
-			return true
-		} ?? false
+		let draft = TransactionDraft(
+			id: rowID == nil ? UUID().uuidString.lowercased() : nil,
+			accountId: account, date: day, amount: ownSide ? moved : -moved, payeeId: payee.id, payeeName: nil,
+			categoryId: nil, notes: note, cleared: (leg ?? editing)?.cleared ?? false, splits: []
+		)
+		let command: Command = if asksPurpose && !ownSide {
+			purpose.command(saving: draft, editing: rowID)
+		} else if let rowID {
+			.editTransaction(transactionId: rowID, transaction: draft)
+		} else {
+			.addTransaction(transaction: draft)
+		}
+		return await workspace.perform(command)
 	}
 }

@@ -392,6 +392,11 @@ final class CoreBudgetSession: BudgetSession {
 		return try await Core.cancellable { try await session.wrapped(year: year, today: today, cancel: $0) }
 	}
 
+	func wrappedYears(today: String) async throws -> [Int32] {
+		let session = session
+		return try await Core.cancellable { try await session.wrappedYears(today: today, cancel: $0) }
+	}
+
 	func balanceSheet(asOf: String) async throws -> BalanceSheet {
 		let session = session
 		return try await Core.cancellable { try await session.balanceSheet(asOf: asOf, cancel: $0) }
