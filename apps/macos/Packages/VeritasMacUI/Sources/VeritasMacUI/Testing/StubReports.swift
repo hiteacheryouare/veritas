@@ -205,8 +205,10 @@ final class StubReports: @unchecked Sendable {
 	/// Rows that add up to the number clicked, spread over its dates.
 	func transactions(_ drill: ReportDrill) -> [ReportTransaction] {
 		let (first, last, total, count, category): (String, String, Int64, UInt64, String?)
+		let transfer: (id: String, name: String)?
 		switch drill {
 		case .netProfit(let from, let to, let line, let pick):
+			transfer = Self.transfer(line == .savings ? .savings : line == .debtPaydown ? .debtPaydown : nil)
 			let months = ReportPeriod(first: Month(date: from) ?? Month(year: 2026, month: 10), last: Month(date: to) ?? Month(year: 2026, month: 10)).months
 			let column = Self.column(months)
 			let section: ReportSection? = switch line {
@@ -225,13 +227,14 @@ final class StubReports: @unchecked Sendable {
 				(first, last, total, count, category) = (from, to, value.total, value.count, nil)
 			}
 		case .sankeyNode(let from, let to, let key):
+			transfer = Self.transfer(key.kind)
 			let node = sankey(first: from, last: to).nodes.first { $0.key == key }
 			(first, last, total, count, category) = (from, to, node?.value ?? 0, node?.count ?? 0, key.kind == .category ? key.id : nil)
 		}
 		guard count > 0 else { return [] }
 		let start = Month(date: first) ?? Month(year: 2026, month: 10)
 		let days = max(start.months(through: Month(date: last) ?? start) * 30 + start.dayCount, 1)
-		let names = category.flatMap { Self.payees[$0] } ?? ["Checking", "Corner store", "Hardware store", "Online order"]
+		let names = transfer.map { [$0.name] } ?? category.flatMap { Self.payees[$0] } ?? ["Checking", "Corner store", "Hardware store", "Online order"]
 		let label = category.flatMap { id in Self.expenses.first { $0.id == id }?.name }
 		let share = total / Int64(count)
 		return (0..<Int(count)).map { index in
@@ -242,8 +245,18 @@ final class StubReports: @unchecked Sendable {
 			return ReportTransaction(
 				id: "t\(index)", parentId: nil, date: String(format: "%04d-%02d-%02d", month.year, month.month, day),
 				accountId: "checking", accountName: index % 3 == 2 ? "Card" : "Checking",
-				payee: names[index % names.count], category: label, notes: nil, amount: -amount
+				payee: names[index % names.count], category: label, notes: nil, amount: -amount,
+				transferAccountId: transfer?.id
 			)
+		}
+	}
+
+	/// Savings and debt paydown are transfers out of Checking, to Savings and the car loan.
+	private static func transfer(_ kind: SankeyNodeKind?) -> (id: String, name: String)? {
+		switch kind {
+		case .savings: ("savings", "Savings")
+		case .debtPaydown: ("carloan", "Car loan")
+		default: nil
 		}
 	}
 

@@ -8,7 +8,7 @@ import VeritasCore
 @Observable
 public final class WrappedModel {
 	public private(set) var year: Int32
-	/// Newest first: this year to date, then each year back to the budget's first month.
+	/// The core's years with data, newest first; this year alone when there are none.
 	public private(set) var years: [Int32]
 	public private(set) var report: WrappedReport?
 	public private(set) var goalNames: [String: String] = [:]
@@ -33,9 +33,13 @@ public final class WrappedModel {
 
 	public func load() async {
 		let today = today
-		let month = Month(date: today) ?? Month(year: thisYear, month: 1)
-		if let first = await workspace.report({ try await $0.budgetMonth(month, today: today).firstMonth }), first.year < thisYear {
-			years = Array(first.year...thisYear).reversed()
+		if let listed = await workspace.report({ try await $0.wrappedYears(today: today) }) {
+			years = listed.isEmpty ? [thisYear] : listed
+			if !years.contains(year) {
+				year = years[0]
+				report = nil
+				index = 0
+			}
 		}
 		let goals = await workspace.goals()
 		goalNames = Dictionary(goals.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })

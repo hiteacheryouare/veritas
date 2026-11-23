@@ -4,9 +4,10 @@ import VeritasCore
 import VeritasDesign
 import VeritasKit
 
-/// Net worth from today to the end of the 12th month: the baseline dashed,
-/// each compared what-if in its own color, and the baseline's band drawn
-/// through the four horizons (design/mockups/forecast.html).
+/// Net worth over the up to 12 months before today, as the Net worth report
+/// has it, then from today to the end of the 12th month: the baseline
+/// dashed, each compared what-if in its own color, and the baseline's band
+/// drawn through every projected month (design/mockups/forecast.html).
 struct NetWorthForecastChart: View {
 	let model: ForecastModel
 	let forecast: Forecast
@@ -44,14 +45,23 @@ struct NetWorthForecastChart: View {
 		}
 	}
 
+	/// Month-end net worth before today, joined to today's.
+	private var history: [Point] {
+		guard !forecast.history.isEmpty else { return [] }
+		return forecast.history.compactMap { month in
+			Self.end(of: month.month).map { Point(series: -1, date: $0, value: value(month.netWorth)) }
+		} + [Point(series: -1, date: today, value: value(forecast.netWorthToday))]
+	}
+
+	/// The core's band at each projected month, from today's net worth.
 	private var band: [BandPoint] {
-		let horizons = forecast.baseline.horizons.compactMap { horizon -> BandPoint? in
-			guard let low = horizon.bandLow, let high = horizon.bandHigh, let date = Self.end(of: horizon.month) else { return nil }
+		let months = forecast.baseline.months.compactMap { month -> BandPoint? in
+			guard let low = month.bandLow, let high = month.bandHigh, let date = Self.end(of: month.month) else { return nil }
 			return BandPoint(date: date, low: value(low), high: value(high))
 		}
-		guard !horizons.isEmpty else { return [] }
+		guard !months.isEmpty else { return [] }
 		let start = value(forecast.netWorthToday)
-		return [BandPoint(date: today, low: start, high: start)] + horizons
+		return [BandPoint(date: today, low: start, high: start)] + months
 	}
 
 	private var selected: [Point] {
@@ -84,6 +94,11 @@ struct NetWorthForecastChart: View {
 					.annotation(position: .top, alignment: .leading) {
 						Text("Today").font(.text(.caption)).foregroundStyle(.textSecondary)
 					}
+				ForEach(history) { point in
+					LineMark(x: .value("Date", point.date), y: .value("Net worth", point.value), series: .value("Series", "history"))
+						.foregroundStyle(Color.textSecondary)
+						.lineStyle(StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+				}
 				ForEach(points) { point in
 					LineMark(x: .value("Date", point.date), y: .value("Net worth", point.value), series: .value("Series", "\(point.series)"))
 						.foregroundStyle(ForecastColors.color(point.series))
@@ -108,13 +123,13 @@ struct NetWorthForecastChart: View {
 				}
 			}
 			.chartXAxis {
-				AxisMarks(values: .stride(by: .month, count: 2)) { mark in
+				AxisMarks(values: .stride(by: .month, count: history.isEmpty ? 2 : 3)) { mark in
 					AxisValueLabel(format: .dateTime.month(.abbreviated))
 						.foregroundStyle(Color.textSecondary)
 				}
 			}
 			.frame(height: 280)
-			.accessibilityLabel("Net worth forecast for 12 months")
+			.accessibilityLabel(history.isEmpty ? "Net worth forecast for 12 months" : "Net worth for the past \(forecast.history.count) months and the next 12")
 			.accessibilityIdentifier("forecast.chart")
 		}
 	}

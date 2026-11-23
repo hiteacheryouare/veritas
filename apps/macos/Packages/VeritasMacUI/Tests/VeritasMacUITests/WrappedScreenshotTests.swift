@@ -44,7 +44,7 @@ struct WrappedScreenshotTests {
 
 	@Test func theStoryHasEveryCardForTheStubYear() async throws {
 		let (_, model) = await model()
-		#expect(model.years == [2026])
+		#expect(model.years == [2026, 2025], "the core's years with data, 2025 included")
 		#expect(model.cards.map(\.kind) == [.totals, .categories, .groups, .payees, .biggestMonth, .debtAndSavings, .noSpend, .goals, .netWorth])
 		#expect(model.cards.first { $0.kind == .goals }?.rows.map(\.label) == ["Winter tires", "Vet bill"])
 		#expect(model.title == "Wrapped 2026 so far")

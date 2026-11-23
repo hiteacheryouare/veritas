@@ -27,6 +27,41 @@ struct RealCoreGoalJourneyTests {
 		))
 	}
 
+	@Test func aGoalsIconIsASymbolOrOneEmojiAndOneUndoStep() async throws {
+		// R-GOAL-1, v18: setGoalIcon keeps the icon in veritas_goal only, and
+		// the core's refusal reaches the sheet's inline note.
+		try await RealBudget.with { budget in
+			let goals = await budget.goalsScreen()
+			#expect(await goals.create(name: "Bike", target: 90_000, date: nil, icon: "bicycle", color: nil), "the new-goal sheet's symbols still work")
+			var bike = try #require(goals.open.first { $0.name == "Bike" })
+			#expect(GoalIcon(bike.icon) == .symbol("bicycle"))
+
+			var refusal: String?
+			#expect(!(await goals.setIcon(bike, to: "Car", inline: { refusal = $0 })))
+			#expect(refusal == "Choose a symbol or one emoji.")
+			#expect(!(await goals.setIcon(bike, to: "🚲🚲", inline: { refusal = $0 })), "two emoji are refused too")
+			#expect(budget.workspace.alert == nil, "a refusal is shown beside the field, not as an alert")
+
+			for icon in ["🚲", "👨‍👩‍👧", "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "car.fill"] {
+				#expect(await goals.setIcon(bike, to: icon, inline: { Issue.record("\(icon): \($0)") }))
+				bike = try #require(goals.goals.first { $0.id == bike.id })
+				#expect(bike.icon == icon)
+			}
+			#expect(GoalIcon(bike.icon) == .symbol("car.fill"))
+
+			await budget.workspace.undo()
+			await goals.load()
+			bike = try #require(goals.goals.first { $0.id == bike.id })
+			#expect(bike.icon == "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "one undo step puts back the icon before")
+			#expect(GoalIcon(bike.icon) == .emoji("🏴󠁧󠁢󠁥󠁮󠁧󠁿"))
+			#expect(bike.state == .active && bike.available == 0, "an icon moves no money")
+
+			#expect(await goals.setIcon(bike, to: "  ", inline: { Issue.record("\($0)") }))
+			bike = try #require(goals.goals.first { $0.id == bike.id })
+			#expect(bike.icon == nil, "blank clears it")
+		}
+	}
+
 	@Test func aGoalGoesFromCreatedToReachedToSpentToRetargetedToClosedAndBack() async throws {
 		// §10: a $1,500 goal due in 6 months suggests $250/mo; buying moves it to reached/spent;
 		// closing releases the leftover as a budget move and touches no transaction.

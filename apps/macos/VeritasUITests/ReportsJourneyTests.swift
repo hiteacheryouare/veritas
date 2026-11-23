@@ -21,6 +21,14 @@ final class ReportsJourneyTests: XCTestCase {
 		attachScreenshot(of: app, named: "drilldown")
 		sheet.buttons["Done"].click()
 		XCTAssertTrue(sheet.waitForDisappearance())
+
+		// §10 C1: a transfer reads as it does in every register.
+		app.buttons["netProfit.cell.savings.2"].click()
+		XCTAssertTrue(sheet.waitForExistence(timeout: 5))
+		XCTAssertTrue(sheet.staticTexts["→ To Savings"].firstMatch.waitForExistence(timeout: 5))
+		attachScreenshot(of: app, named: "drilldown-transfer")
+		sheet.buttons["Done"].click()
+		XCTAssertTrue(sheet.waitForDisappearance())
 	}
 
 	@MainActor
@@ -97,6 +105,50 @@ final class ReportsJourneyTests: XCTestCase {
 		app.menuItems["Remove Widget…"].click()
 		app.buttons["Remove"].click()
 		XCTAssertTrue(added.waitForDisappearance())
+	}
+
+	@MainActor
+	func testHoveringASankeyCardNodeShowsItsAmount() {
+		// v18: the core's node value, where #86 showed the column percentage.
+		let app = openReport("dashboard")
+		let card = app.descendants(matching: .any)["widget.sankey"]
+		XCTAssertTrue(present(card, in: app))
+		card.click()
+		XCTAssertTrue(present(app.screen("cardDetail"), in: app), "the Sankey card opens full size")
+		let housing = app.descendants(matching: .any)["sankey.card"].descendants(matching: .any)
+			.matching(NSPredicate(format: "label == %@", "Housing and utilities")).firstMatch
+		XCTAssertTrue(housing.waitForExistence(timeout: 5))
+		housing.hover()
+		let readout = app.descendants(matching: .any)["sankey.readout"]
+		XCTAssertTrue(readout.waitForExistence(timeout: 5))
+		XCTAssertTrue(waitUntil { self.text(readout).contains("1,776.00") }, text(readout))
+		XCTAssertFalse(text(readout).contains("55.1%"), text(readout))
+		attachScreenshot(of: app, named: "sankey-card-node-amount")
+	}
+
+	@MainActor
+	func testTheBudgetAnalysisCardSavesShowBalance() {
+		// v18: Actual's showBalance, on unless the card stores false.
+		let app = openReport("dashboard")
+		let card = app.descendants(matching: .any)["widget.analysis"]
+		XCTAssertTrue(present(card, in: app))
+		card.rightClick()
+		app.menuItems["Configure…"].click()
+		let sheet = app.descendants(matching: .any)["sheet.widgetConfig"]
+		XCTAssertTrue(sheet.waitForExistence(timeout: 5))
+		let toggle = sheet.descendants(matching: .any)["widgetConfig.showBalance"]
+		XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+		XCTAssertEqual("\(toggle.value ?? "")", "1", "a card that stores no showBalance shows the line")
+		toggle.click()
+		XCTAssertTrue(waitUntil { "\(toggle.value ?? "")" == "0" })
+		attachScreenshot(of: app, named: "budget-analysis-show-balance")
+		sheet.buttons["widgetConfig.save"].click()
+		XCTAssertTrue(sheet.waitForDisappearance())
+		card.rightClick()
+		app.menuItems["Configure…"].click()
+		XCTAssertTrue(sheet.waitForExistence(timeout: 5))
+		XCTAssertEqual("\(sheet.descendants(matching: .any)["widgetConfig.showBalance"].value ?? "")", "0", "saved off")
+		sheet.buttons["Cancel"].click()
 	}
 
 	@MainActor

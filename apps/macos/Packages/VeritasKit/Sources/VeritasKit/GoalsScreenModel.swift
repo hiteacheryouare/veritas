@@ -86,6 +86,15 @@ public final class GoalsScreenModel {
 		return done
 	}
 
+	/// An SF Symbol name or one emoji; blank clears it. The core refuses
+	/// anything else, and `inline` shows its words beside the picker.
+	public func setIcon(_ goal: GoalSummary, to icon: String, inline: (String) -> Void) async -> Bool {
+		let icon = icon.trimmingCharacters(in: .whitespacesAndNewlines)
+		let done = await workspace.perform(.setGoalIcon(goalId: goal.id, icon: icon.isEmpty ? nil : icon), inline: inline)
+		if done { await load() }
+		return done
+	}
+
 	public func preview(close goal: GoalSummary, releaseTo destination: String?) async -> GoalClosePreview? {
 		await workspace.goalClosePreview(goal.id, releaseTo: destination)
 	}
