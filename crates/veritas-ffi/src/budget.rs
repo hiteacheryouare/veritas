@@ -2,6 +2,7 @@ use veritas_domain::{BudgetData, CategoryId, CivilDate, CoreError, Money, Row, Y
 use veritas_engine::{BudgetEditor, BudgetWrites, CategoryMonth, Envelope, EnvelopeSheet};
 
 use crate::Month;
+use crate::money::CategoryKind;
 
 /// How an amount reads on screen. The app picks the colour, icon and word.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -30,6 +31,12 @@ pub struct EnvelopeRow {
 	/// How full the drain bar is: available ÷ (carried in + budgeted), 0 to 1.
 	pub fill: f64,
 	pub note: Option<String>,
+	/// v20. The category's effective kind (CLS-3, CLS-3.1): Actual's income
+	/// flag wins, else the Veritas kind, else `expense`. Hidden and archived
+	/// categories keep their kind (CLS-3.2). Swift's default is `.expense`
+	/// (`Sources/VeritasCore/CategoryKindDefault.swift`).
+	#[uniffi(default)]
+	pub kind: CategoryKind,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
@@ -142,6 +149,7 @@ pub(crate) fn budget_month(
 					tone,
 					fill,
 					note: data.notes.get(id.as_str()).cloned().flatten(),
+					kind: data.category_kind(id).into(),
 				})
 			})
 			.collect();
