@@ -147,9 +147,15 @@ public enum BillWords {
 
 	/// Asked before Post today when Actual won't count a payment today as
 	/// paying that occurrence (`UpcomingBill.paidTodayCounts`, contract v15).
-	public static func postTodayConfirm(_ date: String) -> String {
-		"This won't pay the \(day(date)) bill. Post today anyway?"
+	public static func postTodayConfirm(_ date: String, isIncome: Bool) -> String {
+		isIncome
+			? "This won't count as the \(day(date)) income. Post today anyway?"
+			: "This won't pay the \(day(date)) bill. Post today anyway?"
 	}
+
+	/// Beside the editor's title when the bill matches or sets more than the
+	/// editor shows (`BillSummary.customRule`). Saving keeps those parts.
+	public static let customParts = "Has settings only Actual shows"
 
 	/// The editor's line under Auto-post for an estimated amount. Nil for an exact one.
 	public static func estimate(_ kind: BillAmountKind) -> String? {

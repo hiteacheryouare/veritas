@@ -531,7 +531,7 @@ struct WidgetBody: View {
 		case .crossover(_, _, let points, let crossover, _, _, _, _, _, _, _):
 			CrossoverChart(points: points, crossover: crossover, filtered: card.isFiltered, format: format, expanded: expanded)
 		case .budgetAnalysis(_, _, let months, _, _, _, _):
-			BudgetAnalysisChart(months: months, format: format, expanded: expanded)
+			BudgetAnalysisChart(months: months, format: format, showsBalance: card.config.showBalance != false, expanded: expanded)
 		case .ageOfMoney(_, _, _, let points, _, _, _):
 			Chart(Array(points.enumerated()), id: \.offset) { index, point in
 				AreaMark(x: .value("Period", index), y: .value("Days", point.days))
@@ -948,19 +948,19 @@ private struct CrossoverChart: View {
 	var expanded = false
 
 	var body: some View {
-		let expenseLine = filtered ? "Selected categories" : "All non-income categories"
+		let expenseLine = CardWords.crossoverCategories(filtered: filtered)
 		Chart {
 			ForEach(Array(points.enumerated()), id: \.offset) { index, point in
 				LineMark(x: .value("Month", index), y: .value("Amount", format.chartValue(point.expenses, on: .register)), series: .value("Line", expenseLine))
 					.interpolationMethod(.monotone)
 					.foregroundStyle(Color.chartExpense)
 				if let adjusted = point.adjustedExpenses {
-					LineMark(x: .value("Month", index), y: .value("Amount", format.chartValue(adjusted, on: .register)), series: .value("Line", "Projected"))
+					LineMark(x: .value("Month", index), y: .value("Amount", format.chartValue(adjusted, on: .register)), series: .value("Line", CardWords.crossoverProjectedCategories(filtered: filtered)))
 						.interpolationMethod(.monotone)
 						.lineStyle(StrokeStyle(lineWidth: 2, dash: [5, 5]))
 						.foregroundStyle(Color.chartExpense)
 				}
-				LineMark(x: .value("Month", index), y: .value("Amount", format.chartValue(point.investmentIncome, on: .register)), series: .value("Line", "Investment income"))
+				LineMark(x: .value("Month", index), y: .value("Amount", format.chartValue(point.investmentIncome, on: .register)), series: .value("Line", CardWords.projectedReturn))
 					.interpolationMethod(.monotone)
 					.foregroundStyle(Color.chartSavings)
 			}
@@ -976,16 +976,17 @@ private struct CrossoverChart: View {
 		.chartYAxis {
 			if expanded { moneyAxis(format) }
 		}
-		.accessibilityLabel(crossover.map { "Investment income covers expenses from \(ReportPeriod.monthYear($0))" } ?? "Investment income against expenses")
+		.accessibilityLabel(CardWords.crossoverChart(crossover: crossover, filtered: filtered))
 	}
 }
 
 /// The budget analysis card's bars as Actual draws them: budgeted, spent
 /// (below zero, as Actual's figure is negative) and the overspending
-/// adjustment, with the balance line Actual shows by default.
+/// adjustment, with the balance line unless the card turns it off.
 private struct BudgetAnalysisChart: View {
 	let months: [BudgetAnalysisPoint]
 	let format: MoneyFormat
+	let showsBalance: Bool
 	var expanded = false
 
 	var body: some View {
@@ -1001,9 +1002,11 @@ private struct BudgetAnalysisChart: View {
 				BarMark(x: .value("Month", month), y: .value("Amount", format.chartValue(point.overspendingAdjustment, on: .register)))
 					.position(by: .value("Series", "Overspending"))
 					.foregroundStyle(Color.moneyOverspentFill)
-				LineMark(x: .value("Month", month), y: .value("Amount", format.chartValue(point.balance, on: .register)), series: .value("Line", "Balance"))
-					.interpolationMethod(.monotone)
-					.foregroundStyle(Color.textSecondary)
+				if showsBalance {
+					LineMark(x: .value("Month", month), y: .value("Amount", format.chartValue(point.balance, on: .register)), series: .value("Line", "Balance"))
+						.interpolationMethod(.monotone)
+						.foregroundStyle(Color.textSecondary)
+				}
 			}
 			RuleMark(y: .value("Zero", 0))
 				.foregroundStyle(Color.chartGrid)
@@ -1164,11 +1167,8 @@ struct SankeyReadoutView: View {
 	var body: some View {
 		VStack(alignment: .leading, spacing: 2) {
 			Text(readout.title).font(.text(.caption, weight: .semibold))
-			switch readout.figure {
-			case .amount(let amount):
+			if let amount = readout.amount {
 				Text(format.amount(amount, on: .register)).font(.figures(.caption))
-			case .percentage(let text):
-				if !text.isEmpty { Text(text).font(.figures(.caption)) }
 			}
 			ForEach(detail.prefix(8), id: \.self) { line in
 				Text(line).font(.text(.caption)).foregroundStyle(.textSecondary)

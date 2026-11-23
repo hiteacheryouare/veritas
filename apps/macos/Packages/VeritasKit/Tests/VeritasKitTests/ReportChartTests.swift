@@ -179,19 +179,22 @@ struct CardOpeningTests {
 }
 
 struct SankeyCardReadoutTests {
-	/// The card sends no node amount, so a node shows the core's percentage
-	/// text and nothing summed on the Mac; a flow shows the core's link value.
-	@Test func aCardNodeShowsTheCoresPercentageAndAFlowItsValue() {
+	/// v18: a node shows the core's `value`, the amount Actual prints under
+	/// it, and nothing summed on the Mac; a flow shows the core's link value.
+	@Test func aCardNodeShowsTheCoresValueAndAFlowItsValue() {
 		let nodes = [
-			SankeyCardNode(key: "accounts", label: .allAccounts, percentage: "100%", color: .blue),
-			SankeyCardNode(key: "housing", label: .name(name: "Housing"), percentage: "55.1%", color: .palette(index: 1)),
-			SankeyCardNode(key: "spacer", label: .hidden, percentage: "", color: .gray)
+			SankeyCardNode(key: "accounts", label: .allAccounts, percentage: "100%", color: .blue, value: 10_000),
+			SankeyCardNode(key: "housing", label: .name(name: "Housing"), percentage: "55.1%", color: .palette(index: 1), value: 5_510),
+			SankeyCardNode(key: "spacer", label: .hidden, percentage: "", color: .gray, value: 0),
+			SankeyCardNode(key: "empty", label: .name(name: "Empty"), percentage: "0%", color: .gray, value: 0)
 		]
 		let links = [
 			SankeyCardLink(source: 0, target: 1, value: 5510, folded: [], color: nil),
 			SankeyCardLink(source: 0, target: 2, value: -1, folded: [], color: nil)
 		]
-		#expect(SankeyCardNode.readout(.node(1), nodes: nodes, links: links) == SankeyReadout(title: "Housing", percentage: "55.1%"))
+		#expect(SankeyCardNode.readout(.node(1), nodes: nodes, links: links) == SankeyReadout(title: "Housing", amount: 5_510))
+		#expect(SankeyCardNode.readout(.node(0), nodes: nodes, links: links) == SankeyReadout(title: "All accounts", amount: 10_000))
+		#expect(SankeyCardNode.readout(.node(3), nodes: nodes, links: links) == SankeyReadout(title: "Empty", amount: nil), "Actual draws no amount at 0 or less")
 		#expect(SankeyCardNode.readout(.flow(0), nodes: nodes, links: links) == SankeyReadout(title: "All accounts → Housing", amount: 5510))
 		#expect(SankeyCardNode.readout(.node(2), nodes: nodes, links: links) == nil, "a hidden node has no words")
 	}

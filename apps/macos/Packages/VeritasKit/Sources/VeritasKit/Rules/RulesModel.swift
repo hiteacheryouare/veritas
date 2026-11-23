@@ -23,10 +23,13 @@ public struct RuleEditing: Hashable, Sendable {
 /// One row "Apply to existing" would change.
 public struct RulePreviewRow: Hashable, Identifiable, Sendable {
 	public let match: RuleMatch
-	/// The register's reconciled flag.
-	public let reconciled: Bool
+
+	public init(match: RuleMatch) {
+		self.match = match
+	}
 
 	public var id: String { match.transactionId }
+	public var reconciled: Bool { match.reconciled }
 
 	/// A reconciled row whose amount or account would change: applying moves
 	/// a reconciled balance (Fred on #63 and #73).
@@ -142,16 +145,7 @@ public final class RulesModel {
 		isPreviewing = true
 		defer { isPreviewing = false }
 		guard let result = await workspace.attempt({ session in
-			let matches = try await session.rulePreview(source)
-			// TEMPORARY, until contract v13's `RuleMatch.reconciled`: one
-			// register lookup per match, only to learn whether it's reconciled.
-			var reconciled = Set<String>()
-			for match in matches {
-				if let row = try? await session.registerRow(match.parentId ?? match.transactionId), row.reconciled {
-					reconciled.insert(match.transactionId)
-				}
-			}
-			return matches.map { RulePreviewRow(match: $0, reconciled: reconciled.contains($0.transactionId)) }
+			try await session.rulePreview(source).map(RulePreviewRow.init)
 		}) else { return }
 		switch result {
 		case .success(let rows):

@@ -128,7 +128,7 @@ struct DrilldownSheet: View {
 						Table(rows) {
 							TableColumn("Date") { Text(Self.date($0.date)).monospacedDigit() }
 								.width(min: 80, ideal: 90)
-							TableColumn("Payee") { Text($0.payee ?? "") }
+							TableColumn("Payee") { DrilldownPayee(payee: PayeeText($0)) }
 							TableColumn("Category") { Text($0.category ?? "") }
 							TableColumn("Account") { Text($0.accountName) }
 								.width(min: 80, ideal: 100)
@@ -167,5 +167,19 @@ struct DrilldownSheet: View {
 	static func date(_ text: String) -> String {
 		guard let date = CivilDate.date(text) else { return text }
 		return date.formatted(.dateTime.month(.abbreviated).day().year())
+	}
+}
+
+/// A drill-down row's payee as the register draws it: a transfer's arrow in
+/// secondary ink before "To Savings" or "From Savings".
+private struct DrilldownPayee: View {
+	let payee: PayeeText
+
+	var body: some View {
+		if let direction = payee.direction {
+			Text("\(Text(direction).fontWeight(.semibold).foregroundStyle(.textSecondary)) \(payee.text)")
+		} else {
+			Text(payee.text)
+		}
 	}
 }

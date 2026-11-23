@@ -10,6 +10,8 @@ public final class GoalsScreenModel {
 	public private(set) var goals: [GoalSummary] = []
 	/// False until the first load has finished, so the screen can show it's loading.
 	public private(set) var hasLoaded = false
+	/// The core's CLS-12.10 line, set only in a 0-place budget (`GoalList.mixedScaleNote`).
+	public private(set) var mixedScaleNote: String?
 	/// The goal the arrow keys and the Goal menu act on.
 	public var selection: String?
 
@@ -40,9 +42,10 @@ public final class GoalsScreenModel {
 		defer { hasLoaded = true }
 		loadGeneration += 1
 		let generation = loadGeneration
-		let loaded = await workspace.goals()
+		let loaded = await workspace.goalList()
 		guard generation == loadGeneration else { return }
-		goals = loaded
+		goals = loaded.goals
+		mixedScaleNote = loaded.mixedScaleNote
 		if let selection, !goals.contains(where: { $0.id == selection }) {
 			self.selection = nil
 		}
@@ -82,6 +85,15 @@ public final class GoalsScreenModel {
 		let done = await workspace.perform(.createGoal(
 			name: name, target: target, targetDate: date.map(Self.civilDate), icon: icon, color: color
 		))
+		if done { await load() }
+		return done
+	}
+
+	/// An SF Symbol name or one emoji; blank clears it. The core refuses
+	/// anything else, and `inline` shows its words beside the picker.
+	public func setIcon(_ goal: GoalSummary, to icon: String, inline: (String) -> Void) async -> Bool {
+		let icon = icon.trimmingCharacters(in: .whitespacesAndNewlines)
+		let done = await workspace.perform(.setGoalIcon(goalId: goal.id, icon: icon.isEmpty ? nil : icon), inline: inline)
 		if done { await load() }
 		return done
 	}

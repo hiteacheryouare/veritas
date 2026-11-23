@@ -271,13 +271,21 @@ public final class DashboardModel {
 		sheets.first { $0.id == pageID } ?? sheets.first
 	}
 
+	/// The screen reloads on every change while a move or resize reloads too, so
+	/// only the latest load lands: an older one never puts a card back.
+	@ObservationIgnored private var loadGeneration = 0
+
 	public func load() async {
 		defer { hasLoaded = true }
+		loadGeneration += 1
+		let generation = loadGeneration
 		let today = WorkspaceModel.today()
-		guard let sheets = await workspace.report({ try await $0.dashboardSheets(today: today) }) else { return }
+		guard let sheets = await workspace.report({ try await $0.dashboardSheets(today: today) }), generation == loadGeneration else { return }
 		self.sheets = sheets
-		names = await workspace.budgetNames()
 		if pageID == nil || !sheets.contains(where: { $0.id == pageID }) { pageID = sheets.first?.id }
+		let names = await workspace.budgetNames()
+		guard generation == loadGeneration else { return }
+		self.names = names
 	}
 
 	/// Clamped as Actual's grid clamps it; the core clamps again.

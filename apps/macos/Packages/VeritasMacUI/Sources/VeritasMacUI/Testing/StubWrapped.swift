@@ -7,6 +7,20 @@ import VeritasCore
 /// worked by hand the way FC-8 rounds them (largest remainder for the top
 /// five and Everything else, half away from zero for the rest).
 enum StubWrapped {
+	static let years: [Int32] = [2026, 2025]
+
+	/// FC-8's monthly series from the budget's first month through the
+	/// period's last: each share of total out rounded half away from zero,
+	/// and a month without rows 0.
+	private static func months(_ year: Int32, _ figures: [(month: UInt32, total: Int64, share: Int64)], through last: String) -> [WrappedSpendingMonth] {
+		let end = Month(date: last)?.month ?? 12
+		let start = figures.first?.month ?? 1
+		return (start...max(start, end)).map { month in
+			let figure = figures.first { $0.month == month }
+			return WrappedSpendingMonth(month: Month(year: year, month: month), total: figure?.total ?? 0, share: figure?.share ?? 0)
+		}
+	}
+
 	static func report(year: Int32, today: String) throws -> WrappedReport {
 		guard let thisYear = Int32(today.prefix(4)), year <= thisYear else {
 			throw FfiError.Invalid(message: "\(year) hasn't started.")
@@ -66,7 +80,11 @@ enum StubWrapped {
 				.biggestMonthVsTypical(month: Month(year: 2026, month: 3), basisPoints: 5_600),
 				.topCategoryShare(categoryId: "rent", tenths: 361),
 				.noSpendShare(days: 87, evaluatedDays: 324, tenths: 269)
-			]
+			],
+			months: months(2026, [
+				(1, 540_000, 88), (2, 498_000, 81), (3, 812_000, 132), (4, 560_000, 91), (5, 575_000, 94), (6, 590_000, 96),
+				(7, 610_000, 99), (8, 470_000, 77), (9, 600_000, 98), (10, 585_000, 95), (11, 300_000, 49)
+			], through: last)
 		)
 	}
 
@@ -97,7 +115,8 @@ enum StubWrapped {
 		funFacts: [
 			.topCategoryShare(categoryId: "rent", tenths: 639),
 			.noSpendShare(days: 40, evaluatedDays: 151, tenths: 265)
-		]
+		],
+		months: months(2025, [(8, 520_000, 158), (9, 610_000, 185), (10, 640_000, 194), (11, 630_000, 191), (12, 900_000, 273)], through: "2025-12-31")
 	)
 
 	static func empty(year: Int32, last: String) -> WrappedReport {

@@ -107,7 +107,7 @@ private struct ForecastHero: View {
 					}
 					.accessibilityElement(children: .combine)
 					.accessibilityIdentifier("forecast.band")
-					MethodInfo(notes: ForecastWords.method(forecast.bandMethod))
+					MethodInfo(notes: ForecastWords.method(forecast.bandMethod) + (forecast.history.isEmpty ? [] : [ForecastWords.historyNote]))
 				}
 			}
 			ForEach([forecast.notForecastNote, forecast.assetPurchaseNote].compactMap { $0 }, id: \.self) { note in
@@ -213,9 +213,15 @@ private struct CompareRow: View {
 					}
 				}
 				Spacer(minLength: Spacing.s4)
+				if let difference = point?.netWorthDifference {
+					Text(ForecastWords(format: model.format).difference(difference))
+						.font(.figures(.body))
+						.foregroundStyle(.textSecondary)
+				}
 				if let point {
 					Text(model.format.wholeCurrency(point.netWorth, on: .register))
 						.font(.figures(.body, weight: .semibold))
+						.frame(minWidth: 96, alignment: .trailing)
 				}
 			}
 			.accessibilityElement(children: .combine)
@@ -237,6 +243,13 @@ private struct AccountsSection: View {
 	let model: ForecastModel
 	let forecast: Forecast
 
+	/// Each compared what-if's accounts at the horizon, with its series for the swatch.
+	private var whatIfs: [(series: Int, name: String, accounts: [ForecastAccount])] {
+		model.projections.enumerated().dropFirst().map { index, projection in
+			(index, projection.name, model.point(projection)?.accounts ?? [])
+		}
+	}
+
 	var body: some View {
 		if let point = model.selected {
 			VStack(alignment: .leading, spacing: Spacing.s2) {
@@ -246,6 +259,13 @@ private struct AccountsSection: View {
 						Text("").gridColumnAlignment(.leading)
 						Text("Today")
 						Text(ReportPeriod.monthYear(point.month))
+						ForEach(whatIfs, id: \.series) { whatIf in
+							HStack(spacing: 6) {
+								SeriesSwatch(series: whatIf.series)
+								Text(whatIf.name).lineLimit(1)
+							}
+							.frame(maxWidth: 140, alignment: .trailing)
+						}
 					}
 					.font(.text(.caption, weight: .medium))
 					.foregroundStyle(.textSecondary)
@@ -259,6 +279,12 @@ private struct AccountsSection: View {
 								ReportAmount(amount: later.balance, format: model.format)
 							} else {
 								Text("")
+							}
+							ForEach(whatIfs, id: \.series) { whatIf in
+								let difference = whatIf.accounts.first { $0.accountId == account.accountId }?.difference
+								Text(difference.map(ForecastWords(format: model.format).difference) ?? "")
+									.font(.figures(.body))
+									.foregroundStyle(.textSecondary)
 							}
 						}
 						.frame(minHeight: 34)

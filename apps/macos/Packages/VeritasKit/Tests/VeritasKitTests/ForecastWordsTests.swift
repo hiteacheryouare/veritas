@@ -21,6 +21,14 @@ struct ForecastWordsTests {
 	let june = Month(year: 2027, month: 6)
 	let december = Month(year: 2027, month: 12)
 
+	@Test func aWhatIfsDifferenceReadsWithItsSign() {
+		// v18, FC-3: the core's difference, signed; under a whole unit has no sign.
+		#expect(words.difference(120_000) == "+$1,200")
+		#expect(words.difference(-30_000) == "\u{2212}$300")
+		#expect(words.difference(0) == "$0")
+		#expect(words.difference(40) == "$0")
+	}
+
 	@Test func eachKindReadsAsOneLine() {
 		#expect(words.sentence(.oneTime(date: "2027-03-10", accountId: "checking", categoryId: "groceries", amount: -200_000))
 			== "Groceries: \u{2212}$2,000.00 on March 10, 2027, Checking")

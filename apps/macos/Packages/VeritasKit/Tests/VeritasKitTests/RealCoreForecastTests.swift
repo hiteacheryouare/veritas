@@ -200,4 +200,39 @@ struct RealCoreForecastTests {
 			#expect(try suggestions.items.map { try undone.row($0.categoryId).budgeted } == beforeCells)
 		}
 	}
+
+	@Test func theChartsPastIsTheNetWorthReportAndAWhatIfCarriesItsDifference() async throws {
+		// v18, FC-3 and FC-4.2: history before today, the band at every
+		// month, and each what-if's difference as the core sends it.
+		try await RealBudget.with { budget in
+			let id = try await addTrip(await whatIfs(budget))
+			let model = await forecastModel(budget)
+			let forecast = try #require(model.forecast)
+
+			#expect(!forecast.history.isEmpty && forecast.history.count <= 12)
+			let first = try #require(forecast.history.first?.month), last = try #require(forecast.history.last?.month)
+			#expect(last == Month(year: 2026, month: 10), "the last complete month before today's")
+			let report = try #require(await budget.workspace.report { try await $0.netWorth(first: first, last: last) })
+			#expect(report.map(\.netWorth) == forecast.history.map(\.netWorth), "the Net worth report's own figures")
+
+			#expect(forecast.baseline.months.first?.bandLow == nil, "the current month's remainder has no band")
+			for month in forecast.baseline.months.dropFirst() {
+				#expect(month.bandLow != nil && month.bandHigh != nil, "\(month.month)")
+			}
+			for horizon in forecast.baseline.horizons {
+				#expect(horizon.bandLow == forecast.baseline.months[Int(horizon.months)].bandLow)
+				#expect(horizon.netWorthDifference == nil, "the baseline has no difference")
+			}
+
+			let whatIf = try #require(forecast.scenarios.first { $0.scenarioId == id })
+			let words = ForecastWords(format: model.format)
+			for (base, moved) in zip(forecast.baseline.horizons, whatIf.horizons) {
+				let difference = try #require(moved.netWorthDifference)
+				#expect(difference == (base.month < Self.march ? 0 : -200_000), "\(base.months) months")
+				#expect(words.difference(difference) == (difference == 0 ? "0" : "\u{2212}2,000"))
+				#expect(moved.accounts.first { $0.accountId == AllFeatures.checking }?.difference == difference, "the trip leaves Checking")
+				#expect(base.accounts.allSatisfy { $0.difference == nil })
+			}
+		}
+	}
 }

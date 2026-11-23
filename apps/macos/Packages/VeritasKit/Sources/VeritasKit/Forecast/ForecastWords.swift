@@ -140,6 +140,17 @@ public struct ForecastWords: Sendable {
 		]
 	}
 
+	/// FC-3: the chart's past is the net worth report's, and that includes
+	/// what the projection leaves out.
+	public static let historyNote = "Past months are the Net worth report's month-end figures, revaluations and adjustments included."
+
+	/// "+$1,200" or "−$300": a what-if's difference from the baseline, as the
+	/// core sends it. Less than a whole unit reads "$0", with no sign.
+	public func difference(_ amount: Int64) -> String {
+		let text = format.wholeCurrency(amount, on: .register)
+		return amount > 0 && text != format.wholeCurrency(0, on: .register) ? "+" + text : text
+	}
+
 	/// "$30,100 to $33,900", the band at a horizon. `nil` with no history.
 	public func band(_ horizon: ForecastHorizon) -> String? {
 		guard let low = horizon.bandLow, let high = horizon.bandHigh else { return nil }

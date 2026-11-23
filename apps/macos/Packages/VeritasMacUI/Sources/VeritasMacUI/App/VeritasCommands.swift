@@ -101,6 +101,8 @@ struct VeritasCommands: Commands {
 				.disabled(goalActions?.close == nil)
 			Button("Change Target…") { goalActions?.changeTarget?() }
 				.disabled(goalActions?.changeTarget == nil)
+			Button("Change Icon…") { goalActions?.changeIcon?() }
+				.disabled(goalActions?.changeIcon == nil)
 			Button("Reopen Goal") { goalActions?.reopen?() }
 				.disabled(goalActions?.reopen == nil)
 		}
