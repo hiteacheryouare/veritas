@@ -57,6 +57,16 @@ struct TourScreenshotTests {
 		#expect(try DrawnText.texts(in: last, size: CGSize(width: CoachMark.width, height: 140)).joined(separator: " ").contains("Done"))
 	}
 
+	@Test func theLongestCardDrawsAllOfItsWords() throws {
+		let card = CoachMark(step: .toBudget, number: 1, count: 5, isLastStep: false, canGoBack: false, back: {}, next: {}, skip: {})
+		let host = NSHostingView(rootView: card)
+		let height = host.fittingSize.height
+		let texts = try DrawnText.texts(in: card, size: CGSize(width: CoachMark.width, height: height))
+		let drawn = texts.joined(separator: " ")
+		#expect(drawn.contains("If it goes negative, you've given out more than you have."), "the last line isn't clipped: \(texts)")
+		#expect(texts.map { $0.trimmingCharacters(in: .whitespaces) }.contains("1 of 5"), "\(texts)")
+	}
+
 	@Test func cardsAreRenderedForEveryStepOnTheirOwn() throws {
 		for (index, step) in TourStep.allCases.enumerated() {
 			for side in [CoachMarkPlacement.Side.below, .above] {

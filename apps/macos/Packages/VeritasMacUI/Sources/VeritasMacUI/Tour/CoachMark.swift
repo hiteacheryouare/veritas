@@ -101,8 +101,9 @@ struct CoachMarkPlacement: Equatable {
 	}
 }
 
-/// One step: its sentences, "2 of 5", and Skip, Back and Next. Return is
-/// Next and Esc is Skip while the card has focus; ⌘[ is Back anywhere in the window.
+/// One step: its sentences, "2 of 5", and Skip, Back and Next. While the
+/// card has focus, Return is Next, Esc is Skip and ⌘[ is Back. VoiceOver
+/// reads the card once, by its label, when focus moves to it.
 struct CoachMark: View {
 	static let width: CGFloat = 320
 
@@ -127,6 +128,7 @@ struct CoachMark: View {
 				.font(.text(.body))
 				.foregroundStyle(.textPrimary)
 				.fixedSize(horizontal: false, vertical: true)
+				.accessibilityHidden(true)
 			HStack(spacing: Spacing.s2) {
 				Text(TourWords.position(number, of: count))
 					.font(.text(.caption))
@@ -140,7 +142,6 @@ struct CoachMark: View {
 					.accessibilityIdentifier("tour.skip")
 				Button(TourWords.back, action: back)
 					.disabled(!canGoBack)
-					.keyboardShortcut("[", modifiers: .command)
 					.help("Back (⌘[)")
 					.accessibilityIdentifier("tour.back")
 				Button(TourWords.next(isLastStep: isLastStep), action: next)
@@ -170,6 +171,11 @@ struct CoachMark: View {
 			skip()
 			return .handled
 		}
+		.onKeyPress(keys: ["["]) { press in
+			guard press.modifiers.contains(.command), canGoBack else { return .ignored }
+			back()
+			return .handled
+		}
 		.accessibilityElement(children: .contain)
 		.accessibilityLabel(spoken)
 		.accessibilityFocused($isVoiceOverFocused)
@@ -179,7 +185,6 @@ struct CoachMark: View {
 	}
 
 	private func takeFocus() {
-		AccessibilityNotification.Announcement(spoken).post()
 		// The screen under the card claims focus as it appears; take it after.
 		Task { @MainActor in
 			isFocused = true
