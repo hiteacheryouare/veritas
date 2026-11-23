@@ -55,7 +55,7 @@ struct AssistantReadOnlyTests {
 		let queries = RecordingQueries()
 		let context = AssistantContext(queries: queries, format: MoneyFormat(), today: "2026-11-17")
 		let tools = AssistantTools.all(context)
-		#expect(tools.count == 12)
+		#expect(tools.count == 14)
 		for tool in tools {
 			for child in Self.descendants(of: tool) {
 				#expect(!(child is any BudgetSession), "\(tool.name) holds a session")
@@ -64,9 +64,11 @@ struct AssistantReadOnlyTests {
 			}
 		}
 		_ = try? await SpendingTool(context: context).call(arguments: .init(period: "last month"))
+		_ = try? await SpendingByCategoryTool(context: context).call(arguments: .init(period: "last month"))
 		_ = try? await CategorySpendingTool(context: context).call(arguments: .init(name: "Groceries", period: "this month"))
 		_ = try? await IncomeTool(context: context).call(arguments: .init(period: "this year"))
 		_ = try? await BudgetTool(context: context).call(arguments: .init(name: "Groceries", period: ""))
+		_ = try? await BudgetHabitsTool(context: context).call(arguments: .init())
 		_ = try? await NetProfitTool(context: context).call(arguments: .init(period: "May to October 2026"))
 		_ = try? await BudgetMonthTool(context: context).call(arguments: .init(period: "2026-10"))
 		_ = try? await AccountsTool(context: context).call(arguments: .init())
