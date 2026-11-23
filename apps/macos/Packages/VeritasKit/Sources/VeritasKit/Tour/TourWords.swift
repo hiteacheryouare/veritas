@@ -3,9 +3,9 @@ public enum TourWords {
 	public static func text(_ step: TourStep) -> String {
 		switch step {
 		case .toBudget:
-			"To Budget is money you have that isn't in an envelope yet. Assign it to envelopes until this reaches zero."
+			"To Budget is the money in your budget accounts that isn't in an envelope yet. Give it to envelopes until it reads zero. If it goes negative, you've given out more than you have."
 		case .budgetCell:
-			"Click a Budgeted amount and type what this envelope gets this month. Return saves it, and Tab moves to the next envelope."
+			"Click a Budgeted amount and type what this envelope gets this month. Return or Tab saves it and moves to the next envelope."
 		case .openAccount:
 			"Every account has a register with all of its transactions. Click an account to open it."
 		case .addTransaction:
