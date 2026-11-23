@@ -149,6 +149,68 @@ struct AssistantPanelCancelTests {
 	}
 }
 
+/// A streaming answer redraws the panel at most once a frame, not once per
+/// token, and the last words always land. The frame here is an hour long,
+/// so nothing depends on how fast the machine is.
+@MainActor
+struct AssistantPanelCoalescingTests {
+	private func letThePanelRun(until condition: () -> Bool) async {
+		for _ in 0..<10_000 where !condition() {
+			await Task.yield()
+		}
+	}
+
+	private func panel(_ answerer: GatedAnswerer) -> AssistantPanelModel {
+		let panel = AssistantPanelModel(makeAnswerer: { _ in answerer }) {
+			AssistantContext(queries: RecordingQueries(), format: MoneyFormat(), today: "2026-11-18")
+		}
+		panel.frameInterval = .seconds(3_600)
+		return panel
+	}
+
+	@Test func theFirstWordsShowAtOnceAndLaterOnesWaitForTheFrame() async throws {
+		let answerer = GatedAnswerer()
+		let panel = panel(answerer)
+		panel.draft = "What changed?"
+		panel.ask()
+		await letThePanelRun { answerer.continuation != nil }
+		let stream = try #require(answerer.continuation)
+		stream.yield("Spending")
+		await letThePanelRun { panel.exchanges.first?.answer == "Spending" }
+		#expect(panel.exchanges.first?.answer == "Spending")
+
+		var text = "Spending"
+		for word in ["October", "2026:", "$2,489.35."] {
+			text += " \(word)"
+			stream.yield(text)
+		}
+		for _ in 0..<1_000 { await Task.yield() }
+		#expect(panel.exchanges.first?.answer == "Spending", "held for the next frame")
+
+		stream.finish()
+		await panel.settle()
+		#expect(panel.exchanges.first?.answer == "Spending October 2026: $2,489.35.", "the last words land when the stream ends")
+		#expect(panel.exchanges.first?.state == .answered)
+	}
+
+	@Test func stoppingDropsTheHeldWords() async throws {
+		let answerer = GatedAnswerer()
+		let panel = panel(answerer)
+		panel.draft = "What changed?"
+		panel.ask()
+		await letThePanelRun { answerer.continuation != nil }
+		let stream = try #require(answerer.continuation)
+		stream.yield("Net")
+		await letThePanelRun { panel.exchanges.first?.answer == "Net" }
+		stream.yield("Net Profit")
+		for _ in 0..<1_000 { await Task.yield() }
+		panel.stop()
+		for _ in 0..<1_000 { await Task.yield() }
+		#expect(panel.exchanges.first?.answer == "Net", "text already shown stays, and nothing held lands")
+		#expect(panel.exchanges.first?.state == .failed(AssistantPanelModel.stopped))
+	}
+}
+
 /// Hands the test the stream's continuation instead of producing words itself.
 @MainActor
 final class GatedAnswerer: AssistantAnswering {

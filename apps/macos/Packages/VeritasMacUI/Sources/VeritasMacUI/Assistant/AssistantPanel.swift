@@ -7,8 +7,21 @@ import VeritasKit
 struct AssistantPanel: View {
 	@Bindable var model: AssistantPanelModel
 	@FocusState private var isFieldFocused: Bool
+	@State private var position = ScrollPosition(edge: .bottom)
+	@State private var panelWidth: CGFloat = 0
 
-	static let bottom = "assistant.bottom"
+	/// How close to the end still counts as reading the newest message.
+	static let followSlack: CGFloat = 24
+	/// Room kept for a scroller that takes space ("Always show scroll bars"),
+	/// so the messages don't narrow and reflow when one appears. Overlay
+	/// scrollers take none.
+	static var scrollerRoom: CGFloat {
+		NSScroller.preferredScrollerStyle == .legacy ? NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy) : 0
+	}
+
+	private var contentWidth: CGFloat? {
+		panelWidth > 0 ? max(0, panelWidth - 2 * Spacing.s3 - Self.scrollerRoom) : nil
+	}
 
 	var body: some View {
 		VStack(spacing: 0) {
@@ -49,33 +62,39 @@ struct AssistantPanel: View {
 		.background(.bar)
 	}
 
+	/// The newest answer stays in view as it grows, but only for a reader
+	/// already at the bottom, and without animating each update.
 	private var conversation: some View {
-		ScrollViewReader { proxy in
-			ScrollView {
-				LazyVStack(spacing: Spacing.s3) {
-					if model.exchanges.isEmpty {
-						Text("Ask about spending, income, budgets, balances, goals or taxes in this budget.")
-							.font(.text(.body))
-							.foregroundStyle(.textSecondary)
-							.multilineTextAlignment(.center)
-							.frame(maxWidth: .infinity)
-							.padding(.top, Spacing.s6)
-					}
-					ForEach(model.exchanges) { exchange in
-						QuestionBubble(text: exchange.question)
-						AnswerBubble(exchange: exchange)
-					}
-					Color.clear.frame(height: 1).id(Self.bottom)
+		ScrollView {
+			VStack(spacing: Spacing.s3) {
+				if model.exchanges.isEmpty {
+					Text("Ask about spending, income, budgets, balances, goals or taxes in this budget.")
+						.font(.text(.body))
+						.foregroundStyle(.textSecondary)
+						.multilineTextAlignment(.center)
+						.frame(maxWidth: .infinity)
+						.padding(.top, Spacing.s6)
 				}
-				.padding(Spacing.s3)
+				ForEach(model.exchanges) { exchange in
+					QuestionBubble(text: exchange.question)
+					AnswerBubble(exchange: exchange)
+				}
 			}
-			.defaultScrollAnchor(.bottom)
-			.onChange(of: model.exchanges.last?.answer) {
-				proxy.scrollTo(Self.bottom, anchor: .bottom)
-			}
-			.onChange(of: model.exchanges.count) {
-				proxy.scrollTo(Self.bottom, anchor: .bottom)
-			}
+			.frame(width: contentWidth)
+			.padding(Spacing.s3)
+			.frame(maxWidth: .infinity, alignment: .leading)
+		}
+		.onGeometryChange(for: CGFloat.self) { $0.size.width } action: { panelWidth = $0 }
+		.scrollPosition($position)
+		.defaultScrollAnchor(.bottom)
+		.onScrollGeometryChange(for: ScrollFill.self) { geometry in
+			ScrollFill(height: geometry.contentSize.height, below: geometry.contentSize.height - geometry.visibleRect.maxY)
+		} action: { old, new in
+			guard new.height > old.height, old.below <= Self.followSlack else { return }
+			position.scrollTo(edge: .bottom)
+		}
+		.onChange(of: model.exchanges.count) {
+			position.scrollTo(edge: .bottom)
 		}
 	}
 
@@ -103,6 +122,12 @@ struct AssistantPanel: View {
 		.padding(Spacing.s3)
 		.background(.bar)
 	}
+}
+
+/// The conversation's height, and how much of it is below the visible part.
+struct ScrollFill: Equatable {
+	var height: CGFloat
+	var below: CGFloat
 }
 
 /// A round button beside the field, the height of one line of it.
@@ -159,8 +184,14 @@ struct QuestionBubble: View {
 	}
 }
 
+extension EnvironmentValues {
+	/// Told each reply bubble's frame as it lays out, for the streaming test.
+	@Entry var assistantReplyFrame: (@MainActor (UUID, CGRect) -> Void)?
+}
+
 struct AnswerBubble: View {
 	let exchange: AssistantExchange
+	@Environment(\.assistantReplyFrame) private var reportFrame
 
 	private var failure: String? {
 		if case .failed(let message) = exchange.state { message } else { nil }
@@ -176,10 +207,13 @@ struct AnswerBubble: View {
 			HStack {
 				VStack(alignment: .leading, spacing: Spacing.s2) {
 					if exchange.answer.isEmpty, exchange.state == .answering {
-						TypingDots()
+						ZStack(alignment: .leading) {
+							Text(" ").hidden()
+							TypingDots()
+						}
 					}
 					if !exchange.answer.isEmpty {
-						Text(Self.formatted(exchange.answer))
+						Text(Self.formatted(exchange.answer, streaming: exchange.state == .answering))
 							.foregroundStyle(.textPrimary)
 					}
 					if let failure {
@@ -188,10 +222,14 @@ struct AnswerBubble: View {
 				}
 				.font(.text(.body))
 				.textSelection(.enabled)
+				.frame(maxWidth: .infinity, alignment: .leading)
 				.padding(.horizontal, Spacing.s3)
 				.padding(.vertical, Spacing.s2)
 				.background(.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.section, style: .continuous))
 				.overlay(RoundedRectangle(cornerRadius: Radius.section, style: .continuous).strokeBorder(Color.separator))
+				.onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+					reportFrame?(exchange.id, frame)
+				}
 				Spacer(minLength: Spacing.s6)
 			}
 		}
@@ -200,9 +238,15 @@ struct AnswerBubble: View {
 		.accessibilityValue(exchange.state == .answering ? AssistantSpeech.answering : "")
 	}
 
-	/// The model sometimes writes **bold**; show it as bold rather than as asterisks.
-	static func formatted(_ answer: String) -> AttributedString {
-		(try? AttributedString(markdown: answer, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(answer)
+	/// The model sometimes writes **bold**; show it as bold rather than as
+	/// asterisks. While it streams, an unclosed "**" waits for its partner,
+	/// so the words don't flip from plain to bold and reflow.
+	static func formatted(_ answer: String, streaming: Bool = false) -> AttributedString {
+		var text = answer
+		if streaming, text.components(separatedBy: "**").count % 2 == 0, let open = text.range(of: "**", options: .backwards) {
+			text.removeSubrange(open)
+		}
+		return (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
 	}
 }
 
@@ -248,7 +292,6 @@ struct TypingDots: View {
 					.opacity(Self.opacity(index: index, time: time))
 			}
 		}
-		.frame(height: 18)
 	}
 
 	/// Each dot brightens a third of a cycle after the one before it. A nil
