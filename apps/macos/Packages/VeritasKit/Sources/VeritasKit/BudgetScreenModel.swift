@@ -53,6 +53,11 @@ public final class BudgetScreenModel {
 		sheet?.groups.contains { $0.hidden || $0.envelopes.contains(where: \.hidden) } ?? false
 	}
 
+	/// The Budgeted cell the tour points at: the first one on screen.
+	public var tourCellID: String? {
+		groups.first { !$0.isIncome && !$0.envelopes.isEmpty }?.envelopes.first?.id
+	}
+
 	/// Envelopes in screen order, income last, for ↑ and ↓.
 	public var envelopeIDs: [String] {
 		groups.flatMap { $0.envelopes.map(\.id) }
