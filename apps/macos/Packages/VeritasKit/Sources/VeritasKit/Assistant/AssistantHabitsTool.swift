@@ -7,7 +7,7 @@ import VeritasCore
 struct BudgetHabitsTool: AssistantTool {
 	let context: AssistantContext
 	let name = "budgetHabits"
-	let description = "Which categories ran over their monthly budget in most of the last 3 complete months, with the one figure that could be freed. Use it for questions about improving money habits, overspending or going over budget."
+	let description = "Categories over their monthly budget in most of the last 3 months."
 
 	struct Arguments {}
 
@@ -30,6 +30,20 @@ struct BudgetHabitsTool: AssistantTool {
 		}
 		let goals = sheets.isEmpty ? [] : Set(try await context.queries.goals(today: context.today).goals.map(\.categoryId))
 		return BudgetHabits.text(sheets: sheets, goalCategories: goals, format: context.format)
+	}
+}
+
+/// AI-11.4: what Mo Nee answers, for a question none of the other tools can.
+/// The redirect comes back from a tool rather than sitting in the
+/// instructions, where its example questions made the model open real
+/// answers with it.
+struct WhatMoNeeAnswersTool: AssistantTool {
+	let name = "whatMoNeeAnswers"
+	let description = "What Mo Nee can answer, for a question no other tool answers."
+	let arguments: [AssistantToolArgument] = []
+
+	func run(_ input: AssistantToolInput) async throws -> String {
+		AssistantPrompt.redirect
 	}
 }
 

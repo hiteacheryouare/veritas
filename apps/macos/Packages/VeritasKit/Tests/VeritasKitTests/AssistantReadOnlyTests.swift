@@ -55,7 +55,7 @@ struct AssistantReadOnlyTests {
 		let queries = RecordingQueries()
 		let context = AssistantContext(queries: queries, format: MoneyFormat(), today: "2026-11-17")
 		let tools = AssistantTools.all(context)
-		#expect(tools.count == 14)
+		#expect(tools.count == 15)
 		for tool in tools {
 			for child in Self.descendants(of: tool) {
 				#expect(!(child is any BudgetSession), "\(tool.name) holds a session")

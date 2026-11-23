@@ -14,6 +14,7 @@ public enum AssistantTools {
 			IncomeTool(context: context),
 			BudgetTool(context: context),
 			BudgetHabitsTool(context: context),
+			WhatMoNeeAnswersTool(),
 			NetProfitTool(context: context),
 			BudgetMonthTool(context: context),
 			AccountsTool(context: context),
@@ -94,7 +95,7 @@ enum AssistantDates {
 struct NetProfitTool: AssistantTool {
 	let context: AssistantContext
 	let name = "netProfit"
-	let description = "The Net Profit report for a period: Income, Expenses, Net Profit, debt paydown, savings and net cash flow. Use it only when the question names Net Profit, net cash flow, debt paydown or savings."
+	let description = "The Net Profit report for a period, with debt paydown, savings and net cash flow."
 
 	struct Arguments {
 		var period: String
@@ -135,7 +136,7 @@ struct NetProfitTool: AssistantTool {
 struct BudgetMonthTool: AssistantTool {
 	let context: AssistantContext
 	let name = "budgetMonth"
-	let description = "Every envelope on the Budget screen for one month: To Budget, and each envelope's budgeted, activity and available amounts. For one category or group, use budget."
+	let description = "Every envelope on the Budget screen for one month."
 
 	struct Arguments {
 		var period: String

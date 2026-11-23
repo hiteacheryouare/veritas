@@ -13,7 +13,7 @@ enum AssistantArguments {
 
 	static let name = AssistantToolArgument(
 		name: "name",
-		description: "The category or category group the question names, as the user wrote it.",
+		description: "The category or group named, as the user wrote it.",
 		kind: .text
 	)
 
@@ -40,7 +40,7 @@ enum AssistantLabels {
 struct SpendingTool: AssistantTool {
 	let context: AssistantContext
 	let name = "spending"
-	let description = "Total spending for a period: what was spent, all categories together. Use it for \"how much did I spend\" without a category."
+	let description = "Total spending for a period, by group."
 
 	struct Arguments {
 		var period: String
@@ -81,7 +81,7 @@ struct SpendingTool: AssistantTool {
 struct SpendingByCategoryTool: AssistantTool {
 	let context: AssistantContext
 	let name = "spendingByCategory"
-	let description = "Spending for a period broken down by category, largest first. Use it for spending by category, a breakdown, or what was spent the most on."
+	let description = "Spending for a period by category, largest first."
 
 	struct Arguments {
 		var period: String
@@ -135,7 +135,7 @@ struct SpendingByCategoryTool: AssistantTool {
 struct IncomeTool: AssistantTool {
 	let context: AssistantContext
 	let name = "income"
-	let description = "Total income for a period: what was earned, with each income category. Use it for \"how much did I earn\" or \"what came in\"."
+	let description = "Total income for a period."
 
 	struct Arguments {
 		var period: String
@@ -162,7 +162,7 @@ struct IncomeTool: AssistantTool {
 		]
 		guard !income.categories.isEmpty else { return text.joined(separator: "\n") }
 		text.append("Income by category, \(period.title):")
-		text += income.categories.map { "\(AssistantLabels.category($0)): \(amount($0.total))" }
+		text += income.categories.map { "From \(AssistantLabels.category($0)): \(amount($0.total))" }
 		return text.joined(separator: "\n")
 	}
 }
@@ -170,7 +170,7 @@ struct IncomeTool: AssistantTool {
 struct CategorySpendingTool: AssistantTool {
 	let context: AssistantContext
 	let name = "categorySpending"
-	let description = "What was spent on one category or category group for a period, or earned from an income category. Use it whenever the question names a category or group."
+	let description = "Spending on, or income from, one named category or group for a period."
 
 	struct Arguments {
 		var name: String
@@ -281,7 +281,7 @@ struct BudgetTool: AssistantTool {
 	}
 
 	let arguments = [
-		AssistantToolArgument(name: "name", description: "The category or category group the question names, as the user wrote it. Empty for the whole budget.", kind: .text),
+		AssistantToolArgument(name: "name", description: "The category or group named. Empty for the whole budget.", kind: .text),
 		AssistantArguments.period
 	]
 
