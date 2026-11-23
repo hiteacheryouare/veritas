@@ -23,18 +23,6 @@ struct WhatIfsScreen: View {
 	var body: some View {
 		ScrollView {
 			VStack(alignment: .leading, spacing: Spacing.s5) {
-				if model.scenarios.isEmpty {
-					VStack(spacing: Spacing.s3) {
-						Text("No what-ifs yet")
-							.font(.text(.heading, weight: .semibold))
-							.foregroundStyle(.textSecondary)
-						Button("New what-if") { isCreating = true }
-							.disabled(model.isReadOnly)
-							.accessibilityIdentifier("whatIfs.new.empty")
-					}
-					.frame(maxWidth: .infinity, minHeight: 240)
-					.accessibilityIdentifier("whatIfs.empty")
-				}
 				ForEach(model.scenarios, id: \.id) { scenario in
 					ScenarioSection(
 						model: model,
@@ -50,6 +38,11 @@ struct WhatIfsScreen: View {
 			.padding(.bottom, Spacing.s6)
 			.frame(maxWidth: 820, alignment: .leading)
 			.frame(maxWidth: .infinity, alignment: .leading)
+		}
+		.overlay {
+			if model.scenarios.isEmpty {
+				ScreenState(kind: .empty(title: "No what-ifs yet"), action: ("New what-if", { isCreating = true }), isActionDisabled: model.isReadOnly, identifier: "whatIfs.empty")
+			}
 		}
 		.background(.surfaceWindow)
 		.focusable()

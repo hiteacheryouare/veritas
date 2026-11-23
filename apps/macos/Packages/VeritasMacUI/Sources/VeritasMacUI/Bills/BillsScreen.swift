@@ -37,6 +37,7 @@ struct BillsScreen: View {
 			.padding(Spacing.s5)
 			.frame(maxWidth: .infinity, alignment: .leading)
 		}
+		.overlay { if !model.hasLoaded { ScreenState(kind: .loading) } }
 		.background(.surfaceWindow)
 		.focusable()
 		.focusEffectDisabled()

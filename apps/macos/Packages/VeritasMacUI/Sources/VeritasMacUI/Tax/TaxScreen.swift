@@ -30,12 +30,6 @@ struct TaxScreen: View {
 					.accessibilityElement(children: .combine)
 					.accessibilityAddTraits(.isHeader)
 					.accessibilityIdentifier("tax.title")
-					if model.buckets.isEmpty, model.conflicts.isEmpty {
-						Text("No transactions in a tax bucket in \(String(summary.year))")
-							.foregroundStyle(.textSecondary)
-							.frame(maxWidth: .infinity, minHeight: 160)
-							.accessibilityIdentifier("tax.empty")
-					}
 					if !model.buckets.isEmpty {
 						TaxBucketTable(model: model)
 					}
@@ -61,6 +55,15 @@ struct TaxScreen: View {
 			.padding(.bottom, Spacing.s6)
 			.frame(maxWidth: 760, alignment: .leading)
 			.frame(maxWidth: .infinity, alignment: .leading)
+		}
+		.overlay {
+			if let summary = model.summary {
+				if model.buckets.isEmpty, model.conflicts.isEmpty {
+					ScreenState(kind: .empty(title: "No transactions in a tax bucket in \(String(summary.year))"), identifier: "tax.empty")
+				}
+			} else {
+				ScreenState(kind: .loading)
+			}
 		}
 		.background(.surfaceWindow)
 		.focusable()

@@ -17,11 +17,12 @@ public extension ColorToken {
 	static let separator = ColorToken(light: RGBA(0x14161e, alpha: 0.08), dark: RGBA(0xf0f0fa, alpha: 0.08))
 	static let textPrimary = ColorToken(light: RGBA(0x1c1c21), dark: RGBA(0xececf0))
 	static let textSecondary = ColorToken(light: RGBA(0x66666f), dark: RGBA(0xa2a2ab))
-	static let textTertiary = ColorToken(light: RGBA(0x9c9ca5), dark: RGBA(0x74747d))
+	static let textTertiary = ColorToken(light: RGBA(0x6c6c75), dark: RGBA(0x97979f))
 	static let textPaper = ColorToken(light: RGBA(0x23232a), dark: RGBA(0x23232a))
 	static let accent = ColorToken(light: RGBA(0x3b3d45), dark: RGBA(0xd9dae0))
 	static let accentFill = ColorToken(light: RGBA(0x2f3138), dark: RGBA(0xe2e3e8))
 	static let accentSoft = ColorToken(light: RGBA(0x282a34, alpha: 0.09), dark: RGBA(0xf0f0fa, alpha: 0.11))
+	static let surfaceSelected = ColorToken(light: RGBA(0x14161e, alpha: 0.08), dark: RGBA(0xf0f0fa, alpha: 0.12))
 	static let focusRing = ColorToken(light: RGBA(0x3b3d45), dark: RGBA(0xd9dae0))
 	static let textOnAccent = ColorToken(light: RGBA(0xf5f5f7), dark: RGBA(0x1c1c21))
 	static let track = ColorToken(light: RGBA(0x14161e, alpha: 0.08), dark: RGBA(0xf0f0fa, alpha: 0.09))
@@ -33,13 +34,13 @@ public extension ColorToken {
 	static let moneyOverspentFill = ColorToken(light: RGBA(0xe0474e), dark: RGBA(0xf05650))
 	static let moneyIncome = ColorToken(light: RGBA(0x1668bd), dark: RGBA(0x5eaaf5))
 	static let moneyIncomeFill = ColorToken(light: RGBA(0x2f84dc), dark: RGBA(0x4796e6))
-	static let moneyNeutral = ColorToken(light: RGBA(0x9c9ca5), dark: RGBA(0x74747d))
+	static let moneyNeutral = ColorToken(light: RGBA(0x6c6c75), dark: RGBA(0x97979f))
 	static let chartExpense = ColorToken(light: RGBA(0x6e6e78), dark: RGBA(0xa5a5ae))
 	static let chartExpenseSoft = ColorToken(light: RGBA(0x6e6e78, alpha: 0.28), dark: RGBA(0xa5a5ae, alpha: 0.3))
 	static let chartSavings = ColorToken(light: RGBA(0x26a066), dark: RGBA(0x3fb06d))
 	static let chartDebtPaydown = ColorToken(light: RGBA(0x8b5e34), dark: RGBA(0xc99a6b))
 	static let chartUnallocated = ColorToken(light: RGBA(0x2f84dc, alpha: 0.35), dark: RGBA(0x5eaaf5, alpha: 0.4))
-	static let chartBand = ColorToken(light: RGBA(0x3a3a42, alpha: 0.1), dark: RGBA(0xe2e2e8, alpha: 0.1))
+	static let chartBand = ColorToken(light: RGBA(0x3a3a42, alpha: 0.2), dark: RGBA(0xe2e2e8, alpha: 0.2))
 	static let chartGrid = ColorToken(light: RGBA(0x14161e, alpha: 0.07), dark: RGBA(0xf0f0fa, alpha: 0.07))
 	static let scenarioBaseline = ColorToken(light: RGBA(0x3a3a42), dark: RGBA(0xe2e2e8))
 	static let scenario1 = ColorToken(light: RGBA(0x2f84dc), dark: RGBA(0x5eaaf5))
@@ -69,6 +70,7 @@ public extension ShapeStyle where Self == Color {
 	static var accent: Color { Color(ColorToken.accent) }
 	static var accentFill: Color { Color(ColorToken.accentFill) }
 	static var accentSoft: Color { Color(ColorToken.accentSoft) }
+	static var surfaceSelected: Color { Color(ColorToken.surfaceSelected) }
 	static var focusRing: Color { Color(ColorToken.focusRing) }
 	static var textOnAccent: Color { Color(ColorToken.textOnAccent) }
 	static var track: Color { Color(ColorToken.track) }
@@ -117,6 +119,7 @@ extension ColorToken {
 		"accent": .accent,
 		"accent-fill": .accentFill,
 		"accent-soft": .accentSoft,
+		"surface-selected": .surfaceSelected,
 		"focus-ring": .focusRing,
 		"text-on-accent": .textOnAccent,
 		"track": .track,

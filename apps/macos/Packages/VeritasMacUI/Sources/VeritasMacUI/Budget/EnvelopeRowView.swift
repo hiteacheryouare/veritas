@@ -119,6 +119,7 @@ struct EnvelopeRowView: View {
 			} label: {
 				Text(screen.format.amount(envelope.budgeted, on: .budget))
 					.font(.figures(.body))
+					.foregroundStyle(envelope.budgeted == 0 ? Color(ColorToken.moneyNeutral) : Color.textPrimary)
 					.frame(maxWidth: .infinity, alignment: .trailing)
 					.contentShape(.rect)
 			}

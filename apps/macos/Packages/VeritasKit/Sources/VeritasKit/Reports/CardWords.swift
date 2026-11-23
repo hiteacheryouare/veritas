@@ -37,7 +37,7 @@ public enum CardWords {
 		case .ageOfMoney: "How old your money is when you spend it. Every deposit counts as new money, and every payment or move out of your budget accounts counts as spending."
 		case .crossover: "Every category outside the income group, including categories Veritas treats as savings or debt paydown. Not Net Profit's Expenses."
 		case .cashFlow: "Deposits and payments in your budget accounts, up to today. Leaves out transfers between accounts, including card payments and moves to savings or loans. Includes refunds, starting balances and reconciliation adjustments."
-		case .spending: "Every row in your budget accounts that is not in an income category, including rows with no category and transfers out of your budget. Refunds reduce it. Not Net Profit's Expenses."
+		case .spending: "Every row in your budget accounts that is not in an income category, including rows with no category and transfers out of your budget. Refunds reduce it. Compared through the same day of the month, up to the 28th. Not Net Profit's Expenses."
 		default: nil
 		}
 	}
@@ -60,6 +60,25 @@ public enum CardWords {
 
 	public static func spending(filtered: Bool) -> String {
 		filtered ? "Selected rows" : "Everything except income categories"
+	}
+
+	/// ST-10.10's comparison line: the difference's size, more or less, and
+	/// what it is compared with. Zero reads "Same as". The sign stays on the figure.
+	public static func comparison(_ difference: Int64, mode: SpendingCardMode, compareTo: Month, averageFirst: Month?, averageLast: Month?, format: MoneyFormat) -> String {
+		let against = switch mode {
+		case .singleMonth: compareTo.date().map { $0.formatted(.dateTime.month(.wide)) } ?? ReportPeriod.monthYear(compareTo)
+		case .budget: "budgeted so far"
+		case .average: averageMonths(averageFirst, averageLast).map { "the \($0)-month average" } ?? "the average"
+		}
+		guard difference != 0 else { return "Same as \(against)" }
+		let amount = format.amount(Int64(difference.magnitude), on: .register)
+		return "\(amount) \(difference > 0 ? "more" : "less") than \(against)"
+	}
+
+	private static func averageMonths(_ first: Month?, _ last: Month?) -> Int? {
+		guard let first, let last else { return nil }
+		let count = (Int(last.year) - Int(first.year)) * 12 + Int(last.month) - Int(first.month) + 1
+		return count > 0 ? count : nil
 	}
 
 	// MARK: Crossover

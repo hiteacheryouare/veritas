@@ -296,27 +296,29 @@ public final class StatementsModel {
 	}
 
 	/// ST-3 and ST-2: assets and liabilities by account group, each as the
-	/// core totals them. A group's subtotal shows when it has more than one account.
+	/// core totals them, and the accounts in no group under "Other accounts"
+	/// or "Other liabilities", so none sits outside a heading. A budget with no
+	/// groups arrives with ST-9.2's type headings instead. A section's subtotal
+	/// shows when it has more than one account.
 	nonisolated static func lines(_ sheet: BalanceSheet) -> [StatementLine] {
-		func side(_ id: String, _ title: String, _ sections: [SheetSection], total: Int64, totalTitle: String) -> [StatementLine] {
+		func side(_ id: String, _ title: String, _ sections: [SheetSection], ungrouped: String, total: Int64, totalTitle: String) -> [StatementLine] {
 			var lines = [StatementLine(id: id, title: title, style: .section)]
 			for section in sections {
 				let group = section.groupId ?? "none"
-				if let name = section.groupName {
-					lines.append(StatementLine(id: "\(id).group.\(group)", title: name, style: .group))
-				}
+				let name = section.groupName ?? ungrouped
+				lines.append(StatementLine(id: "\(id).group.\(group)", title: name, style: .group))
 				for account in section.accounts {
 					lines.append(StatementLine(id: "account.\(account.accountId)", title: accountTitle(account), amount: account.amount, style: .line))
 				}
-				if let name = section.groupName, section.accounts.count > 1 {
+				if section.accounts.count > 1 {
 					lines.append(StatementLine(id: "\(id).subtotal.\(group)", title: "Total \(lowercasedFirstWord(name))", amount: section.total, style: .subtotal))
 				}
 			}
 			lines.append(StatementLine(id: "\(id).total", title: totalTitle, amount: total, style: .total))
 			return lines
 		}
-		return side("assets", "Assets", sheet.assets, total: sheet.totalAssets, totalTitle: "Total assets")
-			+ side("liabilities", "Liabilities", sheet.liabilities, total: sheet.totalLiabilities, totalTitle: "Total liabilities")
+		return side("assets", "Assets", sheet.assets, ungrouped: "Other accounts", total: sheet.totalAssets, totalTitle: "Total assets")
+			+ side("liabilities", "Liabilities", sheet.liabilities, ungrouped: "Other liabilities", total: sheet.totalLiabilities, totalTitle: "Total liabilities")
 			+ [StatementLine(id: "netWorth", title: "Net worth", amount: sheet.netWorth, style: .grand)]
 	}
 

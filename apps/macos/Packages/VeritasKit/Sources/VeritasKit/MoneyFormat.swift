@@ -130,10 +130,17 @@ public struct MoneyFormat: Hashable, Sendable {
 		minorUnits / pow(10, Double(impliedPlaces(scale)))
 	}
 
-	/// `$12k`, `−$800`: a chart axis label for a `chartValue`, with the symbol where the budget puts it.
+	/// `$12k`, `$2.5k`, `−$800`: a chart axis label for a `chartValue`, with the symbol where the budget puts it.
+	/// Thousands keep one decimal when they have one, so 2,500 never reads as 2k.
 	public func axisLabel(_ units: Double) -> String {
 		let whole = Int64(units.rounded())
-		let digits = whole.magnitude >= 1000 ? "\(whole.magnitude / 1000)k" : "\(whole.magnitude)"
+		let digits: String
+		if whole.magnitude >= 1000 {
+			let tenths = (whole.magnitude + 50) / 100
+			digits = tenths % 10 == 0 ? "\(tenths / 10)k" : "\(tenths / 10)\(decimalSeparator)\(tenths % 10)k"
+		} else {
+			digits = "\(whole.magnitude)"
+		}
 		return (whole < 0 ? "\u{2212}" : "") + withSymbol(digits)
 	}
 

@@ -248,6 +248,8 @@ public final class DashboardModel {
 	public static let columns: Int64 = 12
 
 	public private(set) var sheets: [DashboardSheet] = []
+	/// False until the first load has finished, so the screen can show it's loading.
+	public private(set) var hasLoaded = false
 	public var pageID: String?
 	public var isEditing = false
 	/// Payees, accounts and categories, for the widget filter editor's pickers.
@@ -274,6 +276,7 @@ public final class DashboardModel {
 	@ObservationIgnored private var loadGeneration = 0
 
 	public func load() async {
+		defer { hasLoaded = true }
 		loadGeneration += 1
 		let generation = loadGeneration
 		let today = WorkspaceModel.today()
@@ -300,6 +303,14 @@ public final class DashboardModel {
 
 	public func move(_ card: DashboardCard, columns: Int64 = 0, rows: Int64 = 0) async {
 		await place(card, x: card.x + columns, y: card.y + rows, width: card.width, height: card.height)
+	}
+
+	/// Move ▸ Down or Up, as the compacted grid settles it (`DashboardSheet.placementDown`).
+	public func move(_ card: DashboardCard, down: Bool) async {
+		guard let sheet, let placement = down ? sheet.placementDown(card) : sheet.placementUp(card),
+			let moved = sheet.cards.first(where: { $0.id == placement.id })
+		else { return }
+		await place(moved, x: moved.x, y: placement.y, width: moved.width, height: moved.height)
 	}
 
 	public func resize(_ card: DashboardCard, columns: Int64 = 0, rows: Int64 = 0) async {

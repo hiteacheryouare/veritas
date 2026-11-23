@@ -8,7 +8,8 @@ extension Screen {
 		case .bills: "calendar"
 		case .rules: "list.bullet.indent"
 		case .goals: "target"
-		case .reports, .dashboard, .netProfit, .sankey, .customReports: "chart.bar"
+		case .dashboard: "square.grid.2x2"
+		case .reports, .netProfit, .sankey, .customReports: "chart.bar"
 		case .insights, .forecast, .whatIfs, .wrapped, .statements, .tax: "chart.line.uptrend.xyaxis"
 		case .settings: "slider.horizontal.3"
 		}
