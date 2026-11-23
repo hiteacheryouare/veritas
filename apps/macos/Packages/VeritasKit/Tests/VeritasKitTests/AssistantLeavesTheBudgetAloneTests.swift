@@ -25,13 +25,17 @@ struct AssistantLeavesTheBudgetAloneTests {
 			let couldUndo = workspace.canUndo
 			#expect(before.count > 20, "the whole file, Actual's tables and Veritas's")
 
-			let months = ["2026-10", "2031-06", "1999-01", "2026-13", "", "next month"]
-			for month in months {
-				_ = try? await BudgetMonthTool(context: context).call(arguments: .init(month: month))
-			}
-			for (first, last) in [("2026-05", "2026-10"), ("2031-01", "2031-12"), ("1999-01", "2040-12"), ("2026-10", "2026-05"), ("x", "y")] {
-				_ = try? await NetProfitTool(context: context).call(arguments: .init(first: first, last: last))
-				_ = try? await CashFlowTool(context: context).call(arguments: .init(first: first, last: last))
+			let periods = ["2026-10", "last month", "so far this month", "this year", "2031-06", "1999-01", "2026-13", "", "next month", "2026-10-31 to 2026-05-01", "May to October 2026"]
+			for period in periods {
+				_ = try? await BudgetMonthTool(context: context).call(arguments: .init(period: period))
+				_ = try? await NetProfitTool(context: context).call(arguments: .init(period: period))
+				_ = try? await CashFlowTool(context: context).call(arguments: .init(period: period))
+				_ = try? await SpendingTool(context: context).call(arguments: .init(period: period))
+				_ = try? await IncomeTool(context: context).call(arguments: .init(period: period))
+				for name in ["Groceries", "everyday", "groc", "", "'; DROP TABLE categories; --"] {
+					_ = try? await CategorySpendingTool(context: context).call(arguments: .init(name: name, period: period))
+					_ = try? await BudgetTool(context: context).call(arguments: .init(name: name, period: period))
+				}
 			}
 			for date in [context.today, "2031-12-31", "1999-01-01", "2026-02-30", "soon"] {
 				_ = try? await BalanceSheetTool(context: context).call(arguments: .init(date: date))
