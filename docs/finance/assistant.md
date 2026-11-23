@@ -1,10 +1,11 @@
 # AI answers (R-AI-1)
 
-Status: draft, revised for the PR #93 review round. Owner: Fred. Builds on classification.md (CLS-n) and statements.md (ST-n). Applies to the on-device assistant's read-only Q&A. Amounts are integer minor units, summed in the core. Examples use made-up names and amounts, a 2-place currency written as `$` unless an example says otherwise, and cents in the data lines.
+Status: draft, revised for the PR #93 review round, with budget habits (AI-10) and wording (AI-11). Owner: Fred. Builds on classification.md (CLS-n) and statements.md (ST-n). Applies to the on-device assistant's read-only Q&A. Amounts are integer minor units, summed in the core. Examples use made-up names and amounts, a 2-place currency written as `$` unless an example says otherwise, and cents in the data lines.
 
 ## AI-1 Who computes what
 
 - **AI-1.1** The app resolves the period from the user's words against today's date, the core computes every figure, and the app formats the answer. The model never computes a date, a sum, a difference, a percentage or a conversion, and never states a figure that no tool returned.
+- **AI-1.1a** The model's instructions carry this sentence exactly: "Call a tool for every question about money, every time, even one asked before. Every figure you give must come from a tool you called for this question." A figure from an earlier answer in the conversation is not a figure from a tool called for this question.
 - **AI-1.2** Each tool's first line is the answer. The model may add words around it but never changes a figure, a label or a date range.
 - **AI-1.3** The model offers no figure for a range no tool returned. A question about a range the tools cannot resolve gets the tool's own refusal, not an estimate. The model's instructions carry this sentence exactly: "Never give a figure for a time range a tool did not return. If a tool refuses the range, say so."
 - **AI-1.4** No tool writes anything. Hypothetical questions never touch real data.
@@ -25,7 +26,7 @@ Status: draft, revised for the PR #93 review round. Owner: Fred. Builds on class
 
 ## AI-3 Categories and groups
 
-- **AI-3.1** **One figure per kind.** For a category or group and a period, each figure is the CLS-6 sum over rows of one row kind (`expense`, `income`, `debt_principal`, `savings_contribution`) whose resolved category (CLS-1) is that category, or any category currently in that group. A group's Spending counts only `expense` rows, never every row of the group's categories. The category's own kind is never a second classifier (CLS-3, CLS-4): a purchase booked to a debt or savings category with no transfer is an `expense` row (CLS-4 row 14, `misfiled`) and counts as Spending. The category's kind is read in one place only, AI-3.4.
+- **AI-3.1** **One figure per kind.** For a category or group and a period, each figure is the CLS-6 sum over rows of one row kind (`expense`, `income`, `debt_principal`, `savings_contribution`) whose resolved category (CLS-1) is that category, or any category currently in that group. A group's Spending counts only `expense` rows, never every row of the group's categories. The category's own kind is never a second classifier (CLS-3, CLS-4): a purchase booked to a debt or savings category with no transfer is an `expense` row (CLS-4 row 14, `misfiled`) and counts as Spending. The category's kind is read in two places only, AI-3.4 and AI-10.2.
 - **AI-3.2** Totals are summed in integer cents in the core over the same classified rows as the Net Profit screen (CLS-1, CLS-6), so a figure equals its line in the drill-down (ST-1.6). Signs follow CLS-6: Expenses, Debt paydown and Savings are positive for money out, Income is positive for money in.
 - **AI-3.3** **Lines.** The answer lists every kind that has at least one row, in the order Expenses, Income, Debt paydown, Savings, each with its own label:
   - `Spending on <label>, <range>: <amount>`
@@ -34,7 +35,7 @@ Status: draft, revised for the PR #93 review round. Owner: Fred. Builds on class
   - `Savings for <label>, <range>: <amount>. It is not spending.`
 
   The first line is followed by `From <n> transactions, on the Expenses line of the Net Profit report.` (`on the Income line` for an Income first line). It reads `From 1 transaction` for one. n counts the classified rows of that line's kind: split children count, split parents and mirror legs do not (CLS-1). The Debt paydown and Savings lines carry their own sentence and no count. Naming a category or group counts as asking for it by name under AI-5.1, for that category or group only. `spending(period)` never does.
-- **AI-3.4** **Nothing to report.** A category or group with no rows of any kind answers one line with `0.00` in the currency's places. It reads `Income from <label>` for an Actual income category or group, and `Spending on <label>` for anything else, with the matching second line. This is the only place the category's own kind is read.
+- **AI-3.4** **Nothing to report.** A category or group with no rows of any kind answers one line with `0.00` in the currency's places. It reads `Income from <label>` for an Actual income category or group, and `Spending on <label>` for anything else, with the matching second line. This is one of the two places the category's own kind is read (the other is AI-10.2).
 - **AI-3.5** `<label>` is the ST-10.3 label, the same function the reports use: `Groceries (hidden)`, `Old Gym (hidden, archived)`, `Old Gym (closed goal)`, `(deleted) Old Gym`. Groups carry the same labels.
 - **AI-3.6** **Matching names.** `categorySpending(name, period)` matches a category or a category group by a key. Both the asked name and each candidate name become a key the same way: fold case and accents, read `&` as `and`, treat any run of characters that is not a letter or digit as a word break, drop a leading `the`, `my` or `our`, then make each word singular (`ies` to `y` for words over 4 letters, otherwise drop a trailing `s`, but not `ss`, for words over 3 letters). On the asked name only, a trailing `category`, `categories` or `envelope` narrows the match to categories, `group` narrows it to groups, and `<name> in <group>` narrows it to that group's category.
   - **Exactly one exact key match:** it answers.
@@ -130,3 +131,104 @@ Today is 2026-11-22. Scenario A (examples 1, 5, 8, 10, 12): one on-budget accoun
 - `Unreviewed transfers, <range>: <amount>. Not in Net cash flow.` Shown only when not zero (CLS-6 `unreviewed_total`).
 
 The negative sentences of AI-5.3 follow a negative Debt paydown or Savings line. The figures are the ST-1 lines for the range. Example, Scenario A: Net Profit `$4,438.00`, Income `$5,000.00`, Expenses `$562.00`, Debt paydown `$300.00`, Savings `$200.00`, Net cash flow `$3,938.00` (443800 - 30000 - 20000 = 393800). No Unreviewed transfers line.
+
+## AI-10 Budget habits (`budgetHabits`)
+
+`budgetHabits()` answers "how can I improve my money habits", "where am I overspending", "which categories ran over budget lately" and questions like them. It looks at the user's own Budget screen figures, names the categories that ran over their monthly budget in most recent months, and gives one concrete figure for the largest. It takes no argument, because the window is fixed by AI-10.1. It writes nothing (AI-1.4). Every figure is computed by the core read the tool uses, in integer minor units. The model never averages, subtracts, ranks or rounds (AI-1.1).
+
+- **AI-10.1** **Window.** The window is the last 3 complete calendar months before today's month, never today's month and never part of one. With today = 2026-11-22 the window is August, September and October 2026, and its label is `August to October 2026` (AI-6.1 form for whole months). Today = 2026-11-01 gives the same window. Today = 2026-01-15 gives October, November and December 2025, labelled `October to December 2025`. A window month counts only if it is not before the budget's first month (the Budget screen's `firstMonth`). Let N be the number of window months that count, 0 to 3.
+  - **N = 0:** the answer is the one line `Budget habits: no complete month of history yet.` and nothing else.
+  - **N = 1:** the one line `Budget habits: only 1 complete month of history (October 2026), so there is no pattern to report yet.`
+  - **N = 2:** the window is those 2 months, labelled for example `September to October 2026`, and the rules below run with B at most 2.
+  - **N = 3:** the full window.
+- **AI-10.2** **Which categories.** A category is considered when all of these hold:
+  1. It is an expense envelope on the Budget screen: not in an income group (CLS-3.1).
+  2. It is not hidden, and neither is its group, as of today. Hiding keeps a category's history in every report and in `categorySpending` (CLS-3.2). It only takes the category out of this list, because a hidden category is one the user has put away. A hidden category is never counted or named here.
+  3. Its effective kind (CLS-3) is `expense`. A category of kind `debt_principal` or `savings` is never listed, because paying down debt and saving are not spending (AI-5). This is the second and last place a category's own kind is read (AI-3.4). The tool takes the kind from the core and never guesses it from a name or a group.
+  4. It has no goal, open or closed (CLS-3.3, DEBT-8). A goal's budgeted amount is saved up for a later purchase, so a month with a purchase would look like a month over budget when it is the goal doing its job. Goal categories keep their lines in every other tool.
+  5. The budget is not in the mixed-scale case. When the core's CLS-12.10 note is present (a 0-place budget), budgeted and activity are on different scales (CLS-12.10, D77), so the tool compares nothing. The whole answer is `Budget habits can't be compared in this budget, because budgets and activity are recorded at different scales.` followed by the CLS-12.10 fixed line, and no figure.
+  - If the existing core reads do not expose a category's effective kind or goal link, that is a contract addition for the implementer to raise. The rule above does not change.
+- **AI-10.3** **The two figures per month.** For each considered category and each window month that counts:
+  - `budgeted` is the Budget screen's `budgeted` for that month: the amount assigned in that month alone. Carryover, rollover and the envelope's `available` are never added to it. A category with savings carried in from earlier months is still measured against the month's own assignment (open question 1 in AI-10.9).
+  - `activity` is the Budget screen's Spent figure as it prints (D78, AI-7.2): `-spent`, money out positive, a month where refunds win negative. The core keeps Actual's sign, and the tool flips it once, the same way the Mac screen does. Activity is a Budget screen figure, not a Net Profit figure, and may differ from `categorySpending` (CLS-9).
+  - A month is a budgeted month for the category when `budgeted > 0`. A category with `budgeted = 0` that month has activity the user never budgeted for. That month is not counted for the category, and its activity is ignored by this tool. A category created partway through the window is counted only from the month it was first budgeted. Let B be the category's number of budgeted months.
+- **AI-10.4** **Over budget most months.** A budgeted month is over when `activity > budgeted` (equal is not over). A category is listed when all of these hold:
+  - B is at least 2.
+  - The over months, O, satisfy `2 * O > B` (strictly more than half: 2 of 3, 3 of 3, 2 of 2).
+  - Its average activity is greater than its average budgeted (AI-10.5), so a category that was over in 2 months by a little and far under in the third is never called over budget.
+- **AI-10.5** **Averages and rounding.** For a listed category:
+  - `averageActivity = sum of activity over its B budgeted months / B`, and `averageBudgeted = sum of budgeted over the same B months / B`.
+  - Each average is rounded once, to the currency's minor unit, half away from zero, in integers: `(2 * |sum| + B) / (2 * B)` with integer division, then the sign of the sum is put back.
+  - `overage = averageActivity - averageBudgeted`, using the two rounded averages, so the three printed figures always agree to the cent. No total of categories is ever printed, so no rounding remainder has to be placed anywhere.
+- **AI-10.6** **Ranking and limits.** Listed categories are ordered by `overage`, largest first. Ties go to the larger `averageActivity`, then to the name with case and accents folded (AI-3.6 key), then by category id. At most 3 are shown. When more than 3 qualify, the line `Showing the 3 largest of <k>.` follows the list, and the first line's count is `<k>`. Two shown categories with the same name in different groups read `<name> in <group>` (AI-3.6).
+- **AI-10.7** **The suggestion.** The one computed suggestion is for the first (largest) listed category: `Bringing <name> back to its monthly budget would free about <overage> a month.` `<overage>` is the AI-10.5 figure, printed to the minor unit with no further rounding, never a whole-dollar figure. "About" is there because the figure is an average over the window, not a promise about next month. The tool offers no suggestion for the other categories, no total for them and no projection.
+- **AI-10.8** **Nothing to report.** When no category is listed by AI-10.4, the answer never invents a problem. It states that nothing ran over in most months and shows the largest budgeted categories against their budgets, so the user still sees their own numbers:
+  - Considered categories with B at least 2, ordered by `averageActivity` largest first, then by AI-10.6's ties, at most 3.
+  - No suggestion line.
+  - When there are no such categories at all: `No category has a monthly budget in <range>, so there is nothing to compare.`
+- **AI-10.9** **Output lines.** The model copies the first line exactly and the lines after it as returned (AI-1.2). The word "spent" and the word "spending" never appear (AI-7.3), except inside the CLS-12.10 fixed line, which is copied as it is (AI-7.4). `<range>` is the AI-10.1 label. `<k>` categories read `1 category` for one.
+  1. `Budget habits, <range>: <k> categories ran over their monthly budget in most months.`
+  2. One line per shown category: `<name>: over in <O> of <B> months. Average activity <averageActivity> a month against <averageBudgeted> budgeted, <overage> a month over.`
+  3. `Showing the 3 largest of <k>.` (only when k is more than 3)
+  4. `Bringing <name> back to its monthly budget would free about <overage> a month.`
+  5. `Activity and budgeted are the Budget screen's figures for each month. Carryover is not counted.`
+
+  When nothing is listed (AI-10.8), lines 1 to 5 are replaced by:
+  1. `Budget habits, <range>: no category ran over its monthly budget in most months.`
+  2. `Largest categories by average activity:`
+  3. `<name>: average activity <averageActivity> a month against <averageBudgeted> budgeted.` (up to 3 lines)
+  4. The line 5 sentence above.
+
+  Amounts are on the budget scale, formatted as the Budget screen formats them (AI-1.5).
+- **AI-10.10** **Worked examples (tests).** Today is 2026-11-22 and the budget began in 2026-01, so N = 3 and the window is August, September and October 2026. A 2-place currency, written in cents in the data and in dollars in the answers. Activity is `-spent`.
+
+  **Scenario H.** Considered categories, each month in the order August, September, October:
+
+  | Category | Budgeted | Activity |
+  |---|---|---|
+  | Dining | 30000, 30000, 30000 | 45000, 38250, 40500 |
+  | Shopping | 15000, 15000, 15000 | 26010, 14020, 29000 |
+  | Rideshare | 6000, 6000, 6000 | 12000, 6600, 10200 |
+  | Groceries | 45000, 45000, 45000 | 44000, 47000, 41000 |
+  | Gas | 10000, 10000, 10000 | 12000, 9000, 9000 |
+
+  1. **Ryan's preview.** Dining: over (45000 > 30000, 38250 > 30000, 40500 > 30000), O = 3 of B = 3, `2 * 3 = 6 > 3`. Sum of activity 123750, average `(2 * 123750 + 3) / 6 = 247503 / 6 = 41250` (integer division, remainder 3 dropped), budgeted average 30000, overage 41250 - 30000 = 11250. Shopping: over in August (26010 > 15000) and October (29000 > 15000), not in September (14020 < 15000). O = 2, `2 * 2 = 4 > 3`. Sum 69030, average `(2 * 69030 + 3) / 6 = 138063 / 6 = 23010`, budgeted 15000, overage 8010. Rideshare: over all three months (12000, 6600, 10200 against 6000). Sum 28800, average `(57600 + 3) / 6 = 9600`, overage 9600 - 6000 = 3600. Groceries: over only in September (47000 > 45000), O = 1, `2 * 1 = 2` is not more than 3, so it is not listed (and its average 44000 is under 45000). Gas: over only in August, not listed. Order by overage: Dining 11250, Shopping 8010, Rideshare 3600. Answer:
+     - `Budget habits, August to October 2026: 3 categories ran over their monthly budget in most months.`
+     - `Dining: over in 3 of 3 months. Average activity $412.50 a month against $300.00 budgeted, $112.50 a month over.`
+     - `Shopping: over in 2 of 3 months. Average activity $230.10 a month against $150.00 budgeted, $80.10 a month over.`
+     - `Rideshare: over in 3 of 3 months. Average activity $96.00 a month against $60.00 budgeted, $36.00 a month over.`
+     - `Bringing Dining back to its monthly budget would free about $112.50 a month.`
+     - `Activity and budgeted are the Budget screen's figures for each month. Carryover is not counted.`
+  2. **Rounding and the limit.** Add Fun, budgeted 20000, 20000, 20000, activity 21000, 20001, 20000. Over in August and September, not October (20000 is not more than 20000). O = 2, `4 > 3`. Sum 61001, average `(2 * 61001 + 3) / 6 = 122005 / 6 = 20334` (61001 / 3 = 20333.67 rounds to 20334, half away from zero), budgeted 20000, overage 334. It ranks fourth, so the first line reads `4 categories ran over...`, the three lines above follow unchanged, then `Showing the 3 largest of 4.`, then the Dining suggestion.
+  3. **Nothing over.** Only Groceries and Gas are considered. Groceries: O = 1 of 3, average activity `(2 * 132000 + 3) / 6 = 44000`, budgeted 45000. Gas: O = 1 of 3, activity sum 30000, average `(60000 + 3) / 6 = 10000`, budgeted 10000. Neither is listed. Answer:
+     - `Budget habits, August to October 2026: no category ran over its monthly budget in most months.`
+     - `Largest categories by average activity:`
+     - `Groceries: average activity $440.00 a month against $450.00 budgeted.`
+     - `Gas: average activity $100.00 a month against $100.00 budgeted.`
+     - `Activity and budgeted are the Budget screen's figures for each month. Carryover is not counted.`
+
+     No suggestion line.
+  4. **Excluded rows, same window, none of them listed.** Hobbies is hidden, budgeted 10000, activity 30000 each month. Vacation has an open goal, budgeted 20000, activity 60000 in October. Car Loan Principal is a `debt_principal` category with activity 30000 each month and budgeted 30000. Salary is in an income group. Coffee has budgeted 0 and activity 5000 each month, so B = 0 and it is unbudgeted, not over. None appears in any line, and none changes the figures of examples 1 to 3.
+  5. **A category budgeted partway.** Transit is first budgeted in September: budgeted 0, 8000, 8000, activity 3000, 9500, 9000. B = 2 (August is not a budgeted month, and its 3000 is ignored). Over in both (9500 > 8000, 9000 > 8000), O = 2, `4 > 2`. Sum 18500, average `(2 * 18500 + 2) / 4 = 37002 / 4 = 9250`, budgeted average 8000, overage 1250. `Transit: over in 2 of 2 months. Average activity $92.50 a month against $80.00 budgeted, $12.50 a month over.` Not `over in 2 of 3`.
+  6. **Over in most months but under on average.** A category budgeted 10000 each month with activity 10100, 10100, 1000. O = 2 of 3, but the average activity is `(2 * 21200 + 3) / 6 = 7067` against 10000, so it is not listed.
+  7. **Carryover does not hide it.** Dining has 50000 carried in on 2026-08-01, so its `available` is positive all three months and the Budget screen shows no overspending. Its budgeted amounts and activity are as in example 1, so it is listed exactly as there, and the closing line says carryover is not counted.
+  8. **Fewer than 3 months.** The budget began 2026-10. N = 1, and the answer is `Budget habits: only 1 complete month of history (October 2026), so there is no pattern to report yet.` The budget began 2026-09. N = 2, the label is `September to October 2026`, and a category is listed only if it is over in both months, for example Dining over in September only (45000 > 30000) and under in October (28000 < 30000) is not listed. The budget began in November 2026 (today's month). N = 0, and the answer is `Budget habits: no complete month of history yet.` Today = 2026-11-01 gives the same window as 2026-11-22, and today = 2026-01-15 gives October to December 2025.
+  9. **Negative activity.** A month where refunds exceed purchases has negative activity, for example -3000. It is never over. It lowers that category's average like any other figure.
+  10. **0-place budget.** A yen budget with the core's CLS-12.10 note: `Budget habits can't be compared in this budget, because budgets and activity are recorded at different scales.` then the fixed line `Spending is recorded at 2 places and budgets at 0, so these numbers mix both, as in Actual.`, and no figure.
+  11. **Two names.** Misc in Everyday and Misc in Fun both qualify and both are shown: `Misc in Everyday: ...` and `Misc in Fun: ...`.
+- **AI-10.11** **Open questions for the product owner.** The defaults above stand until answered.
+  1. **Measured against budgeted or available?** Default: the month's own budgeted amount, because it states a fact that is always true ("activity ran above what you assigned that month") and never shows a problem Actual's overspending logic has already covered. The alternative is available (carryover included), which only flags a category when its envelope actually went negative. It changes which categories are listed whenever carryover is large.
+  2. **Exact cents or whole units in the suggestion?** Default: exact to the minor unit (`$112.50`), so the three printed figures agree. Ryan's preview shows `112`. Whole units would cost the reconciliation by up to half a unit.
+  3. **Hidden categories.** Default: left out of this list (AI-10.2). The alternative is to include them with their `(hidden)` label (AI-3.5).
+  4. **Unbudgeted spending.** Default: ignored here (AI-10.3). The alternative is a separate line naming categories with activity and no budget.
+
+## AI-11 Wording and questions outside the data
+
+- **AI-11.1** **Allowed.** Suggestions that follow from a figure the tool returned: "ran over", "could", "would free about", "Bringing <name> back to its monthly budget would free about <amount> a month". Every claim about the user's habits carries the figure it comes from, in the same sentence or the lines the model copies.
+- **AI-11.2** **Banned.** The model never writes "you should", "you must", "you need to" or "I recommend". It never gives investment, debt payoff or tax advice (R-REP-8's rule applies: organize, never advise). It never offers a generic tip or rule of thumb (50/30/20, "build an emergency fund", "cut subscriptions", "pay yourself first"). It never states a figure, a trend, a cause or a motive that no tool returned. It never says a category "wastes" money or that a purchase was "unnecessary".
+- **AI-11.3** **Instructions.** The model's instructions carry these sentences exactly:
+  - "For questions about improving money habits, call budgetHabits and give only what it returns. Offer suggestions, never orders."
+  - "Never give general financial advice, generic tips, or investment, debt or tax advice."
+- **AI-11.4** **Questions the tools cannot answer** (general advice, forecasts outside the tools, the market, the user's feelings about money). The answer is the redirect below, copied exactly, with no figure and no apology that starts "I can't". The model does not answer the question from general knowledge:
+  - `Mo Nee answers from your own numbers: spending, income, budgets and which categories ran over their monthly budget. For example: "How much did I spend last month?", "Which categories ran over budget lately?" or "How much did I budget for Groceries this month?"`
+- **AI-11.5** **Tests.** The tool's tests pin AI-10.9's strings and AI-10.10's examples. The instruction tests pin AI-11.3's sentences exactly, and the redirect is a constant the panel's tests compare to AI-11.4.
