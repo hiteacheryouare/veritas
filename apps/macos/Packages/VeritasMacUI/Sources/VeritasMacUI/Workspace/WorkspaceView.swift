@@ -6,6 +6,7 @@ struct WorkspaceView: View {
 	@Bindable var model: WorkspaceModel
 	@State private var paletteChoice: PaletteItem?
 	@Environment(AssistantSettings.self) private var assistant: AssistantSettings?
+	@Environment(\.accessibilityReduceMotion) private var reduceMotion
 
 	private var offersAssistant: Bool { assistant?.offersPanel ?? false }
 
@@ -14,45 +15,12 @@ struct WorkspaceView: View {
 			SidebarView(model: model)
 				.navigationSplitViewColumnWidth(min: 200, ideal: Size.sidebar, max: 320)
 		} detail: {
-			Group {
-				if model.destination == .screen(.settings) {
-					SettingsView(model: model)
-				} else if model.destination == .screen(.budget) {
-					BudgetScreen(workspace: model)
-				} else if model.destination == .screen(.bills) {
-					BillsScreen(workspace: model)
-				} else if model.destination == .screen(.rules) {
-					RulesScreen(workspace: model)
-				} else if model.destination == .screen(.statements) {
-					StatementsScreen(workspace: model)
-				} else if model.destination == .screen(.forecast) {
-					ForecastScreen(workspace: model)
-				} else if model.destination == .screen(.whatIfs) {
-					WhatIfsScreen(workspace: model)
-				} else if model.destination == .screen(.tax) {
-					TaxScreen(workspace: model)
-				} else if model.destination == .screen(.wrapped) {
-					WrappedScreen(workspace: model)
-				} else if model.destination == .screen(.goals) {
-					GoalsScreen(workspace: model)
-				} else if model.destination == .screen(.accounts) {
-					AccountsScreen(workspace: model)
-				} else if case .account(let id) = model.destination {
-					AccountRegisterScreen(workspace: model, accountID: id)
-						.id(id)
-				} else if model.destination == .screen(.reports) || model.destination == .screen(.dashboard) {
-					DashboardScreen(workspace: model)
-				} else if model.destination == .screen(.netProfit) {
-					NetProfitScreen(workspace: model)
-				} else if model.destination == .screen(.sankey) {
-					SankeyScreen(workspace: model)
-				} else if model.destination == .screen(.customReports) {
-					CustomReportsScreen(workspace: model)
-				} else {
-					ScreenView(destination: model.destination, title: model.title(of: model.destination))
-				}
+			ZStack {
+				page
+					.id(PageID(directory: model.overview?.directory, destination: model.destination))
+					.transition(reduceMotion ? .identity : .asymmetric(insertion: .opacity.combined(with: .offset(y: 6)), removal: .identity))
 			}
-				.id(model.overview?.directory)
+				.animation(Motion.fast.animation(reduceMotion: reduceMotion), value: model.destination)
 				.safeAreaInset(edge: .top, spacing: 0) {
 					VStack(spacing: 0) {
 						if let readOnly = model.readOnly {
@@ -63,7 +31,7 @@ struct WorkspaceView: View {
 							}
 						}
 						if let problem = model.settings?.backup.lastProblem {
-							NoticeBanner(symbol: "externaldrive.badge.exclamationmark", message: "The last backup failed. \(problem)", actionTitle: "Show settings") {
+							NoticeBanner(symbol: "exclamationmark.triangle", message: "The last backup failed. \(problem)", actionTitle: "Show settings") {
 								model.go(to: .screen(.settings))
 							}
 							.accessibilityIdentifier("backupBanner")
@@ -104,6 +72,46 @@ struct WorkspaceView: View {
 		}
 	}
 
+	/// The screen for the current destination.
+	@ViewBuilder private var page: some View {
+		if model.destination == .screen(.settings) {
+			SettingsView(model: model)
+		} else if model.destination == .screen(.budget) {
+			BudgetScreen(workspace: model)
+		} else if model.destination == .screen(.bills) {
+			BillsScreen(workspace: model)
+		} else if model.destination == .screen(.rules) {
+			RulesScreen(workspace: model)
+		} else if model.destination == .screen(.statements) {
+			StatementsScreen(workspace: model)
+		} else if model.destination == .screen(.forecast) {
+			ForecastScreen(workspace: model)
+		} else if model.destination == .screen(.whatIfs) {
+			WhatIfsScreen(workspace: model)
+		} else if model.destination == .screen(.tax) {
+			TaxScreen(workspace: model)
+		} else if model.destination == .screen(.wrapped) {
+			WrappedScreen(workspace: model)
+		} else if model.destination == .screen(.goals) {
+			GoalsScreen(workspace: model)
+		} else if model.destination == .screen(.accounts) {
+			AccountsScreen(workspace: model)
+		} else if case .account(let id) = model.destination {
+			AccountRegisterScreen(workspace: model, accountID: id)
+				.id(id)
+		} else if model.destination == .screen(.reports) || model.destination == .screen(.dashboard) {
+			DashboardScreen(workspace: model)
+		} else if model.destination == .screen(.netProfit) {
+			NetProfitScreen(workspace: model)
+		} else if model.destination == .screen(.sankey) {
+			SankeyScreen(workspace: model)
+		} else if model.destination == .screen(.customReports) {
+			CustomReportsScreen(workspace: model)
+		} else {
+			ScreenView(destination: model.destination, title: model.title(of: model.destination))
+		}
+	}
+
 	/// Runs after the palette has gone, so a command that opens a sheet
 	/// doesn't race the palette's own sheet off the window.
 	private func activatePaletteChoice() {
@@ -111,4 +119,10 @@ struct WorkspaceView: View {
 		paletteChoice = nil
 		model.activate(item)
 	}
+}
+
+/// A page's identity: a new budget or a new destination is a new page, which fades in.
+private struct PageID: Hashable {
+	let directory: URL?
+	let destination: Destination
 }

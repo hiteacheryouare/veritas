@@ -54,6 +54,13 @@ struct GoalsScreen: View {
 			.padding(Spacing.s5)
 			.frame(maxWidth: .infinity, alignment: .leading)
 		}
+		.overlay {
+			if !goals.hasLoaded {
+				ScreenState(kind: .loading)
+			} else if goals.open.isEmpty, goals.archive.isEmpty {
+				ScreenState(kind: .empty(title: "No goals"), action: ("New goal", { isCreating = true }), isActionDisabled: workspace.readOnly != nil, identifier: "goals.empty")
+			}
+		}
 		.background(.surfaceWindow)
 		.focusable()
 		.focusEffectDisabled()

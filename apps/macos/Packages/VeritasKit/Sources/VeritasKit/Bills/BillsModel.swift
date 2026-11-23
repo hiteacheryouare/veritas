@@ -139,6 +139,8 @@ public final class BillsModel {
 	public static let timelineDays: UInt32 = 60
 
 	public private(set) var bills: [BillSummary] = []
+	/// False until the first load has finished, so the screen can show it's loading.
+	public private(set) var hasLoaded = false
 	public private(set) var tray: [UpcomingBill] = []
 	public private(set) var timeline: [UpcomingBill] = []
 	public private(set) var names = BudgetNames.empty
@@ -160,6 +162,7 @@ public final class BillsModel {
 	public var today: String { WorkspaceModel.today() }
 
 	public func load() async {
+		defer { hasLoaded = true }
 		let today = today
 		async let names = workspace.budgetNames()
 		let loaded = await workspace.report { session in

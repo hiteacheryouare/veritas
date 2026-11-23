@@ -58,7 +58,7 @@ struct WorkspaceWindow: View {
 			storedBudgetDirectory = directory?.path(percentEncoded: false) ?? ""
 		}
 		.task {
-			model.destination = storedDestination
+			model.go(to: storedDestination)
 			if let directory = LaunchEnvironment.budgetToOpenOnLaunch ?? restoredBudgetDirectory {
 				await model.reopen(directory: directory)
 				if model.phase != .open {

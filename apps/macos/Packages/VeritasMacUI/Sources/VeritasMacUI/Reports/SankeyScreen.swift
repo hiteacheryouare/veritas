@@ -20,28 +20,29 @@ struct SankeyScreen: View {
 	var body: some View {
 		ScrollView {
 			VStack(alignment: .leading, spacing: Spacing.s3) {
-				if let report = model.report {
-					if report.nodes.isEmpty {
-						Text("No income or spending in \(model.title)")
-							.foregroundStyle(.textSecondary)
-							.frame(maxWidth: .infinity, minHeight: 240)
-					} else {
-						SankeyCanvas(report: report, format: model.format) { node in
-							drilldown = model.drilldown(node)
-						}
-						.frame(height: 600)
-						.padding(.vertical, Spacing.s2)
-						.padding(.horizontal, Spacing.s4)
-						.background(.surfaceGrouped, in: .rect(cornerRadius: Radius.section))
-						.overlay { RoundedRectangle(cornerRadius: Radius.section).strokeBorder(Color.edgeGrouped) }
+				if let report = model.report, !report.nodes.isEmpty {
+					SankeyCanvas(report: report, format: model.format) { node in
+						drilldown = model.drilldown(node)
 					}
-				} else {
-					ProgressView().frame(maxWidth: .infinity, minHeight: 240)
+					.frame(height: 600)
+					.padding(.vertical, Spacing.s2)
+					.padding(.horizontal, Spacing.s4)
+					.background(.surfaceGrouped, in: .rect(cornerRadius: Radius.section))
+					.overlay { RoundedRectangle(cornerRadius: Radius.section).strokeBorder(Color.edgeGrouped) }
 				}
 			}
 			.padding(.top, Spacing.s2)
 			.padding(.horizontal, Spacing.s5)
 			.padding(.bottom, Spacing.s6)
+		}
+		.overlay {
+			if let report = model.report {
+				if report.nodes.isEmpty {
+					ScreenState(kind: .empty(title: "No income or spending in \(model.title)"))
+				}
+			} else {
+				ScreenState(kind: .loading)
+			}
 		}
 		.background(.surfaceWindow)
 		.focusable()
@@ -101,6 +102,7 @@ struct SankeyCanvas: View {
 		GeometryReader { proxy in
 			let layout = SankeyLayout(report: report, size: proxy.size)
 			let lit = shown.map { SankeyHighlight($0, links: layout.links) }
+			let labelY = labelCenters(layout.nodes)
 			ZStack(alignment: .topLeading) {
 				Canvas { context, _ in
 					for ribbon in layout.ribbons {
@@ -117,7 +119,7 @@ struct SankeyCanvas: View {
 				ForEach(layout.nodes, id: \.index) { placed in
 					let node = report.nodes[placed.index]
 					if !compact || placed.rect.height >= 9 || node.column < 3 {
-						label(node, placed)
+						label(node, placed, y: labelY[placed.index] ?? placed.rect.midY)
 					}
 					nodeElement(node, placed)
 				}
@@ -216,7 +218,24 @@ struct SankeyCanvas: View {
 		.padding(Spacing.s3)
 	}
 
-	@ViewBuilder private func label(_ node: SankeyNode, _ placed: SankeyLayout.Node) -> some View {
+	/// Side labels in one column keep a line's height apart, so small neighbours
+	/// stack instead of overlapping; each stays as close to its node as it can.
+	private func labelCenters(_ nodes: [SankeyLayout.Node]) -> [Int: CGFloat] {
+		var centers: [Int: CGFloat] = [:]
+		let sides = nodes.filter { $0.labelSide != .above && (!compact || $0.rect.height >= 9 || report.nodes[$0.index].column < 3) }
+		for column in Dictionary(grouping: sides, by: { "\($0.labelSide)\(Int($0.rect.minX))" }).values {
+			var bottom = -CGFloat.infinity
+			for node in column.sorted(by: { $0.rect.midY < $1.rect.midY }) {
+				let height: CGFloat = compact || report.nodes[node.index].column == 3 ? 15 : 32
+				let center = max(node.rect.midY, bottom + height / 2)
+				centers[node.index] = center
+				bottom = center + height / 2
+			}
+		}
+		return centers
+	}
+
+	@ViewBuilder private func label(_ node: SankeyNode, _ placed: SankeyLayout.Node, y: CGFloat) -> some View {
 		let name = ReportWords.node(node)
 		let value = format.amount(node.value, on: .register)
 		let small = compact || node.column == 3
@@ -248,7 +267,7 @@ struct SankeyCanvas: View {
 			}
 			.lineLimit(1)
 			.frame(width: width, alignment: leading ? .trailing : .leading)
-			.position(x: leading ? placed.rect.minX - 10 - width / 2 : placed.rect.maxX + 10 + width / 2, y: placed.rect.midY)
+			.position(x: leading ? placed.rect.minX - 10 - width / 2 : placed.rect.maxX + 10 + width / 2, y: y)
 			.allowsHitTesting(false)
 			.accessibilityHidden(true)
 		}

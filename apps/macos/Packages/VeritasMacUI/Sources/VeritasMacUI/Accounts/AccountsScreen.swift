@@ -32,6 +32,7 @@ struct AccountsScreen: View {
 			.padding(.bottom, Spacing.s6)
 			.frame(maxWidth: .infinity, alignment: .leading)
 		}
+		.overlay { if model.list == nil { ScreenState(kind: .loading) } }
 		.background(.surfaceWindow)
 		.toolbar {
 			ToolbarItemGroup(placement: .primaryAction) {
