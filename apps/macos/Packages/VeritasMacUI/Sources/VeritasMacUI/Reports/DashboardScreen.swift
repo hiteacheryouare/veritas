@@ -921,19 +921,19 @@ private struct CrossoverChart: View {
 	var expanded = false
 
 	var body: some View {
-		let expenseLine = filtered ? "Selected categories" : "All non-income categories"
+		let expenseLine = CardWords.crossoverCategories(filtered: filtered)
 		Chart {
 			ForEach(Array(points.enumerated()), id: \.offset) { index, point in
 				LineMark(x: .value("Month", index), y: .value("Amount", format.chartValue(point.expenses, on: .register)), series: .value("Line", expenseLine))
 					.interpolationMethod(.monotone)
 					.foregroundStyle(Color.chartExpense)
 				if let adjusted = point.adjustedExpenses {
-					LineMark(x: .value("Month", index), y: .value("Amount", format.chartValue(adjusted, on: .register)), series: .value("Line", "Projected"))
+					LineMark(x: .value("Month", index), y: .value("Amount", format.chartValue(adjusted, on: .register)), series: .value("Line", CardWords.crossoverProjectedCategories(filtered: filtered)))
 						.interpolationMethod(.monotone)
 						.lineStyle(StrokeStyle(lineWidth: 2, dash: [5, 5]))
 						.foregroundStyle(Color.chartExpense)
 				}
-				LineMark(x: .value("Month", index), y: .value("Amount", format.chartValue(point.investmentIncome, on: .register)), series: .value("Line", "Investment income"))
+				LineMark(x: .value("Month", index), y: .value("Amount", format.chartValue(point.investmentIncome, on: .register)), series: .value("Line", CardWords.projectedReturn))
 					.interpolationMethod(.monotone)
 					.foregroundStyle(Color.chartSavings)
 			}
@@ -949,7 +949,7 @@ private struct CrossoverChart: View {
 		.chartYAxis {
 			if expanded { moneyAxis(format) }
 		}
-		.accessibilityLabel(crossover.map { "Investment income covers expenses from \(ReportPeriod.monthYear($0))" } ?? "Investment income against expenses")
+		.accessibilityLabel(CardWords.crossoverChart(crossover: crossover, filtered: filtered))
 	}
 }
 

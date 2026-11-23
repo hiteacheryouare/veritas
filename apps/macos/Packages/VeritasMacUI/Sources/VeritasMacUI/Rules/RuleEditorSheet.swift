@@ -216,7 +216,7 @@ struct RuleEditorSheet: View {
 							get: { RuleMenus.Allocation(allocation.value) },
 							set: { choice in change { $0.setAllocation(choice, line: line) } }
 						)) {
-							ForEach(RuleMenus.Allocation.allCases, id: \.self) { choice in
+							ForEach(RuleMenus.allocations, id: \.self) { choice in
 								Text(RuleWords.allocation(choice)).tag(choice)
 							}
 						}
@@ -466,7 +466,7 @@ private struct IdPicker: View {
 			case .categoryGroup:
 				ForEach(names.categoryGroups, id: \.id) { Text($0.name).tag(String?.some($0.id)) }
 			default:
-				ForEach(names.payees, id: \.id) { Text($0.name).tag(String?.some($0.id)) }
+				ForEach(names.payees, id: \.id) { Text(names.payeeLabel($0)).tag(String?.some($0.id)) }
 			}
 		}
 		.labelsHidden()
@@ -485,7 +485,7 @@ private struct IdList: View {
 		case .account: names.accounts.map { ($0.id, $0.name) }
 		case .category: names.categoryGroups.flatMap(\.envelopes).map { ($0.id, $0.name) }
 		case .categoryGroup: names.categoryGroups.map { ($0.id, $0.name) }
-		default: names.payees.map { ($0.id, $0.name) }
+		default: names.payees.map { ($0.id, names.payeeLabel($0)) }
 		}
 	}
 

@@ -25,8 +25,39 @@ struct StubJourneyDataTests {
 		#expect(try await session.payeeMemory(fernwood.id) != nil, "quick entry fills from the payee's last transaction")
 	}
 
+	@Test func theStubsGoalSuggestionsFollowDebt81() async throws {
+		// DEBT-8.1: ceil((target − available) ÷ months left), Nov 2026 through each target month.
+		let goals = try await session.goals(today: "2026-11-20").goals
+		for goal in goals where goal.state == .active {
+			let monthly = try #require(goal.suggestedMonthly), months = Int64(try #require(goal.monthsLeft))
+			let remaining = goal.target - goal.available
+			#expect(monthly == (remaining + months - 1) / months, "\(goal.name)")
+		}
+		let japan = try #require(goals.first { $0.id == "japan" })
+		#expect(japan.suggestedMonthly == 33_546 && japan.monthsLeft == 11, "369000 ÷ 11, Nov 2026 to Sep 2027")
+		#expect(japan.pace == .behind(neededMonthly: 33_546))
+	}
+
 	@Test func aRowTheStubDoesntHoldIsNotFound() async throws {
 		await #expect(throws: FfiError.self) { _ = try await session.registerRow("no-such-row") }
-		#expect(try await session.registerRow(StubRules.reconciledRow).reconciled)
+	}
+
+	@Test func theRulePreviewMarksItsReconciledRowAsTheCoreDoes() async throws {
+		let matches = try await session.rulePreview(.saved(ruleId: "amazon"))
+		#expect(matches.filter(\.reconciled).map(\.transactionId) == [StubRules.reconciledRow])
+	}
+
+	/// The Reports journey's move, below the UI: Move › Down on the net worth card.
+	@MainActor
+	@Test func movingAWidgetDownOnTheStubDashboardMovesIt() async throws {
+		let workspace = WorkspaceModel(library: StubLibrary(readOnly: nil, importError: nil), localSettings: InMemoryBudgetSettings(), format: MoneyFormat())
+		await workspace.reopen(directory: StubLaunch.budgetDirectory)
+		let model = DashboardModel(workspace: workspace)
+		await model.load()
+		#expect(model.canPlace)
+		let worth = try #require(model.sheet?.cards.first { $0.id == "worth" })
+		await model.move(worth, rows: 1)
+		#expect(workspace.alert == nil, "\(String(describing: workspace.alert))")
+		#expect(model.sheet?.cards.first { $0.id == "worth" }?.y == worth.y + 1)
 	}
 }
