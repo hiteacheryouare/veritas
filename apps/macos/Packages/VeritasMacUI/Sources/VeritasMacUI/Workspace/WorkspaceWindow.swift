@@ -8,6 +8,7 @@ struct WorkspaceWindow: View {
 	static let id = "workspace"
 
 	@State private var model = WorkspaceModel(library: LaunchEnvironment.library(), localSettings: LaunchEnvironment.localSettings())
+	@State private var tour = GuidedTour(defaults: LaunchEnvironment.tourDefaults)
 	@SceneStorage("destination") private var storedDestination = Destination.start
 	@SceneStorage("budgetDirectory") private var storedBudgetDirectory = ""
 
@@ -15,7 +16,7 @@ struct WorkspaceWindow: View {
 		@Bindable var model = model
 		Group {
 			if model.phase == .open {
-				WorkspaceView(model: model)
+				WorkspaceView(model: model, tour: tour)
 			} else {
 				EmptyStateView(isWorking: model.phase == .working, newBudget: model.startNewBudget, importActualZip: chooseActualZip)
 			}
@@ -24,6 +25,7 @@ struct WorkspaceWindow: View {
 		.background(.surfaceWindow)
 		.tint(Color.accent)
 		.focusedSceneValue(\.workspace, model)
+		.focusedSceneValue(\.tour, tour)
 		.fileImporter(isPresented: $model.isImportPanelShown, allowedContentTypes: [.zip]) { result in
 			guard case .success(let zip) = result else { return }
 			Task { await importActualZip(zip) }
@@ -56,6 +58,11 @@ struct WorkspaceWindow: View {
 		}
 		.onChange(of: model.overview?.directory) { _, directory in
 			storedBudgetDirectory = directory?.path(percentEncoded: false) ?? ""
+			if directory == nil {
+				tour.stop()
+			} else {
+				Task { tour.offer(await model.tourBudget()) }
+			}
 		}
 		.task {
 			model.go(to: storedDestination)

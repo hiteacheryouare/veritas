@@ -25,6 +25,19 @@ enum LaunchEnvironment {
 		return BookmarkedBudgetSettings()
 	}
 
+	/// Where the tour remembers it was skipped or finished. UI tests get a
+	/// fresh store with the tour already seen, unless they pass `-VeritasTour YES`.
+	@MainActor static let tourDefaults: UserDefaults = {
+		#if DEBUG
+		if StubLaunch.current != nil || RealCoreLaunch.isOn, let defaults = UserDefaults(suiteName: "veritas-ui-test-tour") {
+			defaults.removePersistentDomain(forName: "veritas-ui-test-tour")
+			defaults.set(!UserDefaults.standard.bool(forKey: "VeritasTour"), forKey: GuidedTour.finishedKey)
+			return defaults
+		}
+		#endif
+		return .standard
+	}()
+
 	/// UI tests can't drive a folder panel, so the stub picks its folder itself.
 	static var backupFolderWithoutPanel: URL? {
 		#if DEBUG

@@ -32,7 +32,7 @@ public struct TourBudget: Hashable, Sendable {
 @MainActor
 @Observable
 public final class GuidedTour {
-	public static let finishedKey = "tourFinished"
+	public nonisolated static let finishedKey = "tourFinished"
 
 	public private(set) var steps: [TourStep] = []
 	public private(set) var index: Int?
