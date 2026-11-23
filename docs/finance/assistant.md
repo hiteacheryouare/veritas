@@ -242,3 +242,47 @@ The negative sentences of AI-5.3 follow a negative Debt paydown or Savings line.
 - **AI-11.4** **Questions the tools cannot answer** (general advice, forecasts outside the tools, the market, the user's feelings about money). The answer is the redirect below, copied exactly, with no figure and no apology that starts "I can't". The model does not answer the question from general knowledge:
   - `Mo Nee answers from your own numbers: spending, income, budgets and which categories ran over their monthly budget. For example: "How much did I spend last month?", "Which categories ran over budget lately?" or "How much did I budget for Groceries this month?"`
 - **AI-11.5** **Tests.** The tool's tests pin AI-10.9's strings and AI-10.10's examples. The instruction tests pin AI-11.3's sentences exactly, and the redirect is a constant the panel's tests compare to AI-11.4.
+
+## AI-12 Spending by category (`spendingByCategory`)
+
+`spendingByCategory(period)` answers "what did I spend last month by category", "break down my spending", "what did I spend the most on" and questions like them. It is the same Expenses figure as `spending` (AI-2), broken into its category lines. It reads nothing but the register-scale Net Profit lines, it writes nothing (AI-1.4), and the model never ranks, sums or rounds (AI-1.1).
+
+- **AI-12.1** **Period.** It takes `period` exactly as `spending` does: the user's own words, resolved by the app against today (AI-6), with the same label rules and the same refusal (the period hint) for words it cannot read. "So far this month" is a partial range and "last month" a whole one.
+- **AI-12.2** **Which categories.** Every line of the Expenses section of the Net Profit report for the range (CLS-6, ST-1) is a candidate, so the lines add up to `expense_total` and the first line is the `spending` figure for the same period, to the cent. Nothing is filtered by the category's own flags or kind:
+  - Hidden and archived categories are included and labeled (AI-3.5, ST-1.3), because the `spending` total includes them. History is never dropped.
+  - Goal categories are included. Spending on a goal is spending (CLS-3.3), and a closed goal's category reads `(closed goal)`. D77 concerns a goal's suggestion, ETA and `available`, none of which this tool reads, so it does not apply.
+  - A category of kind `debt_principal` or `savings` appears only for rows that are `expense` rows, such as a purchase booked to it with no transfer (CLS-4 row 14, AI-3.1). Its principal and savings transfers are never in the Expenses section and never appear here.
+  - Income, internal transfers, card payments, off-budget accounts' own rows, debt paydown and savings are not in the Expenses section, so they are not here (CLS-2, AI-2.3).
+  - Rows with no category are one line, `Uncategorized (needs review)`, which can be negative (AI-2.5, CLS-4 row 15). A category whose group record is gone shows by its own label, for example `(deleted) Old Gym`.
+  - A category line whose total is 0 (a purchase and an equal refund in the same range) is left out. It changes nothing in the total, and it is not counted in `Everything else`.
+- **AI-12.3** **By group.** There is no group variant and no flag. A question "by group" is answered by `spending`, whose AI-2.2 part 3 already lists the Expenses line by category group, reconciled to the cent (AI-2.5). The routing sentence in AI-12.7 sends it there.
+- **AI-12.4** **Order and limit.** Lines are ordered by amount, largest first, with a negative last. Ties go to the name with case and accents folded (the AI-3.6 key), then to the category id. When there are at most 6 lines, all are shown. When there are more than 6, the first 5 are shown, then one line `Everything else (<n> categories): <amount>` where n is the number of lines left out (always at least 2) and the amount is their exact sum. Two shown lines with the same name key read `<name> in <group>` (AI-3.6). A line left out is never named.
+- **AI-12.5** **Reconciliation and rounding.** Every figure is an integer in minor units, summed in the core. Nothing is divided, so there is no rounding rule and no remainder to place. The shown lines plus `Everything else` equal `expense_total` to the cent, including negative lines. No percentages are printed. Signs follow CLS-6: money out is positive, a refund-heavy category is negative, the same direction as the Budget screen's activity (D78).
+- **AI-12.6** **Output lines.** The model copies the first line exactly and the rest as returned (AI-1.2). Amounts are on the register scale, formatted with the currency symbol and places as `spending` formats them (AI-1.5).
+  1. `Spending, <range>: <expense_total>`
+  2. `This is the Expenses line of the Net Profit report. Debt paydown and savings are not included.`
+  3. `Spending by category, <range>, largest first:`
+  4. One line per shown category: `<label>: <amount>`
+  5. `Everything else (<n> categories): <amount>` (only when more than 6 lines)
+
+  With no expense rows in the range, lines 1 and 2 are followed by `No expenses were recorded in <range>.` and no heading. A currency without 2 places needs no refusal: spending and its category lines are all register-scale figures, as in AI-8 example 14, and no budget figure is read. So the CLS-12.10 note does not apply here, and the figures print as `spending` prints them.
+- **AI-12.7** **Routing.** The model's instructions carry this sentence exactly, in place of the two that choose between `spending` and `categorySpending`: "For spending by category, a breakdown, or what was spent the most on, use spendingByCategory. For a total, or spending by group, use spending. Use categorySpending only when the question names one category or group." A question that names a category or group still goes to `categorySpending` (AI-3). `categorySpending` with no name keeps asking for one (AI-3.6) and never guesses.
+- **AI-12.8** **Worked examples (tests).** Today is 2026-11-22, a 2-place currency, amounts in cents in the data.
+  1. **More than 6 lines.** November rows, one expense line each: Rent 150000, Groceries 41200 (hidden), Utilities 12000, Gas 10000, Dining out 5000 (8000 less a 3000 refund), Fun Money 4500, Gifts 2500. Total 150000 + 41200 + 12000 + 10000 + 5000 + 4500 + 2500 = 225200. Seven lines, so 5 shown: 150000 + 41200 + 12000 + 10000 + 5000 = 218200, and Everything else (2 categories) = 4500 + 2500 = 7000. 218200 + 7000 = 225200. "This month" gives:
+     - `Spending, November 2026: $2,252.00`
+     - `This is the Expenses line of the Net Profit report. Debt paydown and savings are not included.`
+     - `Spending by category, November 2026, largest first:`
+     - `Rent: $1,500.00`, `Groceries (hidden): $412.00`, `Utilities: $120.00`, `Gas: $100.00`, `Dining out: $50.00`
+     - `Everything else (2 categories): $70.00`
+
+     The first line equals `spending` for the same range, and the hidden Groceries is in both.
+  2. **Exactly 6 lines.** Example 1 without Gifts: total 222700, all six shown (the sixth is `Fun Money: $45.00`), no Everything else line.
+  3. **A negative line.** Lines A 100000, B 90000, C 80000, D 70000, E 60000, F 50000 and Dining out -8000 (October purchase, November refund, AI-8 example 2). Total 450000 - 8000 = 442000. Shown: A to E = 400000. Everything else (2 categories) = 50000 + (-8000) = 42000, printed `$420.00`. 400000 + 42000 = 442000. The negative line is last, so it falls in Everything else.
+  4. **Uncategorized and deleted.** The AI-8 example 12 rows: Groceries 41200, Gas 10000, Dining out 5000, (deleted) Old Gym 1200, Uncategorized -4000. Five lines, all shown: `Groceries: $412.00`, `Gas: $100.00`, `Dining out: $50.00`, `(deleted) Old Gym: $12.00`, `Uncategorized (needs review): -$40.00`. Total 41200 + 10000 + 5000 + 1200 - 4000 = 53400, `Spending, November 2026: $534.00`.
+  5. **Ties.** Coffee 5000 and Dining out 5000 tie at the fifth and sixth places of a seven-line list. The fold key `coffee` is before `dining out`, so Coffee is shown and Dining out falls into Everything else. Two categories both named Misc, in Everyday (3000) and Fun (2000), shown together, read `Misc in Everyday: $30.00` and `Misc in Fun: $20.00`.
+  6. **Zero line.** A -8000 Dining out purchase and its +8000 refund in the same month net to 0. The line is left out and is not counted in Everything else (AI-12.2).
+  7. **Goal and misfiled lines.** A -20000 card purchase in the open goal's category Vacation: `Vacation: $200.00`, included. In a closed goal, `Vacation (closed goal): $200.00`. A -2000 purchase booked to the debt-kind category Car Loan Principal with no transfer (CLS-4 row 14): `Car Loan Principal: $20.00`. The -30000 principal transfer is not in the Expenses section and does not appear.
+  8. **No rows.** October with no expense rows: `Spending, October 2026: $0.00`, the AI-12.6 second line, `No expenses were recorded in October 2026.`
+  9. **Partial range.** "So far this month": `Spending, November 1 to 22, 2026: ...` and `Spending by category, November 1 to 22, 2026, largest first:`. The lines are those of rows dated in the range only.
+  10. **0-place currency.** A made-up yen budget, Groceries stored -50000 and Transit stored -20000 (register scale, AI-8 example 14): `Spending, November 2026: ¥700`, then `Groceries: ¥500` and `Transit: ¥200`. 50000 + 20000 = 70000. No refusal and no CLS-12.10 note.
+  11. **By group.** "What did I spend by group last month?" is answered by `spending`, whose AI-2.2 group lines reconcile to the total. `spendingByCategory` is not called.
