@@ -8,28 +8,34 @@ struct AssistantPanel: View {
 	@Bindable var model: AssistantPanelModel
 	@FocusState private var isFieldFocused: Bool
 	@State private var position = ScrollPosition(edge: .bottom)
-	@State private var panelWidth: CGFloat = 0
 
 	/// How close to the end still counts as reading the newest message.
 	static let followSlack: CGFloat = 24
-	/// Room kept for a scroller that takes space ("Always show scroll bars"),
-	/// so the messages don't narrow and reflow when one appears. Overlay
-	/// scrollers take none.
-	static var scrollerRoom: CGFloat {
-		NSScroller.preferredScrollerStyle == .legacy ? NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy) : 0
-	}
+	/// Room always kept for a scroller that takes space ("Always show scroll
+	/// bars"), so the messages don't narrow and reflow when one appears. The
+	/// system's preferred style can change while the panel is open, so it
+	/// isn't consulted.
+	static let scrollerRoom = NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
 
-	private var contentWidth: CGFloat? {
-		panelWidth > 0 ? max(0, panelWidth - 2 * Spacing.s3 - Self.scrollerRoom) : nil
+	/// The messages' width, read from the panel's own width during layout,
+	/// so it is right on the first frame and never waits for a state update.
+	static func contentWidth(panel: CGFloat) -> CGFloat {
+		max(0, panel - 2 * Spacing.s3 - scrollerRoom)
 	}
 
 	var body: some View {
-		VStack(spacing: 0) {
-			header
-			Divider()
-			conversation
-			Divider()
-			composer
+		GeometryReader { geometry in
+			VStack(spacing: 0) {
+				header
+				Divider()
+				if model.exchanges.isEmpty {
+					AssistantEmptyState(model: model)
+				} else {
+					conversation(width: Self.contentWidth(panel: geometry.size.width))
+				}
+				Divider()
+				composer
+			}
 		}
 		.background(.surfaceWindow)
 		.onAppear { isFieldFocused = true }
@@ -64,27 +70,18 @@ struct AssistantPanel: View {
 
 	/// The newest answer stays in view as it grows, but only for a reader
 	/// already at the bottom, and without animating each update.
-	private var conversation: some View {
+	private func conversation(width: CGFloat) -> some View {
 		ScrollView {
 			VStack(spacing: Spacing.s3) {
-				if model.exchanges.isEmpty {
-					Text("Ask about spending, income, budgets, balances, goals or taxes in this budget.")
-						.font(.text(.body))
-						.foregroundStyle(.textSecondary)
-						.multilineTextAlignment(.center)
-						.frame(maxWidth: .infinity)
-						.padding(.top, Spacing.s6)
-				}
 				ForEach(model.exchanges) { exchange in
 					QuestionBubble(text: exchange.question)
-					AnswerBubble(exchange: exchange)
+					AnswerBubble(exchange: exchange, width: width - Spacing.s6)
 				}
 			}
-			.frame(width: contentWidth)
+			.frame(width: width)
 			.padding(Spacing.s3)
 			.frame(maxWidth: .infinity, alignment: .leading)
 		}
-		.onGeometryChange(for: CGFloat.self) { $0.size.width } action: { panelWidth = $0 }
 		.scrollPosition($position)
 		.defaultScrollAnchor(.bottom)
 		.onScrollGeometryChange(for: ScrollFill.self) { geometry in
@@ -121,6 +118,48 @@ struct AssistantPanel: View {
 		.font(.text(.body))
 		.padding(Spacing.s3)
 		.background(.bar)
+	}
+}
+
+/// What Mo Nee answers, and AI-11.4's example questions, each of which asks
+/// itself when clicked. It shows only while the conversation is empty.
+struct AssistantEmptyState: View {
+	let model: AssistantPanelModel
+
+	var body: some View {
+		VStack(spacing: Spacing.s4) {
+			Spacer(minLength: 0)
+			Text(AssistantPrompt.scope)
+				.font(.text(.heading))
+				.foregroundStyle(.textPrimary)
+				.multilineTextAlignment(.center)
+				.accessibilityLabel(AssistantPrompt.scope.replacingOccurrences(of: AssistantName.shown, with: AssistantName.spoken))
+			VStack(spacing: Spacing.s2) {
+				ForEach(AssistantPrompt.examples, id: \.self) { example in
+					Button {
+						model.ask(example)
+					} label: {
+						Text(example)
+							.font(.text(.body))
+							.foregroundStyle(.textPrimary)
+							.multilineTextAlignment(.center)
+							.fixedSize(horizontal: false, vertical: true)
+							.padding(.horizontal, Spacing.s3)
+							.padding(.vertical, Spacing.s2)
+							.frame(maxWidth: .infinity)
+							.background(.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.section, style: .continuous))
+							.overlay(RoundedRectangle(cornerRadius: Radius.section, style: .continuous).strokeBorder(Color.separator))
+							.contentShape(RoundedRectangle(cornerRadius: Radius.section, style: .continuous))
+					}
+					.buttonStyle(.plain)
+					.accessibilityLabel("Ask: \(example)")
+						.accessibilityIdentifier("assistant.example")
+				}
+			}
+			Spacer(minLength: 0)
+		}
+		.padding(Spacing.s5)
+		.frame(maxWidth: .infinity, maxHeight: .infinity)
 	}
 }
 
@@ -191,6 +230,8 @@ extension EnvironmentValues {
 
 struct AnswerBubble: View {
 	let exchange: AssistantExchange
+	/// Fixed while the answer streams, so the bubble never resizes as words arrive.
+	var width: CGFloat?
 	@Environment(\.assistantReplyFrame) private var reportFrame
 
 	private var failure: String? {
@@ -222,7 +263,8 @@ struct AnswerBubble: View {
 				}
 				.font(.text(.body))
 				.textSelection(.enabled)
-				.frame(maxWidth: .infinity, alignment: .leading)
+				.frame(maxWidth: width.map { $0 - 2 * Spacing.s3 } ?? .infinity, alignment: .leading)
+				.frame(minWidth: width.map { $0 - 2 * Spacing.s3 }, alignment: .leading)
 				.padding(.horizontal, Spacing.s3)
 				.padding(.vertical, Spacing.s2)
 				.background(.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.section, style: .continuous))

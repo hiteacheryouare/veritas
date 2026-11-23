@@ -60,6 +60,12 @@ public final class AssistantPanelModel {
 
 	public var canAsk: Bool { !isAnswering && !question.isEmpty }
 
+	/// Asks `question` at once, as the empty panel's example buttons do.
+	public func ask(_ question: String) {
+		draft = question
+		ask()
+	}
+
 	public func ask() {
 		guard canAsk else { return }
 		guard let answerer = answerer ?? context().map(makeAnswerer) else { return }
