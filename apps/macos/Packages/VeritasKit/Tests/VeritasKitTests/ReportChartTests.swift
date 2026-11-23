@@ -199,3 +199,50 @@ struct SankeyCardReadoutTests {
 		#expect(SankeyCardNode.readout(.node(2), nodes: nodes, links: links) == nil, "a hidden node has no words")
 	}
 }
+
+struct DashboardCompactionTests {
+	private func card(_ id: String, x: Int64, y: Int64, width: Int64, height: Int64) -> DashboardCard {
+		DashboardCard(id: id, kind: .summary, rawKind: "summary-card", x: x, y: y, width: width, height: height, config: .empty, content: .missingReport)
+	}
+
+	@Test func aStoredGapBetweenRowsCloses() {
+		// The audit's M7: the third row stored two rows below the second.
+		let sheet = DashboardSheet(id: "p", name: "Main", cards: [
+			card("a", x: 0, y: 0, width: 3, height: 2), card("b", x: 3, y: 0, width: 3, height: 2),
+			card("worth", x: 0, y: 2, width: 6, height: 2),
+			card("month", x: 0, y: 6, width: 4, height: 2), card("avg", x: 4, y: 6, width: 4, height: 2)
+		])
+		#expect(sheet.rows == ["a": 0, "b": 0, "worth": 2, "month": 4, "avg": 4])
+	}
+
+	@Test func aGapInOneColumnClosesAsInActual() {
+		// react-grid-layout's vertical compaction: a card rises in its own columns,
+		// even while a taller card holds those rows elsewhere.
+		let sheet = DashboardSheet(id: "p", name: "Main", cards: [
+			card("short", x: 0, y: 0, width: 6, height: 2), card("tall", x: 6, y: 0, width: 6, height: 4),
+			card("under", x: 0, y: 4, width: 6, height: 2), card("beside", x: 6, y: 4, width: 6, height: 2)
+		])
+		#expect(sheet.rows == ["short": 0, "tall": 0, "under": 2, "beside": 4])
+	}
+
+	@Test func moveDownSticksAfterCompaction() {
+		// The UI journey's Net worth: Move ▸ Down puts it under the next card in its
+		// columns, which rises into its place, so it really moves.
+		var sheet = DashboardSheet(id: "p", name: "Main", cards: [
+			card("salary", x: 0, y: 0, width: 3, height: 2),
+			card("worth", x: 0, y: 2, width: 6, height: 2), card("flow", x: 6, y: 2, width: 6, height: 2),
+			card("month", x: 0, y: 6, width: 4, height: 2)
+		])
+		let worth = try! #require(sheet.cards.first { $0.id == "worth" })
+		#expect(sheet.rows["worth"] == 2)
+		let placement = try! #require(sheet.placementDown(worth))
+		#expect(placement.id == "worth")
+		sheet.cards = sheet.cards.map { $0.id == placement.id ? DashboardCard(id: $0.id, kind: $0.kind, rawKind: $0.rawKind, x: $0.x, y: placement.y, width: $0.width, height: $0.height, config: $0.config, content: $0.content) : $0 }
+		#expect(sheet.rows["month"] == 2, "the card below rises into its place")
+		#expect(sheet.rows["worth"] == 4, "and Net worth sits under it")
+		let moved = try! #require(sheet.cards.first { $0.id == "worth" })
+		#expect(sheet.placementDown(moved) == nil, "nothing below: Move ▸ Down is off")
+		let up = try! #require(sheet.placementUp(moved))
+		#expect(up.id == "month", "Move ▸ Up puts the card above under this one")
+	}
+}

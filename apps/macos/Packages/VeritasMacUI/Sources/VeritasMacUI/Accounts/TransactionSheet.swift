@@ -120,7 +120,7 @@ struct TransactionSheet: View {
 			}
 			HStack {
 				if !model.choseTransfer {
-					Button(model.isSplit ? "Add Split Line" : "Split") { model.addSplitLine() }
+					Button(model.isSplit ? "Add split line" : "Split") { model.addSplitLine() }
 						.accessibilityIdentifier("transaction.split")
 				}
 				Spacer()

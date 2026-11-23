@@ -23,12 +23,13 @@
 
 	--color-text-primary: #1c1c21;
 	--color-text-secondary: #66666f;
-	--color-text-tertiary: #9c9ca5;
+	--color-text-tertiary: #6c6c75;
 	--color-text-paper: #23232a;
 
 	--color-accent: #3b3d45;
 	--color-accent-fill: #2f3138;
 	--color-accent-soft: rgba(40, 42, 52, 0.09);
+	--color-surface-selected: rgba(20, 22, 30, 0.08);
 	--color-focus-ring: #3b3d45;
 	--color-text-on-accent: #f5f5f7;
 
@@ -42,14 +43,14 @@
 	--color-money-overspent-fill: #e0474e;
 	--color-money-income: #1668bd;
 	--color-money-income-fill: #2f84dc;
-	--color-money-neutral: #9c9ca5;
+	--color-money-neutral: #6c6c75;
 
 	--color-chart-expense: #6e6e78;
 	--color-chart-expense-soft: rgba(110, 110, 120, 0.28);
 	--color-chart-savings: #26a066;
 	--color-chart-debt-paydown: #8b5e34;
 	--color-chart-unallocated: rgba(47, 132, 220, 0.35);
-	--color-chart-band: rgba(58, 58, 66, 0.1);
+	--color-chart-band: rgba(58, 58, 66, 0.2);
 	--color-chart-grid: rgba(20, 22, 30, 0.07);
 	--color-scenario-baseline: #3a3a42;
 	--color-scenario-1: #2f84dc;
@@ -86,12 +87,13 @@
 
 	--color-text-primary: #ececf0;
 	--color-text-secondary: #a2a2ab;
-	--color-text-tertiary: #74747d;
+	--color-text-tertiary: #97979f;
 	--color-text-paper: #23232a;
 
 	--color-accent: #d9dae0;
 	--color-accent-fill: #e2e3e8;
 	--color-accent-soft: rgba(240, 240, 250, 0.11);
+	--color-surface-selected: rgba(240, 240, 250, 0.12);
 	--color-focus-ring: #d9dae0;
 	--color-text-on-accent: #1c1c21;
 
@@ -105,14 +107,14 @@
 	--color-money-overspent-fill: #f05650;
 	--color-money-income: #5eaaf5;
 	--color-money-income-fill: #4796e6;
-	--color-money-neutral: #74747d;
+	--color-money-neutral: #97979f;
 
 	--color-chart-expense: #a5a5ae;
 	--color-chart-expense-soft: rgba(165, 165, 174, 0.3);
 	--color-chart-savings: #3fb06d;
 	--color-chart-debt-paydown: #c99a6b;
 	--color-chart-unallocated: rgba(94, 170, 245, 0.4);
-	--color-chart-band: rgba(226, 226, 232, 0.1);
+	--color-chart-band: rgba(226, 226, 232, 0.2);
 	--color-chart-grid: rgba(240, 240, 250, 0.07);
 	--color-scenario-baseline: #e2e2e8;
 	--color-scenario-1: #5eaaf5;

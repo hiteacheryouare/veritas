@@ -2035,3 +2035,41 @@ fn every_forecast_loan_is_listed_and_a_clean_one_has_no_notes() {
 		forecast.unforecast
 	);
 }
+
+#[test]
+fn st3_a_budget_with_no_account_groups_sends_the_type_heading_ids() {
+	// fixtures/synthetic/small has no account_groups rows, so every section is
+	// an ST-3 type heading with its documented id (contracts/ffi.md, balanceSheet).
+	let scratch = Scratch::new("type-headings");
+	let session = block_on(Session::import_actual_zip(
+		fixture("small"),
+		scratch.budget(),
+		CancelToken::new(),
+	))
+	.unwrap();
+	let sheet = block_on(session.balance_sheet(TODAY.to_owned(), CancelToken::new())).unwrap();
+	let expected = [
+		("type.cash", "Cash"),
+		("type.credit", "Credit"),
+		("type.investments", "Investments & Other assets"),
+		("type.loans", "Loans"),
+	];
+	let sections: Vec<_> = sheet.assets.iter().chain(&sheet.liabilities).collect();
+	assert!(!sections.is_empty());
+	for section in sections {
+		let pair = (
+			section.group_id.as_deref().unwrap_or_default(),
+			section.group_name.as_deref().unwrap_or_default(),
+		);
+		assert!(expected.contains(&pair), "{pair:?}");
+		assert_eq!(
+			section.total,
+			section.accounts.iter().map(|line| line.amount).sum::<i64>()
+		);
+	}
+	assert_eq!(
+		sheet.total_assets - sheet.total_liabilities,
+		sheet.net_worth
+	);
+	session.close().unwrap();
+}

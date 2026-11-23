@@ -43,7 +43,7 @@ public struct PaletteIndex: Sendable {
 		let commands = PaletteCommand.allCases.map {
 			PaletteItem(title: $0.title, detail: $0 == .addTransaction ? "⌘N" : nil, target: .perform($0))
 		}
-		let screens = Screen.allCases.map {
+		let screens = Screen.allCases.filter { $0 != .insights }.map {
 			PaletteItem(title: $0.title, detail: nil, target: .go(.screen($0)))
 		}
 		let accountItems = accounts.map {

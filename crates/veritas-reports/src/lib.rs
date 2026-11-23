@@ -44,7 +44,8 @@ pub use sankey::{Flow, Node, NodeKind, Sankey, sankey};
 pub use standard::{NetWorthPoint, net_profit_by_month, net_worth_by_month};
 pub use statements::{
 	AccountGroupSection, BalanceSheet, CashFlow, IncomeStatement, OwnersEquity, SheetLine,
-	StatementGroup, balance_sheet, cash_flow, cash_flow_by_month, income_statement, owners_equity,
+	StatementGroup, TypeHeading, balance_sheet, cash_flow, cash_flow_by_month, income_statement,
+	owners_equity,
 };
 pub use tax::{
 	Bucket, BucketTotal, Direction, Source, TaxRow, TaxRowText, TaxSummary, detail_csv,

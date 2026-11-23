@@ -81,8 +81,13 @@ public enum RuleWords {
 	}
 
 	/// A condition as the rules list reads it: `imported payee contains "AMZN"`.
-	public static func condition(_ condition: RuleCondition, names: BudgetNames, format: MoneyFormat) -> String {
+	/// A bill's date condition holds Actual's recurrence, which only the core
+	/// reads: `schedule` is the bill's own date from `bills(today:)`, said as the Bills screen says it.
+	public static func condition(_ condition: RuleCondition, names: BudgetNames, format: MoneyFormat, schedule: BillDate? = nil) -> String {
 		let words = "\(field(condition.field)) \(op(condition.op, on: condition.field))"
+		if condition.field == .date, case .raw = condition.value, let schedule {
+			return "\(words) \(BillWords.sentence(schedule))"
+		}
 		let shown = value(condition.value, on: condition.field, names: names, format: format)
 		return shown.isEmpty ? words : "\(words) \(shown)"
 	}
@@ -187,7 +192,7 @@ public enum RuleWords {
 		case .bool(let flag): return flag ? "true" : "false"
 		case .percent(let percent): return (percent / 100).formatted(.percent.precision(.fractionLength(0...2)))
 		case .nothing: return ""
-		case .raw(let json): return json
+		case .raw(let json): return field == .date ? "a repeating date" : json
 		}
 	}
 
@@ -201,3 +206,4 @@ public enum RuleWords {
 		}
 	}
 }
+

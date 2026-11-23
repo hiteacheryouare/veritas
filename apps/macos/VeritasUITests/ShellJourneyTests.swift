@@ -38,8 +38,8 @@ final class ShellJourneyTests: XCTestCase {
 		app.sidebar("settings").click()
 		XCTAssertTrue(app.screen("settings").waitForExistence(timeout: 5))
 
-		// Reports opens on its first page, the dashboard.
-		let digits = ["1": "budget", "2": "accounts", "3": "bills", "4": "goals", "5": "dashboard", "6": "insights"]
+		// Reports opens on its first page, the dashboard, and Insights on Forecast.
+		let digits = ["1": "budget", "2": "accounts", "3": "bills", "4": "goals", "5": "dashboard", "6": "forecast"]
 		for (digit, screen) in digits.sorted(by: { $0.key < $1.key }) {
 			app.typeKey(digit, modifierFlags: .command)
 			XCTAssertTrue(app.screen(screen).waitForExistence(timeout: 5), "⌘\(digit) → \(screen)")

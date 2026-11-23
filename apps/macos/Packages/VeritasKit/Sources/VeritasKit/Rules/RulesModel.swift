@@ -58,6 +58,10 @@ public struct RuleApplying: Hashable, Sendable {
 @Observable
 public final class RulesModel {
 	public private(set) var rules: [RuleSentence] = []
+	/// Each bill's date from the core, by schedule id, so a bill's rule says its schedule in words.
+	public private(set) var schedules: [String: BillDate] = [:]
+	/// False until the first load has finished, so the screen can show it's loading.
+	public private(set) var hasLoaded = false
 	public private(set) var names = BudgetNames.empty
 	public var editing: RuleEditing?
 	public var applying: RuleApplying?
@@ -76,10 +80,16 @@ public final class RulesModel {
 	public var isReadOnly: Bool { workspace.readOnly != nil }
 
 	public func load() async {
+		defer { hasLoaded = true }
 		async let names = workspace.budgetNames()
+		let today = WorkspaceModel.today()
 		let loaded = await workspace.report { try await $0.rules() }
+		let bills = await workspace.report { try await $0.bills(today: today) }
 		self.names = await names
 		if let loaded { rules = loaded }
+		if let bills {
+			schedules = Dictionary(bills.compactMap { bill in bill.draft.map { (bill.id, $0.date) } }, uniquingKeysWith: { first, _ in first })
+		}
 	}
 
 	/// Actual's new rule: when imported payee contains something, set the category.

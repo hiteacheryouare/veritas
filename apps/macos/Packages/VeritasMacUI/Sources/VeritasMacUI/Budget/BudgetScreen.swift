@@ -10,6 +10,7 @@ struct BudgetScreen: View {
 	@State private var screen: BudgetScreenModel
 	@State private var isMovingBudget = false
 	@State private var isAddingGroup = false
+	@State private var showsBar = true
 	@FocusState private var hasKeyFocus: Bool
 
 	init(workspace: WorkspaceModel, screen: BudgetScreenModel? = nil) {
@@ -68,7 +69,12 @@ struct BudgetScreen: View {
 			.padding(.horizontal, Spacing.s5)
 			.padding(.bottom, Spacing.s6)
 			.frame(maxWidth: .infinity, alignment: .leading)
+			.contentTransition(.opacity)
+			.motion(.fast, value: screen.sheet?.month)
+			.onGeometryChange(for: Bool.self) { $0.size.width - 2 * Spacing.s5 >= EnvelopeLayout.widthWithBar } action: { showsBar = $0 }
+			.environment(\.showsDrainBar, showsBar)
 		}
+		.overlay { if screen.sheet == nil { ScreenState(kind: .loading) } }
 		.background(.surfaceWindow)
 		.focusable()
 		.focusEffectDisabled()
@@ -234,6 +240,7 @@ struct EnvelopeColumns: View {
 		}
 		.font(.text(.caption))
 		.foregroundStyle(.textTertiary)
+		.lineLimit(1)
 		.padding(.bottom, dense ? 0 : Spacing.s1)
 	}
 }
@@ -247,11 +254,15 @@ struct EnvelopeGrid<Name: View, Bar: View, Budgeted: View, Spent: View, Availabl
 	@ViewBuilder let spent: Spent
 	@ViewBuilder let available: Available
 
+	@Environment(\.showsDrainBar) private var showsBar
+
 	var body: some View {
 		HStack(spacing: Spacing.s4) {
-			name.frame(maxWidth: .infinity, alignment: .leading)
-			if !dense {
-				bar.frame(width: 160)
+			name
+				.frame(minWidth: EnvelopeLayout.nameMinimum, maxWidth: .infinity, alignment: .leading)
+				.layoutPriority(1)
+			if !dense, showsBar {
+				bar.frame(minWidth: 100, maxWidth: 160)
 			}
 			budgeted.frame(width: 110, alignment: .trailing)
 			spent.frame(width: 110, alignment: .trailing)
@@ -259,6 +270,17 @@ struct EnvelopeGrid<Name: View, Bar: View, Budgeted: View, Spent: View, Availabl
 		}
 		.padding(.horizontal, Spacing.s4)
 	}
+}
+
+enum EnvelopeLayout {
+	static let nameMinimum: CGFloat = 160
+	/// The narrowest the table can be and still draw the bar beside a readable name.
+	static let widthWithBar: CGFloat = nameMinimum + 100 + 110 + 110 + 150 + 4 * Spacing.s4 + 2 * Spacing.s4
+}
+
+extension EnvironmentValues {
+	/// False when the Budget table is too narrow for the drain bar and a readable name.
+	@Entry var showsDrainBar = true
 }
 
 /// CLS-12.10's fixed line under a 0-place budget's envelope numbers.

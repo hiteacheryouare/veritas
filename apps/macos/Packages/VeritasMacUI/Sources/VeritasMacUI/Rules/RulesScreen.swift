@@ -41,6 +41,7 @@ struct RulesScreen: View {
 			.padding(Spacing.s5)
 			.frame(maxWidth: .infinity, alignment: .leading)
 		}
+		.overlay { if !model.hasLoaded { ScreenState(kind: .loading) } }
 		.background(.surfaceWindow)
 		.toolbar {
 			ToolbarItem(placement: .primaryAction) {
@@ -70,9 +71,14 @@ private struct RuleRow: View {
 	let rule: RuleSentence
 	@State private var showsReasons = false
 
+	private var schedule: BillDate? {
+		if case .bill(let scheduleId) = rule.access { return model.schedules[scheduleId] }
+		return nil
+	}
+
 	var body: some View {
 		HStack(alignment: .top, spacing: Spacing.s4) {
-			RuleSentenceText(rule: rule, names: model.names, format: model.format)
+			RuleSentenceText(rule: rule, names: model.names, format: model.format, schedule: schedule)
 				.frame(maxWidth: .infinity, alignment: .leading)
 			VStack(alignment: .trailing, spacing: Spacing.s1) {
 				trailing
@@ -158,11 +164,12 @@ struct RuleSentenceText: View {
 	let rule: RuleSentence
 	let names: BudgetNames
 	let format: MoneyFormat
+	var schedule: BillDate?
 
 	var body: some View {
 		VStack(alignment: .leading, spacing: 2) {
 			ForEach(Array(rule.conditions.enumerated()), id: \.offset) { index, condition in
-				Text("\(lead(index)) \(RuleWords.condition(condition, names: names, format: format))")
+				Text("\(lead(index)) \(RuleWords.condition(condition, names: names, format: format, schedule: schedule))")
 					.foregroundStyle(.textPrimary)
 			}
 			ForEach(Array(actionLines.enumerated()), id: \.offset) { _, line in

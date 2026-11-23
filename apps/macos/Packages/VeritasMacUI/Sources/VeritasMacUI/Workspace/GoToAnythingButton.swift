@@ -1,23 +1,19 @@
 import SwiftUI
 import VeritasDesign
 
-/// Looks like a search field, as in the mockups. With a Spacer in its label
-/// SwiftUI left the item out of the toolbar entirely, so the width is fixed.
+/// A magnifier with its shortcut. It used to look like a wide search field,
+/// which pushed other toolbar items into the overflow menu at 1280 pt.
 struct GoToAnythingButton: View {
 	let action: () -> Void
 
 	var body: some View {
 		Button(action: action) {
-			HStack(spacing: 6) {
+			HStack(spacing: 4) {
 				Image(systemName: "magnifyingglass")
-				Text("Go to anything")
-			}
-			.frame(width: 186, alignment: .leading)
-			.overlay(alignment: .trailing) {
 				Text("⌘K")
 					.font(.text(.caption))
+					.foregroundStyle(.textSecondary)
 			}
-			.foregroundStyle(.textTertiary)
 		}
 		.help("Go to anything (⌘K)")
 		.accessibilityLabel("Go to anything")

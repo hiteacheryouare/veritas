@@ -167,11 +167,11 @@ fn november_brings_in_new_accounts_and_a_card_payment_still_in_transit() {
 		listed(&s.sheet, Side::Asset),
 		named(&[
 			("CHK", 805_299, false),
+			("CU", 0, false),
 			("HYSA", 1_386_920, false),
 			("401K", 3_250_000, false),
 			("BRK", 812_345, false),
 			("OLDSAV", 1_000, true),
-			("CU", 0, false),
 		]),
 		"an open account with nothing in it yet is still listed"
 	);
@@ -233,12 +233,12 @@ fn december_overpays_the_car_loan_into_an_asset_and_saves_across_the_year_end() 
 		listed(&s.sheet, Side::Asset),
 		named(&[
 			("CHK", 883_774, false),
+			("CU", 25_000, false),
 			("HYSA", 1_441_230, false),
 			("401K", 3_287_500, false),
 			("AUTO", 500, true),
 			("BRK", 804_135, false),
 			("OLDSAV", 1_000, true),
-			("CU", 25_000, false),
 		])
 	);
 	assert_eq!(
@@ -295,11 +295,11 @@ fn january_receives_the_year_end_savings_and_the_car_loan_refund_closes_it_out()
 		listed(&s.sheet, Side::Asset),
 		named(&[
 			("CHK", 1_015_491, false),
+			("CU", 24_925, false),
 			("HYSA", 1_545_650, false),
 			("401K", 3_325_000, false),
 			("BRK", 824_135, false),
 			("OLDSAV", 1_000, true),
-			("CU", 24_925, false),
 		]),
 		"the car loan is closed at zero, so it leaves the sheet"
 	);
