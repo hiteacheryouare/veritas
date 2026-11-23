@@ -33,9 +33,9 @@ pub struct EnvelopeRow {
 	pub note: Option<String>,
 	/// v20. The category's effective kind (CLS-3, CLS-3.1): Actual's income
 	/// flag wins, else the Veritas kind, else `expense`. Hidden and archived
-	/// categories keep their kind (CLS-3.2). Swift's default is `.expense`
-	/// (`Sources/VeritasCore/CategoryKindDefault.swift`).
-	#[uniffi(default)]
+	/// categories keep their kind (CLS-3.2). uniffi has no enum default, so
+	/// Swift written before v20 uses an initializer without `kind` that gives
+	/// `.expense` (`Sources/VeritasCore/EnvelopeRowDefaults.swift`).
 	pub kind: CategoryKind,
 }
 
