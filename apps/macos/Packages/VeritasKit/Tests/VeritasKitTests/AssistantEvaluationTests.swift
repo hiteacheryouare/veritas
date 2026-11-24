@@ -125,14 +125,14 @@ struct AssistantEvaluationTests {
 			},
 			Case(question: "What did I spend last month by category?", expected: topSeptember, context: end, label: "September 2026", known: fixtureNames, sources: [byCategory.joined(separator: "\n")]) { answer in
 				let figures = AssistantEvaluationCheck.figures(in: answer)
-				return figures.contains(topSeptemberFigure) && figures.isSubset(of: byCategoryFigures) && !answer.lowercased().contains("which one") && Self.clean(answer)
+				return AssistantEvaluationCheck.leads(answer, with: septemberTotal) && figures.contains(topSeptemberFigure) && figures.isSubset(of: byCategoryFigures) && !answer.lowercased().contains("which one") && Self.clean(answer)
 			},
 			Case(question: "What did I spend the most on last month?", expected: topSeptember, context: end, label: "September 2026", known: fixtureNames, sources: [byCategory.joined(separator: "\n")]) { answer in
-				AssistantEvaluationCheck.figures(in: answer).contains(topSeptemberFigure) && Self.clean(answer)
+				AssistantEvaluationCheck.figures(in: answer).contains(topSeptemberFigure) && !AssistantEvaluationCheck.mislabelsTotal(answer, total: septemberTotal) && Self.clean(answer)
 			},
 			Case(question: "Break down my spending by group for last month.", expected: "the group lines of spending", context: end, label: "September 2026", known: fixtureNames, sources: [spendingText]) { answer in
 				let figures = AssistantEvaluationCheck.figures(in: answer)
-				return answer.contains(everydayName) && figures.contains(everydayFigure) && figures.isSubset(of: spendingFigures) && !answer.contains("Everything else") && Self.clean(answer)
+				return AssistantEvaluationCheck.leads(answer, with: septemberTotal) && answer.contains(everydayName) && figures.contains(everydayFigure) && figures.isSubset(of: spendingFigures) && !answer.contains("Everything else") && Self.clean(answer)
 			}
 		]
 	}
@@ -224,8 +224,19 @@ struct AssistantEvaluationTests {
 /// How the evaluation reads an answer, checked without the model.
 struct AssistantEvaluationCheck {
 	/// Words that label a figure without naming a category or group: the
-	/// tools' fixed wording and the model's own headings.
-	static let fixedWords = ["total", "spending", "spent", "income", "expenses", "net profit", "net cash flow", "everything else", "average", "budget", "activity", "available", "debt paydown", "savings", "from", "category", "group", "breakdown"]
+	/// tools' fixed wording, the model's own headings and dates. A name made
+	/// only of these is a heading; one with any other word, such as
+	/// "Pet Spending", is checked.
+	static let headingWords = Set([
+		"total", "spending", "spent", "income", "expenses", "expense", "net", "profit", "cash", "flow", "everything", "else", "average", "budget", "budgeted",
+		"activity", "available", "debt", "paydown", "savings", "from", "category", "categories", "group", "groups", "breakdown", "by", "your", "my", "the",
+		"of", "for", "in", "on", "last", "this", "month", "year", "line", "is", "was", "you", "and", "a", "an", "to", "so", "far"
+	]).union(monthNames)
+
+	static func isHeading(_ name: String) -> Bool {
+		let words = name.lowercased().split(whereSeparator: { !$0.isLetter }).map(String.init)
+		return words.allSatisfy(headingWords.contains)
+	}
 
 	/// The names an answer attaches to a figure ("Rent: 1,800.00",
 	/// "Bills (1,934.49)") and any it quotes, without a trailing ST-10.3 label.
@@ -244,7 +255,7 @@ struct AssistantEvaluationCheck {
 		}
 		.filter { name in
 			let lower = name.lowercased()
-			return !lower.isEmpty && !lower.contains(where: \.isNumber) && !fixedWords.contains { lower.contains($0) }
+			return !lower.isEmpty && !lower.contains(where: \.isNumber) && !isHeading(name)
 		})
 	}
 
@@ -262,6 +273,29 @@ struct AssistantEvaluationCheck {
 		dates(in: firstSentence(answer)).isSubset(of: dates(in: label))
 	}
 
+	/// The total's own wording, which may only ever sit beside the total.
+	static let totalWords = ["total", "spending,", "expenses line"]
+
+	/// The answer's lines, split again at sentence breaks (a decimal point is not one).
+	static func sentences(_ answer: String) -> [String] {
+		answer.split(separator: "\n").flatMap { line in
+			String(line).split(separator: /[.!?]\s+(?=[A-Z])/).map(String.init)
+		}
+	}
+
+	/// AI-1.2: a line or sentence that uses the total's wording ("total",
+	/// "Spending, <range>:", "the Expenses line") with any figure but the
+	/// total, such as "Rent: 1,800.00 This is the Expenses line".
+	static func mislabelsTotal(_ answer: String, total: String) -> Bool {
+		let wanted = figures(in: total)
+		return sentences(answer).contains { sentence in
+			let lower = sentence.lowercased()
+			guard totalWords.contains(where: lower.contains) else { return false }
+			let found = figures(in: sentence).filter { $0.contains(".") }
+			return !found.isEmpty && !found.isSubset(of: wanted)
+		}
+	}
+
 	/// Whether `name` is in `text` as whole words, so "Car" doesn't match "Car loan".
 	static func mentions(_ text: String, _ name: String, ignoringCase: Bool = true) -> Bool {
 		let pattern = "(?<![A-Za-z0-9])" + NSRegularExpression.escapedPattern(for: name) + "(?![A-Za-z0-9])"
@@ -277,8 +311,7 @@ struct AssistantEvaluationCheck {
 	static func ungrounded(_ answer: String, in sources: [String], known: [String] = []) -> Set<String> {
 		let text = sources.joined(separator: "\n")
 		let prose = known.filter { name in
-			let lower = name.lowercased()
-			return !name.isEmpty && !fixedWords.contains { lower.contains($0) } && mentions(answer, name, ignoringCase: false)
+			!name.isEmpty && !isHeading(name) && mentions(answer, name, ignoringCase: false)
 		}
 		let returned = Set(labelledNames(in: text).union(known.filter { mentions(text, $0) }).map { $0.lowercased() })
 		return Set(labelledNames(in: answer).union(prose).filter { !returned.contains($0.lowercased()) })
@@ -286,6 +319,14 @@ struct AssistantEvaluationCheck {
 
 	static func grounded(_ answer: String, in sources: [String], known: [String] = []) -> Bool {
 		ungrounded(answer, in: sources, known: known).isEmpty
+	}
+
+	@Test func theTotalsWordingSitsOnlyBesideTheTotal() {
+		#expect(Self.mislabelsTotal("Rent: 1,800.00 This is the Expenses line of the Net Profit report.", total: "2,443.61"))
+		#expect(Self.mislabelsTotal("Your total spending in September 2026 was 1,800.00. Rent: 1,800.00.", total: "2,443.61"))
+		#expect(!Self.mislabelsTotal("Spending, September 2026: 2,443.61\nThis is the Expenses line of the Net Profit report.\nRent: 1,800.00", total: "2,443.61"))
+		#expect(!Self.mislabelsTotal("You spent the most on Rent: 1,800.00.", total: "2,443.61"))
+		#expect(!Self.leads("Spending, September 2026: 1,800.00\nRent: 1,800.00", with: "2,443.61"), "a category line quoted as the total fails the headline check")
 	}
 
 	@Test func theHeadlineNamesOnlyTheToolsDates() {
@@ -302,6 +343,8 @@ struct AssistantEvaluationCheck {
 		#expect(!Self.grounded("- Utilities: 69.99\n- Rent: 1,800.00", in: [tool]), "an invented name fails")
 		#expect(Self.ungrounded("The names suggested are \"Entertainment\" and \"Rent\".", in: [tool]) == ["Entertainment"], "a quoted invented name fails")
 		#expect(!Self.grounded("- Car: 20.00", in: ["Car loan: 20.00"]), "names match on word boundaries, not substrings")
+		#expect(!Self.grounded("- Pet Spending: 12.00\n- Rent: 1,800.00", in: [tool]), "an invented name with a heading word in it is still checked")
+		#expect(Self.grounded("Total Spending: 2,443.61\nRent: 1,800.00", in: [tool]), "a name made only of heading words is a heading")
 		#expect(!Self.grounded("You spent the most on Gas last month.", in: [tool], known: ["Rent", "Gas", "Groceries"]), "a budget name in prose must be in the tool's output")
 		#expect(Self.grounded("You spent the most on Rent last month, and your gas bill was small.", in: [tool], known: ["Rent", "Gas"]), "prose names match as the budget writes them, so lowercase prose isn't a name")
 	}

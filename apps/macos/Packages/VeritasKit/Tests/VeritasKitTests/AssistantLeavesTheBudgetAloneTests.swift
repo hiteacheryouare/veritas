@@ -32,6 +32,7 @@ struct AssistantLeavesTheBudgetAloneTests {
 				_ = try? await CashFlowTool(context: context).call(arguments: .init(period: period))
 				_ = try? await SpendingTool(context: context).call(arguments: .init(period: period))
 				_ = try? await IncomeTool(context: context).call(arguments: .init(period: period))
+				_ = try? await SpendingByCategoryTool(context: context).call(arguments: .init(period: period))
 				for name in ["Groceries", "everyday", "groc", "", "'; DROP TABLE categories; --"] {
 					_ = try? await CategorySpendingTool(context: context).call(arguments: .init(name: name, period: period))
 					_ = try? await BudgetTool(context: context).call(arguments: .init(name: name, period: period))
@@ -42,6 +43,9 @@ struct AssistantLeavesTheBudgetAloneTests {
 			}
 			for year in [2026, 2031, 1900, 99_999, -1] {
 				_ = try? await TaxSummaryTool(context: context).call(arguments: .init(year: year))
+			}
+			for today in [context.today, "2026-11-22", "2026-11-01", "2026-01-15", "2031-12-31", "1999-01-01", "2026-02-30", "soon"] {
+				_ = try? await BudgetHabitsTool(context: AssistantContext(queries: context.queries, format: context.format, today: today)).call(arguments: .init())
 			}
 			_ = try? await AccountsTool(context: context).call(arguments: .init())
 			_ = try? await GoalsTool(context: context).call(arguments: .init())

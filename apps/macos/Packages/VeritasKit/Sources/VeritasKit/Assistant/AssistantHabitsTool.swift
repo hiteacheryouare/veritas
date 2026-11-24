@@ -2,9 +2,6 @@ import Foundation
 import VeritasCore
 
 /// docs/finance/assistant.md AI-10: the categories that ran over their
-/// monthly budget in most of the last 3 complete months, from the Budget
-/// screen's own figures, and one figure that could be freed.
-/// docs/finance/assistant.md AI-10: the categories that ran over their
 /// monthly budget in most of the last 3 complete months. The core read
 /// `budgetHabits` computes every figure; this only formats them.
 struct BudgetHabitsTool: AssistantTool {
