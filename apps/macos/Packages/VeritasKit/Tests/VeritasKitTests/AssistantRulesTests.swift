@@ -69,6 +69,8 @@ struct CannedQueries: ReadOnlyBudgetQueries {
 	var goalList: GoalList?
 
 	func netProfitPeriod(first: String, last: String) async throws -> NetProfitPeriod { throw Missing() }
+	func budgetHabits(today: String) async throws -> BudgetHabits { throw Missing() }
+	func spendingByCategory(first: String, last: String) async throws -> CategoryBreakdown { throw Missing() }
 	func balanceSheet(asOf: String) async throws -> BalanceSheet { throw Missing() }
 	func cashFlowStatement(first: String, last: String) async throws -> CashFlowColumn { throw Missing() }
 	func budgetMonth(_ month: Month, today: String) async throws -> BudgetMonth { throw Missing() }

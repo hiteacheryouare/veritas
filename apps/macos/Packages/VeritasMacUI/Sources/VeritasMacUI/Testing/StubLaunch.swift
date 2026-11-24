@@ -338,6 +338,14 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 	}
 
 	func netProfit(first: Month, last: Month) async throws -> NetProfitReport { reports.netProfit(first: first, last: last) }
+	func budgetHabits(today: String) async throws -> BudgetHabits {
+		BudgetHabits(months: [], outcome: .noHistory)
+	}
+
+	func spendingByCategory(first: String, last: String) async throws -> CategoryBreakdown {
+		CategoryBreakdown(expenseTotal: 0, shown: [], everythingElse: nil, uncategorized: nil)
+	}
+
 	func netProfitPeriod(first: String, last: String) async throws -> NetProfitPeriod {
 		guard let start = Month(date: first), let end = Month(date: last) else { throw FfiError.Invalid(message: "Can't read \(first) to \(last).") }
 		return NetProfitPeriod(column: reports.netProfit(first: start, last: end).total, incomeGroups: [], expenseGroups: [], debtPaydownGroups: [], savingsGroups: [])

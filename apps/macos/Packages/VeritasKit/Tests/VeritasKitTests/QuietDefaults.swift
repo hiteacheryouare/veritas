@@ -23,6 +23,8 @@ extension BudgetSession {
 	}
 	func netProfit(first: Month, last: Month) async throws -> NetProfitReport { throw FfiError.Cancelled }
 	func netProfitPeriod(first: String, last: String) async throws -> NetProfitPeriod { throw FfiError.Cancelled }
+	func budgetHabits(today: String) async throws -> BudgetHabits { throw FfiError.Cancelled }
+	func spendingByCategory(first: String, last: String) async throws -> CategoryBreakdown { throw FfiError.Cancelled }
 	func netWorth(first: Month, last: Month) async throws -> [NetWorthMonth] { [] }
 	func cashFlow(first: Month, last: Month) async throws -> [CashFlowColumn] { [] }
 	func cashFlowStatement(first: String, last: String) async throws -> CashFlowColumn { throw FfiError.Cancelled }

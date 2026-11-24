@@ -19,6 +19,8 @@ struct AssistantReadOnlyTests {
 
 	static let allowedQueries: Set<String> = [
 		"netProfitPeriod(first:last:)",
+		"budgetHabits(today:)",
+		"spendingByCategory(first:last:)",
 		"balanceSheet(asOf:)",
 		"cashFlowStatement(first:last:)",
 		"budgetMonth(_:today:)",
@@ -130,6 +132,8 @@ final class RecordingQueries: ReadOnlyBudgetQueries {
 	}
 
 	func netProfitPeriod(first: String, last: String) async throws -> NetProfitPeriod { throw record("netProfitPeriod(first:last:)") }
+	func budgetHabits(today: String) async throws -> BudgetHabits { throw record("budgetHabits(today:)") }
+	func spendingByCategory(first: String, last: String) async throws -> CategoryBreakdown { throw record("spendingByCategory(first:last:)") }
 	func balanceSheet(asOf: String) async throws -> BalanceSheet { throw record("balanceSheet(asOf:)") }
 	func cashFlowStatement(first: String, last: String) async throws -> CashFlowColumn { throw record("cashFlowStatement(first:last:)") }
 	func budgetMonth(_ month: Month, today: String) async throws -> BudgetMonth { throw record("budgetMonth(_:today:)") }

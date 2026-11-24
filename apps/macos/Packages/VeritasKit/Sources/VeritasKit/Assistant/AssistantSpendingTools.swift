@@ -88,7 +88,6 @@ struct SpendingByCategoryTool: AssistantTool {
 	}
 
 	let arguments = [AssistantArguments.period]
-	static let shownInFull = 6
 
 	func run(_ input: AssistantToolInput) async throws -> String {
 		try await call(arguments: Arguments(period: input.text("period")))
@@ -96,38 +95,34 @@ struct SpendingByCategoryTool: AssistantTool {
 
 	func call(arguments: Arguments) async throws -> String {
 		guard let period = AssistantPeriod.resolve(arguments.period, today: context.today) else { return AssistantPeriod.hint }
-		let report = try await context.queries.netProfitPeriod(first: period.first, last: period.last)
-		return Self.text(report, period: period, format: context.format)
+		let breakdown = try await context.queries.spendingByCategory(first: period.first, last: period.last)
+		return Self.text(breakdown, period: period, format: context.format)
 	}
 
-	static func text(_ report: NetProfitPeriod, period: AssistantPeriod, format: MoneyFormat) -> String {
+	/// AI-12.6's lines for the core's `CategoryBreakdown`, which is already ranked and summed.
+	static func text(_ breakdown: CategoryBreakdown, period: AssistantPeriod, format: MoneyFormat) -> String {
 		func amount(_ value: Int64) -> String { format.currency(value, on: .register) }
-		let expenses = report.column.expenses
 		var text = [
-			"Spending, \(period.title): \(amount(expenses.total))",
+			"Spending, \(period.title): \(amount(breakdown.expenseTotal))",
 			"This is the Expenses line of the Net Profit report. Debt paydown and savings are not included."
 		]
-		let uncategorized = expenses.categories.filter { $0.categoryId == nil && $0.total != 0 }
-		let lines = expenses.categories.filter { $0.categoryId != nil && $0.total != 0 }.sorted { a, b in
-			(-a.total, AssistantNames.key(a.name), a.categoryId ?? "") < (-b.total, AssistantNames.key(b.name), b.categoryId ?? "")
-		}
-		guard !lines.isEmpty || !uncategorized.isEmpty else {
+		guard !breakdown.shown.isEmpty || breakdown.uncategorized != nil else {
 			text.append("No spending lines in \(period.title).")
 			return text.joined(separator: "\n")
 		}
-		let shown = lines.count <= shownInFull ? lines : Array(lines.prefix(shownInFull - 1))
-		let rest = lines.dropFirst(shown.count)
-		let keys = shown.map { AssistantNames.key($0.name) }
+		let keys = breakdown.shown.map { AssistantNames.key($0.name) }
 		text.append("Spending by category, \(period.title), largest first:")
-		text += shown.enumerated().map { index, line in
+		text += breakdown.shown.enumerated().map { index, line in
 			let label = AssistantLabels.category(line)
 			let named = !line.name.isEmpty && keys.filter { $0 == keys[index] }.count > 1 ? "\(label) in \(line.groupName ?? "")" : label
 			return "\(named): \(amount(line.total))"
 		}
-		if !rest.isEmpty {
-			text.append("Everything else (\(rest.count) categories): \(amount(rest.reduce(Int64(0)) { $0 + $1.total }))")
+		if let rest = breakdown.everythingElse {
+			text.append("Everything else (\(rest.count) categories): \(amount(rest.total))")
 		}
-		text += uncategorized.map { "\(AssistantLabels.category($0)): \(amount($0.total))" }
+		if let uncategorized = breakdown.uncategorized {
+			text.append("\(AssistantLabels.category(uncategorized)): \(amount(uncategorized.total))")
+		}
 		return text.joined(separator: "\n")
 	}
 }

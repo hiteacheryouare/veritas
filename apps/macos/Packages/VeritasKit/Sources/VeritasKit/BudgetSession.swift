@@ -129,6 +129,10 @@ public protocol BudgetSession: AnyObject, Sendable {
 	func netProfit(first: Month, last: Month) async throws -> NetProfitReport
 	/// Net Profit for inclusive `YYYY-MM-DD` dates, with group totals (R-AI-1).
 	func netProfitPeriod(first: String, last: String) async throws -> NetProfitPeriod
+	/// The assistant's budget habits (R-AI-1, AI-10), computed in the core.
+	func budgetHabits(today: String) async throws -> BudgetHabits
+	/// Net Profit's Expenses by category for inclusive dates (R-AI-1, AI-12), ranked and summed in the core.
+	func spendingByCategory(first: String, last: String) async throws -> CategoryBreakdown
 	/// Assets, liabilities and net worth at each month's end (R-REP-5).
 	func netWorth(first: Month, last: Month) async throws -> [NetWorthMonth]
 	/// One cash flow statement per month (R-REP-5).

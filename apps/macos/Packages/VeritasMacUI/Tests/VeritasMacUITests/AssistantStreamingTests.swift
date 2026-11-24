@@ -102,6 +102,8 @@ struct AssistantStreamingTests {
 struct StubReadOnlyQueries: ReadOnlyBudgetQueries {
 	struct Unused: Error {}
 	func netProfitPeriod(first: String, last: String) async throws -> NetProfitPeriod { throw Unused() }
+	func budgetHabits(today: String) async throws -> BudgetHabits { throw Unused() }
+	func spendingByCategory(first: String, last: String) async throws -> CategoryBreakdown { throw Unused() }
 	func balanceSheet(asOf: String) async throws -> BalanceSheet { throw Unused() }
 	func cashFlowStatement(first: String, last: String) async throws -> CashFlowColumn { throw Unused() }
 	func budgetMonth(_ month: Month, today: String) async throws -> BudgetMonth { throw Unused() }
