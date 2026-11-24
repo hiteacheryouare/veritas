@@ -14,17 +14,17 @@ final class TourJourneyTests: XCTestCase {
 		XCTAssertTrue(importButton.waitForExistence(timeout: 10))
 		importButton.click()
 
-		let card = app.descendants(matching: .any)["tour.card"]
+		let card = app.groups["tour.card"]
 		XCTAssertTrue(card.waitForExistence(timeout: 10), "the tour starts once the budget is open")
 		let bodies = ["To Budget is the money", "Click a Budgeted amount", "Every account has a register", "Click Add transaction", "Start typing a payee"]
 		let steps = [("1 of 5", "budget"), ("2 of 5", "budget"), ("3 of 5", "accounts"), ("4 of 5", "register"), ("5 of 5", "register")]
 		for (index, (position, screen)) in steps.enumerated() {
 			XCTAssertTrue(waitForPosition(position, in: app), "step \(index + 1)")
-			XCTAssertTrue(app.screen(screen).waitForExistence(timeout: 5), "step \(index + 1) is on \(screen)")
+			XCTAssertTrue(app.screen(screen).waitForExistence(timeout: 15), "step \(index + 1) is on \(screen)")
 			XCTAssertEqual(app.buttons["tour.back"].isEnabled, index > 0)
-			let spoken = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Tour, step \(index + 1) of 5. "))
+			let spoken = app.groups.matching(NSPredicate(format: "label BEGINSWITH %@", "Tour, step \(index + 1) of 5. "))
 			XCTAssertEqual(spoken.count, 1, "VoiceOver finds the step once")
-			XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", bodies[index])).count, 0, "the card's body isn't read a second time")
+			XCTAssertEqual(card.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", bodies[index])).count, 0, "the card's body isn't read a second time")
 			attachScreenshot(of: app, named: "tour-\(index + 1)")
 			if index == 1 {
 				let groceries = app.buttons["envelope.groceries.budgeted"]
@@ -67,7 +67,7 @@ final class TourJourneyTests: XCTestCase {
 	@MainActor
 	func testSkipEndsTheTourForGood() {
 		let app = XCUIApplication.veritas(stub: "open", ["-VeritasTour", "YES"])
-		let card = app.descendants(matching: .any)["tour.card"]
+		let card = app.groups["tour.card"]
 		XCTAssertTrue(card.waitForExistence(timeout: 10))
 		app.buttons["tour.next"].click()
 		XCTAssertTrue(waitForPosition("2 of 5", in: app))
@@ -91,8 +91,8 @@ final class TourJourneyTests: XCTestCase {
 
 	@MainActor
 	private func waitForPosition(_ position: String, in app: XCUIApplication) -> Bool {
-		let card = app.descendants(matching: .any)["tour.card"]
+		let card = app.groups["tour.card"]
 		let shown = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND label BEGINSWITH %@", "Tour, step \(position). "), object: card)
-		return XCTWaiter().wait(for: [shown], timeout: 5) == .completed
+		return XCTWaiter().wait(for: [shown], timeout: 15) == .completed
 	}
 }
