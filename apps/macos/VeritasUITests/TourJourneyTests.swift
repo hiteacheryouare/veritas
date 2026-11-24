@@ -91,8 +91,8 @@ final class TourJourneyTests: XCTestCase {
 
 	@MainActor
 	private func waitForPosition(_ position: String, in app: XCUIApplication) -> Bool {
-		let text = app.staticTexts["tour.position"]
-		let shown = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND label == %@", position), object: text)
+		let card = app.descendants(matching: .any)["tour.card"]
+		let shown = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND label BEGINSWITH %@", "Tour, step \(position). "), object: card)
 		return XCTWaiter().wait(for: [shown], timeout: 5) == .completed
 	}
 }
