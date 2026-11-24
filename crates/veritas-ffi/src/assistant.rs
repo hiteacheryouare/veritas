@@ -115,7 +115,7 @@ fn average(sum: i64, count: u32) -> Result<i64, CoreError> {
 	Ok(if sum < 0 { -magnitude } else { magnitude })
 }
 
-/// AI-3.6's case and accent fold, for ties only.
+/// Case and accent folding, the first step of AI-3.6's key.
 fn fold(name: &str) -> String {
 	name.chars()
 		.flat_map(char::to_lowercase)
@@ -131,6 +131,34 @@ fn fold(name: &str) -> String {
 			other => other,
 		})
 		.collect()
+}
+
+/// AI-3.6's name key, the same as the app's `AssistantNames.key`: case and
+/// accents folded, "&" read as "and", anything that isn't a letter or digit a
+/// word break, each word made singular, and a leading "the", "my" or "our"
+/// dropped when other words follow. Ties are broken on it.
+pub(crate) fn name_key(name: &str) -> String {
+	let folded = fold(name).replace('&', " and ");
+	let mut words: Vec<String> = folded
+		.split(|c: char| !c.is_alphanumeric())
+		.filter(|word| !word.is_empty())
+		.map(singular)
+		.collect();
+	if words.len() > 1 && matches!(words[0].as_str(), "the" | "my" | "our") {
+		words.remove(0);
+	}
+	words.join(" ")
+}
+
+fn singular(word: &str) -> String {
+	let letters = word.chars().count();
+	if letters > 4 && word.ends_with("ies") {
+		format!("{}y", &word[..word.len() - 3])
+	} else if letters > 3 && word.ends_with('s') && !word.ends_with("ss") {
+		word[..word.len() - 1].to_owned()
+	} else {
+		word.to_owned()
+	}
 }
 
 #[derive(Default)]
@@ -167,6 +195,33 @@ fn compare(
 	today: &BudgetMonth,
 	goal_categories: &BTreeSet<String>,
 ) -> Result<HabitsOutcome, CoreError> {
+	let compared = compared_categories(sheets, today, goal_categories)?;
+	if compared.is_empty() {
+		return Ok(HabitsOutcome::NoBudgets);
+	}
+	let mut listed = ranked_over(&compared);
+	let Some(top) = listed.first().cloned() else {
+		return Ok(HabitsOutcome::NothingOver {
+			largest: largest(compared),
+		});
+	};
+	let qualifying = listed.len() as u32;
+	listed.truncate(HABITS_SHOWN);
+	Ok(HabitsOutcome::Over {
+		qualifying,
+		shown: listed,
+		suggestion: top.overage,
+		suggestion_months: top.budgeted_months,
+	})
+}
+
+/// AI-10.2 and AI-10.3: the considered categories with at least 2 budgeted
+/// months, with their counts and rounded averages (AI-10.5).
+fn compared_categories(
+	sheets: &[BudgetMonth],
+	today: &BudgetMonth,
+	goal_categories: &BTreeSet<String>,
+) -> Result<Vec<HabitsCategory>, CoreError> {
 	let mut tallies: Vec<Tally> = Vec::new();
 	for group in today
 		.groups
@@ -230,14 +285,19 @@ fn compare(
 			average_budgeted,
 		});
 	}
-	if compared.is_empty() {
-		return Ok(HabitsOutcome::NoBudgets);
-	}
-	let ties = |a: &HabitsCategory, b: &HabitsCategory| {
-		fold(&a.name)
-			.cmp(&fold(&b.name))
-			.then_with(|| a.category_id.cmp(&b.category_id))
-	};
+	Ok(compared)
+}
+
+/// AI-10.6's tie order: the AI-3.6 name key, then the category id.
+fn ties(a: &HabitsCategory, b: &HabitsCategory) -> Ordering {
+	name_key(&a.name)
+		.cmp(&name_key(&b.name))
+		.then_with(|| a.category_id.cmp(&b.category_id))
+}
+
+/// AI-10.4 and AI-10.6: the categories over in strictly more than half their
+/// budgeted months with a positive overage, largest overage first.
+fn ranked_over(compared: &[HabitsCategory]) -> Vec<HabitsCategory> {
 	let mut listed: Vec<HabitsCategory> = compared
 		.iter()
 		.filter(|category| {
@@ -251,23 +311,18 @@ fn compare(
 			.then_with(|| b.average_activity.cmp(&a.average_activity))
 			.then_with(|| ties(a, b))
 	});
-	let Some(top) = listed.first().cloned() else {
-		compared.sort_by(|a, b| {
-			b.average_activity
-				.cmp(&a.average_activity)
-				.then_with(|| ties(a, b))
-		});
-		compared.truncate(HABITS_SHOWN);
-		return Ok(HabitsOutcome::NothingOver { largest: compared });
-	};
-	let qualifying = listed.len() as u32;
-	listed.truncate(HABITS_SHOWN);
-	Ok(HabitsOutcome::Over {
-		qualifying,
-		shown: listed,
-		suggestion: top.overage,
-		suggestion_months: top.budgeted_months,
-	})
+	listed
+}
+
+/// AI-10.8: the largest by average activity, at most 3.
+fn largest(mut compared: Vec<HabitsCategory>) -> Vec<HabitsCategory> {
+	compared.sort_by(|a, b| {
+		b.average_activity
+			.cmp(&a.average_activity)
+			.then_with(|| ties(a, b))
+	});
+	compared.truncate(HABITS_SHOWN);
+	compared
 }
 
 /// AI-12.2 to AI-12.5: categories largest first, a negative last, zero lines
@@ -285,8 +340,8 @@ pub(crate) fn rank_breakdown(
 		.filter(|line| line.category_id.is_some() && line.total != 0)
 		.collect();
 	ranked.sort_by(|a, b| match b.total.cmp(&a.total) {
-		Ordering::Equal => fold(&a.name)
-			.cmp(&fold(&b.name))
+		Ordering::Equal => name_key(&a.name)
+			.cmp(&name_key(&b.name))
 			.then_with(|| a.category_id.cmp(&b.category_id)),
 		order => order,
 	});
@@ -586,6 +641,16 @@ mod tests {
 		assert_eq!(k, 4);
 		assert_eq!(shown.len(), 3);
 		assert_eq!(average(61_001, 3).unwrap(), 20_334);
+		let sheets = sheets(&envelopes, &window(), &[], None);
+		let compared =
+			compared_categories(&sheets, sheets.last().unwrap(), &BTreeSet::new()).unwrap();
+		let ranked = ranked_over(&compared);
+		assert_eq!(
+			ranked.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
+			["Dining", "Shopping", "Rideshare", "Fun"],
+			"Fun ranks fourth"
+		);
+		assert_eq!(figures(&ranked[3]), ("Fun", 2, 3, 20_334, 20_000, 334));
 	}
 
 	#[test]
@@ -871,6 +936,36 @@ mod tests {
 		let (_, shown, suggestion, months) = over(&outcome);
 		assert_eq!(shown, [("Dining", 2, 2, 31_500, 30_000, 1_500)]);
 		assert_eq!((suggestion, months), (1_500, 2));
+	}
+
+	#[test]
+	fn ties_go_to_the_ai_3_6_key_not_the_plain_fold() {
+		assert_eq!(name_key("The Kids"), "kid");
+		assert_eq!(name_key("Café & Snacks"), "cafe and snack");
+		assert_eq!(name_key("Gifts"), name_key("gift"));
+		assert!(
+			fold("Laundry") < fold("The Kids") && name_key("The Kids") < name_key("Laundry"),
+			"the two keys disagree on this pair"
+		);
+		let tied = [
+			envelope("laundry", "Laundry", [1_000; 3], [2_000; 3]),
+			envelope("kids", "The Kids", [1_000; 3], [2_000; 3]),
+		];
+		let outcome = habits(&tied, &[], &[]);
+		let (_, shown, _, _) = over(&outcome);
+		assert_eq!(
+			shown.iter().map(|s| s.0).collect::<Vec<_>>(),
+			["The Kids", "Laundry"]
+		);
+		let b = breakdown(vec![
+			line("Rent", 150_000),
+			line("Laundry", 5_000),
+			line("The Kids", 5_000),
+		]);
+		assert_eq!(
+			names(&b),
+			[("Rent", 150_000), ("The Kids", 5_000), ("Laundry", 5_000)]
+		);
 	}
 
 	#[test]
