@@ -82,7 +82,11 @@ Measured on an M3 Pro at `b12a8c2`, release build, perf-100k (100k transactions)
 | R-PERF-5 | Import or export of a 100k zip ≤ 3 s | GitHub runner: import 0.79 s, export 0.66 s. | **proven** on the runner. Export was 3.15 s there before the speed-up (dbe2d16). |
 
 **The CI gate.** CI's `perf` job runs `cargo xtask perf` on an Apple Silicon runner, in a release build. Every check runs, and then every budget that was exceeded is listed together.
-- **R-PERF-4:** the job runs the release R-PERF-4 tests (`reports_perf.rs`, `dashboard_perf.rs`), which time the app's own path right after an edit makes the session classify again. They follow PLAN line 245 ("Typical report ≤ 100 ms; year-long Sankey or forecast ≤ 500 ms"), as the Architect read it on 2026-11-21:
+- **R-PERF-4:** the job runs the release R-PERF-4 tests (`reports_perf.rs`, `dashboard_perf.rs`). `reports_perf` times each report on both of the app's paths, and each must meet its budget on both (the Architect's ruling of 2026-11-25):
+  - right after an edit that makes the session classify the whole budget again. The test uses a category rename, which is the same work as the first report after opening, or after any category, group, account, payee or mapping edit, or the undo of one;
+  - right after a transaction edit, which updates the classification in place.
+
+  Two ratio checks prove the in-place update happens: one month's net profit after a transaction edit, and after a budget edit, must each cost under a third of one after classifying again. `dashboard_perf` times the dashboards warm and each card's marginal cost. Both follow PLAN line 245 ("Typical report ≤ 100 ms; year-long Sankey or forecast ≤ 500 ms"), as the Architect read it on 2026-11-21:
   - each report, each card's marginal cost, and the default dashboard: ≤ 100 ms;
   - the page with every native card, year-long Sankey and forecast cards among them: ≤ 500 ms.
 - **R-PERF-1, 2, 3 and 5:** the criterion benches run, and the gate reads each median from criterion's `estimates.json`. A bench takes 10 to 100 samples after a warm-up, so one slow sample on a shared runner doesn't move the median.
