@@ -19,27 +19,31 @@ public extension ColorToken {
 	static let textSecondary = ColorToken(light: RGBA(0x66666f), dark: RGBA(0xa2a2ab))
 	static let textTertiary = ColorToken(light: RGBA(0x6c6c75), dark: RGBA(0x97979f))
 	static let textPaper = ColorToken(light: RGBA(0x23232a), dark: RGBA(0x23232a))
-	static let accent = ColorToken(light: RGBA(0x3b3d45), dark: RGBA(0xd9dae0))
-	static let accentFill = ColorToken(light: RGBA(0x2f3138), dark: RGBA(0xe2e3e8))
-	static let accentSoft = ColorToken(light: RGBA(0x282a34, alpha: 0.09), dark: RGBA(0xf0f0fa, alpha: 0.11))
+	static let accent = ColorToken(light: RGBA(0x23169c), dark: RGBA(0x94a8fe))
+	static let accentFill = ColorToken(light: RGBA(0x23169c), dark: RGBA(0x94a8fe))
+	static let accentSoft = ColorToken(light: RGBA(0x23169c, alpha: 0.1), dark: RGBA(0x94a8fe, alpha: 0.14))
 	static let surfaceSelected = ColorToken(light: RGBA(0x14161e, alpha: 0.08), dark: RGBA(0xf0f0fa, alpha: 0.12))
-	static let focusRing = ColorToken(light: RGBA(0x3b3d45), dark: RGBA(0xd9dae0))
+	static let focusRing = ColorToken(light: RGBA(0x23169c), dark: RGBA(0x94a8fe))
 	static let textOnAccent = ColorToken(light: RGBA(0xf5f5f7), dark: RGBA(0x1c1c21))
+	static let secondary = ColorToken(light: RGBA(0x03698c), dark: RGBA(0x56b8e3))
+	static let secondaryFill = ColorToken(light: RGBA(0x007ea7), dark: RGBA(0x007ea7))
+	static let brand = ColorToken(light: RGBA(0x23169c), dark: RGBA(0x23169c))
+	static let textOnBrand = ColorToken(light: RGBA(0xf5f5f7), dark: RGBA(0xf5f5f7))
 	static let track = ColorToken(light: RGBA(0x14161e, alpha: 0.08), dark: RGBA(0xf0f0fa, alpha: 0.09))
-	static let moneyAvailable = ColorToken(light: RGBA(0x127a49), dark: RGBA(0x4cc47a))
-	static let moneyAvailableFill = ColorToken(light: RGBA(0x26a066), dark: RGBA(0x3fb06d))
-	static let moneyLow = ColorToken(light: RGBA(0x9a5a00), dark: RGBA(0xeda23a))
-	static let moneyLowFill = ColorToken(light: RGBA(0xd98b12), dark: RGBA(0xe0952a))
-	static let moneyOverspent = ColorToken(light: RGBA(0xc4262e), dark: RGBA(0xff6a64))
-	static let moneyOverspentFill = ColorToken(light: RGBA(0xe0474e), dark: RGBA(0xf05650))
-	static let moneyIncome = ColorToken(light: RGBA(0x1668bd), dark: RGBA(0x5eaaf5))
-	static let moneyIncomeFill = ColorToken(light: RGBA(0x2f84dc), dark: RGBA(0x4796e6))
+	static let moneyAvailable = ColorToken(light: RGBA(0x036f46), dark: RGBA(0x56e39f))
+	static let moneyAvailableFill = ColorToken(light: RGBA(0x56e39f), dark: RGBA(0x56e39f))
+	static let moneyLow = ColorToken(light: RGBA(0x7d5c02), dark: RGBA(0xf5b700))
+	static let moneyLowFill = ColorToken(light: RGBA(0xf5b700), dark: RGBA(0xf5b700))
+	static let moneyOverspent = ColorToken(light: RGBA(0xc50125), dark: RGBA(0xff8b86))
+	static let moneyOverspentFill = ColorToken(light: RGBA(0xdb162f), dark: RGBA(0xdb162f))
+	static let moneyIncome = ColorToken(light: RGBA(0x03698c), dark: RGBA(0x56b8e3))
+	static let moneyIncomeFill = ColorToken(light: RGBA(0x007ea7), dark: RGBA(0x007ea7))
 	static let moneyNeutral = ColorToken(light: RGBA(0x6c6c75), dark: RGBA(0x97979f))
 	static let chartExpense = ColorToken(light: RGBA(0x6e6e78), dark: RGBA(0xa5a5ae))
 	static let chartExpenseSoft = ColorToken(light: RGBA(0x6e6e78, alpha: 0.28), dark: RGBA(0xa5a5ae, alpha: 0.3))
-	static let chartSavings = ColorToken(light: RGBA(0x26a066), dark: RGBA(0x3fb06d))
+	static let chartSavings = ColorToken(light: RGBA(0x56e39f), dark: RGBA(0x56e39f))
 	static let chartDebtPaydown = ColorToken(light: RGBA(0x8b5e34), dark: RGBA(0xc99a6b))
-	static let chartUnallocated = ColorToken(light: RGBA(0x2f84dc, alpha: 0.35), dark: RGBA(0x5eaaf5, alpha: 0.4))
+	static let chartUnallocated = ColorToken(light: RGBA(0x007ea7, alpha: 0.35), dark: RGBA(0x007ea7, alpha: 0.4))
 	static let chartBand = ColorToken(light: RGBA(0x3a3a42, alpha: 0.2), dark: RGBA(0xe2e2e8, alpha: 0.2))
 	static let chartGrid = ColorToken(light: RGBA(0x14161e, alpha: 0.07), dark: RGBA(0xf0f0fa, alpha: 0.07))
 	static let scenarioBaseline = ColorToken(light: RGBA(0x3a3a42), dark: RGBA(0xe2e2e8))
@@ -73,6 +77,10 @@ public extension ShapeStyle where Self == Color {
 	static var surfaceSelected: Color { Color(ColorToken.surfaceSelected) }
 	static var focusRing: Color { Color(ColorToken.focusRing) }
 	static var textOnAccent: Color { Color(ColorToken.textOnAccent) }
+	static var secondary: Color { Color(ColorToken.secondary) }
+	static var secondaryFill: Color { Color(ColorToken.secondaryFill) }
+	static var brand: Color { Color(ColorToken.brand) }
+	static var textOnBrand: Color { Color(ColorToken.textOnBrand) }
 	static var track: Color { Color(ColorToken.track) }
 	static var moneyAvailable: Color { Color(ColorToken.moneyAvailable) }
 	static var moneyAvailableFill: Color { Color(ColorToken.moneyAvailableFill) }
@@ -122,6 +130,10 @@ extension ColorToken {
 		"surface-selected": .surfaceSelected,
 		"focus-ring": .focusRing,
 		"text-on-accent": .textOnAccent,
+		"secondary": .secondary,
+		"secondary-fill": .secondaryFill,
+		"brand": .brand,
+		"text-on-brand": .textOnBrand,
 		"track": .track,
 		"money-available": .moneyAvailable,
 		"money-available-fill": .moneyAvailableFill,
