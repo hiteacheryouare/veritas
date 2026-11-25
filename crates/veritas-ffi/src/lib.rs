@@ -11,6 +11,7 @@ mod dashboards;
 mod forecast;
 mod goals;
 mod money;
+mod names;
 mod records;
 mod reports;
 mod rules;
