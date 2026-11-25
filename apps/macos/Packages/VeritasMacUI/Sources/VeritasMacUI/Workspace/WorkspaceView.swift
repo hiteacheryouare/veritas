@@ -52,8 +52,8 @@ struct WorkspaceView: View {
 							}
 							.accessibilityIdentifier("scheduleBanner")
 						}
-						if let problem = model.overview?.snapshotProblem {
-							NoticeBanner(symbol: "clock.badge.exclamationmark", message: "The last snapshot failed. \(problem)", actionTitle: "Show settings") {
+						if let overview = model.overview, let problem = overview.snapshotProblem {
+							NoticeBanner(symbol: "clock.badge.exclamationmark", message: SnapshotWords.banner(problem: problem, fromImport: overview.snapshotProblemIsImport), actionTitle: "Show settings") {
 								model.go(to: .screen(.settings))
 							}
 							.accessibilityIdentifier("snapshotBanner")
