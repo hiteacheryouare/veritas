@@ -7,8 +7,8 @@
 
 //! R-PERF-4 through the exported API on perf-100k: a typical report within
 //! 100 ms and a year-long Sankey within 500 ms, timed the way the app meets
-//! them, right after an edit made the session classify again. A budget edit
-//! must not cost a reclassification.
+//! them, right after a transaction edit. Neither a transaction edit nor a
+//! budget edit may cost classifying the whole budget again.
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -234,14 +234,33 @@ fn reports_on_perf_100k_meet_r_perf_4_right_after_an_edit() {
 			block_on(session.net_profit(month(year, 6), month(year, 6), token())).unwrap();
 		},
 	);
+	let mut renames = 0;
+	let after_reclassifying = fastest(
+		|| {
+			renames += 1;
+			session
+				.perform(Command::RenameCategory {
+					category_id: category.clone(),
+					name: format!("Renamed {renames}"),
+				})
+				.unwrap();
+		},
+		|| {
+			block_on(session.net_profit(month(year, 6), month(year, 6), token())).unwrap();
+		},
+	);
 	eprintln!(
-		"one month after an edit: {after_edit:?}, after a budget edit: {after_budget_edit:?}"
+		"one month after an edit: {after_edit:?}, after a budget edit: {after_budget_edit:?}, after a category rename (classifying again): {after_reclassifying:?}"
 	);
 	for (name, budget, took) in &timings {
 		assert!(took <= budget, "{name} took {took:?}, over {budget:?}");
 	}
 	assert!(
-		after_budget_edit * 3 < after_edit,
+		after_edit * 3 < after_reclassifying,
+		"a transaction edit updated the classification in place, so the next report skips classifying"
+	);
+	assert!(
+		after_budget_edit * 3 < after_reclassifying,
 		"a budget edit kept the classification, so the next report skips classifying"
 	);
 	session.close().unwrap();
