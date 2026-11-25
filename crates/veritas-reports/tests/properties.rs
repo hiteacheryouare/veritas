@@ -246,6 +246,9 @@ enum Edit {
 	ChildOf(usize, Option<usize>),
 	MakeParent(usize),
 	StartingBalance(usize),
+	ReconciliationNote(usize, bool),
+	Cleared(usize),
+	StorePayee(usize),
 	Copy(usize),
 }
 
@@ -267,6 +270,9 @@ fn edit() -> impl Strategy<Value = Edit> {
 			.prop_map(|(row, parent)| Edit::ChildOf(row, parent)),
 		row.prop_map(Edit::MakeParent),
 		row.prop_map(Edit::StartingBalance),
+		(row, any::<bool>()).prop_map(|(row, note)| Edit::ReconciliationNote(row, note)),
+		row.prop_map(Edit::Cleared),
+		row.prop_map(Edit::StorePayee),
 		row.prop_map(Edit::Copy),
 	]
 }
@@ -288,6 +294,9 @@ fn apply(budget: &mut BudgetData, edit: &Edit, serial: usize) -> Vec<Transaction
 		| Edit::ChildOf(row, _)
 		| Edit::MakeParent(row)
 		| Edit::StartingBalance(row)
+		| Edit::ReconciliationNote(row, _)
+		| Edit::Cleared(row)
+		| Edit::StorePayee(row)
 		| Edit::Copy(row) => pick(*row),
 	};
 	let Some(id) = target else {
@@ -327,6 +336,11 @@ fn apply(budget: &mut BudgetData, edit: &Edit, serial: usize) -> Vec<Transaction
 		}
 		Edit::MakeParent(_) => transaction.split = SplitRole::Parent,
 		Edit::StartingBalance(_) => transaction.starting_balance = !transaction.starting_balance,
+		Edit::ReconciliationNote(_, note) => {
+			transaction.notes = note.then(|| veritas_reports::RECONCILIATION_NOTE.to_owned());
+		}
+		Edit::Cleared(_) => transaction.cleared = !transaction.cleared,
+		Edit::StorePayee(_) => transaction.payee = Some(veritas_domain::PayeeId::new("Store")),
 		Edit::Remove(_) | Edit::Copy(_) => {}
 	}
 	vec![id]
@@ -708,6 +722,29 @@ proptest! {
 			classification.reclassify(&book.budget, &changed);
 			assert_same_classification(&classification, &classify(&book.budget), &book.budget)?;
 		}
+	}
+
+	/// More than RECLASSIFY_AT_MOST rows written at once classify afresh,
+	/// which gives the same classification too.
+	#[test]
+	fn reclassifying_many_rows_at_once_matches_classifying_afresh(
+		scenario in scenario(),
+		copies in 33usize..60,
+		edits in proptest::collection::vec(edit(), 0..10),
+	) {
+		let mut book = build(&scenario);
+		prop_assume!(!book.budget.transactions.is_empty());
+		let mut classification = classify(&book.budget);
+		let mut changed = BTreeSet::new();
+		for serial in 0..copies {
+			changed.extend(apply(&mut book.budget, &Edit::Copy(serial), serial));
+		}
+		for (serial, edit) in edits.iter().enumerate() {
+			changed.extend(apply(&mut book.budget, edit, copies + serial));
+		}
+		prop_assert!(changed.len() > 32);
+		classification.reclassify(&book.budget, &changed);
+		assert_same_classification(&classification, &classify(&book.budget), &book.budget)?;
 	}
 
 	#[test]

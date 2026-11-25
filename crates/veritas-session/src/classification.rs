@@ -114,6 +114,18 @@ mod tests {
 		assert!(cache.classification.is_none());
 		assert!(cache.written.is_empty());
 
+		// A reconciliation flag lives in transaction metadata, which
+		// `reclassify` doesn't follow, so it classifies afresh.
+		cache.get(&data);
+		cache.refresh(&changed(vec![EntityRef::Transaction(TransactionId::new(
+			"t",
+		))]));
+		cache.refresh(&changed(vec![EntityRef::TransactionMeta(
+			TransactionId::new("t"),
+		)]));
+		assert!(cache.classification.is_none());
+		assert!(cache.written.is_empty());
+
 		cache.get(&data);
 		cache.refresh(&ChangeSet {
 			everything: true,
