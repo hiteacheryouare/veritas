@@ -8,8 +8,10 @@ use crate::{FfiError, guard};
 
 /// Lowercase letters of Latin-1 Supplement and Latin Extended-A and -B with
 /// their base letters, generated once from the Unicode decompositions and
-/// written out here, plus the letters that have no decomposition (ß, æ, œ,
-/// ø, đ, ł, ħ, ı, þ, ð and the rest). Sorted by code point for binary search.
+/// written out here, plus the letters that have no decomposition (ß, æ, ǣ,
+/// ǽ, œ, ø, ǿ, đ, ł, ħ, ı, ŋ, þ, ð and the rest). Four entries (ɗ, ɠ, ɲ, ʈ)
+/// are IPA Extensions letters, the lowercase forms of Latin Extended-B
+/// capitals. Sorted by code point for binary search.
 const LATIN_FOLDS: &[(char, &str)] = &[
 	('ß', "ss"),
 	('à', "a"),
@@ -81,6 +83,7 @@ const LATIN_FOLDS: &[(char, &str)] = &[
 	('ņ', "n"),
 	('ň', "n"),
 	('ŉ', "n"),
+	('ŋ', "ng"),
 	('ō', "o"),
 	('ŏ', "o"),
 	('ő', "o"),
@@ -135,6 +138,7 @@ const LATIN_FOLDS: &[(char, &str)] = &[
 	('ǜ', "u"),
 	('ǟ', "a"),
 	('ǡ', "a"),
+	('ǣ', "ae"),
 	('ǥ', "g"),
 	('ǧ', "g"),
 	('ǩ', "k"),
@@ -145,6 +149,8 @@ const LATIN_FOLDS: &[(char, &str)] = &[
 	('ǵ', "g"),
 	('ǹ', "n"),
 	('ǻ', "a"),
+	('ǽ', "ae"),
+	('ǿ', "o"),
 	('ȁ', "a"),
 	('ȃ', "a"),
 	('ȅ', "e"),
@@ -188,7 +194,8 @@ const LATIN_FOLDS: &[(char, &str)] = &[
 ];
 
 /// Case and accents folded: Latin-1 Supplement and Latin Extended-A and -B
-/// letters to their base letters (`LATIN_FOLDS`), and combining marks
+/// letters, and the IPA Extensions lowercase forms of Extended-B capitals, to
+/// their base letters (`LATIN_FOLDS`), and combining marks
 /// (U+0300 to U+036F) dropped. Other scripts are lowercased only.
 pub(crate) fn fold(name: &str) -> String {
 	let mut folded = String::with_capacity(name.len());
@@ -527,6 +534,16 @@ mod tests {
 			"Latin Extended-A, including ł, which has no decomposition"
 		);
 		assert_eq!(fold("Straße"), "strasse");
+		assert_eq!(
+			fold("Ǣ ǽ Ǿ Ŋ"),
+			"ae ae o ng",
+			"the letters added after review"
+		);
+		assert_eq!(
+			fold("Ɗ Ɠ Ɲ Ʈ"),
+			"d g n t",
+			"Extended-B capitals whose lowercase is in IPA Extensions"
+		);
 		assert_eq!(fold("Œuvre Ærø"), "oeuvre aero");
 		assert_eq!(
 			fold("Đặng"),

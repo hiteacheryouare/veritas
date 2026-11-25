@@ -234,6 +234,16 @@ struct AssistantEvaluationCheck {
 		"most", "biggest", "largest", "top", "highest", "spend", "it", "at", "with", "were", "are", "that", "which", "here", "what"
 	]).union(monthNames)
 
+	/// Words that may lead into a name in prose ("You spent the most on
+	/// Rent"): pronouns, verbs, prepositions, articles and time words. No
+	/// finance noun is here, so "Savings Rent" and "Cash Gifts" are not Rent
+	/// and Gifts.
+	static let leadInWords = Set([
+		"you", "i", "we", "spent", "spend", "paid", "went", "go", "goes", "was", "were", "is", "are", "it", "that", "which", "here", "what", "where",
+		"the", "a", "an", "most", "biggest", "largest", "top", "highest", "on", "for", "at", "in", "into", "to", "of", "with", "and", "so", "far",
+		"your", "my", "this", "last", "month", "year", "week"
+	]).union(monthNames)
+
 	static func isHeading(_ name: String) -> Bool {
 		let words = name.lowercased().split(whereSeparator: { !$0.isLetter }).map(String.init)
 		return words.allSatisfy(headingWords.contains)
@@ -322,7 +332,7 @@ struct AssistantEvaluationCheck {
 			let words = label.split(separator: " ").map(String.init)
 			return words.indices.contains { start in
 				returned.contains(words[start...].joined(separator: " ").lowercased())
-					&& words[..<start].allSatisfy { headingWords.contains($0.lowercased()) }
+					&& words[..<start].allSatisfy { leadInWords.contains($0.lowercased()) }
 			}
 		}
 		return labelledNames(in: answer).filter { !names($0) }.union(prose.filter { !returned.contains($0.lowercased()) })
@@ -359,6 +369,10 @@ struct AssistantEvaluationCheck {
 		#expect(Self.grounded("You spent the most on Rent: 1,800.00.", in: [tool]), "the name is the part that matches, after the lead-in")
 		#expect(!Self.grounded("You spent the most on Pet Insurance: 1,800.00.", in: [tool]), "an invented name after a lead-in still fails")
 		#expect(!Self.grounded("- Pet Rent: 1,800.00", in: [tool]), "a word before the name that isn't lead-in wording makes it another name")
+		let withGifts = tool + "\nGifts: 25.00"
+		#expect(!Self.grounded("- Savings Rent: 1,800.00", in: [withGifts]), "a finance noun is not lead-in wording")
+		#expect(!Self.grounded("Cash Gifts: 25.00", in: [withGifts]), "nor is cash")
+		#expect(Self.grounded("You spent the most on Rent: 1,800.00.", in: [withGifts]))
 		#expect(!Self.grounded("You spent the most on Gas last month.", in: [tool], known: ["Rent", "Gas", "Groceries"]), "a budget name in prose must be in the tool's output")
 		#expect(Self.grounded("You spent the most on Rent last month, and your gas bill was small.", in: [tool], known: ["Rent", "Gas"]), "prose names match as the budget writes them, so lowercase prose isn't a name")
 	}
