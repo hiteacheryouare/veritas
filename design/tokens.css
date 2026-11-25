@@ -22,8 +22,8 @@
 	--color-separator: rgba(20, 22, 30, 0.08);
 
 	--color-text-primary: #1c1c21;
-	--color-text-secondary: #66666f;
-	--color-text-tertiary: #6c6c75;
+	--color-text-secondary: #5d5d66;
+	--color-text-tertiary: #606069;
 	--color-text-paper: #23232a;
 
 	--color-accent: #23169c;
@@ -47,7 +47,7 @@
 	--color-money-overspent-fill: #db162f;
 	--color-money-income: #03698c;
 	--color-money-income-fill: #007ea7;
-	--color-money-neutral: #6c6c75;
+	--color-money-neutral: #606069;
 
 	--color-chart-expense: #6e6e78;
 	--color-chart-expense-soft: rgba(110, 110, 120, 0.28);
@@ -90,8 +90,8 @@
 	--color-separator: rgba(240, 240, 250, 0.08);
 
 	--color-text-primary: #ececf0;
-	--color-text-secondary: #a2a2ab;
-	--color-text-tertiary: #97979f;
+	--color-text-secondary: #b0b0b9;
+	--color-text-tertiary: #acacb4;
 	--color-text-paper: #23232a;
 
 	--color-accent: #94a8fe;
@@ -115,7 +115,7 @@
 	--color-money-overspent-fill: #db162f;
 	--color-money-income: #56b8e3;
 	--color-money-income-fill: #007ea7;
-	--color-money-neutral: #97979f;
+	--color-money-neutral: #acacb4;
 
 	--color-chart-expense: #a5a5ae;
 	--color-chart-expense-soft: rgba(165, 165, 174, 0.3);

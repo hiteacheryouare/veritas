@@ -36,14 +36,14 @@ Every color has a light and a dark value. There is no pure black or white anywhe
 | `color-money-low` | #7d5c02 | #f5b700 | Warning. Envelope at or under 20% left, goals behind schedule |
 | `color-money-overspent` | #c50125 | #ff8b86 | Bad. Overspent envelopes, losses, shortfalls |
 | `color-money-income` | #03698c | #56b8e3 | Secondary. Income, To Budget, money received |
-| `color-money-neutral` | #6c6c75 | #97979f | Zero amounts. 4.5:1 or better on every surface |
+| `color-money-neutral` | #606069 | #acacb4 | Zero amounts. 4.5:1 or better on every surface, selected and hovered rows included |
 | `color-money-*-fill` | | | Bar, ring, dot and chart fills: Ryan's colors exactly, in both appearances. Available #56e39f, low #f5b700, overspent #db162f, income #007ea7 |
 | `color-chart-expense` | #6e6e78 | #a5a5ae | Spending in charts. Spending is not a warning, so it is graphite |
 | `color-chart-savings` | #56e39f | #56e39f | Savings in Net Profit and the Sankey (good) |
 | `color-chart-debt-paydown` | #8b5e34 | #c99a6b | Debt paydown in Net Profit and the Sankey |
 | `color-scenario-1..3` | blue, umber, teal | | What-if lines. Baseline uses `color-scenario-baseline` |
 | `color-surface-*` | | | window, sidebar (glass), grouped, raised (sheets, popovers), field, paper, scrim |
-| `color-text-*` | | | primary, secondary, tertiary, on-accent, paper. Tertiary is #6c6c75 / #97979f: every text token reaches 4.5:1 on every surface |
+| `color-text-*` | | | primary, secondary, tertiary, on-accent, paper. Secondary is #5d5d66 / #b0b0b9 and tertiary #606069 / #acacb4: every text token reaches 4.5:1 on every surface, including rows tinted by selection or hover |
 | `color-surface-selected` | rgba(20, 22, 30, 0.08) | rgba(240, 240, 250, 0.12) | The selected sidebar row. Neutral, so it works with any accent; its text is `color-text-primary` |
 
 ### Accent
