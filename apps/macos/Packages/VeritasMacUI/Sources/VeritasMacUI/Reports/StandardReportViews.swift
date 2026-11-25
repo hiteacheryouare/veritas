@@ -73,12 +73,20 @@ struct Hero: View {
 	var tone: VeritasCore.MoneyTone = .neutral
 
 	var body: some View {
-		HStack(alignment: .firstTextBaseline, spacing: Spacing.s3) {
-			ReportAmount(amount: amount, tone: tone, format: format, weight: .bold, size: .display)
-			Text(caption)
-				.font(.text(.heading, weight: .semibold))
-				.foregroundStyle(.textSecondary)
+		ViewThatFits(in: .horizontal) {
+			HStack(alignment: .firstTextBaseline, spacing: Spacing.s3) { figure; label }
+			VStack(alignment: .leading, spacing: Spacing.s1) { figure; label.lineLimit(2) }
 		}
+	}
+
+	private var figure: some View {
+		ReportAmount(amount: amount, tone: tone, format: format, weight: .bold, size: .display)
+	}
+
+	private var label: some View {
+		Text(caption)
+			.font(.text(.heading, weight: .semibold))
+			.foregroundStyle(.textSecondary)
 	}
 }
 
@@ -102,14 +110,14 @@ struct RowsTable: View {
 	let id: String
 
 	var body: some View {
-		VStack(spacing: 0) { grid }
+		TableCard { grid }
 			.containerIdentifier(id)
 	}
 
 	private var grid: some View {
 		Grid(alignment: .trailing, horizontalSpacing: 0, verticalSpacing: 0) {
 			GridRow {
-				Text("").gridColumnAlignment(.leading)
+				Color.clear.frame(maxWidth: .infinity, minHeight: 30).pinnedColumn().gridColumnAlignment(.leading)
 				ForEach(Array(headings.enumerated()), id: \.offset) { _, heading in
 					Text(heading)
 						.font(.text(.caption))
@@ -128,7 +136,8 @@ struct RowsTable: View {
 						.fixedSize()
 						.padding(.leading, Spacing.s4)
 						.padding(.trailing, Spacing.s3)
-						.frame(maxWidth: .infinity, alignment: .leading)
+						.frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
+						.pinnedColumn()
 					ForEach(Array(row.values.enumerated()), id: \.offset) { index, value in
 						ReportAmount(amount: value, tone: row.tones[index], format: format, weight: row.isTotal ? .bold : .medium)
 							.frame(minWidth: 96, alignment: .trailing)
@@ -139,9 +148,6 @@ struct RowsTable: View {
 				.accessibilityIdentifier("\(id).\(row.id)")
 			}
 		}
-		.padding(.vertical, Spacing.s1)
-		.background(.surfaceGrouped, in: .rect(cornerRadius: Radius.section))
-		.overlay { RoundedRectangle(cornerRadius: Radius.section).strokeBorder(Color.edgeGrouped) }
 	}
 }
 
@@ -158,7 +164,8 @@ private struct SpendingList: View {
 				} label: {
 					HStack(spacing: Spacing.s3) {
 						Text(line.title)
-							.frame(width: 220, alignment: .leading)
+							.lineLimit(1)
+							.frame(minWidth: 120, idealWidth: 220, maxWidth: 220, alignment: .leading)
 						GeometryReader { proxy in
 							Capsule()
 								.fill(Color.chartExpense)

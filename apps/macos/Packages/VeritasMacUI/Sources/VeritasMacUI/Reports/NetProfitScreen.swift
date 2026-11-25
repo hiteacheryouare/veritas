@@ -194,9 +194,14 @@ private struct NetProfitTable: View {
 
 	var body: some View {
 		let columns = model.columns
+		TableCard { grid(columns) }
+			.containerIdentifier("netProfit.table")
+	}
+
+	private func grid(_ columns: [NetProfitColumn]) -> some View {
 		Grid(alignment: .trailing, horizontalSpacing: 0, verticalSpacing: 0) {
 			GridRow {
-				Text("").gridColumnAlignment(.leading)
+				Color.clear.frame(maxWidth: .infinity, minHeight: 30).pinnedColumn().gridColumnAlignment(.leading)
 				ForEach(Array(columns.enumerated()), id: \.offset) { _, column in
 					Text(model.heading(column))
 						.font(.text(.caption))
@@ -211,7 +216,8 @@ private struct NetProfitTable: View {
 					.overlay(row.style == .total ? Color.textTertiary : Color.separator)
 				GridRow {
 					title(row)
-						.frame(maxWidth: .infinity, alignment: .leading)
+						.frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
+						.pinnedColumn()
 					ForEach(Array(row.cells.enumerated()), id: \.offset) { index, cell in
 						CellButton(cell: cell, format: model.format, isTotal: row.style == .total, isRange: index == row.cells.count - 1) {
 							open(cell)
@@ -227,16 +233,13 @@ private struct NetProfitTable: View {
 							.foregroundStyle(.textSecondary)
 							.padding(.leading, 28)
 							.padding(.bottom, Spacing.s2)
-							.gridCellColumns(columns.count + 1)
 							.frame(maxWidth: .infinity, alignment: .leading)
+							.pinnedColumn()
+							.gridCellColumns(columns.count + 1)
 					}
 				}
 			}
 		}
-		.padding(.vertical, Spacing.s1)
-		.background(.surfaceGrouped, in: .rect(cornerRadius: Radius.section))
-		.overlay { RoundedRectangle(cornerRadius: Radius.section).strokeBorder(Color.edgeGrouped) }
-		.containerIdentifier("netProfit.table")
 	}
 
 	@ViewBuilder private func title(_ row: NetProfitRow) -> some View {

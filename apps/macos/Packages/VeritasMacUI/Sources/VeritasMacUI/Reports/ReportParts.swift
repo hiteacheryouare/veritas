@@ -36,6 +36,56 @@ struct ReportAmount: View {
 	}
 }
 
+/// A report table's card. The table fills the card when its columns fit, and
+/// otherwise scrolls sideways inside the card, so a wide table never widens
+/// the page or pushes an inspector off screen.
+struct TableCard<Table: View>: View {
+	@ViewBuilder let table: Table
+	@State private var scrolled: CGFloat = 0
+
+	var body: some View {
+		ViewThatFits(in: .horizontal) {
+			table
+			ScrollView(.horizontal) {
+				table.environment(\.tableScrolled, scrolled)
+			}
+			.onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.x } action: { _, offset in
+				scrolled = max(offset, 0)
+			}
+		}
+		.padding(.vertical, Spacing.s1)
+		.background(.surfaceGrouped, in: .rect(cornerRadius: Radius.section))
+		.clipShape(.rect(cornerRadius: Radius.section))
+		.overlay { RoundedRectangle(cornerRadius: Radius.section).strokeBorder(Color.edgeGrouped) }
+	}
+}
+
+extension EnvironmentValues {
+	@Entry var tableScrolled: CGFloat = 0
+}
+
+extension View {
+	/// Keeps a first-column cell at the card's leading edge while its table
+	/// scrolls sideways. Apply it after the cell's frame, so it covers the column.
+	func pinnedColumn() -> some View {
+		modifier(PinnedColumn())
+	}
+}
+
+private struct PinnedColumn: ViewModifier {
+	@Environment(\.tableScrolled) private var scrolled
+
+	func body(content: Content) -> some View {
+		content
+			.background(Color.surfaceGrouped)
+			.overlay(alignment: .trailing) {
+				if scrolled > 0 { Rectangle().fill(Color.separator).frame(width: 1) }
+			}
+			.offset(x: scrolled)
+			.zIndex(1)
+	}
+}
+
 /// Previous and next period, as on the Budget screen (⌘← ⌘→).
 struct PeriodStepper: View {
 	let canGoForward: Bool
