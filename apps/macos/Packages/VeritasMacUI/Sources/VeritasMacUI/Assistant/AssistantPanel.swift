@@ -319,7 +319,7 @@ struct TypingDots: View {
 		if reduceMotion {
 			dots(at: nil)
 		} else {
-			TimelineView(.animation) { timeline in
+			TimelineView(.animation(minimumInterval: 1.0 / 30)) { timeline in
 				dots(at: timeline.date.timeIntervalSinceReferenceDate)
 			}
 		}
@@ -329,7 +329,7 @@ struct TypingDots: View {
 		HStack(spacing: 4) {
 			ForEach(0..<Self.count, id: \.self) { index in
 				Circle()
-					.fill(Color.secondary)
+					.fill(Color.textSecondary)
 					.frame(width: 7, height: 7)
 					.opacity(Self.opacity(index: index, time: time))
 			}
