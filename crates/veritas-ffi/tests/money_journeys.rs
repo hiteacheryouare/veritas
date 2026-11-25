@@ -10,6 +10,9 @@
 //! driven through the exported API the way Swift drives it, with Actual's
 //! own reading of the export as the verdict wherever the oracle is installed.
 
+#[path = "support/children.rs"]
+mod children;
+
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -207,14 +210,15 @@ fn oracle() -> Option<PathBuf> {
 }
 
 fn actual_reads(oracle: &Path, zip: &Path) -> Value {
-	let output = std::process::Command::new("node")
-		.current_dir(oracle)
-		.arg("src/main.ts")
-		.arg("dump")
-		.arg(zip)
-		.args(["--today", TODAY])
-		.output()
-		.expect("node runs");
+	let output = children::output(
+		std::process::Command::new("node")
+			.current_dir(oracle)
+			.arg("src/main.ts")
+			.arg("dump")
+			.arg(zip)
+			.args(["--today", TODAY]),
+	)
+	.expect("node runs");
 	assert!(
 		output.status.success(),
 		"Actual couldn't read {}: {}",
@@ -1097,17 +1101,18 @@ fn actual_apply(oracle: &Path, zip: &Path, ops: Value, out: &Path, seed: u32) {
 		serde_json::json!({"version": 1, "ops": ops}).to_string(),
 	)
 	.unwrap();
-	let output = std::process::Command::new("node")
-		.current_dir(oracle)
-		.arg("src/main.ts")
-		.arg("apply")
-		.arg(zip)
-		.arg(&file)
-		.arg("--out")
-		.arg(out)
-		.args(["--today", TODAY, "--seed", &seed.to_string()])
-		.output()
-		.expect("node runs");
+	let output = children::output(
+		std::process::Command::new("node")
+			.current_dir(oracle)
+			.arg("src/main.ts")
+			.arg("apply")
+			.arg(zip)
+			.arg(&file)
+			.arg("--out")
+			.arg(out)
+			.args(["--today", TODAY, "--seed", &seed.to_string()]),
+	)
+	.expect("node runs");
 	assert!(
 		output.status.success(),
 		"Actual couldn't apply the ops: {}",
