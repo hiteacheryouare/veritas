@@ -120,7 +120,7 @@ Today is 2026-11-22 unless an example says otherwise.
 
 22. **(b) Conflicting sources.** "Vacation" has the note `#goal 10000` and a `goal_def` of source `ui` with amount 20000 (2-place currency). The proposed target is the first source in order, `goal_def`, 2000000, and the item is **shown, unticked** with both figures, 1000000 from the note and 2000000 from `goal_def`. A `zero_budgets.goal` of 1000000 with `long_goal = 1` is used as it is, never multiplied again.
 23. **(b) Two adopted categories with one name.** "Vacation" in Everyday and "Vacation" in Fun. Ticking the first (Everyday, first in Budget screen order) makes the second show "Rename one of them first".
-24. **(a) Several dates.** The report of example 1 matches on E but would differ on the last day of the previous month, because it counts a transaction dated after that day with a different treatment: it is not suggested, even though E matched.
+24. **(a) Several dates.** The report of example 1 matches on E, but a closed account held 5000 on the last day of the previous month and the report leaves closed accounts out, so on that date its total is 5000 short of the native net worth (ST-2 counts closed accounts). It is not suggested, even though E matched.
 
 ## MIG-9 Decisions (Ryan, 2026-11-25)
 
