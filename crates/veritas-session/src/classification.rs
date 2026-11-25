@@ -1,29 +1,54 @@
-use veritas_domain::{BudgetData, EntityRef};
+use std::collections::BTreeSet;
+
+use veritas_domain::{BudgetData, EntityRef, TransactionId};
 use veritas_reports::{Classification, classify};
 
 use crate::bus::ChangeSet;
 
 /// Every row's kind for the loaded budget, kept between report calls so a
 /// report reads it instead of classifying the whole history again (R-PERF-4).
-/// A commit that touches anything classification reads drops it, and the
-/// next report rebuilds it.
+/// A commit that writes only transactions leaves it in place, and the next
+/// report updates just the rows those writes reach. A commit that touches
+/// anything else classification reads drops it, and the next report
+/// rebuilds it.
 #[derive(Default)]
 pub(crate) struct ClassificationCache {
 	classification: Option<Classification>,
+	/// Transactions written since `classification` was last brought up to date.
+	written: BTreeSet<TransactionId>,
 }
 
 impl ClassificationCache {
 	pub(crate) fn get(&mut self, data: &BudgetData) -> &Classification {
+		let written = std::mem::take(&mut self.written);
+		if let Some(classification) = &mut self.classification
+			&& !written.is_empty()
+		{
+			classification.reclassify(data, &written);
+		}
 		self.classification.get_or_insert_with(|| classify(data))
 	}
 
 	pub(crate) fn clear(&mut self) {
 		self.classification = None;
+		self.written.clear();
 	}
 
 	pub(crate) fn refresh(&mut self, changed: &ChangeSet) {
-		if changed.everything || changed.entities.iter().any(affects_classification) {
-			self.classification = None;
+		let rebuild = changed.everything
+			|| changed.entities.iter().any(|entity| {
+				affects_classification(entity) && !matches!(entity, EntityRef::Transaction(_))
+			});
+		if rebuild {
+			self.clear();
+			return;
+		}
+		if self.classification.is_some() {
+			for entity in &changed.entities {
+				if let EntityRef::Transaction(id) = entity {
+					self.written.insert(id.clone());
+				}
+			}
 		}
 	}
 }
@@ -62,7 +87,7 @@ mod tests {
 	}
 
 	#[test]
-	fn budget_edits_keep_the_classification_and_transaction_edits_drop_it() {
+	fn budget_and_transaction_edits_keep_the_classification_and_others_drop_it() {
 		let data = BudgetData::empty(BudgetType::Envelope);
 		let mut cache = ClassificationCache::default();
 		cache.get(&data);
@@ -72,11 +97,22 @@ mod tests {
 			EntityRef::Hold(month),
 		]));
 		assert!(cache.classification.is_some());
+		assert!(cache.written.is_empty());
 
 		cache.refresh(&changed(vec![EntityRef::Transaction(TransactionId::new(
 			"t",
 		))]));
+		assert!(cache.classification.is_some());
+		assert_eq!(cache.written.len(), 1);
+		cache.get(&data);
+		assert!(cache.written.is_empty());
+
+		cache.refresh(&changed(vec![
+			EntityRef::Transaction(TransactionId::new("t")),
+			EntityRef::Category(CategoryId::new("food")),
+		]));
 		assert!(cache.classification.is_none());
+		assert!(cache.written.is_empty());
 
 		cache.get(&data);
 		cache.refresh(&ChangeSet {
