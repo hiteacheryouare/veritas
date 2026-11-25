@@ -270,9 +270,11 @@ struct CustomReportChart: View {
 	}
 
 	private var points: [Point] {
-		series.flatMap { group in
+		let keys = data.intervals.map(\.interval.interval)
+		let headings = Dictionary(zip(keys, ReportPeriod.intervals(keys)), uniquingKeysWith: { first, _ in first })
+		return series.flatMap { group in
 			group.points.map { point in
-				Point(id: "\(point.interval).\(group.id)", interval: ReportPeriod.interval(point.interval), series: group.id, amount: format.chartValue(point.amount, on: .register))
+				Point(id: "\(point.interval).\(group.id)", interval: headings[point.interval] ?? ReportPeriod.interval(point.interval), series: group.id, amount: format.chartValue(point.amount, on: .register))
 			}
 		}
 	}
@@ -376,7 +378,7 @@ private struct CustomReportTable: View {
 					.frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
 					.pinnedColumn()
 					.gridColumnAlignment(.leading)
-				ForEach(intervals, id: \.self) { Text(ReportPeriod.interval($0)).font(.text(.caption)).foregroundStyle(.textTertiary).padding(.horizontal, Spacing.s3) }
+				ForEach(ReportPeriod.intervals(intervals), id: \.self) { Text($0).font(.text(.caption)).foregroundStyle(.textTertiary).padding(.horizontal, Spacing.s3) }
 				Text("Total").font(.text(.caption)).foregroundStyle(.textTertiary).padding(.horizontal, Spacing.s4)
 			}
 			.frame(height: 30)
