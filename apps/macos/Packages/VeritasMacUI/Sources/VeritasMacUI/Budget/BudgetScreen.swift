@@ -69,8 +69,8 @@ struct BudgetScreen: View {
 			.padding(.horizontal, Spacing.s5)
 			.padding(.bottom, Spacing.s6)
 			.frame(maxWidth: .infinity, alignment: .leading)
-			.contentTransition(.opacity)
-			.motion(.fast, value: screen.sheet?.month)
+			.environment(\.shownMonth, screen.sheet?.month)
+			.stillOnRapidRepeat(of: screen.sheet?.month)
 			.onGeometryChange(for: Bool.self) { $0.size.width - 2 * Spacing.s5 >= EnvelopeLayout.widthWithBar } action: { showsBar = $0 }
 			.environment(\.showsDrainBar, showsBar)
 		}
@@ -191,6 +191,7 @@ private struct ToBudgetHeader: View {
 					.font(.system(size: dense ? 15 : 26, weight: .semibold))
 				Text(screen.format.currency(sheet.toBudget, on: .budget))
 					.font(.figures(dense ? .title : .display, weight: .bold))
+					.valueChange(sheet.toBudget)
 					.lineLimit(1)
 					.fixedSize()
 			}

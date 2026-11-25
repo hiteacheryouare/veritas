@@ -11,7 +11,6 @@ struct TourOverlay: View {
 	let isOnStepScreen: Bool
 	@State private var cardHeight: CGFloat = 0
 	@State private var isTargetLate = false
-	@Environment(\.accessibilityReduceMotion) private var reduceMotion
 
 	var body: some View {
 		GeometryReader { proxy in
@@ -36,17 +35,23 @@ struct TourOverlay: View {
 					.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { cardHeight = $0 }
 					.position(x: placement.frame.midX, y: placement.frame.midY)
 					.opacity(cardHeight > 0 ? 1 : 0)
-					.transition(.opacity)
+					.motionTransition(.fade)
 				}
 			}
 		}
-		.animation(Motion.fast.animation(reduceMotion: reduceMotion), value: tour.current)
+		// The card settles to its next anchor, and to a target that turned up late.
+		.motion(.settle, value: Anchoring(step: tour.current, isTargetLate: isTargetLate))
 		.task(id: tour.current) {
 			isTargetLate = false
 			try? await Task.sleep(for: .milliseconds(600))
 			isTargetLate = true
 		}
 	}
+}
+
+private struct Anchoring: Equatable {
+	let step: TourStep?
+	let isTargetLate: Bool
 }
 
 private struct TargetRing: View {

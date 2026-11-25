@@ -7,7 +7,6 @@ struct WorkspaceView: View {
 	let tour: GuidedTour
 	@State private var paletteChoice: PaletteItem?
 	@Environment(AssistantSettings.self) private var assistant: AssistantSettings?
-	@Environment(\.accessibilityReduceMotion) private var reduceMotion
 
 	private var offersAssistant: Bool { assistant?.offersPanel ?? false }
 
@@ -19,9 +18,8 @@ struct WorkspaceView: View {
 			ZStack {
 				page
 					.id(PageID(directory: model.overview?.directory, destination: model.destination))
-					.transition(reduceMotion ? .identity : .asymmetric(insertion: .opacity.combined(with: .offset(y: 6)), removal: .identity))
+					.motionTransition(model.arrival == .drill ? .push : .page)
 			}
-				.animation(Motion.fast.animation(reduceMotion: reduceMotion), value: model.destination)
 				.tourOverlay(tour, isOnStepScreen: model.destination == tour.destination)
 				.onChange(of: tour.current) {
 					if let destination = tour.destination {
@@ -39,27 +37,32 @@ struct WorkspaceView: View {
 								case .showIntegrityReport: model.showIntegrityReport()
 								}
 							}
+							.motionTransition(.reveal)
 						}
 						if let problem = model.settings?.backup.lastProblem {
 							NoticeBanner(symbol: "exclamationmark.triangle", message: "The last backup failed. \(problem)", actionTitle: "Show settings") {
 								model.go(to: .screen(.settings))
 							}
 							.accessibilityIdentifier("backupBanner")
+							.motionTransition(.reveal)
 						}
 						if let problem = model.overview?.scheduleProblem {
 							NoticeBanner(symbol: "calendar.badge.exclamationmark", message: "Bills didn't post today. \(problem)", actionTitle: "Show bills") {
 								model.go(to: .screen(.bills))
 							}
 							.accessibilityIdentifier("scheduleBanner")
+							.motionTransition(.reveal)
 						}
 						if let problem = model.overview?.snapshotProblem {
 							NoticeBanner(symbol: "clock.badge.exclamationmark", message: "The last snapshot failed. \(problem)", actionTitle: "Show settings") {
 								model.go(to: .screen(.settings))
 							}
 							.accessibilityIdentifier("snapshotBanner")
+							.motionTransition(.reveal)
 						}
 						FindBar(isShown: $model.isFindShown)
 					}
+					.motion(.settle, value: banners)
 				}
 				.navigationTitle(model.title(of: model.destination))
 				.toolbar { WorkspaceToolbar(model: model, offersAssistant: offersAssistant) }
@@ -80,6 +83,11 @@ struct WorkspaceView: View {
 				model.isPaletteShown = false
 			}
 		}
+	}
+
+	/// Which banners show, so the page below settles when one comes or goes.
+	private var banners: [Bool] {
+		[model.readOnly != nil, model.settings?.backup.lastProblem != nil, model.overview?.scheduleProblem != nil, model.overview?.snapshotProblem != nil]
 	}
 
 	/// The screen for the current destination.
@@ -131,7 +139,8 @@ struct WorkspaceView: View {
 	}
 }
 
-/// A page's identity: a new budget or a new destination is a new page, which fades in.
+/// A page's identity: a new budget or a new destination is a new page, which
+/// fades through from the last one, or pushes in when opened from a row.
 private struct PageID: Hashable {
 	let directory: URL?
 	let destination: Destination

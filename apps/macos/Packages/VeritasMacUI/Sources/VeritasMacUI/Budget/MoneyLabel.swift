@@ -34,6 +34,7 @@ struct AvailableLabel: View {
 			}
 			Text(format.amount(amount, on: .budget))
 				.font(.figures(.body, weight: .semibold))
+				.valueChange(amount)
 			Text(word ?? tone.word ?? "")
 				.font(.text(.caption))
 				.opacity(0.85)
@@ -44,12 +45,18 @@ struct AvailableLabel: View {
 	}
 }
 
+extension EnvironmentValues {
+	/// The month on screen. A drain bar never animates when it changes, so a
+	/// bar doesn't appear to drain from one month into the next.
+	@Entry var shownMonth: Month? = nil
+}
+
 /// What's left of the envelope, draining as it's spent. Overspent is a red
 /// hatched bar at full width with no fill: the hatch is the non-color signal.
 struct DrainBar: View {
 	let fill: Double
 	let tone: VeritasDesign.MoneyTone
-	@Environment(\.accessibilityReduceMotion) private var reduceMotion
+	@Environment(\.shownMonth) private var shownMonth
 
 	var body: some View {
 		GeometryReader { proxy in
@@ -77,7 +84,8 @@ struct DrainBar: View {
 		}
 		.frame(height: Size.bar)
 		.clipShape(.rect(cornerRadius: Radius.bar))
-		.animation(Motion.fast.animation(reduceMotion: reduceMotion), value: fill)
+		.motion(.fast, value: fill)
+		.still(whenChanging: shownMonth)
 		.accessibilityHidden(true)
 	}
 }

@@ -19,6 +19,7 @@ struct NewBudgetSheet: View {
 				case .paycheckSavings: PaycheckSavingsStep(setup: setup)
 				}
 			}
+			.motionTransition(.fade)
 			.frame(maxWidth: .infinity, alignment: .leading)
 			if let problem = setup.problem {
 				ProblemNote(text: problem)
@@ -27,6 +28,7 @@ struct NewBudgetSheet: View {
 		}
 		.padding(Spacing.s5)
 		.frame(width: 540)
+		.motion(.settle, value: setup.step)
 		.task { await setup.loadCurrencies() }
 		.containerIdentifier("newBudget.\(stepName)")
 	}

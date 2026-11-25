@@ -18,6 +18,7 @@ struct DashboardScreen: View {
 	@State private var reports: [CustomReportItem] = []
 	/// The card opened full size, as clicking a card in Actual opens its report.
 	@State private var openedID: String?
+	@Namespace private var morphSpace
 	static let rowHeight: CGFloat = 100
 	static let gap: CGFloat = Spacing.s3
 
@@ -30,14 +31,20 @@ struct DashboardScreen: View {
 		openedID.flatMap { id in model.sheet?.cards.first { $0.id == id } }
 	}
 
+	/// The grid stays in place under an opened card, so going back finds it
+	/// where it was scrolled. The card grows into its page and shrinks back.
 	var body: some View {
-		Group {
+		ZStack {
+			grid
+				.opacity(opened == nil ? 1 : 0)
+				.allowsHitTesting(opened == nil)
+				.accessibilityHidden(opened != nil)
 			if let card = opened {
-				CardDetail(card: card, workspace: workspace, model: model, configure: { configuring = $0 }, close: { openedID = nil })
-			} else {
-				grid
+				CardDetail(card: card, workspace: workspace, model: model, morphSpace: morphSpace, configure: { configuring = $0 }, close: { open(nil) })
+					.motionTransition(.fade)
 			}
 		}
+		.navigationTitle(opened.map { $0.title ?? $0.rawKind } ?? model.sheet?.name ?? "Dashboard")
 		.sheet(item: $configuring) { card in
 			WidgetConfigSheet(card: card, reports: reports, names: model.names, style: model.numberStyle) { config in
 				Task { await model.configure(card, config) }
@@ -48,6 +55,10 @@ struct DashboardScreen: View {
 			reports = await model.customReports()
 		}
 		.onChange(of: model.sheet?.id) { openedID = nil }
+	}
+
+	private func open(_ card: DashboardCard?) {
+		Motion.perform(.morph) { openedID = card?.id }
 	}
 
 	private var grid: some View {
@@ -63,7 +74,7 @@ struct DashboardScreen: View {
 						.frame(maxWidth: .infinity, minHeight: 240)
 						.containerIdentifier("dashboard.empty")
 					} else {
-						DashboardGrid(sheet: sheet, model: model, open: { openedID = $0.id }, configure: { configuring = $0 }, remove: { removing = $0 })
+						DashboardGrid(sheet: sheet, model: model, openedID: openedID, morphSpace: morphSpace, open: { open($0) }, configure: { configuring = $0 }, remove: { removing = $0 })
 					}
 				} else if !model.sheets.isEmpty || !model.canEdit {
 					Text("No dashboards")
@@ -77,18 +88,19 @@ struct DashboardScreen: View {
 		}
 		.overlay { if !model.hasLoaded { ScreenState(kind: .loading) } }
 		.background(.surfaceWindow)
-		.navigationTitle(model.sheet?.name ?? "Dashboard")
 		.toolbar {
-			ToolbarItem(placement: .navigation) { pageMenu }
-			ToolbarItemGroup(placement: .primaryAction) {
-				if model.canEdit { addMenu }
-				Toggle(isOn: $model.isEditing) {
-					Label(model.isEditing ? "Done" : "Edit layout", systemImage: model.isEditing ? "checkmark" : "rectangle.3.group")
+			if opened == nil {
+				ToolbarItem(placement: .navigation) { pageMenu }
+				ToolbarItemGroup(placement: .primaryAction) {
+					if model.canEdit { addMenu }
+					Toggle(isOn: $model.isEditing) {
+						Label(model.isEditing ? "Done" : "Edit layout", systemImage: model.isEditing ? "checkmark" : "rectangle.3.group")
+					}
+					.toggleStyle(.button)
+					.labelStyle(.titleAndIcon)
+					.disabled(!model.canPlace || model.sheet == nil)
+					.accessibilityIdentifier("dashboard.edit")
 				}
-				.toggleStyle(.button)
-				.labelStyle(.titleAndIcon)
-				.disabled(!model.canPlace || model.sheet == nil)
-				.accessibilityIdentifier("dashboard.edit")
 			}
 		}
 		.confirmationDialog("Remove \(removing?.title ?? "this widget")?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
@@ -163,6 +175,8 @@ struct DashboardScreen: View {
 struct DashboardGrid: View {
 	let sheet: DashboardSheet
 	let model: DashboardModel
+	var openedID: String?
+	var morphSpace: Namespace.ID?
 	let open: (DashboardCard) -> Void
 	let configure: (DashboardCard) -> Void
 	let remove: (DashboardCard) -> Void
@@ -173,14 +187,41 @@ struct DashboardGrid: View {
 			let column = (proxy.size.width - DashboardScreen.gap * 11) / 12
 			ZStack(alignment: .topLeading) {
 				ForEach(sheet.cards) { card in
-					WidgetCard(card: card, model: model, cell: CGSize(width: column + DashboardScreen.gap, height: DashboardScreen.rowHeight + DashboardScreen.gap), open: open, configure: configure, remove: remove)
-						.frame(width: span(card.width, column), height: height(card.height))
-						.offset(x: CGFloat(card.x) * (column + DashboardScreen.gap), y: CGFloat(rows[card.id] ?? card.y) * (DashboardScreen.rowHeight + DashboardScreen.gap))
+					let row = rows[card.id] ?? card.y
+					Group {
+						if card.id == openedID {
+							Color.clear
+						} else {
+							WidgetCard(card: card, row: row, model: model, cell: CGSize(width: column + DashboardScreen.gap, height: DashboardScreen.rowHeight + DashboardScreen.gap), open: open, configure: configure, remove: remove)
+								.morph(card.id, in: morphSpace)
+						}
+					}
+					.frame(width: span(card.width, column), height: height(card.height))
+					.padding(.leading, CGFloat(card.x) * (column + DashboardScreen.gap))
+					.padding(.top, CGFloat(row) * (DashboardScreen.rowHeight + DashboardScreen.gap))
 				}
 			}
+			.motion(.settle, value: sheet.cards.map { Slot(card: $0, row: rows[$0.id] ?? $0.y) })
 		}
 		.frame(height: height(sheet.cards.map { (rows[$0.id] ?? $0.y) + $0.height }.max() ?? 0))
 		.containerIdentifier("dashboard.grid")
+	}
+
+	/// Where a card sits, so the others settle into place when one moves or resizes.
+	private struct Slot: Equatable {
+		let id: String
+		let x: Int64
+		let row: Int64
+		let width: Int64
+		let height: Int64
+
+		init(card: DashboardCard, row: Int64) {
+			id = card.id
+			x = card.x
+			self.row = row
+			width = card.width
+			height = card.height
+		}
 	}
 
 	private func span(_ columns: Int64, _ width: CGFloat) -> CGFloat {
@@ -194,13 +235,26 @@ struct DashboardGrid: View {
 
 private struct WidgetCard: View {
 	let card: DashboardCard
+	let row: Int64
 	let model: DashboardModel
 	/// One grid step, gap included.
 	let cell: CGSize
 	let open: (DashboardCard) -> Void
 	let configure: (DashboardCard) -> Void
 	let remove: (DashboardCard) -> Void
+	/// The pointer's travel while dragging, then the snapped slot's offset until the core answers.
 	@State private var drag: CGSize = .zero
+	/// Where the card was when the drag began. Once the core moves the card,
+	/// the offset shrinks by the same amount, so the card never jumps.
+	@State private var dragOrigin: (column: Int64, row: Int64)?
+
+	private var dragOffset: CGSize {
+		guard let dragOrigin else { return drag }
+		return CGSize(
+			width: drag.width - CGFloat(card.x - dragOrigin.column) * cell.width,
+			height: drag.height - CGFloat(row - dragOrigin.row) * cell.height
+		)
+	}
 
 	private var opens: Bool { !model.isEditing && card.opensFullSize }
 
@@ -220,7 +274,7 @@ private struct WidgetCard: View {
 		.overlay(alignment: .bottomTrailing) { if model.isEditing { editButtons } }
 		.contentShape(.rect(cornerRadius: Radius.section))
 		.onTapGesture { if opens { open(card) } }
-		.offset(drag)
+		.offset(dragOffset)
 		.gesture(model.isEditing ? moveGesture : nil)
 		.contextMenu { menu }
 		.accessibilityElement(children: .contain)
@@ -234,13 +288,26 @@ private struct WidgetCard: View {
 		(Int64((translation.width / cell.width).rounded()), Int64((translation.height / cell.height).rounded()))
 	}
 
+	/// The card follows the pointer, settles into the snapped slot on release,
+	/// and holds it while the core moves it there.
 	private var moveGesture: some Gesture {
 		DragGesture(minimumDistance: 4)
-			.onChanged { drag = $0.translation }
+			.onChanged { value in
+				if dragOrigin == nil { dragOrigin = (card.x, row) }
+				drag = value.translation
+			}
 			.onEnded { value in
 				let (columns, rows) = steps(value.translation)
-				drag = .zero
-				Task { await model.move(card, columns: columns, rows: rows) }
+				Motion.perform(.settle) {
+					drag = CGSize(width: CGFloat(columns) * cell.width, height: CGFloat(rows) * cell.height)
+				}
+				Task {
+					await model.move(card, columns: columns, rows: rows)
+					Motion.perform(.settle) {
+						drag = .zero
+						dragOrigin = nil
+					}
+				}
 			}
 	}
 

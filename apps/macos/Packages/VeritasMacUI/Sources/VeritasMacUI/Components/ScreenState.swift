@@ -19,12 +19,12 @@ struct ScreenState: View {
 		VStack(spacing: Spacing.s3) {
 			switch kind {
 			case .loading:
-				// A load that finishes quickly never flashes a spinner.
+				// A load that finishes inside the ready gate never flashes a spinner.
 				ProgressView()
 					.controlSize(.small)
-					.opacity(isLoadingShown ? 1 : 0)
+					.shown(isLoadingShown)
 					.task {
-						try? await Task.sleep(for: .milliseconds(250))
+						try? await Task.sleep(for: .seconds(Motion.Duration.readyGate))
 						isLoadingShown = true
 					}
 					.accessibilityLabel("Loading")

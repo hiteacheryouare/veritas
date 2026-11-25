@@ -155,10 +155,11 @@ struct CustomReportPane: View {
 								.frame(maxWidth: .infinity, minHeight: 200)
 								.accessibilityIdentifier("customReport.previewProblem")
 						} else {
-							ProgressView().frame(maxWidth: .infinity, minHeight: 200)
+							ScreenState(kind: .loading).frame(minHeight: 200)
 						}
 					}
 				}
+				.motion(.fast, value: model.shown == nil)
 				.padding(.top, Spacing.s2)
 				.padding(.horizontal, Spacing.s5)
 				.padding(.bottom, Spacing.s6)
