@@ -4,7 +4,9 @@ import VeritasCore
 /// Everything the assistant may read from an open budget. Every requirement
 /// is a read, so a tool built on this protocol has no way to change the budget.
 public protocol ReadOnlyBudgetQueries: Sendable {
-	func netProfit(first: Month, last: Month) async throws -> NetProfitReport
+	func netProfitPeriod(first: String, last: String) async throws -> NetProfitPeriod
+	func budgetHabits(today: String) async throws -> BudgetHabits
+	func spendingByCategory(first: String, last: String) async throws -> CategoryBreakdown
 	func balanceSheet(asOf: String) async throws -> BalanceSheet
 	func cashFlowStatement(first: String, last: String) async throws -> CashFlowColumn
 	func budgetMonth(_ month: Month, today: String) async throws -> BudgetMonth

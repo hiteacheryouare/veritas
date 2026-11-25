@@ -93,10 +93,15 @@ struct AccountsScreen: View {
 							workspace.go(to: .account(id: account.id))
 						}
 						.contextMenu { menu(account) }
+						.tourAnchor(.openAccount, isOn: account.id == firstShownAccountID)
 					}
 				}
 			}
 		}
+	}
+
+	private var firstShownAccountID: String? {
+		(model.onBudget + model.offBudget + model.closed).first?.id
 	}
 
 	private func heading(_ text: String) -> some View {

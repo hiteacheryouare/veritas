@@ -1609,6 +1609,83 @@ pub(crate) mod tests {
 		(group, members.into_iter().map(|(_, id)| id).collect())
 	}
 
+	/// v20 (R-AI-1, AI-10.2): each envelope carries its effective kind, the
+	/// one `kindTarget` reads. An archived category shown again keeps its
+	/// kind beside a visible one of the same kind, where `kindTarget` would
+	/// name only the visible one.
+	#[test]
+	fn every_envelope_carries_its_effective_kind_archived_ones_too() {
+		use crate::CategoryKind;
+		let (scratch, core) = imported("kinds");
+		let (_, members) = busy_group(&data(&core));
+		let (visible, archived) = (members[0].clone(), members[1].clone());
+		for id in [&visible, &archived] {
+			core.perform(Command::SetCategoryKind {
+				category_id: id.clone(),
+				kind: CategoryKind::DebtPrincipal,
+			})
+			.unwrap();
+		}
+		core.perform(Command::ArchiveCategory {
+			category_id: archived.clone(),
+		})
+		.unwrap();
+		core.close().unwrap();
+		// Showing it again in Veritas restores it; in Actual, unhiding it
+		// leaves Veritas's archive date in place.
+		let db = std::path::Path::new(&scratch.budget()).join(veritas_session::DB_FILE);
+		rusqlite::Connection::open(&db)
+			.unwrap()
+			.execute(
+				"UPDATE categories SET hidden = 0 WHERE id = ?1",
+				[&archived],
+			)
+			.unwrap();
+		let core = Arc::new(
+			Core::<veritas_store::Store>::open(&scratch.budget(), &CancelToken::default()).unwrap(),
+		);
+		let after = data(&core);
+		let archived_id = veritas_domain::CategoryId::new(archived.as_str());
+		assert!(after.category_meta[&archived_id].archived_on.is_some());
+		assert!(!after.categories[&archived_id].hidden);
+		assert_eq!(
+			veritas_engine::category_kinds::kind_target(
+				&after,
+				veritas_domain::CategoryKind::DebtPrincipal
+			)
+			.unwrap(),
+			veritas_engine::category_kinds::KindTarget::One(veritas_domain::CategoryId::new(
+				visible.as_str()
+			)),
+			"kindTarget names only the visible one"
+		);
+
+		let (month, today) = this_month();
+		let sheet = core.budget_month(month, &today).unwrap();
+		let rows: Vec<_> = sheet
+			.groups
+			.iter()
+			.flat_map(|group| group.envelopes.iter().map(move |row| (group, row)))
+			.collect();
+		let kind_of = |id: &str| {
+			rows.iter()
+				.find(|(_, row)| row.id == id)
+				.map(|(_, row)| row.kind)
+		};
+		assert_eq!(kind_of(&visible), Some(CategoryKind::DebtPrincipal));
+		assert_eq!(kind_of(&archived), Some(CategoryKind::DebtPrincipal));
+		for (group, row) in &rows {
+			if row.id != visible && row.id != archived {
+				let expected = if group.is_income {
+					CategoryKind::Income
+				} else {
+					CategoryKind::Expense
+				};
+				assert_eq!(row.kind, expected, "{}", row.name);
+			}
+		}
+	}
+
 	fn created_category(change: &Change) -> String {
 		change
 			.entities
