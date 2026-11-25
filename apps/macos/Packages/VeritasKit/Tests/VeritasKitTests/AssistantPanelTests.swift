@@ -90,8 +90,10 @@ final class ScriptedAnswerer: AssistantAnswering {
 
 /// Closing the panel or switching budgets stops an answer mid-stream. The
 /// test holds the stream's continuation, so it decides when each word
-/// arrives, and a word sent after the stop is refused by the stream itself.
-/// Nothing here waits on a clock.
+/// arrives. The stream may notice the cancellation a moment after `stop()`,
+/// because its `next()` runs off the main actor, so the tests wait for that
+/// moment rather than assume it, and check a word sent in between never
+/// lands. Nothing here waits on a clock.
 @MainActor
 struct AssistantPanelCancelTests {
 	private func context() -> AssistantContext? {
@@ -121,11 +123,12 @@ struct AssistantPanelCancelTests {
 		try #require(panel.exchanges.first?.answer == "Net")
 
 		panel.stop()
-		#expect(answerer.terminated, "stopping cancels the model's stream before stop() returns")
-		#expect(refused(stream.yield("Net Profit")), "so the stream refuses any later word")
+		#expect(panel.exchanges.first?.state == .failed(AssistantPanelModel.stopped))
+		stream.yield("Net Profit")
 		await panel.settle()
-		await letThePanelRun { false }
-		#expect(panel.exchanges.first?.answer == "Net", "no more text lands")
+		await answerer.waitUntilTerminated()
+		#expect(refused(stream.yield("Net Profit for October")), "the model's stream was cancelled, so it refuses any later word")
+		#expect(panel.exchanges.first?.answer == "Net", "a word sent before the stream noticed the stop never lands")
 		#expect(panel.exchanges.first?.state == .failed(AssistantPanelModel.stopped))
 		#expect(!panel.isAnswering)
 	}
@@ -144,8 +147,8 @@ struct AssistantPanelCancelTests {
 		weak let dropped = panel
 		panel = nil
 		#expect(dropped == nil, "the old budget's panel is gone")
-		#expect(answerer.terminated, "and dropping it cancelled its model stream")
-		#expect(refused(stream.yield("Net Profit")))
+		await answerer.waitUntilTerminated()
+		#expect(refused(stream.yield("Net Profit")), "and dropping it cancelled its model stream")
 	}
 }
 
@@ -214,16 +217,39 @@ struct AssistantPanelCoalescingTests {
 /// Hands the test the stream's continuation instead of producing words itself.
 @MainActor
 final class GatedAnswerer: AssistantAnswering {
+	/// Set when the stream terminates; `wait()` returns once it has.
 	final class Ended: Sendable {
-		private let flag = Mutex(false)
-		var value: Bool { flag.withLock { $0 } }
-		func set() { flag.withLock { $0 = true } }
+		private let state = Mutex<(ended: Bool, waiters: [CheckedContinuation<Void, Never>])>((false, []))
+		var value: Bool { state.withLock { $0.ended } }
+
+		func set() {
+			let waiters = state.withLock { state in
+				state.ended = true
+				defer { state.waiters = [] }
+				return state.waiters
+			}
+			waiters.forEach { $0.resume() }
+		}
+
+		func wait() async {
+			await withCheckedContinuation { continuation in
+				let ended = state.withLock { state in
+					if !state.ended { state.waiters.append(continuation) }
+					return state.ended
+				}
+				if ended { continuation.resume() }
+			}
+		}
 	}
 
 	private(set) var continuation: AsyncThrowingStream<String, any Error>.Continuation?
 	private let ended = Ended()
 
 	var terminated: Bool { ended.value }
+
+	func waitUntilTerminated() async {
+		await ended.wait()
+	}
 
 	func answer(_ question: String) -> AsyncThrowingStream<String, any Error> {
 		let (stream, continuation) = AsyncThrowingStream.makeStream(of: String.self, throwing: (any Error).self)
