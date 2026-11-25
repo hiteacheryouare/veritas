@@ -138,6 +138,14 @@ impl<B: Backend> Session<B> {
 	/// passed. If the full check fails, the budget turns read-only and
 	/// subscribers are told to refetch.
 	pub fn open(dir: &Path, options: SessionOptions) -> Result<Self, CoreError> {
+		let mut session = Session::open_unchecked(dir, options)?;
+		session.start_open_check();
+		Ok(session)
+	}
+
+	/// `open` without the background check, for a caller that must finish
+	/// something before the open snapshot can be taken.
+	fn open_unchecked(dir: &Path, options: SessionOptions) -> Result<Self, CoreError> {
 		let db = dir.join(DB_FILE);
 		if !db.is_file() {
 			return Err(CoreError::Io(format!(
@@ -149,7 +157,7 @@ impl<B: Backend> Session<B> {
 		let (bus, load_report) =
 			open_bus(&db, lock.as_ref(), Listeners::default()).map_err(|(error, _)| error)?;
 		let today = CivilDate::from((options.clock)().date_naive());
-		let mut session = Session {
+		Ok(Session {
 			dir: dir.to_path_buf(),
 			db,
 			snapshots: dir.join(SNAPSHOTS_DIR),
@@ -169,20 +177,21 @@ impl<B: Backend> Session<B> {
 			register: None,
 			classification: ClassificationCache::default(),
 			today,
-		};
-		let take_snapshot = session.read_only().is_none();
-		session.open_check = Some(
+		})
+	}
+
+	fn start_open_check(&mut self) {
+		self.open_check = Some(
 			OpenCheck {
-				db: session.db.clone(),
-				snapshots: session.snapshots.clone(),
-				retention: session.options.retention,
-				clock: session.options.clock.clone(),
-				take_snapshot,
+				db: self.db.clone(),
+				snapshots: self.snapshots.clone(),
+				retention: self.options.retention,
+				clock: self.options.clock.clone(),
+				take_snapshot: self.read_only().is_none(),
 				verify: B::verify,
 			}
 			.start(),
 		);
-		Ok(session)
 	}
 
 	/// Starts a brand-new budget in `budget_dir`, which must not exist yet,
@@ -261,14 +270,16 @@ impl<B: Backend> Session<B> {
 				}),
 			},
 		)?;
-		let mut session = Session::open(budget_dir, options)?;
-		// R-REL-3: the budget as it arrived from Actual, before any edit can
-		// reach the background open snapshot.
+		let mut session = Session::open_unchecked(budget_dir, options)?;
+		// R-REL-3: the budget as it arrived from Actual, before any edit. The
+		// open check starts after it, so the open snapshot is always newer and
+		// retention never counts it as replaced by this one.
 		if session.read_only().is_none()
 			&& let Err(problem) = session.snapshot(SnapshotReason::Import)
 		{
 			session.snapshot_problem = Some(problem);
 		}
+		session.start_open_check();
 		Ok(session)
 	}
 
