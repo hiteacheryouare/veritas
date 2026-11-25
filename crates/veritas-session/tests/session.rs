@@ -764,6 +764,52 @@ fn a_failed_open_snapshot_is_reported_without_blocking_the_budget() {
 	);
 	assert_eq!(session.read_only(), None);
 	session.perform(&rename("Still editable")).unwrap();
+
+	std::fs::remove_file(dir.join("snapshots")).unwrap();
+	session.snapshot(SnapshotReason::Hourly).unwrap();
+	assert!(
+		session.snapshot_problem().is_none(),
+		"any later snapshot holds the budget as it is now"
+	);
+}
+
+#[test]
+fn a_failed_import_snapshot_stays_reported_after_later_snapshots_work() {
+	// R-REL-3, R-REL-4. The snapshots folder is blocked only until the open
+	// check runs: the import snapshot fails, the open snapshot works.
+	let root = TempDir::new("session-import-snapshot-problem");
+	let dir = root.path().join("budget");
+	let blocked = dir.join("snapshots");
+	let session_thread = std::thread::current().id();
+	let fixed = TestClock::new().options().clock;
+	let options = SessionOptions {
+		clock: Arc::new(move || {
+			if std::thread::current().id() == session_thread {
+				if !blocked.exists() {
+					let _ = std::fs::write(&blocked, b"a file where the folder should be");
+				}
+			} else {
+				let _ = std::fs::remove_file(&blocked);
+			}
+			fixed()
+		}),
+		..SessionOptions::default()
+	};
+	let mut session = TestSession::import_actual_zip(&fixture("small"), &dir, options).unwrap();
+	assert_eq!(session.wait_for_open_check(), None);
+	assert_eq!(reasons(&session), [SnapshotReason::Open]);
+	assert!(
+		matches!(session.snapshot_problem(), Some(CoreError::Io(_))),
+		"the open snapshot working doesn't hide the import's failure: {:?}",
+		session.snapshot_problem()
+	);
+
+	session.perform(&rename("Everyday")).unwrap();
+	session.snapshot(SnapshotReason::Hourly).unwrap();
+	assert!(
+		session.snapshot_problem().is_some(),
+		"no later snapshot holds the budget as it arrived"
+	);
 }
 
 #[test]

@@ -117,7 +117,7 @@ pub struct Session<B: Backend> {
 	dirty: bool,
 	last_snapshot: Option<DateTime<Utc>>,
 	open_check: Option<Pending>,
-	snapshot_problem: Option<CoreError>,
+	snapshot_problem: Option<(SnapshotReason, CoreError)>,
 	schedule_problem: Option<String>,
 	audit: Option<AuditReport>,
 	backup_folder: Option<PathBuf>,
@@ -277,7 +277,7 @@ impl<B: Backend> Session<B> {
 		if session.read_only().is_none()
 			&& let Err(problem) = session.snapshot(SnapshotReason::Import)
 		{
-			session.snapshot_problem = Some(problem);
+			session.snapshot_failed(SnapshotReason::Import, problem);
 		}
 		session.start_open_check();
 		Ok(session)
@@ -323,10 +323,34 @@ impl<B: Backend> Session<B> {
 		self.bus().is_ok_and(CommandBus::can_redo)
 	}
 
-	/// Why the background open snapshot failed, until a later snapshot works.
-	/// A failed open snapshot never stops the budget opening.
+	/// Why a snapshot failed. A failed snapshot never stops the budget
+	/// opening. An open or hourly snapshot's problem lasts until any later
+	/// snapshot works, since each holds the budget as it is now. The import
+	/// snapshot's lasts until another import snapshot works: no later copy
+	/// holds the budget as it arrived.
 	pub fn snapshot_problem(&self) -> Option<&CoreError> {
-		self.snapshot_problem.as_ref()
+		self.snapshot_problem.as_ref().map(|(_, problem)| problem)
+	}
+
+	fn snapshot_failed(&mut self, reason: SnapshotReason, problem: CoreError) {
+		let hides_an_operations_problem = reason.is_routine()
+			&& self
+				.snapshot_problem
+				.as_ref()
+				.is_some_and(|(failed, _)| !failed.is_routine());
+		if !hides_an_operations_problem {
+			self.snapshot_problem = Some((reason, problem));
+		}
+	}
+
+	fn snapshot_worked(&mut self, reason: SnapshotReason) {
+		if self
+			.snapshot_problem
+			.as_ref()
+			.is_some_and(|(failed, _)| failed.is_routine() || *failed == reason)
+		{
+			self.snapshot_problem = None;
+		}
 	}
 
 	/// Why the last run of the daily schedule service failed, until a later
@@ -617,7 +641,7 @@ impl<B: Backend> Session<B> {
 		self.ensure_writer()?;
 		let now = self.now();
 		let snapshot = take_snapshot(&self.db, &self.snapshots, reason, now)?;
-		self.snapshot_problem = None;
+		self.snapshot_worked(reason);
 		self.dirty = false;
 		self.last_snapshot = Some(now);
 		prune_snapshots(&self.snapshots, &self.options.retention, now)?;
@@ -811,9 +835,9 @@ impl<B: Backend> Session<B> {
 		match checked.snapshot {
 			Some(Ok(snapshot)) => {
 				self.last_snapshot = Some(snapshot.taken_at);
-				self.snapshot_problem = None;
+				self.snapshot_worked(snapshot.reason);
 			}
-			Some(Err(error)) => self.snapshot_problem = Some(error),
+			Some(Err(error)) => self.snapshot_failed(SnapshotReason::Open, error),
 			None => {}
 		}
 		let sound = checked
