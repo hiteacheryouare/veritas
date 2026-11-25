@@ -1,6 +1,6 @@
 # Wrapped, editorial
 
-A proposal to turn Wrapped from nine story cards into a short year-in-review magazine: spreads with serif headlines, ranked tables, and charts annotated in place. Nothing here is built yet. Motion references point to `design/motion.md`.
+The design for turning Wrapped from nine story cards into a short year-in-review magazine: spreads with serif headlines, ranked tables, and charts annotated in place. Ryan's decisions are collected at the end. The build waits for the core figures N1 to N4. Motion references point to `design/motion.md`.
 
 The voice is classy and plain. It reports the year; it doesn't cheer, judge or console. Every figure on every page comes from the core's `WrappedReport` (FC-8), or from a new figure listed at the end for Fred to spec. The app formats; it never computes a money figure of its own.
 
@@ -20,7 +20,7 @@ A spread is two facing pages on a fixed canvas, like a printed magazine, scaled 
 - **Canvas:** 1280 by 800 pt per spread (16:10), two pages of 640 by 800.
 - **Scaling:** the spread is laid out at canvas size and scaled as a whole to fit the content area, so the typography keeps its exact proportions at any window size. It never scales above 1.
 - **Narrow windows:** below 1000 pt of content width, pages show one at a time in the same order, at 640 by 800.
-- **Paper:** the page is `color-surface-paper` with `color-text-paper` ink in both appearances. In dark mode it sits on the dark window like a printed page on a desk, the same treatment Statements uses. A soft shadow (the current card's 24 pt radius, 18% black) lifts it off the window. Corners are square, as paper is.
+- **Paper:** follows the appearance, light pages in light mode and dark pages in dark mode (see Color).
 
 ## The sequence
 
@@ -101,7 +101,7 @@ There are no eyebrow labels, kickers or running heads. Each page opens on its he
 
 `tokens.md` puts every amount in SF Pro Rounded. Wrapped is the one place an exception could earn its keep.
 
-| | **A. New York for display figures (recommended)** | B. SF Pro Rounded everywhere |
+| | **A. New York for display figures (chosen)** | B. SF Pro Rounded everywhere |
 |---|---|---|
 | Hero figures and figures inside headlines | New York, tabular lining | SF Pro Rounded |
 | Tables and annotations | SF Pro Rounded | SF Pro Rounded |
@@ -109,25 +109,39 @@ There are no eyebrow labels, kickers or running heads. Each page opens on its he
 
 ## Color
 
-Neutral until Ryan's palette exists. Accent positions are marked so the accent drops in later without a layout change.
+Paper follows the appearance: light pages in light mode, dark pages in dark mode. The brand accent marks at most one thing per page. Colors are named by token; their values live in `design/tokens.css`, where `ws/brand` puts the brand palette.
 
-| Use | Value |
+### Page colors
+
+New Wrapped tokens, each defined as an existing token so there is no new hex value to keep in step.
+
+| Token | Light | Dark |
+|---|---|---|
+| `color-wrapped-paper` | `color-surface-paper` | `color-surface-grouped` |
+| `color-wrapped-ink` | `color-text-paper` | `color-text-primary` |
+| `color-wrapped-ink-secondary` | `color-text-secondary` | `color-text-secondary` |
+| `color-wrapped-rule` | `color-wrapped-ink` at 16% | `color-wrapped-ink` at 20% |
+| `color-wrapped-edge` | none (a shadow lifts the page) | `color-edge-grouped`, 1 pt |
+
+- **Light pages** sit on `color-surface-window` with a soft shadow (24 pt radius, 18% black). Corners are square, as paper is.
+- **Dark pages** sit on the dark window, where a shadow barely shows, so the page gets the 1 pt edge plus a deeper shadow (24 pt radius, 40% black). The page is lighter than the window, so it still reads as a sheet on a desk.
+- Every text token reaches 4.5:1 on its page in both appearances.
+
+### Marks
+
+| Use | Token |
 |---|---|
-| Paper | `color-surface-paper` |
-| Ink | `color-text-paper` |
-| Secondary ink | A new `color-text-paper-secondary`, about #5f5f67, at 4.5:1 or better on both paper values |
-| Hairlines | Ink at 16% |
-| Bars, lines | `color-chart-expense` (light value, since paper is light in both appearances) |
+| Bars, lines | `color-chart-expense` (each appearance's own value) |
 | Soft bars | `color-chart-expense-soft` |
 | Refund bar | Unfilled, hatched in `color-chart-expense`, the same non-color signal as the overspent drain bar |
+| Cover rule | `color-accent` |
+| The one highlighted mark per chart (the biggest month's bar, the net worth line's end point, the longest no-spend run) | `color-accent` |
+| No-spend days on the calendar | `color-accent-secondary` at 35% |
+| Focus ring on contents entries | `color-focus-ring` |
 
-Accent positions:
+`color-accent` is the brand primary, with the derived dark-mode shade in dark mode. `color-accent-secondary` is the brand secondary. Both names follow whatever `ws/brand` lands. Each accent mark must reach 3:1 against its page in both appearances (WCAG 1.4.11); check this once `ws/brand` merges, and fall back to the ink color for any mark that misses. Text is never set in an accent color.
 
-- **ACCENT-1:** the 48 pt rule under the cover year.
-- **ACCENT-2:** the highlighted mark in a chart: the biggest month's bar, the net worth line's end point. Until the accent exists, these are solid ink.
-- **ACCENT-3:** the focus ring on contents entries, which is `color-focus-ring` today and follows whatever the app's focus color becomes.
-
-Money-state colors (available, low, overspent, income) are not used in Wrapped. Nothing in a year review is in one of those states, and green spending bars would say the wrong thing.
+The good, bad and warning colors, and the money-state colors (available, low, overspent, income), are not used in Wrapped. Nothing in a year review is in one of those states, and green spending bars would say the wrong thing.
 
 ## Charts and annotations
 
@@ -226,9 +240,9 @@ Tied to `motion.md`.
 
 ## Export
 
-R-WRAP-2 requires images. Every export renders on light paper, from the same views as the screen, at 2x (a spread is 2560 by 1600 px, a page 1280 by 1600 px).
+R-WRAP-2 requires images. Every export renders from the same views as the screen, at 2x (a spread is 2560 by 1600 px, a page 1280 by 1600 px). The save panel has a Paper popup, Light or Dark, set to the appearance on screen, so a dark-mode reader can still send a light page.
 
-| | **A. Menu of three (recommended)** | B. One PNG per spread | C. One contact sheet (today) |
+| | **A. Menu of three (chosen)** | B. One PNG per spread | C. One contact sheet (today) |
 |---|---|---|---|
 | Items | "This spread as image…", "All spreads as images…" (a folder of numbered PNGs), "All spreads as PDF…" | Folder of PNGs only | All spreads tiled into one PNG |
 | Hide amounts | Each item has a "without amounts" twin, as today | Same | Same |
@@ -242,8 +256,8 @@ The PDF has real, selectable text, which makes it searchable and readable by Voi
 - **Tables** read each row as a sentence: "Groceries, 9,412 dollars, 18.3% of categorized spending."
 - **Charts** expose an audio graph (`AXChartDescriptor`) and a one-sentence summary built from the same report text.
 - **Calendar** reads as a summary ("142 no-spend days, longest run 9 days from April 4"), with each month navigable as a group listing its no-spend dates.
-- **Contrast.** Every text color reaches 4.5:1 on both paper values; annotation and axis text included.
-- **Non-color signals.** The biggest month is marked by its annotation and a heavier bar, not only by ACCENT-2. Refund months are hatched.
+- **Contrast.** Every text color reaches 4.5:1 on both pages, light and dark, annotation and axis text included. Accent marks reach 3:1 or fall back to ink.
+- **Non-color signals.** The biggest month is marked by its annotation and a heavier bar, not only by its accent color. Refund months are hatched.
 - **Zoom.** The spread scales with the window, and macOS zoom works as on any view. In single-page mode at 640 pt, nothing is smaller than 11 pt.
 - **Keyboard.** Everything works from the keys above; contents entries are focusable buttons with the focus ring.
 - **Reduce Motion** as described in Moving between spreads.
@@ -260,7 +274,7 @@ At canvas scale, not to exact proportion. `|` in the middle is the spine.
 |  2026                                 |  Contents                             |
 |  New York 168, tabular                |                                       |
 |                                       |  The ledger                       3   |
-|  ____  ACCENT-1, 48 pt rule           |  Where it went                    5   |
+|  ____  48 pt rule, color-accent       |  Where it went                    5   |
 |                                       |  Who you paid                     7   |
 |  Household budget                     |  Paid down and saved              8   |
 |  January 1 to November 25             |  The shape of the year            9   |
@@ -310,7 +324,7 @@ At canvas scale, not to exact proportion. `|` in the middle is the spine.
 |                                                                               |
 |                 March  $8,120                                                 |
 |            +----                                                              |
-|          ####  ACCENT-2                                                       |
+|          ####  color-accent                                                   |
 |   ##     ####          ##                           ##                        |
 |   ##     ####   ##     ##    ##    ##     ##   ##   ##    ##                  |
 |  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - typical  $6,200  |
@@ -332,7 +346,7 @@ The chart spans all twelve columns across the spine. February sits below the bas
 |                                       |                                       |
 |  Net worth went up.                   |                            $111,830   |
 |                                       |                       +----  Dec 31   |
-|                                       |                   ___/  ACCENT-2      |
+|                                       |                ___/  color-accent   |
 |                                       |              ____/                    |
 |                                       |   ___    ___/                         |
 |                                       |  /   \__/                             |
@@ -360,11 +374,13 @@ For Fred to spec in FC-8. Each page works without its new figure, so Wrapped can
 | N5 | Monthly income series (optional) | The ledger, if it gains an in-and-out by month chart | `income_total` per month of the period, like the spending series | Shares of `total_in` |
 | N6 | Prior-year change per top category (optional) | Categories, as an annotation | Basis points per top category vs the same range a year earlier, under the same partial-prior-year and `prev = 0` rules as the totals | Already a percentage |
 
-## Choices for Ryan
+## Decisions
 
-1. **Display figures.** **A New York** or B SF Pro Rounded.
-2. **Paper.** **Always light paper, like Statements**, or paper that follows the appearance (dark paper in dark mode).
-3. **Auto-advance.** **Drop it**, or keep a 6 s auto-advance with Space to pause.
-4. **Export.** **A menu of three (spread PNG, all PNGs, PDF)**, B PNGs only, C one contact sheet as today.
-5. **Contents page.** **Keep it**, or open straight on the ledger with the cover as a single page.
-6. **Optional figures.** Ask Fred for N5 and N6 now, or only N1 to N4.
+Ryan's picks, November 2026:
+
+1. **Display figures:** New York (A).
+2. **Paper:** follows the appearance, so dark mode gets dark pages. Both are specified under Color.
+3. **Auto-advance:** none. The reader pages it.
+4. **Export:** this spread as PNG, all spreads as PNGs, or the issue as a PDF (A), each with a "without amounts" twin.
+5. **Contents page:** kept.
+6. **Core figures:** N1 to N4 now, N5 and N6 later.

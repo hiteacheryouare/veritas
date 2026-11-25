@@ -1,6 +1,6 @@
 # Motion
 
-A proposal for one motion system across the Mac app. Nothing here is built yet. Where a real choice exists, the options are listed with a recommendation, and the "Choices for Ryan" section at the end collects them.
+One motion system across the Mac app. Where a real choice existed, the options stay listed with the one Ryan chose, and the "Decisions" section at the end collects them.
 
 Motion in Veritas has one job: keep the user oriented while money changes on screen. It shows where something came from, where it went, and that a commit landed. It never decorates, and it never shows an amount that isn't real, even for a frame.
 
@@ -44,7 +44,7 @@ Also found:
 
 This is the main choice. It decides how everything moves.
 
-| | A. Crisp curves | **B. Settled (recommended)** | C. Spring-forward |
+| | A. Crisp curves | **B. Settled (chosen)** | C. Spring-forward |
 |---|---|---|---|
 | Opacity and color | ease-out curve | ease-out curve | ease-out curve |
 | Movement and size | ease-out curve | spring, no bounce | spring, bounce 0.15 to 0.2 |
@@ -52,7 +52,7 @@ This is the main choice. It decides how everything moves.
 | Character | Veritas today; precise, slightly mechanical | precise and calm; things arrive and stop | lively, iOS-like |
 | Risk | hitches on repeated ⌘→, fast sidebar clicks | needs two kinds of token | a drain bar or card that overshoots shows a wrong amount for a moment |
 
-Recommendation: **B.** Keyboard users in a budgeting app repeat commands constantly (⌘→ three times, ↓ through envelopes), and springs absorb that where curves stutter. Bounce is ruled out because overshoot on a bar or a figure briefly displays money that isn't there.
+Chosen: **B.** Keyboard users in a budgeting app repeat commands constantly (⌘→ three times, ↓ through envelopes), and springs absorb that where curves stutter. Bounce is ruled out because overshoot on a bar or a figure briefly displays money that isn't there.
 
 ## Tokens
 
@@ -99,7 +99,7 @@ The transition depends on how the user got there, not on the destination. `Works
 
 ### Peer screens (sidebar, ⌘1 to ⌘6, ⌘K)
 
-| | **A. Ready-gated fade-through (recommended)** | B. Ready-gated instant swap | C. Directional slide |
+| | **A. Ready-gated fade-through (chosen)** | B. Ready-gated instant swap | C. Directional slide |
 |---|---|---|---|
 | What happens | The old page stays until the new page has data or 250 ms pass. Then the old page fades out over 100 ms (`exit`) and the new one fades in over 200 ms (`standard`), starting 60 ms in and rising 4 pt | Same gate, then a one-frame swap | Pages slide up or down by sidebar order |
 | Feel | Soft and quick, no blank frame | Finder and Mail; no motion at all | Spatial |
@@ -111,12 +111,12 @@ The 60 ms overlap is short enough that two different screens never visibly ghost
 
 ### Drilling in (a card, a row, a goal)
 
-| | **A. Morph (recommended for cards)** | B. Short push (recommended for rows) | C. Fade-through |
+| | **A. Morph (chosen for cards)** | **B. Short push (chosen for rows)** | C. Fade-through |
 |---|---|---|---|
 | What happens | The card's frame grows into the detail page's content frame (`morph` spring). The header stays matched. The body cross-fades, because the detail draws the chart at a new size rather than scaling the old one. Back reverses it into the card's slot | The detail comes in from 24 pt to the trailing side while fading in (`settle`); the list moves 24 pt the other way while fading out. Back reverses | Same as peer screens |
 | Fits | Dashboard cards, goal cards: things that look like containers | Accounts list row to register, Rules row to its editor page if it becomes one | Anything else |
 
-Recommendation: morph for dashboard cards and goal cards, short push for rows. A list row growing into a full page looks odd because a row has no visual weight to grow from.
+Chosen: morph for dashboard cards and goal cards, short push for rows. A list row growing into a full page looks odd because a row has no visual weight to grow from.
 
 Going back (⌘[ or the back button) restores the previous scroll position. The dashboard grid keeps its scroll state while the detail is shown instead of being rebuilt.
 
@@ -151,7 +151,7 @@ Notice banners, the read-only banner, the find bar and the reconcile bar fold in
 
 Budget, Net Profit, Sankey and the register's month filter.
 
-| | **A. Figures cross-fade, title nudges (recommended)** | B. Figures cross-fade only |
+| | **A. Figures cross-fade, title nudges (chosen)** | B. Figures cross-fade only |
 |---|---|---|
 | Figures | Cross-fade over `fast` | Same |
 | Drain bars | Change without animation | Same |
@@ -176,7 +176,7 @@ Morph needs a fallback: if the source card isn't on screen (opened from ⌘K), t
 
 ## Numbers and values
 
-| | A. In place | **B. Cross-fade on commit (recommended)** | C. Digit roll |
+| | A. In place | **B. Cross-fade on commit (chosen)** | C. Digit roll |
 |---|---|---|---|
 | What happens | The new value replaces the old in one frame | A value changed by a commit somewhere else on screen cross-fades over `fast` | `.contentTransition(.numericText)` rolls each changed digit |
 | Example | | Budgeting 40 more to Dining cross-fades To Budget, the group total and the drain bar together | |
@@ -230,9 +230,9 @@ The register (`NSTableView`) is separate. A single row the user adds or deletes 
 
 ## Reduce Motion
 
-Today's rule is that every duration becomes 0. Apple's guidance for Reduce Motion is to remove movement, scaling and parallax and replace them with dissolves, not to remove every transition. Two options:
+The rule before this system was that every duration becomes 0. Apple's guidance for Reduce Motion is to remove movement, scaling and parallax and replace them with dissolves, not to remove every transition. Two options:
 
-| | A. Everything instant (today) | **B. Movement becomes a short fade (recommended)** |
+| | A. Everything instant (before) | **B. Movement becomes a short fade (chosen)** |
 |---|---|---|
 | Rule | All durations 0 | Anything that moves, scales or resizes is replaced by a cross-fade over `fast`, or by nothing for small things. Opacity-only animations stay, capped at `fast`. Loops stop |
 
@@ -334,11 +334,13 @@ Names are a sketch; the final API is decided when it's built.
 
 `tokens.md` (Motion table), `tokens.css` (duration and spring tokens, the reduced-motion block), and `interaction.md` (Motion table, the Wrapped auto-advance line and the Reduce Motion line).
 
-## Choices for Ryan
+## Decisions
 
-1. **Feel.** A crisp curves, **B settled springs**, C spring-forward.
-2. **Peer page transition.** **A ready-gated fade-through**, B ready-gated instant swap, C directional slide.
-3. **Drill-in.** **Morph for cards and short push for rows**, push everywhere, or fade-through everywhere.
-4. **Month change.** **A figures cross-fade and the title nudges**, B figures cross-fade only.
-5. **Value changes.** A in place, **B cross-fade on commit**, C digit roll.
-6. **Reduce Motion.** A everything instant (today), **B movement becomes a short fade**.
+Ryan's picks, November 2026:
+
+1. **Feel:** settled springs (B).
+2. **Peer page transition:** ready-gated fade-through (A).
+3. **Drill-in:** morph for cards, short push for rows.
+4. **Month change:** figures cross-fade and the month title nudges (A).
+5. **Value changes:** cross-fade on commit (B).
+6. **Reduce Motion:** movement becomes a short fade (B).
