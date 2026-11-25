@@ -203,7 +203,7 @@ Every decision behind Veritas, so no question gets asked twice. D1–D24 are PLA
 
 ### D40. Accent color?
 - **Options:** indigo (rejected, too close to Actual's purple) / graphite / petrol / olive
-- **Decision:** Graphite. The interface stays neutral, so money is the only color on screen.
+- **Decision:** Graphite. The interface stays neutral, so money is the only color on screen. Superseded by D80.
 - **Date:** 2026-11-09
 
 ### D41. Which extra keyboard shortcuts?
@@ -400,3 +400,8 @@ Every decision behind Veritas, so no question gets asked twice. D1–D24 are PLA
 - **Options:** scope: the whole app / one screen; style: coach marks on the real screen / a separate walkthrough window; stops: every screen / the Budget grid and Accounts only; when: never on its own / once after the first budget opens
 - **Decision:** Ryan chose a coach-mark tour of the app at first launch. Small cards anchored to the real UI, each with short sentences, at most three, a step counter ("2 of 5"), Back, Next and Skip. It stops only at the Budget grid (To Budget, then assigning money in a Budgeted cell) and at Accounts and a register (opening an account, adding a transaction, quick entry), five steps, and moves the sidebar to each screen itself. It runs once, right after the first budget opens, whether created or imported (after D53's two ways in). Skip or Done ends it for good, kept as an app preference in UserDefaults and never in the budget file. Help › Show Tour replays it any time. A step whose target the open budget doesn't have, such as a Budgeted cell in a budget with no envelopes or the account steps in a budget with no open accounts, is left out, and the counter counts only the steps shown. A read-only or tracking budget also leaves out the steps that edit: the Budgeted cell, Add transaction and quick entry. A budget with nothing to point at shows no tour and leaves it for a later budget.
 - **Date:** 2026-11-23
+
+### D80. Ryan's brand
+- **Options:** for brand colors used as text: use them exactly / derive darker same-hue shades for light mode and lighter ones for dark mode that meet WCAG AA; for the wordmark: ship ITC Benguiat / trace it from Ryan's PNG
+- **Decision:** Ryan supplied his brand on 2026-11-25 (`brand/`): primary #23169C, secondary #007EA7, bad #DB162F, good #56E39F, warning #F5B700, a Canva logo with the wordmark in ITC Benguiat, and Bootstrap Icons' coin (MIT). The primary becomes the accent, replacing D40's graphite; its dark-mode accent is #94A8FE, the same OKLCH hue at 4.5:1 on every dark surface. Bad, good and warning map to overspent, available and low, and secondary to income and links (design/tokens.md). Fills, bars, dots and chart marks use the five colors exactly. Where one is text or a small icon, Ryan chose same-hue shades, darker in light mode and lighter in dark mode, that reach 4.5:1 on every surface and selected row; a color that already does keeps its value (`tools/brand/palette.py`). `ContrastTests` fails the build of VeritasDesignTests if a token pair drops below 4.5:1 for text or 3:1 for UI. Ryan chose to trace the wordmark from his PNG, so no Benguiat font file is downloaded or shipped. The coin is redrawn from the MIT icon. The app icon is an Icon Composer file with light and dark appearances; the system derives the clear and tinted ones. The logo appears in the app icon, the About window and the first-launch screen, and never on financial statements.
+- **Date:** 2026-11-25
