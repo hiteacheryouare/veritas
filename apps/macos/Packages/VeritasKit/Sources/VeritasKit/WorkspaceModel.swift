@@ -20,6 +20,8 @@ public final class WorkspaceModel {
 	public private(set) var integrityReport: IntegrityReport?
 	public private(set) var budgetList: [BudgetListingItem]?
 	public var isOpenPickerShown = false
+	/// Shared by every window, so each one's menus list the same budgets.
+	public let recents: RecentBudgets
 	/// Goes up after every change the core announces, so open screens refetch.
 	public private(set) var changeCount = 0
 	public var destination = Destination.start
@@ -54,12 +56,14 @@ public final class WorkspaceModel {
 	public init(
 		library: any BudgetLibrary,
 		localSettings: any LocalBudgetSettings = InMemoryBudgetSettings(),
+		recents: RecentBudgets? = nil,
 		format: MoneyFormat = MoneyFormat(locale: .current),
 		maintenanceInterval: Duration = .seconds(300),
 		checkingInterval: Duration = .seconds(2)
 	) {
 		self.library = library
 		self.localSettings = localSettings
+		self.recents = recents ?? RecentBudgets(defaults: nil, exists: { _ in true })
 		fallbackFormat = format
 		self.maintenanceInterval = maintenanceInterval
 		self.checkingInterval = checkingInterval
@@ -354,6 +358,16 @@ public final class WorkspaceModel {
 		await reopen(directory: budget.folder)
 	}
 
+	/// Closes this window's budget as Close Budget does, so its lock and
+	/// snapshots settle, then opens the chosen one.
+	public func switchTo(_ budget: RecentBudgets.Entry) async {
+		guard phase != .working else { return }
+		if overview.map({ RecentBudgets.key($0.directory) }) == budget.id { return }
+		await closeBudget()
+		await reopen(directory: budget.folder)
+		if phase != .open { recents.forgetMissing() }
+	}
+
 	public func undo() async {
 		guard let session, canUndo else { return }
 		do {
@@ -490,6 +504,7 @@ public final class WorkspaceModel {
 			canExport = opened.canExport
 			apply(overview)
 			phase = .open
+			recents.opened(name: overview.name, folder: overview.directory)
 			let settings = BudgetSettingsModel(session: opened, local: localSettings, budget: overview.directory) { [weak self] error in
 				self?.present(error)
 			}
@@ -535,6 +550,7 @@ public final class WorkspaceModel {
 	private func apply(_ overview: BudgetOverview) {
 		self.overview = overview
 		readOnly = overview.readOnly
+		recents.renamed(overview.name, folder: overview.directory)
 		if case .account(let id) = destination, !overview.accounts.contains(where: { $0.id == id }) {
 			destination = .screen(.accounts)
 		}
