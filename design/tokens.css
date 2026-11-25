@@ -175,15 +175,34 @@
 	--radius-field: 6px;
 	--radius-bar: 3px;
 
+	--duration-instant: 90ms;
 	--duration-fast: 150ms;
 	--duration-sheet: 220ms;
+	--duration-page: 200ms;
+	--duration-page-exit: 100ms;
+	--delay-page: 60ms;
+	--duration-story: 480ms;
+	--duration-stage: 700ms;
+	--spring-settle: 320ms;
+	--spring-morph: 400ms;
+	--spring-push: 320ms;
+	--spring-turn: 480ms;
 	--easing-standard: cubic-bezier(0.2, 0.7, 0.2, 1);
 	--easing-exit: cubic-bezier(0.4, 0, 1, 1);
 }
 
 @media (prefers-reduced-motion: reduce) {
 	:root {
+		--duration-instant: 0ms;
 		--duration-fast: 0ms;
-		--duration-sheet: 0ms;
+		--duration-sheet: 150ms;
+		--duration-page: 150ms;
+		--duration-page-exit: 90ms;
+		--delay-page: 0ms;
+		--duration-story: 150ms;
+		--spring-settle: 0ms;
+		--spring-morph: 150ms;
+		--spring-push: 150ms;
+		--spring-turn: 150ms;
 	}
 }
