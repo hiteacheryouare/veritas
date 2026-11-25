@@ -311,9 +311,9 @@ enum AssistantSpeech {
 struct TypingDots: View {
 	@Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-	static let count = 3
-	static let cycle: TimeInterval = 1.2
-	static let still = 0.55
+	nonisolated static let count = 3
+	nonisolated static let cycle: TimeInterval = 1.2
+	nonisolated static let still = 0.55
 
 	var body: some View {
 		if reduceMotion {
@@ -338,7 +338,7 @@ struct TypingDots: View {
 
 	/// Each dot brightens a third of a cycle after the one before it. A nil
 	/// time, as with Reduce Motion, holds every dot at the same opacity.
-	static func opacity(index: Int, time: TimeInterval?) -> Double {
+	nonisolated static func opacity(index: Int, time: TimeInterval?) -> Double {
 		guard let time else { return still }
 		let phase = (time / cycle - Double(index) / Double(count + 1)).truncatingRemainder(dividingBy: 1)
 		let wave = 0.5 - 0.5 * cos(2 * .pi * (phase < 0 ? phase + 1 : phase))
