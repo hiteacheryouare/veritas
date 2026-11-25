@@ -4,6 +4,7 @@ import VeritasKit
 
 struct WorkspaceView: View {
 	@Bindable var model: WorkspaceModel
+	let tour: GuidedTour
 	@State private var paletteChoice: PaletteItem?
 	@Environment(AssistantSettings.self) private var assistant: AssistantSettings?
 	@Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -21,6 +22,15 @@ struct WorkspaceView: View {
 					.transition(reduceMotion ? .identity : .asymmetric(insertion: .opacity.combined(with: .offset(y: 6)), removal: .identity))
 			}
 				.animation(Motion.fast.animation(reduceMotion: reduceMotion), value: model.destination)
+				.tourOverlay(tour, isOnStepScreen: model.destination == tour.destination)
+				.onChange(of: tour.current) {
+					if let destination = tour.destination {
+						model.go(to: destination)
+					}
+				}
+				.onChange(of: model.destination) { _, destination in
+					tour.follow(destination)
+				}
 				.safeAreaInset(edge: .top, spacing: 0) {
 					VStack(spacing: 0) {
 						if let readOnly = model.readOnly {

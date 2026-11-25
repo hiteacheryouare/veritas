@@ -216,6 +216,7 @@ private struct ToBudgetHeader: View {
 		}
 		.accessibilityElement(children: .combine)
 		.accessibilityIdentifier("budget.toBudget")
+		.tourAnchor(.toBudget)
 	}
 
 	private var tone: VeritasDesign.MoneyTone {

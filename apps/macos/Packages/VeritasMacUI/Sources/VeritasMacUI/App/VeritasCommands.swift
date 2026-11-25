@@ -6,6 +6,7 @@ struct VeritasCommands: Commands {
 	@FocusedValue(\.workspace) private var model
 	@FocusedValue(\.budgetMonths) private var budgetMonths
 	@FocusedValue(\.goalActions) private var goalActions
+	@FocusedValue(\.tour) private var tour
 	@Environment(\.openWindow) private var openWindow
 
 	private var isOpen: Bool { model?.phase == .open }
@@ -95,6 +96,13 @@ struct VeritasCommands: Commands {
 			Button("Go to Anything…") { model?.isPaletteShown = true }
 				.keyboardShortcut("k")
 				.disabled(!isOpen)
+		}
+		CommandGroup(after: .help) {
+			Button("Show Tour") {
+				guard let model, let tour else { return }
+				Task { tour.replay(await model.tourBudget()) }
+			}
+			.disabled(!isOpen || tour == nil)
 		}
 		CommandMenu("Goal") {
 			Button("Close Goal…") { goalActions?.close?() }
