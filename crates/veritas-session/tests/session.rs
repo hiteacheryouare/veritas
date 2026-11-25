@@ -803,12 +803,20 @@ fn a_failed_import_snapshot_stays_reported_after_later_snapshots_work() {
 		"the open snapshot working doesn't hide the import's failure: {:?}",
 		session.snapshot_problem()
 	);
+	assert_eq!(
+		session.snapshot_problem_reason(),
+		Some(SnapshotReason::Import)
+	);
 
 	session.perform(&rename("Everyday")).unwrap();
 	session.snapshot(SnapshotReason::Hourly).unwrap();
 	assert!(
 		session.snapshot_problem().is_some(),
 		"no later snapshot holds the budget as it arrived"
+	);
+	assert_eq!(
+		session.snapshot_problem_reason(),
+		Some(SnapshotReason::Import)
 	);
 }
 

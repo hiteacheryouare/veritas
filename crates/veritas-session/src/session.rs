@@ -332,6 +332,11 @@ impl<B: Backend> Session<B> {
 		self.snapshot_problem.as_ref().map(|(_, problem)| problem)
 	}
 
+	/// The kind of snapshot `snapshot_problem` is about.
+	pub fn snapshot_problem_reason(&self) -> Option<SnapshotReason> {
+		self.snapshot_problem.as_ref().map(|(reason, _)| *reason)
+	}
+
 	fn snapshot_failed(&mut self, reason: SnapshotReason, problem: CoreError) {
 		let hides_an_operations_problem = reason.is_routine()
 			&& self
