@@ -33,6 +33,11 @@ struct SidebarView: View {
 		}
 		.listStyle(.sidebar)
 		.background(NoSystemHighlight())
+		.safeAreaInset(edge: .top, spacing: 0) {
+			BudgetSwitcher(model: model)
+				.padding(.horizontal, Spacing.s4)
+				.padding(.vertical, Spacing.s2)
+		}
 		.safeAreaInset(edge: .bottom, spacing: 0) {
 			SettingsRow(isCurrent: model.destination == .screen(.settings)) {
 				model.go(to: .screen(.settings))
