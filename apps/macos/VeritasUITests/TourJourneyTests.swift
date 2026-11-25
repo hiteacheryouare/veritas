@@ -24,6 +24,8 @@ final class TourJourneyTests: XCTestCase {
 			XCTAssertEqual(app.buttons["tour.back"].isEnabled, index > 0)
 			let spoken = app.groups.matching(NSPredicate(format: "label BEGINSWITH %@", "Tour, step \(index + 1) of 5. "))
 			XCTAssertEqual(spoken.count, 1, "VoiceOver finds the step once")
+			let spokenAgain = card.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Tour, step \(index + 1) of 5."))
+			XCTAssertEqual(spokenAgain.count, 0, "no text inside the card repeats the step's label")
 			XCTAssertEqual(card.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", bodies[index])).count, 0, "the card's body isn't read a second time")
 			attachScreenshot(of: app, named: "tour-\(index + 1)")
 			if index == 1 {
