@@ -56,7 +56,8 @@ struct AssistantPeriodTests {
 	}
 }
 
-/// AI-3.6 and AI-3.7.
+/// AI-3.6 and AI-3.7 through the core's matcher. Its own tests, with every
+/// tier and the accent folding, are in veritas-ffi's names module.
 struct AssistantNamesTests {
 	static let candidates: [AssistantNames.Candidate] = [
 		.init(id: "everyday", name: "Everyday", isGroup: true),
@@ -92,14 +93,19 @@ struct AssistantNamesTests {
 	}
 
 	@Test func closestNamesFollowTheTiersAndTheEditLimit() {
-		#expect(AssistantNames.closest(to: "groc", in: Self.candidates) == ["Groceries"], "Gas and Gifts are 3 edits away")
-		#expect(AssistantNames.closest(to: "gift card", in: Self.candidates) == ["Gifts"], "tier 3: the asked key holds the name")
-		#expect(AssistantNames.closest(to: "ga", in: Self.candidates) == ["Gas"])
-		#expect(AssistantNames.closest(to: "gs", in: Self.candidates) == ["Gas"], "tier 4, one edit")
-		#expect(AssistantNames.closest(to: "zzzzzz", in: Self.candidates).isEmpty)
+		#expect(Self.closest("groc") == ["Groceries"], "Gas and Gifts are 3 edits away")
+		#expect(Self.closest("gift card") == ["Gifts"], "tier 3: the asked key holds the name")
+		#expect(Self.closest("ga") == ["Gas"])
+		#expect(Self.closest("gs") == ["Gas"], "tier 4, one edit")
+		#expect(Self.closest("zzzzzz").isEmpty)
 		#expect(AssistantNames.text(.notFound(closest: ["Groceries"]), wanted: "groc") == "No category or group is called \"groc\". The closest name is Groceries.")
 		#expect(AssistantNames.text(.notFound(closest: ["Groceries", "Gifts"]), wanted: "g") == "No category or group is called \"g\". The closest names are Groceries, Gifts.")
 		#expect(AssistantNames.text(.notFound(closest: []), wanted: "zzz") == "No category or group is called \"zzz\".")
+	}
+
+	static func closest(_ wanted: String) -> [String] {
+		guard case .notFound(let closest) = AssistantNames.match(wanted, in: candidates) else { return ["(matched)"] }
+		return closest
 	}
 
 	@Test func aNamelessCandidateIsNeverMatched() {
