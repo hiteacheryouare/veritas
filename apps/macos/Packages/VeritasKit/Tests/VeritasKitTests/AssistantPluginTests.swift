@@ -125,12 +125,18 @@ struct AssistantPluginTests {
 			#expect(await read("taxSummary", ["year": year]) == AssistantTools.yearHint, "\(year)")
 		}
 		#expect(await read("taxSummary", [:]) == AssistantTools.yearHint, "a missing year")
-		for month in ["", "-999-01", "0000-01", "99999-01", "2026-00", "2026-13", "1899-12", "2201-01", "2026", "x-y", String(repeating: "9", count: 4_000)] {
-			#expect(await read("budgetMonth", ["month": month]) == AssistantTools.monthHint, "\(month)")
-			#expect(await read("netProfit", ["first": month, "last": "2026-10"]) == AssistantTools.monthHint, "\(month)")
-			#expect(await read("cashFlow", ["first": "2026-10", "last": month]) == AssistantTools.monthHint, "\(month)")
+		let periods = [
+			"-999-01", "0000-01", "99999-01", "2026-00", "2026-13", "1899-12", "2201-01", "x-y", "2026-02-30", "-999-01-01",
+			"2026-10-99999999999999999999", "1899", "next fortnight", String(repeating: "9", count: 4_000), String(repeating: "2026-", count: 1_000)
+		]
+		for period in periods {
+			for tool in ["spending", "income", "netProfit", "cashFlow", "budgetMonth"] {
+				#expect(await read(tool, ["period": period]) == AssistantPeriod.hint, "\(tool) \(period.prefix(40))")
+			}
+			#expect(await read("categorySpending", ["name": "Groceries", "period": period]) == AssistantPeriod.hint)
+			#expect(await read("budget", ["name": "Groceries", "period": period]) == AssistantPeriod.hint)
 		}
-		#expect(await read("netProfit", ["first": 2026, "last": 10]) == AssistantTools.monthHint, "numbers where text belongs read as missing")
+		#expect(await read("categorySpending", ["name": 42, "period": 2026]) == AssistantArguments.nameHint, "numbers where text belongs read as missing")
 		for date in ["", "2026-02-30", "-999-01-01", "2026-10-00", "2026-10-99999999999999999999", "2026-10"] {
 			#expect(await read("balanceSheet", ["date": date]) == "Ask again with a date written as YYYY-MM-DD.", "\(date)")
 		}
@@ -142,8 +148,8 @@ struct AssistantPluginTests {
 
 	@Test func theReaderPassesOnlyTheArgumentsEachToolTakes() {
 		let tool = NetProfitTool(context: AssistantContext(queries: RecordingQueries(), format: MoneyFormat(), today: "2026-11-17"))
-		let input = ToolReader.input(["first": "2026-10", "last": "2026-11", "extra": "ignored", "month": 3], for: tool)
-		#expect(input.values == ["first": .text("2026-10"), "last": .text("2026-11")])
+		let input = ToolReader.input(["period": "last month", "extra": "ignored", "month": 3], for: tool)
+		#expect(input.values == ["period": .text("last month")])
 		let tax = TaxSummaryTool(context: AssistantContext(queries: RecordingQueries(), format: MoneyFormat(), today: "2026-11-17"))
 		#expect(ToolReader.input(["year": 2026], for: tax).values == ["year": .integer(2026)])
 		#expect(ToolReader.input(["year": "2026"], for: tax).values.isEmpty, "a value of the wrong kind is left out")

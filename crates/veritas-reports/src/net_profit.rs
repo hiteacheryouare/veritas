@@ -2,7 +2,8 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
 use veritas_domain::{
-	BudgetData, CategoryId, CoreError, GoalStatus, Money, TransactionId, TransactionKind,
+	BudgetData, CategoryGroupId, CategoryId, CoreError, GoalStatus, Money, TransactionId,
+	TransactionKind,
 };
 
 use crate::{Classification, ClassifiedRow, Decision, Period};
@@ -43,6 +44,52 @@ pub struct Section {
 	pub total: Money,
 	pub rows: Vec<TransactionId>,
 	pub categories: Vec<CategoryLine>,
+}
+
+/// One category group's share of a section. A section holds rows of one kind
+/// only (CLS-6), so a group's figure counts only rows of that kind whose
+/// category is in the group, never every row of the group's categories.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GroupLine {
+	pub group: CategoryGroupId,
+	/// `hidden` and `deleted` are the group's own (ST-10.3).
+	pub labels: CategoryLabels,
+	pub total: Money,
+	pub rows: Vec<TransactionId>,
+}
+
+/// The section's category lines totalled by group, in budget order. A line
+/// whose category has no group record, and the uncategorized line, are in no
+/// group, so the groups plus those lines add up to the section's total.
+pub fn group_lines(budget: &BudgetData, section: &Section) -> Result<Vec<GroupLine>, CoreError> {
+	let mut groups: Vec<GroupLine> = Vec::new();
+	for line in &section.categories {
+		let Some(group) = line
+			.category
+			.as_ref()
+			.and_then(|id| budget.categories.get(id))
+			.and_then(|category| budget.category_groups.get(&category.group))
+		else {
+			continue;
+		};
+		match groups.iter_mut().find(|known| known.group == group.id) {
+			Some(known) => {
+				known.total = known.total.checked_add(line.total)?;
+				known.rows.extend(line.rows.iter().cloned());
+			}
+			None => groups.push(GroupLine {
+				group: group.id.clone(),
+				labels: CategoryLabels {
+					hidden: group.hidden,
+					deleted: group.tombstone,
+					..CategoryLabels::default()
+				},
+				total: line.total,
+				rows: line.rows.clone(),
+			}),
+		}
+	}
+	Ok(groups)
 }
 
 /// Every amount is a positive-means-normal magnitude: income earned, money

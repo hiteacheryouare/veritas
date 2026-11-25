@@ -15,7 +15,7 @@ struct AssistantScreenshotTests {
 		.standardizedFileURL
 
 	static let answers = [
-		"What did I spend on groceries last month?": "Groceries spent 412.00 in October 2026, from the October budget. You budgeted 450.00 and 38.00 is still available.",
+		"What did I spend on groceries last month?": "Spending on Groceries, October 2026: 412.00. That's from 9 transactions on the Expenses line of the Net Profit report.",
 		"How is my net worth?": "Net worth was 48,210.55 on October 31, 2026, from the balance sheet: total assets 61,904.12 and total liabilities 13,693.57."
 	]
 
@@ -68,6 +68,46 @@ struct AssistantScreenshotTests {
 		}
 		#expect(panel.exchanges.map(\.state) == [.answered, .answered])
 		try render(AssistantPanel(model: panel).frame(width: 340, height: 520), named: "panel")
+		let drawn = try DrawnText.texts(in: VStack {
+			AssistantTitle()
+			ForEach(panel.exchanges) { exchange in
+				QuestionBubble(text: exchange.question)
+				AnswerBubble(exchange: exchange)
+			}
+		}, size: CGSize(width: 340, height: 520))
+		#expect(drawn.filter { $0 == "Mo Nee" }.count == 3, "the title and one sender label per reply, none on questions: \(drawn)")
+
+		let failing = AssistantPanelModel(makeAnswerer: { _ in HeldAnswerer(failure: "The model is busy. Ask again in a moment.") }) {
+			workspace.readOnlyQueries.map { AssistantContext(queries: $0, format: workspace.format, today: "2026-11-17") }
+		}
+		failing.draft = "What did I spend last month?"
+		failing.ask()
+		await failing.settle()
+		#expect(failing.exchanges.first?.state == .failed("The model is busy. Ask again in a moment."))
+		try render(AssistantPanel(model: failing).frame(width: 340, height: 520), named: "panel-error")
+
+		let held = HeldAnswerer(partial: "Spending, October 2026: 2,489.35. This is the Expenses line")
+		let streaming = AssistantPanelModel(makeAnswerer: { _ in held }) {
+			workspace.readOnlyQueries.map { AssistantContext(queries: $0, format: workspace.format, today: "2026-11-17") }
+		}
+		streaming.draft = "What did I spend last month?"
+		streaming.ask()
+		for _ in 0..<10_000 where streaming.exchanges.first?.answer.isEmpty ?? true {
+			await Task.yield()
+		}
+		#expect(streaming.isAnswering)
+		try render(AssistantPanel(model: streaming).frame(width: 340, height: 520), named: "panel-streaming")
+
+		let waiting = AssistantPanelModel(makeAnswerer: { _ in HeldAnswerer() }) {
+			workspace.readOnlyQueries.map { AssistantContext(queries: $0, format: workspace.format, today: "2026-11-17") }
+		}
+		waiting.draft = "What did I spend last month?"
+		waiting.ask()
+		for _ in 0..<10_000 where waiting.exchanges.isEmpty {
+			await Task.yield()
+		}
+		#expect(waiting.isAnswering && waiting.exchanges.first?.answer.isEmpty == true)
+		try render(AssistantPanel(model: waiting).frame(width: 340, height: 520), named: "panel-waiting")
 	}
 
 	func render(_ view: some View, named name: String, settle: TimeInterval = 0.4) throws {
@@ -88,6 +128,29 @@ struct AssistantScreenshotTests {
 			try png.write(to: Self.output.appending(path: "\(name)-\(suffix).png"))
 		}
 	}
+}
+
+/// Sends one part of an answer and then holds the stream open, or fails.
+@MainActor
+final class HeldAnswerer: AssistantAnswering {
+	let partial: String?
+	let failure: String?
+	private var held: AsyncThrowingStream<String, any Error>.Continuation?
+
+	init(partial: String? = nil, failure: String? = nil) {
+		self.partial = partial
+		self.failure = failure
+	}
+
+	func answer(_ question: String) -> AsyncThrowingStream<String, any Error> {
+		let (stream, continuation) = AsyncThrowingStream.makeStream(of: String.self, throwing: (any Error).self)
+		if let partial { continuation.yield(partial) }
+		if let failure { continuation.finish(throwing: AssistantFailure(message: failure)) }
+		held = continuation
+		return stream
+	}
+
+	func reset() {}
 }
 
 /// Answers from a fixed list, a word at a time, as the real model streams.

@@ -24,24 +24,17 @@ struct AssistantToolTests {
 		try await RealBudget.with { budget in
 			let model = NetProfitModel(workspace: budget.workspace, thisMonth: Self.october)
 			await model.setCustom(first: Self.may, last: Self.october)
-			model.toggle(.income)
-			model.toggle(.expenses)
 			let format = model.format
-			let text = try await NetProfitTool(context: context(budget)).call(arguments: .init(first: "2026-05", last: "2026-10"))
-			#expect(!Self.hasStatementParentheses(text), "\(text)")
-			#expect(text.hasPrefix("Net Profit report, May to October 2026\n"))
-			let rows = model.rows
-			#expect(rows.count > 8)
-			for row in rows {
-				let total = try #require(row.cells.last)
-				#expect(text.contains("\n\(row.title): \(format.amount(total.amount, on: .register))\n"), "\(row.title)")
-			}
-			let netProfit = try #require(rows.first { $0.line == .netProfit })
-			let income = try #require(rows.first { $0.line == .income && $0.style == .line })
-			let expenses = try #require(rows.first { $0.line == .expenses && $0.style == .line })
-			for (index, month) in model.period.months.enumerated() {
-				let figures = [income, expenses, netProfit].map { format.amount($0.cells[index].amount, on: .register) }
-				#expect(text.contains("\(ReportPeriod.monthYear(month)): income \(figures[0]), expenses \(figures[1]), Net Profit \(figures[2])"))
+			let tool = NetProfitTool(context: try context(budget))
+			for period in ["May to October 2026", "2026-05-01 to 2026-10-31"] {
+				let text = try await tool.call(arguments: .init(period: period))
+				#expect(!Self.hasStatementParentheses(text), "\(text)")
+				let netProfit = try #require(model.rows.first { $0.line == .netProfit }?.cells.last)
+				#expect(text.hasPrefix("Net Profit, May to October 2026: \(format.currency(netProfit.amount, on: .register))\n"), "\(text)")
+				for row in model.rows where row.line != .netProfit {
+					let total = try #require(row.cells.last)
+					#expect(text.contains("\n\(row.title), May to October 2026: \(format.currency(total.amount, on: .register))"), "\(row.title)")
+				}
 			}
 		}
 	}
@@ -51,19 +44,19 @@ struct AssistantToolTests {
 			let screen = await budget.screen(Self.october)
 			let sheet = try #require(screen.sheet)
 			let format = screen.format
-			let text = try await BudgetMonthTool(context: context(budget)).call(arguments: .init(month: "2026-10"))
+			let text = try await BudgetMonthTool(context: context(budget)).call(arguments: .init(period: "2026-10"))
 			#expect(!Self.hasStatementParentheses(text), "\(text)")
 			#expect(text.contains("To Budget: \(format.currency(sheet.toBudget, on: .budget))\n"))
 			let groups = screen.groups.filter { !$0.isIncome }
 			#expect(!groups.isEmpty)
 			for group in groups {
-				#expect(text.contains("Group \(group.name): budgeted \(format.amount(group.budgeted, on: .budget)), spent \(format.amount(-group.spent, on: .budget)), available \(format.amount(group.available, on: .budget))"))
+				#expect(text.contains("Group \(group.name): budgeted \(format.currency(group.budgeted, on: .budget)), activity \(format.currency(-group.spent, on: .budget)), available \(format.currency(group.available, on: .budget))"))
 				for envelope in group.envelopes {
-					#expect(text.contains("\n\(envelope.name): budgeted \(format.amount(envelope.budgeted, on: .budget)), spent \(format.amount(-envelope.spent, on: .budget)), available \(format.amount(envelope.available, on: .budget))"))
+					#expect(text.contains("\n\(envelope.name): budgeted \(format.currency(envelope.budgeted, on: .budget)), activity \(format.currency(-envelope.spent, on: .budget)), available \(format.currency(envelope.available, on: .budget))"))
 				}
 			}
 			for envelope in screen.groups.filter(\.isIncome).flatMap(\.envelopes) {
-				#expect(text.contains("\n\(envelope.name): received \(format.amount(envelope.spent, on: .budget))"))
+				#expect(text.contains("\n\(envelope.name): received \(format.currency(envelope.spent, on: .budget))"))
 			}
 			let hidden = sheet.groups.flatMap(\.envelopes).filter(\.hidden)
 			for envelope in hidden where !screen.groups.flatMap(\.envelopes).contains(where: { $0.name == envelope.name }) {
@@ -113,7 +106,7 @@ struct AssistantToolTests {
 			await model.setCustom(first: Self.october, last: Self.october)
 			let document = try #require(model.document)
 			let format = model.format
-			let text = try await CashFlowTool(context: context(budget)).call(arguments: .init(first: "2026-10", last: "2026-10"))
+			let text = try await CashFlowTool(context: context(budget)).call(arguments: .init(period: "October 2026"))
 			#expect(!Self.hasStatementParentheses(text), "\(text)")
 			#expect(text.hasPrefix("Cash flow statement, October 2026\n"))
 			for line in document.lines {

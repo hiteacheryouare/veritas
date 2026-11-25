@@ -20,6 +20,17 @@ pub enum CategoryKind {
 	Savings,
 }
 
+impl From<veritas_domain::CategoryKind> for CategoryKind {
+	fn from(kind: veritas_domain::CategoryKind) -> Self {
+		match kind {
+			veritas_domain::CategoryKind::Income => CategoryKind::Income,
+			veritas_domain::CategoryKind::Expense => CategoryKind::Expense,
+			veritas_domain::CategoryKind::DebtPrincipal => CategoryKind::DebtPrincipal,
+			veritas_domain::CategoryKind::Savings => CategoryKind::Savings,
+		}
+	}
+}
+
 impl From<CategoryKind> for veritas_domain::CategoryKind {
 	fn from(kind: CategoryKind) -> Self {
 		match kind {

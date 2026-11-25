@@ -6,6 +6,15 @@ import VeritasCore
 /// Fred's rules for what the model may say (PR #81 review): tax totals never
 /// become advice, reserved words stay with their figures, and scale notes travel with them.
 struct AssistantRulesTests {
+	@Test func theRedirectIsAI11_4WordForWord() {
+		#expect(AssistantPrompt.redirect == "Mo Nee answers from your own numbers: spending, income, budgets and which categories ran over their monthly budget. For example: \"How much did I spend last month?\", \"Which categories ran over budget lately?\" or \"How much did I budget for Groceries this month?\"")
+	}
+
+	@Test func theRedirectComesFromItsToolNotTheInstructions() async throws {
+		#expect(try await WhatMoNeeAnswersTool().run(AssistantToolInput([:])) == AssistantPrompt.redirect)
+		#expect(!AssistantPrompt.instructions(today: "2026-11-18").contains("For example:"), "the example questions stay out of the instructions")
+	}
+
 	@Test func theInstructionsCarryEachRuleWordForWord() {
 		let instructions = AssistantPrompt.instructions(today: "2026-11-18")
 		for rule in [
@@ -13,6 +22,22 @@ struct AssistantRulesTests {
 			"Use each tool's own words for its figures. Call a figure Income, Expenses, Spending or Net Profit only when the tool names it that. Never call a balance, a saved report's total or a budget figure by those words.",
 			"If a result includes a note about scales, repeat it with the figures.",
 			"A question about now, such as a current balance or net worth, uses today's date.",
+			"Never give a figure for a time range a tool did not return. If a tool refuses the range, say so.",
+			"Transfers, card payments, net cash flow, debt paydown and savings are never spending.",
+			"Refunds are never income. Mention debt paydown or savings only when the question asks for them by name.",
+			"The tool works out the dates. Never work out dates yourself.",
+			"Start your answer with the first line the tool returns, copied exactly. It names the figure and the dates it covers, and it is the answer: the lines after it are detail, even one with the same word, and never replace it. Then copy the tool's other lines as they are. Keep anything you add to one short sentence.",
+			"Answer only from what your tools return. If the tools don't have what the question needs, say which figure is missing.",
+			"For general advice, a forecast, the market or feelings about money, call whatMoNeeAnswers and do not say a figure is missing.",
+			"For how much was budgeted, use budget, even when the question names a category.",
+			"Your name is Mo Nee, the assistant in Veritas.",
+			"For questions about improving money habits, call budgetHabits and give only what it returns. Give only the suggestion the tool returns, never orders.",
+			"Never give general financial advice, generic tips, or investment, debt or tax advice.",
+			"Only when none of your other tools can answer the question, such as general advice, a forecast, the market or feelings about money, call whatMoNeeAnswers and reply with exactly what it returns and nothing else.",
+			"For questions about being over budget, overspending, improving money habits or what to change in my budget, use budgetHabits. For any other question about spending by category, a breakdown, or what was spent the most on, use spendingByCategory.",
+			"For a total, or spending by group, use spending.",
+			"Use categorySpending only when the question names a category or group. If it names more than one, call categorySpending once for each name and never add the figures together.",
+			"Call a tool for every question about money, every time, even one asked before. Every figure you give must come from a tool you called for this question.",
 			"Today is 2026-11-18."
 		] {
 			#expect(instructions.contains(rule), "\(rule)")
@@ -43,7 +68,9 @@ struct CannedQueries: ReadOnlyBudgetQueries {
 	var tax: TaxSummary?
 	var goalList: GoalList?
 
-	func netProfit(first: Month, last: Month) async throws -> NetProfitReport { throw Missing() }
+	func netProfitPeriod(first: String, last: String) async throws -> NetProfitPeriod { throw Missing() }
+	func budgetHabits(today: String) async throws -> BudgetHabits { throw Missing() }
+	func spendingByCategory(first: String, last: String) async throws -> CategoryBreakdown { throw Missing() }
 	func balanceSheet(asOf: String) async throws -> BalanceSheet { throw Missing() }
 	func cashFlowStatement(first: String, last: String) async throws -> CashFlowColumn { throw Missing() }
 	func budgetMonth(_ month: Month, today: String) async throws -> BudgetMonth { throw Missing() }
@@ -109,7 +136,7 @@ struct AssistantZeroPlaceTests {
 		let trip = try #require(lines.first { $0.hasPrefix("Trip: ") })
 		#expect(trip.hasPrefix("Trip: available ¥0, target ¥50,000"))
 
-		let month = try await BudgetMonthTool(context: context).call(arguments: .init(month: String(context.today.prefix(7))))
+		let month = try await BudgetMonthTool(context: context).call(arguments: .init(period: String(context.today.prefix(7))))
 		#expect(month.components(separatedBy: "\n").first == coreNote, "the note comes before the figures it explains")
 		await workspace.closeBudget()
 	}

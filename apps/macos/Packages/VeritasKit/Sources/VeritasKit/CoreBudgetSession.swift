@@ -176,6 +176,21 @@ final class CoreBudgetSession: BudgetSession {
 		return try await Core.cancellable { try await session.cashFlow(first: first, last: last, cancel: $0) }
 	}
 
+	func budgetHabits(today: String) async throws -> BudgetHabits {
+		let session = session
+		return try await Core.run { try session.budgetHabits(today: today) }
+	}
+
+	func spendingByCategory(first: String, last: String) async throws -> CategoryBreakdown {
+		let session = session
+		return try await Core.cancellable { try await session.spendingByCategory(first: first, last: last, cancel: $0) }
+	}
+
+	func netProfitPeriod(first: String, last: String) async throws -> NetProfitPeriod {
+		let session = session
+		return try await Core.cancellable { try await session.netProfitPeriod(first: first, last: last, cancel: $0) }
+	}
+
 	func cashFlowStatement(first: String, last: String) async throws -> CashFlowColumn {
 		let session = session
 		return try await Core.cancellable { try await session.cashFlowStatement(first: first, last: last, cancel: $0) }

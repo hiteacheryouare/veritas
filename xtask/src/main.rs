@@ -12,6 +12,7 @@ commands:
 	bindings           build the core and generate its Swift bindings into VeritasKit
 	app                build the macOS app into target/xcode
 	app-test           run the macOS app's UI tests
+	ai-eval            ask the on-device model the AI answers evaluation (needs Apple Intelligence)
 	ci                 run every check CI runs, plus the app build
 	perf               fail if a core-measurable R-PERF budget is exceeded on perf-100k
 	shadow <zip>       compare a real Actual export with Actual, printing only counts";
@@ -30,6 +31,7 @@ fn main() -> ExitCode {
 		Some("template") => template(),
 		Some("app") => xcodebuild("build"),
 		Some("app-test") => xcodebuild("test"),
+		Some("ai-eval") => ai_eval(),
 		Some("ci") => ci(),
 		Some("perf") => perf(),
 		Some("shadow") => shadow(&args[1..]),
@@ -214,6 +216,7 @@ fn template() -> Result {
 }
 
 const VERITAS_KIT: &str = "apps/macos/Packages/VeritasKit";
+const VERITAS_AI: &str = "apps/macos/Packages/VeritasAI";
 // Its tests also render the new-budget screens into target/screenshots.
 const VERITAS_MAC_UI: &str = "apps/macos/Packages/VeritasMacUI";
 const MACOS_DEPLOYMENT_TARGET: &str = "27.0";
@@ -365,6 +368,26 @@ fn xcodebuild(action: &str) -> Result {
 		);
 	}
 	Ok(())
+}
+
+/// Builds the AI plug-in, then runs the evaluation that asks the real
+/// on-device model questions about the all-features fixture.
+fn ai_eval() -> Result {
+	let root = root();
+	if bindings_are_stale(&root) {
+		bindings()?;
+	}
+	run(
+		&root.join(VERITAS_AI),
+		"swift",
+		&["build", "--product", "VeritasAIPlugin"],
+	)?;
+	run_with_env(
+		&root.join(VERITAS_KIT),
+		"swift",
+		&["test", "--filter", "AssistantEvaluationTests"],
+		&[("VERITAS_AI_EVAL", "1")],
+	)
 }
 
 fn ci() -> Result {
