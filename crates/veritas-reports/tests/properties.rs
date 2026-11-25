@@ -16,8 +16,8 @@ use veritas_domain::{
 };
 use veritas_reports::{
 	Bucket, Classification, Leg, NetProfit, NodeKind, Period, Sankey, Section, balance_sheet,
-	cash_flow, cash_flow_by_month, classify_on, extract_tags, net_profit, net_worth_by_month,
-	owners_equity, sankey, tax_summary,
+	cash_flow, cash_flow_by_month, classify, classify_on, extract_tags, net_profit,
+	net_worth_by_month, owners_equity, sankey, tax_summary,
 };
 
 // Index ACCOUNTS names an account that is never created, so rows there are
@@ -228,6 +228,121 @@ fn scenario() -> impl Strategy<Value = Scenario> {
 			categories,
 			ops,
 		})
+}
+
+/// One write to a transaction, as a command makes it. Indexes pick among
+/// the budget's transactions (or accounts, categories), wrapping around.
+#[derive(Clone, Debug)]
+enum Edit {
+	Remove(usize),
+	Tombstone(usize),
+	Redate(usize, (u32, u32)),
+	Amount(usize, i64),
+	Negate(usize),
+	Retarget(usize, Option<usize>),
+	TransferPayee(usize, Option<usize>),
+	Category(usize, Option<usize>),
+	Account(usize, usize),
+	ChildOf(usize, Option<usize>),
+	MakeParent(usize),
+	StartingBalance(usize),
+	Copy(usize),
+}
+
+fn edit() -> impl Strategy<Value = Edit> {
+	let row = any::<usize>();
+	prop_oneof![
+		row.prop_map(Edit::Remove),
+		row.prop_map(Edit::Tombstone),
+		(row, day()).prop_map(|(row, day)| Edit::Redate(row, day)),
+		(row, amount()).prop_map(|(row, amount)| Edit::Amount(row, amount)),
+		row.prop_map(Edit::Negate),
+		(row, proptest::option::of(any::<usize>())).prop_map(|(row, to)| Edit::Retarget(row, to)),
+		(row, proptest::option::of(0..=ACCOUNTS))
+			.prop_map(|(row, account)| Edit::TransferPayee(row, account)),
+		(row, proptest::option::of(0..CATEGORIES))
+			.prop_map(|(row, category)| Edit::Category(row, category)),
+		(row, 0..=ACCOUNTS).prop_map(|(row, account)| Edit::Account(row, account)),
+		(row, proptest::option::of(any::<usize>()))
+			.prop_map(|(row, parent)| Edit::ChildOf(row, parent)),
+		row.prop_map(Edit::MakeParent),
+		row.prop_map(Edit::StartingBalance),
+		row.prop_map(Edit::Copy),
+	]
+}
+
+/// Applies `edit` to `budget` and returns the transactions it wrote.
+fn apply(budget: &mut BudgetData, edit: &Edit, serial: usize) -> Vec<TransactionId> {
+	let ids: Vec<TransactionId> = budget.transactions.keys().cloned().collect();
+	let pick = |index: usize| ids.get(index % ids.len().max(1)).cloned();
+	let target = match edit {
+		Edit::Remove(row)
+		| Edit::Tombstone(row)
+		| Edit::Redate(row, _)
+		| Edit::Amount(row, _)
+		| Edit::Negate(row)
+		| Edit::Retarget(row, _)
+		| Edit::TransferPayee(row, _)
+		| Edit::Category(row, _)
+		| Edit::Account(row, _)
+		| Edit::ChildOf(row, _)
+		| Edit::MakeParent(row)
+		| Edit::StartingBalance(row)
+		| Edit::Copy(row) => pick(*row),
+	};
+	let Some(id) = target else {
+		return Vec::new();
+	};
+	if let Edit::Remove(_) = edit {
+		budget.transactions.remove(&id);
+		return vec![id];
+	}
+	if let Edit::Copy(_) = edit {
+		let mut copy = budget.transactions[&id].clone();
+		copy.id = TransactionId::new(format!("edit-{serial}"));
+		let copied = copy.id.clone();
+		budget.transactions.insert(copied.clone(), copy);
+		return vec![copied];
+	}
+	let other = |index: &Option<usize>| index.and_then(pick);
+	let transaction = budget.transactions.get_mut(&id).unwrap();
+	match edit {
+		Edit::Tombstone(_) => transaction.tombstone = !transaction.tombstone,
+		Edit::Redate(_, day) => transaction.date = date(&on(*day)),
+		Edit::Amount(_, amount) => transaction.amount = Money::from_minor(*amount),
+		Edit::Negate(_) => transaction.amount = Money::from_minor(-transaction.amount.minor()),
+		Edit::Retarget(_, to) => transaction.transfer = other(to),
+		Edit::TransferPayee(_, to) => {
+			transaction.payee = to.map(|to| Book::transfer_payee(&account(to)));
+		}
+		Edit::Category(_, category_index) => {
+			transaction.category = category_index.map(|index| cat(&category(index)));
+		}
+		Edit::Account(_, to) => transaction.account = AccountId::new(account(*to)),
+		Edit::ChildOf(_, parent) => {
+			transaction.split = match other(parent) {
+				Some(parent) => SplitRole::Child { parent },
+				None => SplitRole::None,
+			};
+		}
+		Edit::MakeParent(_) => transaction.split = SplitRole::Parent,
+		Edit::StartingBalance(_) => transaction.starting_balance = !transaction.starting_balance,
+		Edit::Remove(_) | Edit::Copy(_) => {}
+	}
+	vec![id]
+}
+
+fn assert_same_classification(
+	updated: &Classification,
+	fresh: &Classification,
+	budget: &BudgetData,
+) -> Result<(), TestCaseError> {
+	prop_assert_eq!(updated.rows(), fresh.rows());
+	prop_assert_eq!(updated.orphans(), fresh.orphans());
+	for id in budget.transactions.keys() {
+		prop_assert_eq!(updated.get(id), fresh.get(id));
+	}
+	Ok(())
 }
 
 fn account(index: usize) -> String {
@@ -569,6 +684,29 @@ proptest! {
 		prop_assert_eq!(one.orphans(), several.orphans());
 		for row in one.rows() {
 			prop_assert_eq!(one.get(&row.id), several.get(&row.id));
+		}
+	}
+
+	/// An edit to a few transactions updates the classification in place
+	/// instead of classifying the whole budget again. Whatever the edits,
+	/// the updated classification is the one a fresh classification gives,
+	/// batch after batch.
+	#[test]
+	fn reclassifying_after_transaction_edits_matches_classifying_afresh(
+		scenario in scenario(),
+		batches in proptest::collection::vec(proptest::collection::vec(edit(), 1..6), 1..4),
+	) {
+		let mut book = build(&scenario);
+		let mut classification = classify(&book.budget);
+		let mut serial = 0;
+		for batch in &batches {
+			let mut changed = BTreeSet::new();
+			for edit in batch {
+				serial += 1;
+				changed.extend(apply(&mut book.budget, edit, serial));
+			}
+			classification.reclassify(&book.budget, &changed);
+			assert_same_classification(&classification, &classify(&book.budget), &book.budget)?;
 		}
 	}
 
