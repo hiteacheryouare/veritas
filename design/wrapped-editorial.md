@@ -53,7 +53,7 @@ Which report fields each page uses. New figures are marked N1 to N6 and specifie
 
 | Page | Fields |
 |---|---|
-| Cover | `year`, `first`, `last` (year to date when `last` isn't Dec 31), the open budget's name |
+| Cover | `year`, `first`, `last` (year to date when `last` isn't Dec 31), the budget's name, which FC-8's copy rule (#111) lists as an allowed field |
 | The ledger | `total_in`, `total_out`, `net`, `prior_year` (changes and `from`), `shares.out_vs_in`, `shares.net` |
 | Categories | `top_categories` (name, total, share, labels), `other_categories`, `shares.other_categories`, the `TopCategoryShare` fact; N6 optional |
 | Groups | `top_groups`, `other_groups`, `shares.other_groups` |
@@ -62,7 +62,7 @@ Which report fields each page uses. New figures are marked N1 to N6 and specifie
 | The shape of the year | `months`, `biggest_month`, `biggest_vs_typical`, `shares.biggest_month`; N2 for the typical-month rule |
 | Quiet days | `no_spend` (days, evaluated days, first, last, longest, current), the `NoSpendShare` fact; N3 for the calendar |
 | Goals reached | `completed_goal_ids` and goal names; N4 for reached months |
-| Net worth | `net_worth_start`, `net_worth_end`, `net_worth_change`, `shares.net_worth_change`; N1 for the line |
+| Net worth | `net_worth_start`, `net_worth_end`, `net_worth_change`, `shares.net_worth_change`; N1 for the line and its redacted shares |
 | Notes | FC-8's definitions, as copy Fred reviews; `first`, `last` |
 
 ## Layout grid
@@ -150,9 +150,9 @@ The good, bad and warning colors, and the money-state colors (available, low, ov
 - **Leaders.** 0.5 pt hairline in secondary ink, an elbow with a horizontal run, a 6 pt gap from the mark. The text starts at the end of the run, left-aligned.
 - **Placement.** Above and right of the mark if it fits, else above and left, else in the band above the plot. Annotations never cross marks or each other.
 - **Axes.** No y-axis and no gridlines. A 0.5 pt baseline in ink at 40%. Month initials below. A reference line (the typical month) is dashed 0.5 pt with its label at the right end.
-- **Missing values.** A month with no share reads "n/a" in its slot (W-21), in axis type.
+- **Missing values.** "n/a" has one meaning: the core gave no share because `out <= 0` (W-21). Those slots read "n/a" in axis type. A month after the period's last day isn't in the series at all. Its slot stays empty, with only its month initial in tertiary ink, the same "not yet" treatment the calendar gives days that aren't evaluated.
 - **Refund months.** Drawn below the baseline, hatched, never clamped (W-20).
-- **Hide amounts.** Shapes stay identical, because bars are drawn from the core's shares in both modes. Amount annotations become share annotations. The y-scale never shows money.
+- **Hide amounts.** Shapes stay identical, because bars are drawn from the core's shares in both modes. Amount annotations become share annotations. The y-scale never shows money. The one exception is the net worth line when opening net worth is 0 or less: N1 gives no redacted shares then, so the redacted page has no line (see Hide amounts).
 - **VoiceOver.** Each chart has an `AXChartDescriptor` (audio graph) built from the same series, and its annotations are read as text after the headline.
 
 ## Voice
@@ -161,12 +161,12 @@ Plain declarative sentences in the past tense, second person only where it reads
 
 Rules:
 
-1. **Every figure comes from the report**, formatted by `MoneyFormat` and `WrappedWords`. No rounding beyond what they do, no "about", no "nearly".
+1. **Every figure comes from the report**, formatted by `MoneyFormat` and `WrappedWords`. No rounding beyond what they do, no "about", no "nearly". Page numbers and folios are layout numbers, not figures, and the budget's name is a field the copy rule allows (#111).
 2. **Comparisons only from the report:** prior-year changes, `biggest_vs_typical`, the two shares in `fun_facts`. Nothing against other people or averages (FC-8).
 3. **No judgment words:** not "only", "just", "impressive", "great", "careful", "splurge".
 4. **No growth or decline words** when the prior year is partial (`prior_year.from` set). The ledger shows FC-8's line instead: "No full prior year to compare. Your budget starts November 1, 2025."
 5. **Net is "left over" or "came up short"**, never "saved". Savings is its own figure.
-6. **No-spend copy** never says the user spent nothing. Bills, loan payments, transfers and refunds don't break a no-spend day.
+6. **No-spend copy** never says the user spent nothing. Bills, loan payments, refunds, and transfers, card payments and savings moves between the user's own accounts don't break a no-spend day. A transfer booked as spending (CLS-4 row 8) does (FC-8 as revised in #111; Fred to confirm the words).
 7. **No filler, eyebrows or reassurance.** Not "What a year", "Let's look back", "Here's your", "Your money story", "Keep it up", "Don't worry", "at a glance", "insights", "journey".
 
 ### Examples
@@ -175,7 +175,7 @@ Amounts here are made up to show shape. The real text is generated by `WrappedSt
 
 | Page | Headline | Dek |
 |---|---|---|
-| Cover | 2026 | Household budget. January 1 to November 25. |
+| Cover | 2026 | Household budget. January 1 to November 25. (The budget's name is the copy-rule field from #111.) |
 | The ledger | $84,210 came in. $71,380 went out. | That left $12,830, 21.4% more than in 2025. |
 | The ledger, short year | $52,000 came in. $54,140 went out. | That came up $2,140 short. |
 | The ledger, partial prior year | $84,210 came in. $71,380 went out. | That left $12,830. No full prior year to compare. Your budget starts November 1, 2025. |
@@ -198,7 +198,7 @@ Short, factual sentences, reviewed by Fred, drawn from FC-8:
 - "Went out" is spending after refunds. Debt paydown and savings are counted separately.
 - Categories and groups rank by spending after refunds. Uncategorized spending isn't ranked.
 - Payees rank by what was paid to them. Transfers aren't payees.
-- A no-spend day is a day with no discretionary spending. Bills, loan payments, transfers and refunds don't count against it.
+- A no-spend day is a day with no discretionary spending. Bills, loan payments, refunds, and transfers, card payments and savings moves between your own accounts don't count against it. A transfer recorded as spending does.
 - Net worth at the start is the balance at the end of the day before January 1.
 - Percentages compare the same dates a year earlier.
 
@@ -213,7 +213,7 @@ Hide amounts (R-WRAP-2) keeps every layout identical and swaps each amount for t
   - Ledger: "84.8% of what came in went out." / "15.2% was left over."
   - Categories: "Groceries took the largest share." / "18.3% of categorized spending."
   - Shape of the year: "March was the biggest month for spending." / "12.4% of the year's spending, 31% more than your typical month."
-  - Net worth: the headline is unchanged ("Net worth went up."), the hero figure becomes "+55.3%" with the dek "since the start of 2026", and the start and end rows are left out.
+  - Net worth: the headline is unchanged ("Net worth went up."), the hero figure becomes "+55.3%" with the dek "since the start of 2026", and the start and end rows are left out. When opening net worth is 0 or less, there is no `shares.net_worth_change` and no N1 shares, so the hero reads "n/a", as other share slots do, and the line is left out. The headline still says which way net worth went, from the sign of `net_worth_change`.
 - **Unchanged:** names, dates, counts, streaks, the calendar, chart shapes.
 - **VoiceOver** reads the redacted text and the redacted chart descriptions; no amount is spoken.
 
@@ -222,7 +222,7 @@ Hide amounts (R-WRAP-2) keeps every layout identical and swaps each amount for t
 Tied to `motion.md`.
 
 - **Turn.** The outgoing spread fades and drifts 12 pt opposite to the direction of travel; the incoming spread fades in from 12 pt on the travel side. Opacity uses `story` (480 ms, `standard`); movement uses the `turn` spring, so a fast second press retargets instead of stacking. No page curl or 3D: it's heavy, skeuomorphic, and fights the precise feel.
-- **First-view entrance.** The first time a spread is shown in a session, its parts arrive in order within the 700 ms `stage` budget: headline and dek fade in (0 ms), the hero figure fades in (80 ms), chart marks grow from the baseline with a 30 ms stagger capped at 12 marks (160 ms), annotations fade in after the marks settle. Figures never count up. Revisiting a spread shows it complete, the same full-then-quick budget as ArenaSwap's reveal.
+- **First-view entrance.** The first time a spread is shown in a session, its parts arrive in order within the 700 ms `stage` budget: headline and dek fade in (0 ms), the hero figure fades in (80 ms), chart marks fade in at their full height with a 30 ms stagger capped at 12 marks (160 ms), annotations fade in after the marks. Marks never grow from the baseline: a bar partway up is the chart form of counting up, an amount that isn't real. Figures never count up either. Revisiting a spread shows it complete, the same full-then-quick budget as ArenaSwap's reveal.
 - **No auto-advance.** A magazine is paged by the reader. This replaces the 6 s auto-advance in `interaction.md`.
 - **Contents.** Choosing an entry turns straight to that spread (one turn, not one per page). Optionally, the entry's title morphs into the spread's headline (`motion.md`, continuity moment 5).
 - **Year change.** Cross-fades to the new year's cover over `story`.
@@ -328,7 +328,7 @@ At canvas scale, not to exact proportion. `|` in the middle is the spine.
 |   ##     ####          ##                           ##                        |
 |   ##     ####   ##     ##    ##    ##     ##   ##   ##    ##                  |
 |  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - typical  $6,200  |
-|   ##     ####   ##     ##    ##    ##     ##   ##   ##    ##   ##    n/a     |
+|   ##     ####   ##     ##    ##    ##     ##   ##   ##    ##   ##            |
 |  -------------------------------------------------------------------------    |
 |          /\/\                                                                 |
 |          ----- Refunds beat spending                                          |
@@ -337,7 +337,7 @@ At canvas scale, not to exact proportion. `|` in the middle is the spine.
 +-------------------------------------------------------------------------------+
 ```
 
-The chart spans all twelve columns across the spine. February sits below the baseline, hatched. December reads "n/a" when the year to date ends in November. The typical-month rule needs N2.
+The chart spans all twelve columns across the spine. February sits below the baseline, hatched. For a year to date that ends in November, December's slot is empty, with only its initial: it isn't in the series. The typical-month rule needs N2.
 
 ### 7. Net worth
 

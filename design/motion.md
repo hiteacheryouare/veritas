@@ -91,21 +91,29 @@ SwiftUI's `.spring(duration:bounce:)`, where duration is perceptual.
 
 ### Rapid repeat
 
-When the same command fires again within 150 ms of the last (a held ⌘→, a held ↓), the change happens without animation. The user is scrubbing, and animating each step only adds lag. The first and last presses animate.
+The first press of a command animates. A repeat that arrives within 150 ms of the previous one (a held ⌘→, a held ↓) applies without animation, since the user is scrubbing and animating each step only adds lag. When the key is released, the final state is already on screen, so nothing is left to animate.
 
 ## Navigation
 
-The transition depends on how the user got there, not on the destination. `WorkspaceModel.go(to:)` gains an origin, `.sidebar` or `.drill(from: id)`, so the page container can pick.
+The transition depends on how the user got there, not on the destination. `WorkspaceModel.go(to:arrival:)` takes an arrival, `.peer` (the default) or `.drill`, so the page container can pick.
 
 ### Peer screens (sidebar, ⌘1 to ⌘6, ⌘K)
 
 | | **A. Ready-gated fade-through (chosen)** | B. Ready-gated instant swap | C. Directional slide |
 |---|---|---|---|
-| What happens | The old page stays until the new page has data or 250 ms pass. Then the old page fades out over 100 ms (`exit`) and the new one fades in over 200 ms (`standard`), starting 60 ms in and rising 4 pt | Same gate, then a one-frame swap | Pages slide up or down by sidebar order |
+| What happens | The old page fades out over 100 ms (`exit`) and the new one fades in over 200 ms (`standard`), starting 60 ms in and rising 4 pt. The new page's content appears when its data has loaded, and a spinner only if that takes more than 250 ms (see The ready gate) | Same gate, then a one-frame swap | Pages slide up or down by sidebar order |
 | Feel | Soft and quick, no blank frame | Finder and Mail; no motion at all | Spatial |
 | Why not | | Reasonable if Ryan wants zero page motion | The sidebar isn't a sequence. Sliding implies a hierarchy that doesn't exist, and macOS apps don't slide between peers |
 
-The ready gate fixes most of choppy spot 1 on its own: the user never sees an empty page fade in and then fill. Screens report readiness through their existing `hasLoaded` or non-nil sheet. If 250 ms pass first, the page transitions to its loading state (see Loading), and the content cross-fades in when it arrives.
+#### The ready gate
+
+The gate lives in the new page, not the old one.
+
+- **Contract.** A screen is ready when its model's loaded value is present: the non-nil sheet, report, forecast, summary or document, or `hasLoaded` where a model has it. Every screen drives two things from that one value: `ScreenState(kind: .loading)` while it's absent, and its content's fade-in (`fast`) when it arrives.
+- **Timing.** The spinner waits 250 ms and then fades in, so a load that finishes inside the gate never shows one. Local loads from the core usually finish inside the page's own 260 ms fade, so the content arrives as part of the page.
+- **Why the old page doesn't hold.** Holding it would need the new screen's data before its view exists. Screens load in their own `.task`, which runs only once the view is mounted. The two ways round that both cost more than they buy. One is starting each screen's load from `go(to:)`, which moves every screen's model into the workspace. The other is mounting the new page invisibly under the old one, which doubles toolbars, titles and focus for the overlap. If loads measured in the app run past about 100 ms, revisit this with `go(to:)` preloading.
+
+This fixes most of choppy spot 1: the old page no longer vanishes in one frame, and the new page never fades in as a spinner and then pops its content in.
 
 The 60 ms overlap is short enough that two different screens never visibly ghost over each other.
 
@@ -187,7 +195,7 @@ With B:
 - The field being typed into, and its expression preview ("Return sets 452.00"), never animate.
 - A value's money state (available, low, overspent) changes color in the same transaction as the value, over the same `fast`.
 - Drain bars keep easing their width over `fast` on commit, as now.
-- Values changed by a reload (sync, import, a schedule posting, an edit on another screen) change in place. The user didn't act here, so there is nothing to connect the change to.
+- The same cross-fade applies whatever caused the change. Today a commit in this window and a change from elsewhere (sync, import, a schedule posting, another window) reach a screen the same way, through `observeChanges` and `refresh()`, and the session doesn't say which window caused it. Telling them apart would need each command path, undo and redo included, to open an animated transaction for the refresh it triggers, with every other refresh running with animations disabled. A 150 ms fade on a change from elsewhere does no harm, so the rule stays simple until there's a reason to add that signal.
 - Amounts never count up, anywhere, including Wrapped.
 
 ## Lists and rows
@@ -208,12 +216,12 @@ The register (`NSTableView`) is separate. A single row the user adds or deletes 
 
 ## Loading to content
 
-1. **Ready gate.** On navigation, the old page holds for up to 250 ms while the new one loads (see Navigation).
+1. **Ready gate.** The new page's content stays hidden until its data has loaded (see The ready gate).
 2. **One loading view.** Every screen uses `ScreenState(kind: .loading)`. The bare `ProgressView().frame(minHeight: 200)` instances in Net Profit, Forecast, Tax, Statements and Custom reports go away.
 3. **The spinner fades.** After its 250 ms delay it fades in over `fast` instead of appearing in one frame.
 4. **Content cross-fades in.** The spinner fades out over 90 ms and the content fades in over `fast`. No rise: the page already rose.
 5. **Reserve known space.** Anything whose size is known before its data arrives takes that size on the first frame: the register's balance summary and graph (one line plus 120 pt), a sheet's table, a dashboard card's body. Skeleton shapes are not used. Veritas screens vary too much for a fake shape to match, and a mismatched skeleton is one more jump.
-6. **Reloads never show loading.** After a data change, the old content stays until the new content is ready, then values change in place.
+6. **Reloads never show loading.** After a data change, the old content stays until the new content is ready, then figures cross-fade as in Numbers and values.
 
 ## What never animates
 
@@ -221,7 +229,6 @@ The register (`NSTableView`) is separate. A single row the user adds or deletes 
 - The figures in a row being edited, until Return or Tab commits.
 - The register: scrolling, paging in, sorting, filtering, searching.
 - Anything during live resize: the window, the sidebar divider, the inspector divider.
-- Values that change because of a reload, a sync, an import or a background schedule posting.
 - The balance graph's hover readout and crosshair. They track the pointer one to one.
 - A dragged card while the pointer is down.
 - Charts on first appearance outside Wrapped. A chart that draws itself in on every visit gets old by the third visit.
@@ -234,7 +241,7 @@ The rule before this system was that every duration becomes 0. Apple's guidance 
 
 | | A. Everything instant (before) | **B. Movement becomes a short fade (chosen)** |
 |---|---|---|
-| Rule | All durations 0 | Anything that moves, scales or resizes is replaced by a cross-fade over `fast`, or by nothing for small things. Opacity-only animations stay, capped at `fast`. Loops stop |
+| Rule | All durations 0 | Anything that moves, scales or resizes becomes a cross-fade over `fast`. Small state changes (tints, a figure's cross-fade, a bar's width, a reorder) happen at once. Loops stop |
 
 B keeps the cue that something changed without any motion. ArenaSwap's notice reveal does the same. It changes `TokenBehaviorTests.reduceMotionTurnsEveryDurationIntoNone`, which would become a test that every preset's reduced form has no spatial component.
 
@@ -284,55 +291,50 @@ Screens never write a duration, a curve or a spring. They name a preset.
 
 ### The `Motion` namespace
 
-`VeritasDesign/Motion.swift` grows from two durations into the token set above plus semantic presets. Each preset knows its default animation and its reduced form.
+`VeritasDesign/Motion.swift` holds the tokens and the named motions. Each `Motion` has a curve (a timing curve with an easing, duration and delay, or a zero-bounce spring) and a reduced curve for Reduce Motion, which is `nil` when the change should happen at once.
 
-```swift
-public enum Motion {
-	public enum Duration { instant, fast, sheet, page, story, stage }
-	public enum Curve { standard, exit, linear }
-	public enum Spring { settle, morph, turn }
+| Motion | Curve | Reduce Motion |
+|---|---|---|
+| `instant` | 90 ms `standard` | at once |
+| `fast` | 150 ms `standard` | at once |
+| `leave` | 90 ms `exit` | at once |
+| `sheet` | 220 ms `standard` | 150 ms fade |
+| `pageIn` | 200 ms `standard` after 60 ms | 150 ms fade |
+| `pageOut` | 100 ms `exit` | 90 ms |
+| `settle` | spring 0.32 s | at once |
+| `morph` | spring 0.40 s | 150 ms fade |
+| `push` | spring 0.32 s | 150 ms fade |
+| `turn` | spring 0.48 s | 150 ms fade |
 
-	// Presets screens use
-	public static let select: MotionPreset   // instant / fast tint
-	public static let value: MotionPreset    // fast cross-fade on commit
-	public static let reveal: MotionPreset   // banner and bar fold
-	public static let page: MotionPreset     // ready-gated fade-through
-	public static let push: MotionPreset     // drill into a row
-	public static let morph: MotionPreset    // card into detail
-	public static let settle: MotionPreset   // layout moves
-	public static let story: MotionPreset    // Wrapped turn
+`MotionTransition` pairs an insertion and a removal, each a motion plus an optional offset and fade: `page`, `push`, `pop`, `reveal`, `rise`, `fade`, `turnForward` and `turnBack`. With Reduce Motion on, every offset is dropped and both sides fade.
 
-	// Escape hatch: allowed, greppable, needs a reduced form
-	public static func custom(_ animation: Animation, reduced: Animation?) -> MotionPreset
-}
-```
-
-Names are a sketch; the final API is decided when it's built.
+`Motion.progress(at:)` samples a curve, for tests and frame strips.
 
 ### View modifiers
 
-| Modifier | Does |
+| API | Does |
 |---|---|
-| `.motion(_:value:)` | Exists today. Animates changes to `value` with a preset, honoring Reduce Motion |
-| `.pageTransition(origin:)` | The page container's transition, picked by origin, with the ready gate |
-| `.reveal(isShown:)` | Banner and bar fold |
-| `.valueChange(_:)` | Cross-fades a money figure on commit, in place while editing or reloading |
-| `.morphSource(_:in:)` / `.morphDestination(_:in:)` | Wraps `matchedGeometryEffect` with the push fallback |
-| `.settles(value:)` | Layout moves with `settle` |
-| `.withoutMotion()` | Disables animation for a subtree, for reload points and the register host |
-| `Motion.perform(_:_:)` | Replaces `withAnimation`, takes a preset |
+| `.motion(_:value:)` | Animates changes to `value` with a named motion, honoring Reduce Motion |
+| `.motionTransition(_:)` | Inserts and removes the view with a `MotionTransition`. The transition carries its own animation, so no container animation is needed |
+| `Motion.perform(_:_:)` | Replaces `withAnimation`, takes a named motion |
+| `.valueChange(_:)` | A money figure's cross-fade. Never a digit roll |
+| `.shown(_:)` | Fades only the view's opacity, so nothing else changing alongside it animates |
+| `.still(whenChanging:)` | No animation in the subtree when a key changes, such as drain bars when the month changes |
+| `.stillOnRapidRepeat(of:)` | The rapid-repeat rule for a value |
+| `.withoutMotion()` | No animation in the subtree at all |
+| `.morph(_:in:)` | `matchedGeometryEffect` for a card and its page. No match with Reduce Motion on, so the two cross-fade |
 
 ### Checks
 
-- **No hand-rolled timing.** A test in `VeritasDesignTests` scans `VeritasMacUI/Sources` and fails on `withAnimation(`, `.animation(`, `.spring(`, `.timingCurve(`, `.easeIn`, `.easeOut`, `.easeInOut`, `.linear(` or `.bouncy` outside `VeritasDesign`. `Motion.custom` is allowed and easy to find.
+- **No hand-rolled timing.** A test in `VeritasDesignTests` scans `VeritasMacUI/Sources`, `VeritasKit` and the app target, and fails on `withAnimation`, the `.animation(` modifier, `.spring(`, `.timingCurve(`, the ease curves, a linear animation, a system spring, `NSAnimationContext`, `.animator()`, `.transition(` (use `.motionTransition`) or a digit roll outside `VeritasDesign`. `TimelineView` schedules, such as `TimelineView(.animation)` in `TypingDots`, are exempt: they set a redraw rate, not a timing. `TypingDots` is the one allowed loop and has its own Reduce Motion test.
 - **Parity.** `TokenParityTests` checks every duration, curve and spring against `tokens.css`, as it does for `duration-fast` and `duration-sheet` today.
 - **Reduce Motion.** For every preset, the reduced form has no offset, scale or spring, and no duration above `fast`.
 - **Loops.** A test lists every looping view (today only `TypingDots`) and proves it holds still under Reduce Motion, the way ArenaSwap's Cypress test does.
-- **Debug time scale.** In debug builds, a launch argument `-MotionTimeScale 5` slows every preset five times, so timings can be judged by eye. macOS has no system-wide slow-animation switch like the iOS Simulator's.
+- **Debug time scale.** In debug builds, a launch argument `-MotionTimeScale 5` slows every motion five times, so timings can be judged by eye. macOS has no system-wide slow-animation switch like the iOS Simulator's.
 
-### Docs to update once choices are made
+### Docs that mirror this one
 
-`tokens.md` (Motion table), `tokens.css` (duration and spring tokens, the reduced-motion block), and `interaction.md` (Motion table, the Wrapped auto-advance line and the Reduce Motion line).
+`tokens.md` lists the motion tokens and `interaction.md` lists the motion per interaction. Both follow the decisions below. The tokens land in `tokens.css` with the motion build.
 
 ## Decisions
 
