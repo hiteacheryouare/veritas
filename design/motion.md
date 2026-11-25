@@ -159,14 +159,14 @@ Notice banners, the read-only banner, the find bar and the reconcile bar fold in
 
 Budget, Net Profit, Sankey and the register's month filter.
 
-| | **A. Figures cross-fade, title nudges (chosen)** | B. Figures cross-fade only |
+| | A. Figures cross-fade, title nudges (chosen, then adjusted) | **B. Figures cross-fade only (what ships)** |
 |---|---|---|
 | Figures | Cross-fade over `fast` | Same |
 | Drain bars | Change without animation | Same |
 | Month title | Nudges 6 pt in the direction of time while cross-fading | Cross-fades in place |
 | Rows that exist in only one month | Fade in or out, no height animation | Same |
 
-A keeps `interaction.md`'s "no sliding" for the money and gives time a direction in the one label that is about time. The cross-fade is applied to the figures only, not to the whole stack, which removes the competing animations of choppy spot 4.
+Ryan chose A, but the nudge can't be built: the month title is the window's `navigationTitle`, which AppKit draws, so SwiftUI can't move it. What ships is B. The cross-fade is applied to the figures only, not to the whole stack, which removes the competing animations of choppy spot 4.
 
 ## Continuity moments worth having
 
@@ -259,7 +259,7 @@ Per item, under B:
 | Coach mark between anchors | `settle` move | Fade out, fade in at the new anchor |
 | Mo Nee question bubble | Fade and 8 pt rise | Fade over `fast` |
 | Typing dots | Pulse | Held still (as now) |
-| Month change | Figures cross-fade, title nudge | Figures cross-fade, no nudge |
+| Month change | Figures cross-fade | Instant |
 | Value change on commit | Cross-fade `fast` | Instant |
 | Drain bar | Width over `fast` | Instant |
 | List insert, delete | Height and fade | Fade over `fast`, height in one frame |
@@ -341,8 +341,8 @@ Screens never write a duration, a curve or a spring. They name a preset.
 Ryan's picks, November 2026:
 
 1. **Feel:** settled springs (B).
-2. **Peer page transition:** ready-gated fade-through (A).
+2. **Peer page transition:** ready-gated fade-through (A). The gate lives in the new page: the old page fades out at once, and the new page's content appears when its data has loaded (see The ready gate).
 3. **Drill-in:** morph for cards, short push for rows.
-4. **Month change:** figures cross-fade and the month title nudges (A).
+4. **Month change:** Ryan chose A, figures cross-fade and the month title nudges. The nudge is dropped because AppKit draws the `navigationTitle`, so only the figures cross-fade.
 5. **Value changes:** cross-fade on commit (B).
 6. **Reduce Motion:** movement becomes a short fade (B).
