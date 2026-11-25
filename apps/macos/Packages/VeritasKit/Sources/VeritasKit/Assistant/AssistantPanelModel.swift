@@ -124,10 +124,12 @@ public final class AssistantPanelModel {
 		await task?.value
 	}
 
-	/// Stops the answer in progress, as when the panel closes. Text already shown stays.
+	/// Stops the answer in progress, as when the panel closes. Text already
+	/// shown stays, and the answer loop drops anything that arrives after this,
+	/// even before the model's stream has seen the cancellation. The cancelled
+	/// task is kept so `settle()` can wait for the loop to end.
 	public func stop() {
 		task?.cancel()
-		task = nil
 		dropPending()
 		guard let last = exchanges.last, last.state == .answering else { return }
 		update(last.id) { $0.state = .failed(Self.stopped) }
