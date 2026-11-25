@@ -92,6 +92,14 @@ struct AccountRegisterScreen: View {
 					deleting = rows
 				}
 			}
+			.overlay(alignment: .topLeading) {
+				// The Payee column's heading, which quick entry fills from.
+				Color.clear
+					.frame(width: RegisterTable.Column.payee.width, height: 24)
+					.tourAnchor(.quickEntry, ringed: false)
+					.padding(.leading, RegisterTable.Column.cleared.width + RegisterTable.Column.date.width)
+					.allowsHitTesting(false)
+			}
 			.overlay {
 				if !register.hasLoaded {
 					ScreenState(kind: .loading)
@@ -104,6 +112,13 @@ struct AccountRegisterScreen: View {
 					)
 				}
 			}
+		}
+		.overlay(alignment: .topTrailing) {
+			// Stands in for Add transaction, which sits in the toolbar out of the overlay's reach.
+			Color.clear
+				.frame(width: 160, height: 1)
+				.tourAnchor(.addTransaction, ringed: false)
+				.allowsHitTesting(false)
 		}
 		.background(.surfaceWindow)
 		.navigationTitle(account?.name ?? "Account")

@@ -42,6 +42,7 @@ struct EnvelopeRowView: View {
 			}
 		} budgeted: {
 			budgeted
+				.tourAnchor(.budgetCell, isOn: screen.tourCellID == envelope.id)
 		} spent: {
 			if !isIncome {
 				Text(screen.format.amount(-envelope.spent, on: .budget))
