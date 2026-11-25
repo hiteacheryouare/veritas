@@ -517,12 +517,18 @@ fn mirror_verdict(primary: Option<Decision>) -> Verdict {
 	}
 }
 
-/// A multiply-rotate hash of an id's length and its first and last eight
-/// bytes, which tells apart the ids a budget holds (UUIDs, mostly). The maps
-/// below are keyed by ids from the budget itself, and std's SipHash costs
-/// more than the lookups they save.
-#[derive(Default)]
+/// A hash that takes an id eight bytes at a time and mixes each word in with
+/// a folded 64-by-64-bit multiply, so every input bit reaches every output
+/// bit. The maps below are keyed by ids from the budget itself, and std's
+/// SipHash costs more than the lookups they save. Ids that share a prefix
+/// and suffix around a counter still hash apart.
 struct IdHasher(u64);
+
+impl Default for IdHasher {
+	fn default() -> Self {
+		IdHasher(0x243f_6a88_85a3_08d3)
+	}
+}
 
 impl Hasher for IdHasher {
 	fn finish(&self) -> u64 {
@@ -530,18 +536,14 @@ impl Hasher for IdHasher {
 	}
 
 	fn write(&mut self, bytes: &[u8]) {
-		self.add(bytes.len() as u64);
-		match (bytes.first_chunk::<8>(), bytes.last_chunk::<8>()) {
-			(Some(&first), Some(&last)) => {
-				self.add(u64::from_le_bytes(first));
-				self.add(u64::from_le_bytes(last));
-			}
-			_ => self.add(
-				bytes
-					.iter()
-					.fold(0, |word, &byte| (word << 8) | u64::from(byte)),
-			),
+		let (words, tail) = bytes.as_chunks::<8>();
+		for &word in words {
+			self.add(u64::from_le_bytes(word));
 		}
+		self.add(
+			tail.iter()
+				.fold(0, |word, &byte| (word << 8) | u64::from(byte)),
+		);
 	}
 
 	fn write_u8(&mut self, byte: u8) {
@@ -551,7 +553,8 @@ impl Hasher for IdHasher {
 
 impl IdHasher {
 	fn add(&mut self, word: u64) {
-		self.0 = (self.0.rotate_left(5) ^ word).wrapping_mul(0x517c_c1b7_2722_0a95);
+		let product = u128::from(self.0 ^ word) * u128::from(0x9e37_79b9_7f4a_7c15_u64);
+		self.0 = (product as u64) ^ ((product >> 64) as u64);
 	}
 }
 
@@ -970,7 +973,21 @@ fn transfer_decision(
 
 #[cfg(test)]
 mod tests {
+	use std::hash::BuildHasher;
+
 	use super::*;
+
+	#[test]
+	fn ids_that_share_a_prefix_and_suffix_hash_apart() {
+		let ids: Vec<TransactionId> = (0..5_000)
+			.map(|n| TransactionId::new(format!("acme-bank-import-{n:08}-transfer")))
+			.collect();
+		let hashes: BTreeSet<u64> = ids
+			.iter()
+			.map(|id| BuildHasherDefault::<IdHasher>::default().hash_one(id))
+			.collect();
+		assert_eq!(hashes.len(), ids.len());
+	}
 
 	#[test]
 	fn every_decision_maps_to_its_table_row_and_kind() {
