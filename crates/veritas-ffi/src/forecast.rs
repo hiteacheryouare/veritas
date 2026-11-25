@@ -1279,8 +1279,7 @@ mod tests {
 		assert_eq!(dump(&db(&scratch)), original);
 
 		core.redo().unwrap();
-		drop(core);
-		let core = reopened(&scratch);
+		let core = reopened(core, &scratch);
 		assert_eq!(core.scenarios(TODAY).unwrap()[0].name, "Vacation");
 	}
 
@@ -1596,15 +1595,16 @@ mod tests {
 			eprintln!("skipping the Actual side: run `cargo xtask oracle setup`");
 			return None;
 		}
-		let output = std::process::Command::new("node")
-			.current_dir(&oracle)
-			.arg("src/main.ts")
-			.arg("forecast-occurrences")
-			.arg(zip)
-			.arg(end)
-			.args(["--today", today])
-			.output()
-			.expect("node runs");
+		let output = crate::test_support::output(
+			std::process::Command::new("node")
+				.current_dir(&oracle)
+				.arg("src/main.ts")
+				.arg("forecast-occurrences")
+				.arg(zip)
+				.arg(end)
+				.args(["--today", today]),
+		)
+		.expect("node runs");
 		assert!(
 			output.status.success(),
 			"Actual couldn't forecast: {}",

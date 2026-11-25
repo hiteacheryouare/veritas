@@ -642,6 +642,7 @@ pub(crate) mod tests {
 	use super::*;
 	use crate::ReadOnlyKind;
 	use crate::records::EntityKind;
+	use crate::test_support::while_no_child_starts;
 
 	pub(crate) struct Scratch(pub(crate) PathBuf);
 
@@ -890,10 +891,11 @@ pub(crate) mod tests {
 	fn a_closed_session_frees_the_budget_and_refuses_calls() {
 		// R-REL-6
 		let (scratch, core) = imported("close");
-		core.close().unwrap();
-		assert!(matches!(core.state(), Err(FfiError::Invalid { .. })));
-		let reopened =
-			Core::<veritas_store::Store>::open(&scratch.budget(), &CancelToken::default()).unwrap();
+		let reopened = while_no_child_starts(|| {
+			core.close().unwrap();
+			assert!(matches!(core.state(), Err(FfiError::Invalid { .. })));
+			Core::<veritas_store::Store>::open(&scratch.budget(), &CancelToken::default()).unwrap()
+		});
 		assert_eq!(reopened.state().unwrap().read_only, None);
 	}
 
@@ -1105,14 +1107,15 @@ pub(crate) mod tests {
 			eprintln!("skipping the Actual side: run `cargo xtask oracle setup`");
 			return None;
 		}
-		let output = std::process::Command::new("node")
-			.current_dir(&oracle)
-			.arg("src/main.ts")
-			.arg("dump")
-			.arg(zip)
-			.args(["--today", today])
-			.output()
-			.expect("node runs");
+		let output = crate::test_support::output(
+			std::process::Command::new("node")
+				.current_dir(&oracle)
+				.arg("src/main.ts")
+				.arg("dump")
+				.arg(zip)
+				.args(["--today", today]),
+		)
+		.expect("node runs");
 		assert!(
 			output.status.success(),
 			"Actual couldn't read the export: {}",
@@ -1296,12 +1299,14 @@ pub(crate) mod tests {
 					Ok(core) => {
 						assert_eq!(entries(&scratch.0), ["budget"], "{what} at {delay:?}");
 						assert_eq!(core.state().unwrap().read_only, None);
-						core.close().unwrap();
-						let reopened = Core::<veritas_store::Store>::open(
-							&scratch.budget(),
-							&CancelToken::default(),
-						)
-						.unwrap();
+						let reopened = while_no_child_starts(|| {
+							core.close().unwrap();
+							Core::<veritas_store::Store>::open(
+								&scratch.budget(),
+								&CancelToken::default(),
+							)
+							.unwrap()
+						});
 						assert_eq!(
 							reopened.state().unwrap().read_only,
 							None,
@@ -1328,19 +1333,20 @@ pub(crate) mod tests {
 		// The token is checked once the budget is open, so a late cancel still
 		// leaves no window holding the budget's lock.
 		let (scratch, core) = imported("cancel-after-open");
-		core.close().unwrap();
-		let cancel = CancelToken::default();
-		cancel.cancel();
+		let reopened = while_no_child_starts(|| {
+			core.close().unwrap();
+			let cancel = CancelToken::default();
+			cancel.cancel();
 
-		let opened = Core::<veritas_store::Store>::open(&scratch.budget(), &cancel);
+			let opened = Core::<veritas_store::Store>::open(&scratch.budget(), &cancel);
 
-		assert!(
-			matches!(opened, Err(FfiError::Cancelled)),
-			"{:?}",
-			opened.err()
-		);
-		let reopened =
-			Core::<veritas_store::Store>::open(&scratch.budget(), &CancelToken::default()).unwrap();
+			assert!(
+				matches!(opened, Err(FfiError::Cancelled)),
+				"{:?}",
+				opened.err()
+			);
+			Core::<veritas_store::Store>::open(&scratch.budget(), &CancelToken::default()).unwrap()
+		});
 		assert_eq!(reopened.state().unwrap().read_only, None);
 	}
 
@@ -2607,9 +2613,10 @@ pub(crate) mod tests {
 		);
 		assert_eq!(after.goals.len(), 1, "D71 updates the same row");
 
-		core.close().unwrap();
-		let reopened =
-			Core::<veritas_store::Store>::open(&scratch.budget(), &CancelToken::default()).unwrap();
+		let reopened = while_no_child_starts(|| {
+			core.close().unwrap();
+			Core::<veritas_store::Store>::open(&scratch.budget(), &CancelToken::default()).unwrap()
+		});
 		assert_eq!(goal_of(&reopened, &id), retargeted);
 		budget(&reopened, NOVEMBER, &category, 80_000);
 		let again = goal_of(&reopened, &id);
@@ -3541,10 +3548,10 @@ pub(crate) mod tests {
 		// Edge case 6: shown, never fixed or rewritten.
 		let (scratch, core) = imported("unbalanced");
 		let checking = new_account(&core, "Everyday", crate::NewAccountKind::Checking, 0);
-		core.close().unwrap();
 		let db = std::path::Path::new(&scratch.budget()).join(veritas_session::DB_FILE);
 		let error = r#"{"type":"SplitTransactionError","version":1,"difference":-500}"#;
-		{
+		let core = while_no_child_starts(|| {
+			core.close().unwrap();
 			let sql = rusqlite::Connection::open(&db).unwrap();
 			sql.execute_batch(&format!(
 				"INSERT INTO transactions (id, acct, date, amount, isParent, isChild, cleared, sort_order, tombstone, error)
@@ -3553,9 +3560,9 @@ pub(crate) mod tests {
 				 VALUES ('odd-1', '{checking}', 20261101, -2500, 0, 1, 'odd', 0, -1, 0);"
 			))
 			.unwrap();
-		}
-		let core =
-			Core::<veritas_store::Store>::open(&scratch.budget(), &CancelToken::default()).unwrap();
+			drop(sql);
+			Core::<veritas_store::Store>::open(&scratch.budget(), &CancelToken::default()).unwrap()
+		});
 		let shown = core.register_row("odd").unwrap();
 		assert_eq!(shown.split_difference, Some(-500));
 		core.perform(Command::SetCleared {
@@ -3728,17 +3735,18 @@ pub(crate) mod tests {
 		}
 		let file = out.with_extension("ops.json");
 		std::fs::write(&file, format!(r#"{{"version":1,"ops":{ops}}}"#)).unwrap();
-		let output = std::process::Command::new("node")
-			.current_dir(&oracle)
-			.arg("src/main.ts")
-			.arg("apply")
-			.arg(zip)
-			.arg(&file)
-			.arg("--out")
-			.arg(out)
-			.args(["--today", today])
-			.output()
-			.expect("node runs");
+		let output = crate::test_support::output(
+			std::process::Command::new("node")
+				.current_dir(&oracle)
+				.arg("src/main.ts")
+				.arg("apply")
+				.arg(zip)
+				.arg(&file)
+				.arg("--out")
+				.arg(out)
+				.args(["--today", today]),
+		)
+		.expect("node runs");
 		assert!(
 			output.status.success(),
 			"Actual couldn't apply the ops: {}",

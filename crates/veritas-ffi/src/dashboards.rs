@@ -1734,9 +1734,7 @@ mod tests {
 			height: 2,
 		})
 		.unwrap();
-		drop(core);
-
-		let core = reopened(&scratch);
+		let core = reopened(core, &scratch);
 		let moved = widget(&pages(&core), NET_WORTH_CARD).clone();
 		assert_eq!((moved.x, moved.y, moved.width, moved.height), (6, 12, 3, 2));
 		let stored = data(&core).widgets[&WidgetId::new(NET_WORTH_CARD)].clone();
@@ -1888,9 +1886,7 @@ mod tests {
 			page_id: page.clone(),
 		})
 		.unwrap();
-		drop(core);
-
-		let core = reopened(&scratch);
+		let core = reopened(core, &scratch);
 		let budget = data(&core);
 		assert!(budget.dashboard_pages[&DashboardPageId::new(page.as_str())].tombstone);
 		assert!(budget.widgets[&WidgetId::new(note.as_str())].tombstone);
