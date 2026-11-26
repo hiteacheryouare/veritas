@@ -230,7 +230,18 @@ struct AssistantEvaluationCheck {
 	static let headingWords = Set([
 		"total", "spending", "spent", "income", "expenses", "expense", "net", "profit", "cash", "flow", "everything", "else", "average", "budget", "budgeted",
 		"activity", "available", "debt", "paydown", "savings", "from", "category", "categories", "group", "groups", "breakdown", "by", "your", "my", "the",
-		"of", "for", "in", "on", "last", "this", "month", "year", "line", "is", "was", "you", "and", "a", "an", "to", "so", "far"
+		"of", "for", "in", "on", "last", "this", "month", "year", "line", "is", "was", "you", "and", "a", "an", "to", "so", "far",
+		"most", "biggest", "largest", "top", "highest", "spend", "it", "at", "with", "were", "are", "that", "which", "here", "what"
+	]).union(monthNames)
+
+	/// Words that may lead into a name in prose ("You spent the most on
+	/// Rent"): pronouns, verbs, prepositions, articles and time words. No
+	/// finance noun is here, so "Savings Rent" and "Cash Gifts" are not Rent
+	/// and Gifts.
+	static let leadInWords = Set([
+		"you", "i", "we", "spent", "spend", "paid", "went", "go", "goes", "was", "were", "is", "are", "it", "that", "which", "here", "what", "where",
+		"the", "a", "an", "most", "biggest", "largest", "top", "highest", "on", "for", "at", "in", "into", "to", "of", "with", "and", "so", "far",
+		"your", "my", "this", "last", "month", "year", "week"
 	]).union(monthNames)
 
 	static func isHeading(_ name: String) -> Bool {
@@ -314,7 +325,17 @@ struct AssistantEvaluationCheck {
 			!name.isEmpty && !isHeading(name) && mentions(answer, name, ignoringCase: false)
 		}
 		let returned = Set(labelledNames(in: text).union(known.filter { mentions(text, $0) }).map { $0.lowercased() })
-		return Set(labelledNames(in: answer).union(prose).filter { !returned.contains($0.lowercased()) })
+		/// "You spent the most on Rent" names Rent: the name is the trailing
+		/// words that match the tool's names, and the words before it may only
+		/// be lead-in wording. "Pet Rent" is not Rent.
+		func names(_ label: String) -> Bool {
+			let words = label.split(separator: " ").map(String.init)
+			return words.indices.contains { start in
+				returned.contains(words[start...].joined(separator: " ").lowercased())
+					&& words[..<start].allSatisfy { leadInWords.contains($0.lowercased()) }
+			}
+		}
+		return labelledNames(in: answer).filter { !names($0) }.union(prose.filter { !returned.contains($0.lowercased()) })
 	}
 
 	static func grounded(_ answer: String, in sources: [String], known: [String] = []) -> Bool {
@@ -345,6 +366,13 @@ struct AssistantEvaluationCheck {
 		#expect(!Self.grounded("- Car: 20.00", in: ["Car loan: 20.00"]), "names match on word boundaries, not substrings")
 		#expect(!Self.grounded("- Pet Spending: 12.00\n- Rent: 1,800.00", in: [tool]), "an invented name with a heading word in it is still checked")
 		#expect(Self.grounded("Total Spending: 2,443.61\nRent: 1,800.00", in: [tool]), "a name made only of heading words is a heading")
+		#expect(Self.grounded("You spent the most on Rent: 1,800.00.", in: [tool]), "the name is the part that matches, after the lead-in")
+		#expect(!Self.grounded("You spent the most on Pet Insurance: 1,800.00.", in: [tool]), "an invented name after a lead-in still fails")
+		#expect(!Self.grounded("- Pet Rent: 1,800.00", in: [tool]), "a word before the name that isn't lead-in wording makes it another name")
+		let withGifts = tool + "\nGifts: 25.00"
+		#expect(!Self.grounded("- Savings Rent: 1,800.00", in: [withGifts]), "a finance noun is not lead-in wording")
+		#expect(!Self.grounded("Cash Gifts: 25.00", in: [withGifts]), "nor is cash")
+		#expect(Self.grounded("You spent the most on Rent: 1,800.00.", in: [withGifts]))
 		#expect(!Self.grounded("You spent the most on Gas last month.", in: [tool], known: ["Rent", "Gas", "Groceries"]), "a budget name in prose must be in the tool's output")
 		#expect(Self.grounded("You spent the most on Rent last month, and your gas bill was small.", in: [tool], known: ["Rent", "Gas"]), "prose names match as the budget writes them, so lowercase prose isn't a name")
 	}
