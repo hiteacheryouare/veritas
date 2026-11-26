@@ -9,6 +9,9 @@
 //! the way Swift drives it, over whole sessions, with Actual's own reading of
 //! the export as the verdict wherever the oracle is installed.
 
+#[path = "support/children.rs"]
+mod children;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -102,7 +105,9 @@ fn import(scratch: &Scratch, zip: &Path, name: &str) -> Arc<Session> {
 }
 
 fn reopen(scratch: &Scratch, name: &str) -> Arc<Session> {
-	let session = block_on(Session::open(text(&scratch.join(name)), CancelToken::new())).unwrap();
+	let session = children::while_no_child_starts(|| {
+		block_on(Session::open(text(&scratch.join(name)), CancelToken::new())).unwrap()
+	});
 	pin_today(&session);
 	session
 }
@@ -262,14 +267,15 @@ fn oracle() -> Option<PathBuf> {
 /// Actual imports and loads `zip`, and dumps its tables and its own
 /// computed balances and budget months.
 fn actual_reads(oracle: &Path, zip: &Path) -> Value {
-	let output = std::process::Command::new("node")
-		.current_dir(oracle)
-		.arg("src/main.ts")
-		.arg("dump")
-		.arg(zip)
-		.args(["--today", TODAY])
-		.output()
-		.expect("node runs");
+	let output = children::output(
+		std::process::Command::new("node")
+			.current_dir(oracle)
+			.arg("src/main.ts")
+			.arg("dump")
+			.arg(zip)
+			.args(["--today", TODAY]),
+	)
+	.expect("node runs");
 	assert!(
 		output.status.success(),
 		"Actual couldn't read {}: {}",
@@ -285,17 +291,18 @@ fn actual_reads(oracle: &Path, zip: &Path) -> Value {
 fn actual_apply(oracle: &Path, zip: &Path, ops: Value, out: &Path, seed: u32) {
 	let file = out.with_extension("ops.json");
 	std::fs::write(&file, json!({"version": 1, "ops": ops}).to_string()).unwrap();
-	let output = std::process::Command::new("node")
-		.current_dir(oracle)
-		.arg("src/main.ts")
-		.arg("apply")
-		.arg(zip)
-		.arg(&file)
-		.arg("--out")
-		.arg(out)
-		.args(["--today", TODAY, "--seed", &seed.to_string()])
-		.output()
-		.expect("node runs");
+	let output = children::output(
+		std::process::Command::new("node")
+			.current_dir(oracle)
+			.arg("src/main.ts")
+			.arg("apply")
+			.arg(zip)
+			.arg(&file)
+			.arg("--out")
+			.arg(out)
+			.args(["--today", TODAY, "--seed", &seed.to_string()]),
+	)
+	.expect("node runs");
 	assert!(
 		output.status.success(),
 		"Actual couldn't apply the ops: {}",
