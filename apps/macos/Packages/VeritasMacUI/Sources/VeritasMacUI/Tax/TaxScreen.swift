@@ -47,9 +47,10 @@ struct TaxScreen: View {
 						.padding(.top, Spacing.s2)
 					}
 				} else {
-					ProgressView().frame(maxWidth: .infinity, minHeight: 200)
+					ScreenState(kind: .loading).frame(minHeight: 200)
 				}
 			}
+			.motion(.fast, value: model.summary == nil)
 			.padding(.top, Spacing.s2)
 			.padding(.horizontal, Spacing.s5)
 			.padding(.bottom, Spacing.s6)

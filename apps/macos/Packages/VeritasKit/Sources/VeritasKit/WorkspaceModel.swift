@@ -440,7 +440,17 @@ public final class WorkspaceModel {
 	/// A bill another screen asked the Bills screen to open, such as a bill's rule on the Rules page.
 	public var pendingBillID: String?
 
-	public func go(to destination: Destination) {
+	/// How the current page was reached, which picks its transition: a page
+	/// opened from a row on another page pushes in, anything else fades through.
+	public enum Arrival: Sendable {
+		case peer
+		case drill
+	}
+
+	public private(set) var arrival = Arrival.peer
+
+	public func go(to destination: Destination, arrival: Arrival = .peer) {
+		self.arrival = arrival
 		self.destination = destination == .screen(.insights) ? .screen(.forecast) : destination
 		isFindShown = false
 	}

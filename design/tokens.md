@@ -122,11 +122,23 @@ A bar shows what is left: `available / (carried in + budgeted)`, clamped to 0–
 
 ## Motion
 
-| Token | Value | Use |
-|---|---|---|
-| `duration-fast` | 150 ms | Bar width, selection, hover, row expand |
-| `duration-sheet` | 220 ms | Sheets and popovers in and out |
-| `easing-standard` | cubic-bezier(0.2, 0.7, 0.2, 1) | Everything that appears or changes |
-| `easing-exit` | cubic-bezier(0.4, 0, 1, 1) | Things that leave |
+`VeritasDesign/Motion.swift` mirrors these. Screens name a motion (`.motion(.settle, value:)`, `.motionTransition(.page)`, `Motion.perform(.morph) { }`) and never write a duration, curve or spring; `MotionEnforcementTests` fails the build if they do. The full system is in `motion.md`.
 
-With Reduce Motion on, both durations become 0 and values change in place. Nothing loops, nothing animates on its own.
+| Token | Value | Reduce Motion | Use |
+|---|---|---|---|
+| `duration-instant` | 90 ms | 0 | Hover, press, focus |
+| `duration-fast` | 150 ms | 0 | Selection, drain bars, a figure cross-fading after a commit, spinners |
+| `duration-sheet` | 220 ms | 150 ms fade | Banners, bars, sheet steps, question bubbles |
+| `duration-page` | 200 ms | 150 ms fade | A page arriving, after `delay-page` |
+| `duration-page-exit` | 100 ms | 90 ms | A page leaving |
+| `delay-page` | 60 ms | 0 | The arriving page waits for the old one to mostly fade |
+| `duration-story` | 480 ms | 150 ms fade | Wrapped turns |
+| `duration-stage` | 700 ms | none | The total budget for a staged entrance |
+| `spring-settle` | 320 ms, bounce 0 | 0 | Layout moves: reorder, drop, collapse, sheet height, the coach mark |
+| `spring-morph` | 400 ms, bounce 0 | 150 ms fade | A card growing into its page |
+| `spring-push` | 320 ms, bounce 0 | 150 ms fade | A row's page pushing in |
+| `spring-turn` | 480 ms, bounce 0 | 150 ms fade | Wrapped cards and spreads |
+| `easing-standard` | cubic-bezier(0.2, 0.7, 0.2, 1) | | Everything that appears or changes |
+| `easing-exit` | cubic-bezier(0.4, 0, 1, 1) | | Things that leave |
+
+Springs never bounce: an overshooting bar would show an amount that isn't real. With Reduce Motion on, anything that moves, scales or resizes becomes a short fade, small changes happen at once, and nothing loops. In debug builds, the launch argument `-MotionTimeScale 5` slows every motion five times.

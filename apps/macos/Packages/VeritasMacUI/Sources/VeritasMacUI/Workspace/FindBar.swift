@@ -38,7 +38,7 @@ struct FindBar: View {
 			}
 		}
 		.accessibilityHidden(!isShown)
-		.motion(.fast, value: isShown)
+		.motion(.settle, value: isShown)
 		.onChange(of: isShown) { _, isShown in
 			isFocused = isShown
 			if !isShown { text = "" }
