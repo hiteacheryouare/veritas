@@ -5,7 +5,7 @@ import VeritasCore
 
 /// R-WRAP-2 where an amount is hardest to spot: a budget that hides decimals
 /// and names no currency writes 1,480.00 as "1,480", with no symbol and no
-/// cents. No redacted card may carry any amount of 1,000 or more the report
+/// cents. No redacted page may carry any amount of 1,000 or more the report
 /// holds, standing as a figure of its own, in any form the budget could write it.
 @MainActor
 struct WrappedRedactionWorstCaseTests {
@@ -22,7 +22,7 @@ struct WrappedRedactionWorstCaseTests {
 		return false
 	}
 
-	@Test func aBudgetThatHidesDecimalsShowsNoAmountOnARedactedCard() async throws {
+	@Test func aBudgetThatHidesDecimalsShowsNoAmountOnARedactedPage() async throws {
 		try await RealBudget.with { budget in
 			let directory = try budget.directory
 			await budget.workspace.closeBudget()
@@ -40,14 +40,15 @@ struct WrappedRedactionWorstCaseTests {
 				let report = try #require(model.report)
 				let amounts = [report.totalIn, report.totalOut, report.net, report.debtPaydown, report.savings,
 					report.netWorthStart, report.netWorthEnd, report.netWorthChange,
-					report.otherCategories, report.otherGroups, report.otherPayees, report.biggestMonth?.total ?? 0]
+					report.otherCategories, report.otherGroups, report.otherPayees, report.biggestMonth?.total ?? 0, report.typicalMonth ?? 0]
 					+ report.topCategories.map(\.total) + report.topGroups.map(\.total) + report.topPayees.map(\.total)
+					+ report.months.map(\.total) + report.monthEnds.map(\.netWorth)
 				let written = Set(amounts.filter { abs($0) >= 100_000 }.flatMap { amount in
 					[amount, -amount].flatMap { [format.amount($0, on: .register), format.currency($0, on: .register)] }
 				})
-				#expect(model.cards(redacted: false).flatMap(\.text).contains { line in written.contains { Self.stands($0, in: line) } },
-					"\(year): the shown cards do carry these amounts, so the check can see them")
-				for line in model.cards(redacted: true).flatMap(\.text) {
+				#expect((model.issue(redacted: false)?.text ?? []).contains { line in written.contains { Self.stands($0, in: line) } },
+					"\(year): the shown pages do carry these amounts, so the check can see them")
+				for line in model.issue(redacted: true)?.text ?? [] {
 					let leaked = written.filter { Self.stands($0, in: line) }
 					#expect(leaked.isEmpty, "\(year): \(line) carries \(leaked)")
 					#expect(line.firstMatch(of: /\d{1,3}(,\d{3})+(?![\d,]|%|\.\d+%)/) == nil, "\(year): \(line) has a grouped figure")
