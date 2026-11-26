@@ -217,7 +217,7 @@ impl Accumulator {
 		budget: &BudgetData,
 		magnitude: fn(Money) -> Result<Money, CoreError>,
 	) -> Result<Section, CoreError> {
-		let mut categories = self
+		let categories = self
 			.categories
 			.into_iter()
 			.map(|(category, (sum, rows))| {
@@ -235,7 +235,12 @@ impl Accumulator {
 				})
 			})
 			.collect::<Result<Vec<_>, CoreError>>()?;
-		categories.sort_by(|a, b| budget_order(budget, a.category.as_ref(), b.category.as_ref()));
+		let mut keyed: Vec<(OrderKey, CategoryLine)> = categories
+			.into_iter()
+			.map(|line| (order_key(budget, line.category.as_ref()), line))
+			.collect();
+		keyed.sort_by(|(a, _), (b, _)| budget_order(a, b));
+		let categories = keyed.into_iter().map(|(_, line)| line).collect();
 		Ok(Section {
 			total: magnitude(self.sum)?,
 			rows: self.rows,
@@ -264,24 +269,30 @@ pub fn labels(budget: &BudgetData, id: &CategoryId) -> CategoryLabels {
 	}
 }
 
+/// Where a category line sits in the budget screen's order: its group's
+/// sort order and id, then its own sort order and id. `None` is the
+/// uncategorized line. Looked up once per line, not once per comparison.
+type OrderKey<'b> = Option<(f64, Option<&'b CategoryGroupId>, f64, CategoryId)>;
+
+fn order_key<'b>(budget: &'b BudgetData, id: Option<&CategoryId>) -> OrderKey<'b> {
+	let id = id?;
+	let category = budget.categories.get(id);
+	let group = category.and_then(|category| budget.category_groups.get(&category.group));
+	Some((
+		group.map_or(f64::MAX, |group| group.sort_order),
+		group.map(|group| &group.id),
+		category.map_or(f64::MAX, |category| category.sort_order),
+		id.clone(),
+	))
+}
+
 /// The budget screen's order: by group, then category, uncategorized last.
-fn budget_order(budget: &BudgetData, a: Option<&CategoryId>, b: Option<&CategoryId>) -> Ordering {
-	let key = |id: &CategoryId| {
-		let category = budget.categories.get(id);
-		let group = category.and_then(|category| budget.category_groups.get(&category.group));
-		(
-			group.map_or(f64::MAX, |group| group.sort_order),
-			group.map(|group| group.id.clone()),
-			category.map_or(f64::MAX, |category| category.sort_order),
-			id.clone(),
-		)
-	};
+fn budget_order(a: &OrderKey, b: &OrderKey) -> Ordering {
 	match (a, b) {
 		(None, None) => Ordering::Equal,
 		(None, Some(_)) => Ordering::Greater,
 		(Some(_), None) => Ordering::Less,
 		(Some(a), Some(b)) => {
-			let (a, b) = (key(a), key(b));
 			a.0.total_cmp(&b.0)
 				.then_with(|| a.1.cmp(&b.1))
 				.then_with(|| a.2.total_cmp(&b.2))
