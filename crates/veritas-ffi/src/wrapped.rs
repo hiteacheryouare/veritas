@@ -84,6 +84,11 @@ pub struct WrappedNoSpend {
 	pub longest: Option<WrappedStreak>,
 	/// The streak running through today, for the current year only.
 	pub current: Option<u32>,
+	/// v24, FC-8 N3: every no-spend date in the evaluated range, ascending,
+	/// `YYYY-MM-DD`. A date of the year is no-spend (listed), spent (in the
+	/// range, not listed) or not evaluated (outside `first`...`last`).
+	#[uniffi(default = [])]
+	pub dates: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -124,6 +129,33 @@ pub struct WrappedShares {
 	pub other_categories: Option<i64>,
 	pub other_groups: Option<i64>,
 	pub other_payees: Option<i64>,
+	/// v24, FC-8 N2: the typical month over total out; `nil` when total out
+	/// is 0 or less.
+	#[uniffi(default = None)]
+	pub typical_month: Option<i64>,
+}
+
+/// v24, FC-8 N1: net worth at the end of one month of the period.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct WrappedMonthEnd {
+	pub month: Month,
+	/// The month's last day, or the period's `last` for a final month it ends inside.
+	pub date: String,
+	pub net_worth: i64,
+	/// The change over `netWorthStart` in tenths of a percent; `nil` when
+	/// `netWorthStart` is 0 or less, and then the line isn't drawn.
+	pub share: Option<i64>,
+}
+
+/// v24, FC-8 N4: a goal reached in the year and the month it was first reached.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct WrappedReachedGoal {
+	pub goal_id: String,
+	/// The goal's category name, with no brackets.
+	pub name: String,
+	/// The category has been deleted: show "(deleted) {name}".
+	pub deleted: bool,
+	pub month: Month,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
@@ -200,6 +232,25 @@ pub struct WrappedReport {
 	/// row, through the last month of the period, oldest first.
 	#[uniffi(default = [])]
 	pub months: Vec<WrappedSpendingMonth>,
+	/// v24: the open budget's name, for the cover. The FC-8 copy rule lists
+	/// it as a report field.
+	#[uniffi(default = "")]
+	pub budget_name: String,
+	/// v24, N1: the months of `months`, each at its month end.
+	#[uniffi(default = [])]
+	pub month_ends: Vec<WrappedMonthEnd>,
+	/// v24, N1: the lowest and highest of `monthEnds`, ties to the earliest.
+	#[uniffi(default = None)]
+	pub lowest_month_end: Option<WrappedMonthEnd>,
+	#[uniffi(default = None)]
+	pub highest_month_end: Option<WrappedMonthEnd>,
+	/// v24, N2: the median month `biggestVsTypical` compares with, as an
+	/// amount. Draw its reference line only when it is above 0.
+	#[uniffi(default = None)]
+	pub typical_month: Option<i64>,
+	/// v24, N4: by month, then goal id. Its length is the goals completed.
+	#[uniffi(default = [])]
+	pub reached_goals: Vec<WrappedReachedGoal>,
 }
 
 fn year_change(change: Change) -> YearChange {
@@ -257,6 +308,15 @@ fn fact(fact: FunFact) -> WrappedFact {
 			evaluated_days,
 			tenths,
 		},
+	}
+}
+
+fn month_end(end: forecast::MonthEnd, share: Option<i64>) -> WrappedMonthEnd {
+	WrappedMonthEnd {
+		month: end.month.into(),
+		date: end.date.to_string(),
+		net_worth: end.net_worth.minor(),
+		share,
 	}
 }
 
@@ -341,6 +401,12 @@ pub(crate) fn wrapped_report(
 				days: streak.days,
 			}),
 			current: wrapped.no_spend.current,
+			dates: wrapped
+				.no_spend
+				.dates
+				.iter()
+				.map(ToString::to_string)
+				.collect(),
 		},
 		completed_goal_ids: wrapped
 			.completed_goals
@@ -366,6 +432,7 @@ pub(crate) fn wrapped_report(
 			other_categories: other_categories_share,
 			other_groups: other_groups_share,
 			other_payees: other_payees_share,
+			typical_month: redacted.typical_month,
 		},
 		fun_facts: wrapped.fun_facts().into_iter().map(fact).collect(),
 		months: wrapped
@@ -376,6 +443,30 @@ pub(crate) fn wrapped_report(
 				month: (*month).into(),
 				total: total.minor(),
 				share: *share,
+			})
+			.collect(),
+		budget_name: String::new(),
+		month_ends: wrapped
+			.month_ends
+			.iter()
+			.zip(&redacted.month_ends)
+			.map(|(end, share)| month_end(*end, *share))
+			.collect(),
+		lowest_month_end: wrapped
+			.lowest_month_end
+			.map(|end| month_end(end, redacted.lowest_month_end)),
+		highest_month_end: wrapped
+			.highest_month_end
+			.map(|end| month_end(end, redacted.highest_month_end)),
+		typical_month: wrapped.typical_month.map(|typical| typical.minor()),
+		reached_goals: wrapped
+			.reached_goals
+			.iter()
+			.map(|goal| WrappedReachedGoal {
+				goal_id: goal.goal.to_string(),
+				name: goal.name.clone(),
+				deleted: goal.deleted,
+				month: goal.month.into(),
 			})
 			.collect(),
 	})
@@ -394,9 +485,12 @@ impl Session {
 		let core = self.core.clone();
 		run(&cancel, move |cancel| {
 			core.pin_today(&today)?;
-			core.report(cancel, |budget, classification| {
+			let budget_name = core.call(|session| session.budget_name())?;
+			let mut report = core.report(cancel, |budget, classification| {
 				wrapped_report(budget, classification, year, civil_date(&today)?)
-			})
+			})?;
+			report.budget_name = budget_name.unwrap_or_default();
+			Ok(report)
 		})
 		.await
 	}

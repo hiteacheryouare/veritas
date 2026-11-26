@@ -88,8 +88,9 @@ pub use session::{ChangeListener, Session};
 pub use statements::{IncomeStatement, StatementEntity, StatementGroup};
 pub use tax_setup::{TaxCategoryBucket, TaxSetup, TaxTagMapping, TaxTagMeaning};
 pub use wrapped::{
-	WrappedCategory, WrappedFact, WrappedGroup, WrappedMeasure, WrappedMonth, WrappedNoSpend,
-	WrappedPayee, WrappedPriorYear, WrappedReport, WrappedShares, WrappedStreak, YearChange,
+	WrappedCategory, WrappedFact, WrappedGroup, WrappedMeasure, WrappedMonth, WrappedMonthEnd,
+	WrappedNoSpend, WrappedPayee, WrappedPriorYear, WrappedReachedGoal, WrappedReport,
+	WrappedShares, WrappedStreak, YearChange,
 };
 
 uniffi::setup_scaffolding!();
