@@ -166,7 +166,7 @@ Budget, Net Profit, Sankey and the register's month filter.
 | Month title | Nudges 6 pt in the direction of time while cross-fading | Cross-fades in place |
 | Rows that exist in only one month | Fade in or out, no height animation | Same |
 
-Ryan chose A, but the nudge can't be built: the month title is the window's `navigationTitle`, which AppKit draws, so SwiftUI can't move it. What ships is B. The cross-fade is applied to the figures only, not to the whole stack, which removes the competing animations of choppy spot 4.
+Ryan chose A, but the nudge can't be built: the month title is the window's `navigationTitle`, which AppKit draws, so SwiftUI can't move it. What ships is B. On a budget with more than 20 envelopes, only To Budget cross-fades and the rows' figures change at once, by the 20-row rule in Performance. The cross-fade is applied to the figures only, not to the whole stack, which removes the competing animations of choppy spot 4.
 
 ## Continuity moments worth having
 
@@ -326,7 +326,7 @@ Screens never write a duration, a curve or a spring. They name a preset.
 
 ### Checks
 
-- **No hand-rolled timing.** A test in `VeritasDesignTests` scans `VeritasMacUI/Sources`, `VeritasKit` and the app target, and fails on `withAnimation`, the `.animation(` modifier, `.spring(`, `.timingCurve(`, the ease curves, a linear animation, a system spring, `NSAnimationContext`, `.animator()`, `.transition(` (use `.motionTransition`) or a digit roll outside `VeritasDesign`. `TimelineView` schedules, such as `TimelineView(.animation)` in `TypingDots`, are exempt: they set a redraw rate, not a timing. `TypingDots` is the one allowed loop and has its own Reduce Motion test.
+- **No hand-rolled timing.** A test in `VeritasDesignTests` scans `VeritasMacUI/Sources`, `VeritasKit` and the app target, and fails on `withAnimation`, `withTransaction`, `Transaction(animation:)`, a transaction's `.animation` set by hand, the `.animation(` modifier, phase and keyframe animators, Core Animation, `.spring(`, `.timingCurve(`, the ease curves, a linear animation, a system spring, `NSAnimationContext`, `.animator()`, `.transition(` (use `.motionTransition`) or a digit roll outside `VeritasDesign`. Only a `TimelineView`'s schedule argument, such as `.animation` in `TypingDots`, is exempt: it sets a redraw rate, not a timing, and the rest of the line is still scanned. The test fails if a source folder doesn't resolve or holds no Swift files. `TypingDots` is the one allowed loop and has its own Reduce Motion test.
 - **Parity.** `TokenParityTests` checks every duration, curve and spring against `tokens.css`, as it does for `duration-fast` and `duration-sheet` today.
 - **Reduce Motion.** For every preset, the reduced form has no offset, scale or spring, and no duration above `fast`.
 - **Loops.** A test lists every looping view (today only `TypingDots`) and proves it holds still under Reduce Motion, the way ArenaSwap's Cypress test does.
