@@ -2,6 +2,8 @@
 
 mod support;
 
+use std::time::{Duration, Instant};
+
 use support::*;
 use veritas_domain::{
 	CategoryGroupId, CategoryKind, PayeeId, SplitRole, TransactionId, TransactionKind::*,
@@ -713,4 +715,38 @@ fn cls1_rows_are_sorted_by_date_then_id_and_split_children_know_their_parent() {
 		master().budget.transactions[&TransactionId::new("T5")].split,
 		SplitRole::Parent
 	));
+}
+
+/// Ids from an import tool can share a long prefix and suffix around a
+/// counter. Classify's maps must still tell them apart, or the first report
+/// would take quadratic time on such a budget.
+#[test]
+fn transfers_whose_ids_share_a_prefix_and_suffix_classify_quickly() {
+	let mut book = Book::new();
+	book.account("checking", false).account("savings", false);
+	for n in 0..10_000 {
+		book.transfer_with_mirror(
+			&format!("acme-bank-import-{n:08}-a-transfer"),
+			&format!("acme-bank-import-{n:08}-b-transfer"),
+			"checking",
+			"savings",
+			"2026-01-15",
+			100,
+		);
+	}
+	let started = Instant::now();
+	let classification = book.classify();
+	let took = started.elapsed();
+	assert_eq!(classification.rows().len(), 20_000);
+	assert!(
+		classification
+			.rows()
+			.iter()
+			.all(|row| row.decision == Decision::OnBudgetTransfer),
+		"every pair found its partner"
+	);
+	assert!(
+		took < Duration::from_secs(5),
+		"classify took {took:?} on 20,000 transfer ids that share a prefix and suffix"
+	);
 }
