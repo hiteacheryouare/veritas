@@ -10,6 +10,9 @@
 //! exported API over several days, with Actual's own service, rule search and
 //! reading of the same file as the verdict wherever the oracle is installed.
 
+#[path = "support/children.rs"]
+mod children;
+
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::pin;
@@ -102,7 +105,9 @@ fn import(scratch: &Scratch, zip: &Path, name: &str) -> Arc<Session> {
 }
 
 fn reopen(scratch: &Scratch, name: &str) -> Arc<Session> {
-	block_on(Session::open(text(&scratch.join(name)), CancelToken::new())).unwrap()
+	children::while_no_child_starts(|| {
+		block_on(Session::open(text(&scratch.join(name)), CancelToken::new())).unwrap()
+	})
 }
 
 fn export(session: &Session, zip: &Path) {
@@ -315,12 +320,13 @@ fn oracle() -> Option<PathBuf> {
 }
 
 fn node(oracle: &Path, args: &[&str]) -> Vec<u8> {
-	let output = std::process::Command::new("node")
-		.current_dir(oracle)
-		.arg("src/main.ts")
-		.args(args)
-		.output()
-		.expect("node runs");
+	let output = children::output(
+		std::process::Command::new("node")
+			.current_dir(oracle)
+			.arg("src/main.ts")
+			.args(args),
+	)
+	.expect("node runs");
 	assert!(
 		output.status.success(),
 		"the oracle failed on {args:?}: {}",

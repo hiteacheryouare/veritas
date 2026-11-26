@@ -11,6 +11,9 @@
 //! summary card code; the header name and tax mappings against a reopen, undo
 //! and Actual reading the exported file.
 
+#[path = "support/children.rs"]
+mod children;
+
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::pin;
@@ -106,7 +109,9 @@ fn import(scratch: &Scratch) -> Arc<Session> {
 
 fn reopen(scratch: &Scratch, session: Arc<Session>) -> Arc<Session> {
 	session.close().unwrap();
-	let session = block_on(Session::open(scratch.budget(), CancelToken::new())).unwrap();
+	let session = children::while_no_child_starts(|| {
+		block_on(Session::open(scratch.budget(), CancelToken::new())).unwrap()
+	});
 	session.budget_month(NOVEMBER, TODAY.to_owned()).unwrap();
 	session
 }
@@ -161,13 +166,14 @@ fn oracle() -> Option<PathBuf> {
 }
 
 fn node(oracle: &Path, args: &[&str]) -> Value {
-	let output = std::process::Command::new("node")
-		.current_dir(oracle)
-		.arg("src/main.ts")
-		.args(args)
-		.args(["--today", TODAY])
-		.output()
-		.expect("node runs");
+	let output = children::output(
+		std::process::Command::new("node")
+			.current_dir(oracle)
+			.arg("src/main.ts")
+			.args(args)
+			.args(["--today", TODAY]),
+	)
+	.expect("node runs");
 	assert!(
 		output.status.success(),
 		"the oracle failed on {args:?}: {}",

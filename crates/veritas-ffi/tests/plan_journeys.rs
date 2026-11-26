@@ -12,6 +12,9 @@
 //! own budget months, account balances, schedules and report rows are the
 //! judge (PLAN §10, docs/acceptance.md).
 
+#[path = "support/children.rs"]
+mod children;
+
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -307,14 +310,15 @@ fn oracle() -> Option<PathBuf> {
 /// Actual importing `zip` with its own `importBudget`, then its computed
 /// months, balances and schedules beside the raw tables.
 fn actual_reads(oracle: &Path, zip: &Path, today: &str) -> Value {
-	let output = std::process::Command::new("node")
-		.current_dir(oracle)
-		.arg("src/main.ts")
-		.arg("dump")
-		.arg(zip)
-		.args(["--today", today])
-		.output()
-		.expect("node runs");
+	let output = children::output(
+		std::process::Command::new("node")
+			.current_dir(oracle)
+			.arg("src/main.ts")
+			.arg("dump")
+			.arg(zip)
+			.args(["--today", today]),
+	)
+	.expect("node runs");
 	assert!(
 		output.status.success(),
 		"Actual couldn't import {}: {}",
@@ -1043,7 +1047,9 @@ fn a_newer_actual_file_opened_through_the_api_refuses_every_edit_and_is_never_wr
 		.unwrap();
 	let before = std::fs::read(&db).unwrap();
 
-	let session = block_on(Session::open(scratch.budget(), CancelToken::new())).unwrap();
+	let session = children::while_no_child_starts(|| {
+		block_on(Session::open(scratch.budget(), CancelToken::new())).unwrap()
+	});
 	assert_eq!(
 		session.state().unwrap().read_only,
 		Some(ReadOnlyKind::NewerActualVersion)
@@ -1180,7 +1186,9 @@ fn a_backup_is_a_file_actual_opens_and_a_removed_folder_never_blocks_editing() {
 	};
 	assert_eq!(spent(&session), -8_123);
 	session.close().unwrap();
-	let reopened = block_on(Session::open(scratch.budget(), CancelToken::new())).unwrap();
+	let reopened = children::while_no_child_starts(|| {
+		block_on(Session::open(scratch.budget(), CancelToken::new())).unwrap()
+	});
 	reopened
 		.budget_month(month(today), today.to_owned())
 		.unwrap();
