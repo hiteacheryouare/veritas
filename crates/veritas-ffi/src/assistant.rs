@@ -12,6 +12,7 @@ use veritas_reports::{self as reports, Classification, Period};
 use crate::blocking::{CancelToken as CancelHandle, run};
 use crate::budget::{BudgetMonth, civil_date, year_month};
 use crate::money::CategoryKind;
+use crate::names::name_key;
 use crate::reports::{ReportCategory, period, report_category};
 use crate::session::Session;
 use crate::{FfiError, Month};
@@ -113,52 +114,6 @@ fn average(sum: i64, count: u32) -> Result<i64, CoreError> {
 		.ok_or_else(overflow)?;
 	let magnitude = doubled / count.checked_mul(2).ok_or_else(overflow)?;
 	Ok(if sum < 0 { -magnitude } else { magnitude })
-}
-
-/// Case and accent folding, the first step of AI-3.6's key.
-fn fold(name: &str) -> String {
-	name.chars()
-		.flat_map(char::to_lowercase)
-		.map(|c| match c {
-			'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' => 'a',
-			'ç' => 'c',
-			'è' | 'é' | 'ê' | 'ë' => 'e',
-			'ì' | 'í' | 'î' | 'ï' => 'i',
-			'ñ' => 'n',
-			'ò' | 'ó' | 'ô' | 'õ' | 'ö' => 'o',
-			'ù' | 'ú' | 'û' | 'ü' => 'u',
-			'ý' | 'ÿ' => 'y',
-			other => other,
-		})
-		.collect()
-}
-
-/// AI-3.6's name key, the same as the app's `AssistantNames.key`: case and
-/// accents folded, "&" read as "and", anything that isn't a letter or digit a
-/// word break, each word made singular, and a leading "the", "my" or "our"
-/// dropped when other words follow. Ties are broken on it.
-pub(crate) fn name_key(name: &str) -> String {
-	let folded = fold(name).replace('&', " and ");
-	let mut words: Vec<String> = folded
-		.split(|c: char| !c.is_alphanumeric())
-		.filter(|word| !word.is_empty())
-		.map(singular)
-		.collect();
-	if words.len() > 1 && matches!(words[0].as_str(), "the" | "my" | "our") {
-		words.remove(0);
-	}
-	words.join(" ")
-}
-
-fn singular(word: &str) -> String {
-	let letters = word.chars().count();
-	if letters > 4 && word.ends_with("ies") {
-		format!("{}y", &word[..word.len() - 3])
-	} else if letters > 3 && word.ends_with('s') && !word.ends_with("ss") {
-		word[..word.len() - 1].to_owned()
-	} else {
-		word.to_owned()
-	}
 }
 
 #[derive(Default)]
@@ -944,7 +899,8 @@ mod tests {
 		assert_eq!(name_key("Café & Snacks"), "cafe and snack");
 		assert_eq!(name_key("Gifts"), name_key("gift"));
 		assert!(
-			fold("Laundry") < fold("The Kids") && name_key("The Kids") < name_key("Laundry"),
+			crate::names::fold("Laundry") < crate::names::fold("The Kids")
+				&& name_key("The Kids") < name_key("Laundry"),
 			"the two keys disagree on this pair"
 		);
 		let tied = [
