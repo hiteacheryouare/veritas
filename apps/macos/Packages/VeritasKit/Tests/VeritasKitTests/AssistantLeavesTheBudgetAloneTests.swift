@@ -25,7 +25,7 @@ struct AssistantLeavesTheBudgetAloneTests {
 			let couldUndo = workspace.canUndo
 			#expect(before.count > 20, "the whole file, Actual's tables and Veritas's")
 
-			let periods = ["2026-10", "last month", "so far this month", "this year", "2031-06", "1999-01", "2026-13", "", "next month", "2026-10-31 to 2026-05-01", "May to October 2026"]
+			let periods = ["2026-10", "last month", "so far this month", "this year", "2031-06", "1999-01", "2026-13", "", "next month", "2026-10-31 to 2026-05-01", "May to October 2026", "1999-01-01 to 2040-12-31"]
 			for period in periods {
 				_ = try? await BudgetMonthTool(context: context).call(arguments: .init(period: period))
 				_ = try? await NetProfitTool(context: context).call(arguments: .init(period: period))
