@@ -83,6 +83,16 @@ struct TokenBehaviorTests {
 		#expect(Motion.pageIn.progress(at: Motion.Duration.pageDelay) == 0, "the new page waits for the old one")
 	}
 
+	/// design/motion.md: a staged entrance ends within `stage`, and with
+	/// Reduce Motion nothing is staged.
+	@Test func aStagedEntranceEndsWithinItsBudget() {
+		let last = Motion.staged(Motion.stageSteps + 10)
+		#expect(last.curve.delay + last.duration <= Motion.Duration.stage)
+		#expect(Motion.staged(0).curve.delay == 0)
+		#expect(Motion.staged(Motion.stageSteps).curve.delay == last.curve.delay, "steps stop at the last one")
+		#expect(Motion.staged(5).animation(reduceMotion: true) == nil)
+	}
+
 	@Test func exitsAreQuickerThanEntrances() {
 		#expect(Motion.pageOut.duration < Motion.pageIn.duration)
 		#expect(Motion.leave.duration < Motion.fast.duration)

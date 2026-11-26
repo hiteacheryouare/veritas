@@ -94,6 +94,8 @@ public extension Motion {
 		public static let story = 0.48
 		/// The whole budget for a staged entrance, every part included.
 		public static let stage = 0.70
+		/// The gap between the parts of a staged entrance.
+		public static let stagger = 0.03
 		/// How long a page waits for its content before showing a spinner.
 		public static let readyGate = 0.25
 		/// A command repeated sooner than this changes without animation.
@@ -124,6 +126,18 @@ public extension Motion {
 	static let turn = Motion("turn", .spring(duration: Duration.story, bounce: 0), reduced: fade)
 
 	static let all: [Motion] = [.instant, .fast, .leave, .sheet, .pageIn, .pageOut, .settle, .morph, .push, .turn]
+
+	/// One part of a staged entrance (Wrapped's first view of a spread): a
+	/// `fast` fade that starts `step` staggers in. Steps stop at
+	/// `stageSteps`, so the whole entrance ends within `Duration.stage`.
+	/// With Reduce Motion on, nothing is staged and the part is simply there.
+	static func staged(_ step: Int) -> Motion {
+		let delay = Double(min(max(step, 0), stageSteps)) * Duration.stagger
+		return Motion("staged", .timing(.standard, duration: Duration.fast, delay: delay), reduced: nil)
+	}
+
+	/// The last step a staged entrance uses.
+	static let stageSteps = 18
 
 	/// A change touching more rows than this happens without animation
 	/// (design/motion.md, performance): hundreds of cross-fades at once cost
