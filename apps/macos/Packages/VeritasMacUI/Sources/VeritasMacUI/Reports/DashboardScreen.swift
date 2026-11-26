@@ -233,6 +233,36 @@ struct DashboardGrid: View {
 	}
 }
 
+/// A card's place on the grid: its column and its compacted row.
+struct GridSlot: Equatable {
+	let column: Int64
+	let row: Int64
+}
+
+/// A dropped card holds its drop target until the model has moved it, so it
+/// never bounces back to its old slot first. A move can return before the
+/// card moves, when a newer reload overtakes the move's own load, so the hold
+/// ends only when the card's slot changes, or when the move is over and no
+/// load is left that could still move it.
+struct DropHold: Equatable {
+	let id = UUID()
+	let origin: GridSlot
+	var isReleased = false
+	var isMoveFinished = false
+
+	func isOver(slot: GridSlot, isLoading: Bool) -> Bool {
+		guard isReleased else { return false }
+		return slot != origin || (isMoveFinished && !isLoading)
+	}
+
+	/// What the card watches to end its hold.
+	struct Check: Equatable {
+		let slot: GridSlot
+		let isLoading: Bool
+		let hold: DropHold?
+	}
+}
+
 private struct WidgetCard: View {
 	let card: DashboardCard
 	let row: Int64
@@ -244,15 +274,16 @@ private struct WidgetCard: View {
 	let remove: (DashboardCard) -> Void
 	/// The pointer's travel while dragging, then the snapped slot's offset until the core answers.
 	@State private var drag: CGSize = .zero
-	/// Where the card was when the drag began. Once the core moves the card,
-	/// the offset shrinks by the same amount, so the card never jumps.
-	@State private var dragOrigin: (column: Int64, row: Int64)?
+	@State private var hold: DropHold?
 
+	private var slot: GridSlot { GridSlot(column: card.x, row: row) }
+
+	/// Once the core moves the card, the offset shrinks by the same amount, so the card never jumps.
 	private var dragOffset: CGSize {
-		guard let dragOrigin else { return drag }
+		guard let hold else { return drag }
 		return CGSize(
-			width: drag.width - CGFloat(card.x - dragOrigin.column) * cell.width,
-			height: drag.height - CGFloat(row - dragOrigin.row) * cell.height
+			width: drag.width - CGFloat(slot.column - hold.origin.column) * cell.width,
+			height: drag.height - CGFloat(slot.row - hold.origin.row) * cell.height
 		)
 	}
 
@@ -276,6 +307,7 @@ private struct WidgetCard: View {
 		.onTapGesture { if opens { open(card) } }
 		.offset(dragOffset)
 		.gesture(model.isEditing ? moveGesture : nil)
+		.onChange(of: DropHold.Check(slot: slot, isLoading: model.isLoading, hold: hold)) { endHoldIfOver() }
 		.contextMenu { menu }
 		.accessibilityElement(children: .contain)
 		.accessibilityLabel(card.title ?? card.rawKind)
@@ -289,26 +321,33 @@ private struct WidgetCard: View {
 	}
 
 	/// The card follows the pointer, settles into the snapped slot on release,
-	/// and holds it while the core moves it there.
+	/// and holds it until the model has the card's new slot (`DropHold`).
 	private var moveGesture: some Gesture {
 		DragGesture(minimumDistance: 4)
 			.onChanged { value in
-				if dragOrigin == nil { dragOrigin = (card.x, row) }
+				if hold == nil { hold = DropHold(origin: slot) }
 				drag = value.translation
 			}
 			.onEnded { value in
 				let (columns, rows) = steps(value.translation)
+				hold?.isReleased = true
+				let dropped = hold?.id
 				Motion.perform(.settle) {
 					drag = CGSize(width: CGFloat(columns) * cell.width, height: CGFloat(rows) * cell.height)
 				}
 				Task {
 					await model.move(card, columns: columns, rows: rows)
-					Motion.perform(.settle) {
-						drag = .zero
-						dragOrigin = nil
-					}
+					if hold?.id == dropped { hold?.isMoveFinished = true }
 				}
 			}
+	}
+
+	private func endHoldIfOver() {
+		guard let hold, hold.isOver(slot: slot, isLoading: model.isLoading) else { return }
+		Motion.perform(.settle) {
+			drag = .zero
+			self.hold = nil
+		}
 	}
 
 	/// Edges and corners: each drags its own sides, as Actual's grid does.
