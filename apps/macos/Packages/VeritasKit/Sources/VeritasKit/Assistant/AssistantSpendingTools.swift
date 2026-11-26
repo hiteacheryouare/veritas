@@ -56,7 +56,7 @@ struct SpendingTool: AssistantTool {
 		let resolved = try resolvePeriod(text: arguments.period, today: context.today)
 		guard let period = resolved.period else { return resolved.hint }
 		let report = try await context.queries.netProfitPeriod(first: period.first, last: period.last)
-		return Self.text(report, period: period, format: context.format)
+		return period.marked(Self.text(report, period: period, format: context.format))
 	}
 
 	/// AI-2.2 and AI-2.5: the group lines, then every expense line in no
@@ -98,7 +98,7 @@ struct SpendingByCategoryTool: AssistantTool {
 		let resolved = try resolvePeriod(text: arguments.period, today: context.today)
 		guard let period = resolved.period else { return resolved.hint }
 		let breakdown = try await context.queries.spendingByCategory(first: period.first, last: period.last)
-		return Self.text(breakdown, period: period, format: context.format)
+		return period.marked(Self.text(breakdown, period: period, format: context.format))
 	}
 
 	/// AI-12.6's lines for the core's `CategoryBreakdown`, which is already ranked and summed.
@@ -148,7 +148,7 @@ struct IncomeTool: AssistantTool {
 		let resolved = try resolvePeriod(text: arguments.period, today: context.today)
 		guard let period = resolved.period else { return resolved.hint }
 		let report = try await context.queries.netProfitPeriod(first: period.first, last: period.last)
-		return Self.text(report, period: period, format: context.format)
+		return period.marked(Self.text(report, period: period, format: context.format))
 	}
 
 	static func text(_ report: NetProfitPeriod, period: AssistantPeriod, format: MoneyFormat) -> String {
@@ -187,7 +187,7 @@ struct CategorySpendingTool: AssistantTool {
 		guard !arguments.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return AssistantArguments.nameHint }
 		let report = try await context.queries.netProfitPeriod(first: period.first, last: period.last)
 		let sheet = try await context.queries.budgetMonth(Month(date: context.today) ?? period.lastMonth, today: context.today)
-		return Self.text(arguments.name, report: report, sheet: sheet, period: period, format: context.format)
+		return period.marked(Self.text(arguments.name, report: report, sheet: sheet, period: period, format: context.format))
 	}
 
 	/// The Net Profit lines, in the order a category's figures are given (AI-3.3).

@@ -54,7 +54,7 @@ struct AssistantRulesTests {
 			detail: [], conflicts: 0, summaryCsv: "", detailCsv: ""
 		)
 		let context = AssistantContext(queries: CannedQueries(tax: summary), format: MoneyFormat(), today: "2026-11-18")
-		let text = try await TaxSummaryTool(context: context).call(arguments: .init(year: 2026))
+		let text = try await TaxSummaryTool(context: context).call(arguments: .init(year: "2026"))
 		#expect(text.contains("\nMedical: \u{2212}23.00 from 1 transaction. Refunds or reversals exceed what was counted."))
 		#expect(text.contains("\nCharitable giving: 130.00 from 2 transactions\n") || text.hasSuffix("\nCharitable giving: 130.00 from 2 transactions"))
 		#expect(text.components(separatedBy: TaxBuckets.negativeNote).count == 2, "only the negative bucket has the note")

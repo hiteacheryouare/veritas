@@ -18,16 +18,34 @@ struct AssistantPeriodTests {
 		#expect(refused.hint == AssistantPeriod.hint)
 		#expect(AssistantPeriod.hint.hasPrefix("Ask again with a period"))
 	}
+
+	@Test func aPeriodThatHasNotStartedSaysSoAfterTheFirstLine() throws {
+		let march = try #require(try resolvePeriod(text: "March 2027", today: "2026-11-22").period)
+		#expect(march.notStarted)
+		#expect(march.marked("Spending, March 2027: $0.00\nThis is the Expenses line") == "Spending, March 2027: $0.00\nThis period has not started.\nThis is the Expenses line")
+		#expect(march.marked("Spending, March 2027: $0.00") == "Spending, March 2027: $0.00\nThis period has not started.")
+		let thisMonth = try #require(try resolvePeriod(text: "this month", today: "2026-11-22").period)
+		#expect(thisMonth.marked("Spending, November 2026: $1.00") == "Spending, November 2026: $1.00", "a period that has started, though it runs past today")
+	}
 }
 
 extension AssistantPeriod {
 	static func month(_ year: Int32, _ month: UInt32) -> AssistantPeriod {
 		let month = Month(year: year, month: month)
-		return AssistantPeriod(first: month.firstDay, last: month.lastDay, label: ReportPeriod.monthYear(month))
+		return AssistantPeriod(first: month.firstDay, last: month.lastDay, label: ReportPeriod.monthYear(month), notStarted: false)
 	}
 
 	static var hint: String {
 		(try? resolvePeriod(text: "next fortnight", today: "2026-11-22"))?.hint ?? "no hint"
+	}
+
+	static var balanceDateHint: String {
+		(try? resolveBalanceSheetDate(text: "2099-01-01", today: "2026-11-22"))?.hint ?? "no hint"
+	}
+
+	static var yearHint: String {
+		guard case .refused(let hint)? = try? resolveTaxYear(text: "", today: "2026-11-22") else { return "no hint" }
+		return hint
 	}
 }
 
@@ -96,7 +114,7 @@ struct AssistantNamesTests {
 /// a savings transfer and Salary.
 struct AssistantSpendingTextTests {
 	static let november = AssistantPeriod.month(2026, 11)
-	static let soFar = AssistantPeriod(first: "2026-11-01", last: "2026-11-22", label: "November 1 to 22, 2026")
+	static let soFar = AssistantPeriod(first: "2026-11-01", last: "2026-11-22", label: "November 1 to 22, 2026", notStarted: false)
 	static let format = MoneyFormat()
 	static let minus = MoneyFormat.minus
 
@@ -215,7 +233,7 @@ struct AssistantSpendingTextTests {
 
 	@Test func ex6IncomeIsTheIncomeLine() {
 		let report = Self.scenarioA()
-		let text = IncomeTool.text(report, period: AssistantPeriod(first: "2026-01-01", last: "2026-11-22", label: "January 1 to November 22, 2026"), format: Self.format)
+		let text = IncomeTool.text(report, period: AssistantPeriod(first: "2026-01-01", last: "2026-11-22", label: "January 1 to November 22, 2026", notStarted: false), format: Self.format)
 		#expect(Array(Self.lines(text).prefix(2)) == ["Income, January 1 to November 22, 2026: $5,000.00", "This is the Income line of the Net Profit report."])
 	}
 

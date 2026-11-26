@@ -104,15 +104,12 @@ struct AssistantPluginTests {
 		#expect(conversation.tools.map { $0[AIPluginTool.name] as? String } == AssistantTools.all(context).map(\.name))
 		let tax = try #require(conversation.tools.first { $0[AIPluginTool.name] as? String == "taxSummary" })
 		let year = try #require((tax[AIPluginTool.arguments] as? [[String: Any]])?.first)
-		#expect(year[AIPluginTool.type] as? String == AIPluginTool.integer)
-		#expect(year[AIPluginTool.minimum] as? Int == 1900 && year[AIPluginTool.maximum] as? Int == 2200)
+		#expect(year[AIPluginTool.type] as? String == AIPluginTool.text, "the core reads the year's words (AI-6.15)")
 		assistant.reset()
 		#expect(conversation.resets == 1)
 	}
 
 	@Test func hostileArgumentsGetAHintAndReadNothing() async throws {
-		// The plug-in's guides should keep the model in range, but the app checks again:
-		// Int32(year) used to trap on a year outside Int32.
 		let queries = RecordingQueries()
 		let context = AssistantContext(queries: queries, format: MoneyFormat(), today: "2026-11-17")
 		let reader = ToolReader(AssistantTools.all(context))
@@ -121,10 +118,10 @@ struct AssistantPluginTests {
 				reader.read(tool: tool, arguments: arguments) { text, failure in continuation.resume(returning: text ?? failure) }
 			}
 		}
-		for year: Any in [Int.max, Int.min, -1, 0, 1899, 2201, 99_999, Int(Int32.max) + 1, "2026", 2026.5] {
-			#expect(await read("taxSummary", ["year": year]) == AssistantTools.yearHint, "\(year)")
+		for year: Any in [Int.max, Int.min, 2026, 2026.5, "1899", "2201", "99999", "2027", "2024 to 2025", "so far this year", "October 2026"] {
+			#expect(await read("taxSummary", ["year": year]) == AssistantPeriod.yearHint, "\(year)")
 		}
-		#expect(await read("taxSummary", [:]) == AssistantTools.yearHint, "a missing year")
+		#expect(await read("taxSummary", [:]) == AssistantPeriod.yearHint, "a missing year")
 		let periods = [
 			"-999-01", "0000-01", "99999-01", "2026-00", "2026-13", "1899-12", "2201-01", "x-y", "2026-02-30", "-999-01-01",
 			"2026-10-99999999999999999999", "1899", "next fortnight", String(repeating: "9", count: 4_000), String(repeating: "2026-", count: 1_000)
@@ -137,12 +134,12 @@ struct AssistantPluginTests {
 			#expect(await read("budget", ["name": "Groceries", "period": period]) == AssistantPeriod.hint)
 		}
 		#expect(await read("categorySpending", ["name": 42, "period": 2026]) == AssistantArguments.nameHint, "numbers where text belongs read as missing")
-		for date in ["", "2026-02-30", "-999-01-01", "2026-10-00", "2026-10-99999999999999999999", "2026-10"] {
-			#expect(await read("balanceSheet", ["date": date]) == "Ask again with a date written as YYYY-MM-DD.", "\(date)")
+		for date in ["2026-02-30", "-999-01-01", "2026-10-00", "2026-10-99999999999999999999", "2026-12-31", "soon"] {
+			#expect(await read("balanceSheet", ["date": date]) == AssistantPeriod.balanceDateHint, "\(date)")
 		}
 		#expect(await read("noSuchTool", [:]) == "There's no noSuchTool tool.")
 		#expect(queries.calls.isEmpty, "no hostile argument reached a read: \(queries.calls)")
-		#expect(try await TaxSummaryTool(context: context).call(arguments: .init(year: Int.max)) == AssistantTools.yearHint)
+		#expect(try await TaxSummaryTool(context: context).call(arguments: .init(year: "next year")) == AssistantPeriod.yearHint)
 		#expect(queries.calls.isEmpty)
 	}
 
@@ -151,9 +148,8 @@ struct AssistantPluginTests {
 		let input = ToolReader.input(["period": "last month", "extra": "ignored", "month": 3], for: tool)
 		#expect(input.values == ["period": .text("last month")])
 		let tax = TaxSummaryTool(context: AssistantContext(queries: RecordingQueries(), format: MoneyFormat(), today: "2026-11-17"))
-		#expect(ToolReader.input(["year": 2026], for: tax).values == ["year": .integer(2026)])
-		#expect(ToolReader.input(["year": "2026"], for: tax).values.isEmpty, "a value of the wrong kind is left out")
-		#expect(ToolReader.input(["year": 99_999], for: tax).values.isEmpty, "and so is one outside the argument's range")
+		#expect(ToolReader.input(["year": "2026"], for: tax).values == ["year": .text("2026")])
+		#expect(ToolReader.input(["year": 2026], for: tax).values.isEmpty, "a value of the wrong kind is left out")
 	}
 }
 

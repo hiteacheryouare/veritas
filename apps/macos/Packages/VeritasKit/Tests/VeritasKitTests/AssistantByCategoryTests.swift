@@ -71,7 +71,7 @@ struct AssistantByCategoryTests {
 	}
 
 	@Test func ex9APartialRange() {
-		let lines = Self.text(41_200, [Self.line("Groceries", 41_200)], period: AssistantPeriod(first: "2026-11-01", last: "2026-11-22", label: "November 1 to 22, 2026"))
+		let lines = Self.text(41_200, [Self.line("Groceries", 41_200)], period: AssistantPeriod(first: "2026-11-01", last: "2026-11-22", label: "November 1 to 22, 2026", notStarted: false))
 		#expect(lines[0] == "Spending, November 1 to 22, 2026: $412.00")
 		#expect(lines[2] == "Spending by category, November 1 to 22, 2026, largest first:")
 	}

@@ -25,11 +25,6 @@ public enum AssistantTools {
 			SavedReportTool(context: context)
 		]
 	}
-
-	static let yearHint = "Ask again with a calendar year such as 2026."
-	/// The years a tool reads. The model's arguments come from another image,
-	/// so every tool checks them again before they reach the core.
-	static let years = 1900...2200
 }
 
 /// A read the model can ask for. The AI plug-in describes it to the model and
@@ -75,23 +70,6 @@ public struct AssistantToolInput: Sendable {
 	}
 }
 
-enum AssistantDates {
-	/// `2026-10`, or the month of `2026-10-14`.
-	static func month(_ text: String) -> Month? {
-		let parts = text.trimmingCharacters(in: .whitespaces).split(separator: "-")
-		guard parts.count >= 2, parts[0].count == 4, let year = Int32(parts[0]), AssistantTools.years.contains(Int(year)),
-			let month = UInt32(parts[1]), (1...12).contains(month) else { return nil }
-		return Month(year: year, month: month)
-	}
-
-	/// A real civil date, `YYYY-MM-DD`.
-	static func day(_ text: String) -> String? {
-		let parts = text.trimmingCharacters(in: .whitespaces).split(separator: "-")
-		guard parts.count == 3, let month = month(text), let day = Int(parts[2]), (1...month.dayCount).contains(day) else { return nil }
-		return String(format: "%04d-%02d-%02d", month.year, month.month, day)
-	}
-}
-
 struct NetProfitTool: AssistantTool {
 	let context: AssistantContext
 	let name = "netProfit"
@@ -111,7 +89,7 @@ struct NetProfitTool: AssistantTool {
 		let resolved = try resolvePeriod(text: arguments.period, today: context.today)
 		guard let period = resolved.period else { return resolved.hint }
 		let report = try await context.queries.netProfitPeriod(first: period.first, last: period.last)
-		return Self.text(report.column, period: period, format: context.format)
+		return period.marked(Self.text(report.column, period: period, format: context.format))
 	}
 
 	static let lines: [NetProfitLine] = [.netProfit, .income, .expenses, .debtPaydown, .savings, .netCashFlow, .unreviewed]
@@ -242,10 +220,10 @@ struct BalanceSheetTool: AssistantTool {
 	}
 
 	func call(arguments: Arguments) async throws -> String {
-		guard let day = AssistantDates.day(arguments.date) else { return "Ask again with a date written as YYYY-MM-DD." }
-		let asOf = min(day, context.today)
-		let sheet = try await context.queries.balanceSheet(asOf: asOf)
-		return (["Balance sheet as of \(StatementsModel.date(asOf, style: .wide))"] + StatementText.lines(StatementsModel.lines(sheet), format: context.format)).joined(separator: "\n")
+		let resolved = try resolveBalanceSheetDate(text: arguments.date, today: context.today)
+		guard let day = resolved.period else { return resolved.hint }
+		let sheet = try await context.queries.balanceSheet(asOf: day.last)
+		return (["Balance sheet as of \(day.label)"] + StatementText.lines(StatementsModel.lines(sheet), format: context.format)).joined(separator: "\n")
 	}
 }
 
@@ -268,7 +246,7 @@ struct CashFlowTool: AssistantTool {
 		let resolved = try resolvePeriod(text: arguments.period, today: context.today)
 		guard let period = resolved.period else { return resolved.hint }
 		let flow = try await context.queries.cashFlowStatement(first: period.first, last: period.last)
-		return (["Cash flow statement, \(period.label)"] + StatementText.lines(StatementsModel.lines(flow), format: context.format)).joined(separator: "\n")
+		return period.marked((["Cash flow statement, \(period.label)"] + StatementText.lines(StatementsModel.lines(flow), format: context.format)).joined(separator: "\n"))
 	}
 }
 
@@ -346,20 +324,23 @@ struct TaxSummaryTool: AssistantTool {
 	let description = "One calendar year's tax buckets, such as W-2 income, charitable giving and medical, each with its total."
 
 	struct Arguments {
-		var year: Int
+		var year: String
 	}
 
 	let arguments: [AssistantToolArgument] = [
-		AssistantToolArgument(name: "year", description: "Calendar year, such as 2026", kind: .integer(AssistantTools.years))
+		AssistantToolArgument(name: "year", description: "The calendar year, in the user's own words, such as \"2025\" or \"last year\".", kind: .text)
 	]
 
 	func run(_ input: AssistantToolInput) async throws -> String {
-		try await call(arguments: Arguments(year: input.integer("year")))
+		try await call(arguments: Arguments(year: input.text("year")))
 	}
 
+	/// AI-6.15: one whole calendar year that has started, read by the core.
 	func call(arguments: Arguments) async throws -> String {
-		guard AssistantTools.years.contains(arguments.year), let year = Int32(exactly: arguments.year) else { return AssistantTools.yearHint }
-		return Self.text(try await context.queries.taxSummary(year: year), format: context.format)
+		switch try resolveTaxYear(text: arguments.year, today: context.today) {
+		case .year(let year): Self.text(try await context.queries.taxSummary(year: year), format: context.format)
+		case .refused(let hint): hint
+		}
 	}
 
 	static func text(_ summary: TaxSummary, format: MoneyFormat) -> String {

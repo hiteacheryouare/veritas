@@ -41,7 +41,7 @@ struct AssistantLeavesTheBudgetAloneTests {
 			for date in [context.today, "2031-12-31", "1999-01-01", "2026-02-30", "soon"] {
 				_ = try? await BalanceSheetTool(context: context).call(arguments: .init(date: date))
 			}
-			for year in [2026, 2031, 1900, 99_999, -1] {
+			for year in ["2026", "2031", "1900", "99999", "-1", "last year"] {
 				_ = try? await TaxSummaryTool(context: context).call(arguments: .init(year: year))
 			}
 			for today in [context.today, "2026-11-22", "2026-11-01", "2026-01-15", "2031-12-31", "1999-01-01", "2026-02-30", "soon"] {
