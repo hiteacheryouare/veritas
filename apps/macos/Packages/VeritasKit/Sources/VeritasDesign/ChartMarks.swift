@@ -8,7 +8,7 @@ import SwiftUI
 /// the fill wherever it already reaches 3:1 and the edge where it doesn't.
 public extension ColorToken {
 	/// The surfaces charts are drawn on.
-	static let chartSurfaces: [ColorToken] = [.surfaceWindow, .surfaceGrouped]
+	static let chartSurfaces: [ColorToken] = [.surfaceWindow, .surfaceGrouped, .surfaceRaised]
 
 	/// Tokens compare by value, so chart-savings shares money-available-fill's entry
 	/// and brand-secondary-fill shares money-income-fill's.

@@ -67,10 +67,10 @@ Ryan's colors are used exactly for fills, bars, dots and chart marks. Where one 
 `ContrastTests` in VeritasDesignTests fails if any of these drops below its threshold.
 
 - **4.5:1, in both appearances:** every text token (primary, secondary, tertiary, accent, brand-secondary) and every money text token (available, low, overspent, income, neutral) on the window, grouped, raised and field surfaces. The same holds on each of those surfaces tinted by selection (`color-accent-soft`) or hover, on the sidebar and its selected row, and on RuleApplySheet's reconciled-warning row (money-low at 8%). Also text-on-accent on accent-fill, text-on-brand on brand, and the statement's notice on paper.
-- **3:1, in both appearances:** the focus ring and accent fill on the four surfaces, and every brand fill's chart edge and chart mark on the window and grouped surfaces, where charts sit.
+- **3:1, in both appearances:** the focus ring and accent fill on the four surfaces, and every brand fill's chart edge and chart mark on the window, grouped and raised surfaces, where charts sit (dashboard cards draw on raised).
 - **7:1:** primary text on the selected sidebar row.
 
-The fills themselves are not 3:1 everywhere. In light mode the mint is 1.6:1 and the yellow 1.8:1; in dark mode the red is about 3:1. So:
+The fills themselves are not 3:1 everywhere. In light mode the mint is 1.6:1 and the yellow 1.8:1; in dark mode the red is about 3:1 and the secondary 2.9:1 on raised. So:
 
 - **Chart marks that take a stroke** keep the fill and draw a 1 pt edge in the fill's text shade (`ColorToken.chartEdge`): Sankey nodes, the calendar card's bars, the money in and out bars, and legend dots.
 - **Chart marks that can't** (lines, and Swift Charts series) use `ColorToken.chartMark`: the fill where it reaches 3:1, else the edge shade.

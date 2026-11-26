@@ -111,6 +111,7 @@ struct ContrastTests {
 	/// Chart marks keep Ryan's exact fill wherever it reaches 3:1 and fall back to the edge only where it doesn't.
 	@Test func chartMarksKeepTheBrandFillWhereItReaches3To1() {
 		#expect(ColorToken.moneyIncomeFill.chartMark.light == RGBA(0x007ea7))
+		#expect(ColorToken.moneyIncomeFill.chartMark.dark == ColorToken.moneyIncome.dark, "dashboard cards are raised, where #007ea7 is under 3:1 in dark mode")
 		#expect(ColorToken.moneyAvailableFill.chartMark.dark == RGBA(0x56e39f))
 		#expect(ColorToken.moneyLowFill.chartMark.dark == RGBA(0xf5b700))
 		#expect(ColorToken.moneyAvailableFill.chartMark.light == ColorToken.moneyAvailable.light)
