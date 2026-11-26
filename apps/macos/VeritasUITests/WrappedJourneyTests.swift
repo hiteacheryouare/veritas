@@ -1,55 +1,53 @@
 import XCTest
 
-/// Wrapped against the stub (R-WRAP-1, R-WRAP-2): the story steps card by
-/// card, Hide amounts swaps amounts for shares, and both image exports reach
-/// a save panel.
+/// Wrapped against the stub (R-WRAP-1, R-WRAP-2, design/wrapped-editorial.md):
+/// the issue turns spread by spread, the contents turn straight to a spread,
+/// Hide amounts swaps amounts for shares, and each export reaches a save panel.
 final class WrappedJourneyTests: XCTestCase {
 	override func setUp() {
 		continueAfterFailure = false
 	}
 
 	@MainActor
-	func testTheStoryStepsCardByCard() {
+	func testTheIssueTurnsSpreadBySpread() {
 		let app = openWrapped()
-		let title = app.staticTexts["wrapped.title"]
-		XCTAssertTrue(title.waitForExistence(timeout: 5))
-		XCTAssertEqual(text(title), "Your 2026 so far")
-		XCTAssertFalse(app.buttons["wrapped.previous"].isEnabled, "the first card")
+		XCTAssertFalse(app.buttons["wrapped.previous"].isEnabled, "the cover")
 		app.buttons["wrapped.next"].click()
-		XCTAssertTrue(waitUntil { self.text(title) == "Rent topped your spending." }, text(title))
-		attachScreenshot(of: app, named: "wrapped-categories")
+		XCTAssertTrue(app.descendants(matching: .any)["wrapped.spread.ledger"].waitForExistence(timeout: 5))
+		attachScreenshot(of: app, named: "wrapped-ledger")
+		app.typeKey(.rightArrow, modifierFlags: [])
+		XCTAssertTrue(app.descendants(matching: .any)["wrapped.spread.categories+groups"].waitForExistence(timeout: 5))
 		app.typeKey(.leftArrow, modifierFlags: [])
-		XCTAssertTrue(waitUntil { self.text(title) == "Your 2026 so far" }, text(title))
+		XCTAssertTrue(app.descendants(matching: .any)["wrapped.spread.ledger"].waitForExistence(timeout: 5))
+	}
+
+	@MainActor
+	func testTheContentsTurnStraightToASpread() {
+		let app = openWrapped()
+		let entry = app.descendants(matching: .any)["wrapped.contents.4"]
+		XCTAssertTrue(entry.waitForExistence(timeout: 5))
+		entry.click()
+		XCTAssertTrue(app.descendants(matching: .any)["wrapped.spread.shape"].waitForExistence(timeout: 5))
+		let columns = app.descendants(matching: .any)["wrapped.columns"]
+		XCTAssertTrue(columns.waitForExistence(timeout: 5))
+		XCTAssertTrue(columns.label.contains("January, $5,400.00; February, $4,980.00; March, $8,120.00"), columns.label)
+		attachScreenshot(of: app, named: "wrapped-shape")
+		app.descendants(matching: .any)["wrapped.hideAmounts"].click()
+		XCTAssertTrue(waitUntil { columns.label.contains("January, 8.8% of total out") }, columns.label)
+		XCTAssertFalse(columns.label.contains("$"), columns.label)
+		attachScreenshot(of: app, named: "wrapped-shape-hidden")
 	}
 
 	@MainActor
 	func testHideAmountsShowsShares() {
 		let app = openWrapped()
 		app.buttons["wrapped.next"].click()
-		let figure = app.staticTexts["wrapped.figure"]
-		XCTAssertTrue(figure.waitForExistence(timeout: 5))
-		XCTAssertEqual(text(figure), "$19,800.00")
+		let headline = app.staticTexts.matching(identifier: "wrapped.headline").firstMatch
+		XCTAssertTrue(headline.waitForExistence(timeout: 5))
+		XCTAssertTrue(text(headline).hasPrefix("$84,210.00 came in."), text(headline))
 		app.descendants(matching: .any)["wrapped.hideAmounts"].click()
-		XCTAssertTrue(waitUntil { self.text(figure) == "36.1%" }, text(figure))
+		XCTAssertTrue(waitUntil { self.text(headline) == "72.9% of what came in went out." }, text(headline))
 		attachScreenshot(of: app, named: "wrapped-hidden")
-	}
-
-	@MainActor
-	func testTheBiggestMonthDrawsEveryMonthAndHidesItsFigures() {
-		// R-WRAP-1, R-WRAP-2, v18: FC-8's months as bars; with amounts hidden, bars only.
-		let app = openWrapped()
-		let title = app.staticTexts["wrapped.title"]
-		XCTAssertTrue(title.waitForExistence(timeout: 5))
-		for _ in 0..<4 { app.buttons["wrapped.next"].click() }
-		XCTAssertTrue(waitUntil { self.text(title) == "March was your biggest month for spending." }, text(title))
-		let bars = app.descendants(matching: .any)["wrapped.bars"]
-		XCTAssertTrue(bars.waitForExistence(timeout: 5))
-		XCTAssertTrue(bars.label.hasPrefix("January, $5,400.00; February, $4,980.00; March, $8,120.00"), bars.label)
-		attachScreenshot(of: app, named: "wrapped-biggest-month")
-		app.descendants(matching: .any)["wrapped.hideAmounts"].click()
-		XCTAssertTrue(waitUntil { bars.label.hasPrefix("January, 8.8% of total out") }, bars.label)
-		XCTAssertFalse(bars.label.contains("$"), bars.label)
-		attachScreenshot(of: app, named: "wrapped-biggest-month-hidden")
 	}
 
 	@MainActor
@@ -62,22 +60,22 @@ final class WrappedJourneyTests: XCTestCase {
 		XCTAssertTrue(app.menuItems["2025"].exists)
 		XCTAssertFalse(app.menuItems["2024"].exists, "the core lists 2025 as the first year with data")
 		app.menuItems["2025"].click()
-		let title = app.staticTexts["wrapped.title"]
-		XCTAssertTrue(waitUntil { self.text(title) == "Your 2025" }, text(title))
+		let headline = app.staticTexts.matching(identifier: "wrapped.headline").firstMatch
+		XCTAssertTrue(waitUntil { self.text(headline) == "2025" }, text(headline))
 	}
 
 	@MainActor
-	func testTheRedactedImageExportOpensASavePanel() {
+	func testTheSpreadExportOpensASavePanel() {
 		let app = openWrapped()
-		export("Image without amounts…", in: app)
-		assertSavePanel(named: "Wrapped 2026 without amounts.png", in: app)
+		export("wrapped.export.spread", in: app)
+		assertSavePanel(named: "Wrapped 2026 spread 1.png", in: app)
 	}
 
 	@MainActor
-	func testTheImageExportOpensASavePanel() {
+	func testTheRedactedPDFExportOpensASavePanel() {
 		let app = openWrapped()
-		export("Image…", in: app)
-		assertSavePanel(named: "Wrapped 2026.png", in: app)
+		export("wrapped.export.pdf.redacted", in: app)
+		assertSavePanel(named: "Wrapped 2026 without amounts.pdf", in: app)
 	}
 
 	/// The stub's Wrapped is 2026's, so these journeys expect today to fall in 2026.
@@ -90,7 +88,7 @@ final class WrappedJourneyTests: XCTestCase {
 		XCTAssertTrue(wrapped.waitForExistence(timeout: 5))
 		wrapped.click()
 		XCTAssertTrue(app.screen("wrapped").waitForExistence(timeout: 5))
-		XCTAssertTrue(app.descendants(matching: .any)["wrapped.card.totals"].waitForExistence(timeout: 5))
+		XCTAssertTrue(app.descendants(matching: .any)["wrapped.spread.cover+contents"].waitForExistence(timeout: 5))
 		return app
 	}
 
@@ -100,7 +98,7 @@ final class WrappedJourneyTests: XCTestCase {
 		XCTAssertTrue(menu.waitForExistence(timeout: 5))
 		XCTAssertTrue(waitUntil { menu.isEnabled })
 		menu.click()
-		let choice = app.menuItems[item]
+		let choice = app.menuItems.matching(identifier: item).firstMatch
 		XCTAssertTrue(choice.waitForExistence(timeout: 5))
 		choice.click()
 	}

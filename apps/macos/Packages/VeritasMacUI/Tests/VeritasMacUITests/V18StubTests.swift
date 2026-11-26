@@ -23,7 +23,7 @@ struct V18StubTests {
 	@Test func aWrappedYearStartingLateDrawsEachBarInItsMonthsSlot() async throws {
 		// The stub's 2025 starts in August, so January to July stay empty.
 		let report = try await session.wrapped(year: 2025, today: "2026-11-16")
-		let bars = WrappedStory(report: report, format: MoneyFormat()).cards(redacted: true).first { $0.kind == .biggestMonth }?.bars ?? []
+		let bars = WrappedIssue(report: report, format: MoneyFormat(), redacted: true).pages.first { $0.kind == .shape }?.columns ?? []
 		#expect(bars.map(\.slot) == [7, 8, 9, 10, 11])
 		#expect(bars.last?.isBiggest == true, "December")
 	}
@@ -31,7 +31,7 @@ struct V18StubTests {
 	@Test func aWrappedYearStartingInMayLeavesJanuaryToAprilEmpty() throws {
 		var report = try StubWrapped.report(year: 2026, today: "2026-11-16")
 		report.months = report.months.filter { $0.month.month >= 5 }
-		let bars = WrappedStory(report: report, format: MoneyFormat()).cards(redacted: false).first { $0.kind == .biggestMonth }?.bars ?? []
+		let bars = WrappedIssue(report: report, format: MoneyFormat(), redacted: false).pages.first { $0.kind == .shape }?.columns ?? []
 		#expect(bars.first?.slot == 4)
 		#expect(bars.first?.letter == "M")
 		#expect(bars.map(\.slot) == Array(4...10))
