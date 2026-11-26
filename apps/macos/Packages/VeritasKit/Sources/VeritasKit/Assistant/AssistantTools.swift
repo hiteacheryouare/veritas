@@ -108,7 +108,8 @@ struct NetProfitTool: AssistantTool {
 	}
 
 	func call(arguments: Arguments) async throws -> String {
-		guard let period = AssistantPeriod.resolve(arguments.period, today: context.today) else { return AssistantPeriod.hint }
+		let resolved = try resolvePeriod(text: arguments.period, today: context.today)
+		guard let period = resolved.period else { return resolved.hint }
 		let report = try await context.queries.netProfitPeriod(first: period.first, last: period.last)
 		return Self.text(report.column, period: period, format: context.format)
 	}
@@ -121,7 +122,7 @@ struct NetProfitTool: AssistantTool {
 	static func text(_ column: NetProfitColumn, period: AssistantPeriod, format: MoneyFormat) -> String {
 		lines.compactMap { line -> String? in
 			let total = NetProfitModel.value(line, in: column).total
-			let figure = "\(ReportWords.line(line)), \(period.title): \(format.currency(total, on: .register))"
+			let figure = "\(ReportWords.line(line)), \(period.label): \(format.currency(total, on: .register))"
 			switch line {
 			case .debtPaydown: return "\(figure). It is not spending.\(total < 0 ? " \(negativeDebtPaydown)" : "")"
 			case .savings: return "\(figure). It is not spending.\(total < 0 ? " \(negativeSavings)" : "")"
@@ -149,7 +150,8 @@ struct BudgetMonthTool: AssistantTool {
 	}
 
 	func call(arguments: Arguments) async throws -> String {
-		guard let period = AssistantPeriod.resolve(arguments.period, today: context.today) else { return AssistantPeriod.hint }
+		let resolved = try resolvePeriod(text: arguments.period, today: context.today)
+		guard let period = resolved.period else { return resolved.hint }
 		guard period.firstMonth == period.lastMonth else { return BudgetTool.oneMonth }
 		let sheet = try await context.queries.budgetMonth(period.firstMonth, today: context.today)
 		return Self.text(sheet, format: context.format)
@@ -263,9 +265,10 @@ struct CashFlowTool: AssistantTool {
 	}
 
 	func call(arguments: Arguments) async throws -> String {
-		guard let period = AssistantPeriod.resolve(arguments.period, today: context.today) else { return AssistantPeriod.hint }
+		let resolved = try resolvePeriod(text: arguments.period, today: context.today)
+		guard let period = resolved.period else { return resolved.hint }
 		let flow = try await context.queries.cashFlowStatement(first: period.first, last: period.last)
-		return (["Cash flow statement, \(period.title)"] + StatementText.lines(StatementsModel.lines(flow), format: context.format)).joined(separator: "\n")
+		return (["Cash flow statement, \(period.label)"] + StatementText.lines(StatementsModel.lines(flow), format: context.format)).joined(separator: "\n")
 	}
 }
 

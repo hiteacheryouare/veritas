@@ -8,7 +8,7 @@ import VeritasCore
 /// (veritas-ffi assistant.rs, AI-12.8's examples).
 struct AssistantByCategoryTests {
 	typealias Text = AssistantSpendingTextTests
-	static let november = AssistantPeriod(month: Month(year: 2026, month: 11))
+	static let november = AssistantPeriod.month(2026, 11)
 	static let format = MoneyFormat()
 	static let minus = MoneyFormat.minus
 	static let second = "This is the Expenses line of the Net Profit report. Debt paydown and savings are not included."
@@ -57,7 +57,7 @@ struct AssistantByCategoryTests {
 
 	@Test func ex6And8NoSpendingLines() {
 		#expect(Self.text(0, []) == ["Spending, November 2026: $0.00", Self.second, "No spending lines in November 2026."])
-		#expect(Self.text(0, [], period: AssistantPeriod(month: Month(year: 2026, month: 10))) == ["Spending, October 2026: $0.00", Self.second, "No spending lines in October 2026."])
+		#expect(Self.text(0, [], period: AssistantPeriod.month(2026, 10)) == ["Spending, October 2026: $0.00", Self.second, "No spending lines in October 2026."])
 	}
 
 	@Test func ex7GoalLabels() {
@@ -71,7 +71,7 @@ struct AssistantByCategoryTests {
 	}
 
 	@Test func ex9APartialRange() {
-		let lines = Self.text(41_200, [Self.line("Groceries", 41_200)], period: AssistantPeriod(first: "2026-11-01", last: "2026-11-22"))
+		let lines = Self.text(41_200, [Self.line("Groceries", 41_200)], period: AssistantPeriod(first: "2026-11-01", last: "2026-11-22", label: "November 1 to 22, 2026"))
 		#expect(lines[0] == "Spending, November 1 to 22, 2026: $412.00")
 		#expect(lines[2] == "Spending by category, November 1 to 22, 2026, largest first:")
 	}

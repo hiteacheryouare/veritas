@@ -12,6 +12,7 @@ mod forecast;
 mod goals;
 mod money;
 mod names;
+mod periods;
 mod records;
 mod reports;
 mod rules;
