@@ -40,6 +40,8 @@ public final class RecentBudgets {
 
 	@ObservationIgnored private let defaults: UserDefaults?
 	@ObservationIgnored private let locate: (URL) -> Location
+	/// Folders some window has open now, so a new window doesn't open one again.
+	@ObservationIgnored private var open: Set<String> = []
 
 	/// Without `defaults` the list lives only as long as this object.
 	public init(defaults: UserDefaults?, locate: @escaping (URL) -> Location = RecentBudgets.location) {
@@ -58,7 +60,19 @@ public final class RecentBudgets {
 
 	public func opened(name: String?, folder: URL) {
 		let entry = Entry(name: name, folder: folder)
+		open.insert(entry.id)
 		save([entry] + entries.filter { $0.id != entry.id })
+	}
+
+	public func closed(_ folder: URL) {
+		open.remove(Self.key(folder))
+	}
+
+	/// What a window with nothing to restore opens: the most recent budget,
+	/// if its folder is here and no other window has it open.
+	public var budgetToReopen: Entry? {
+		guard let latest = entries.first, !open.contains(latest.id), locate(latest.folder) == .here else { return nil }
+		return latest
 	}
 
 	/// Keeps a budget's place in the list while its name changes.

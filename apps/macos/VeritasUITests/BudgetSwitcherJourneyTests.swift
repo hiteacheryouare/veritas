@@ -46,6 +46,29 @@ final class BudgetSwitcherJourneyTests: XCTestCase {
 		XCTAssertTrue(sidebarAccount(named: "Business checking", in: app).waitForExistence(timeout: 10))
 	}
 
+	/// Ryan's report: closing the window and coming back made him import again.
+	@MainActor
+	func testClosingTheWindowAndOpeningANewOneReopensTheBudget() {
+		let app = XCUIApplication()
+		app.launchArguments = ["-ApplePersistenceIgnoreState", "YES", "-VeritasRealCore", "YES"]
+		app.launch()
+		XCTAssertTrue(app.buttons["newBudget"].waitForExistence(timeout: 10))
+		app.buttons["newBudget"].click()
+		createBudget(named: "Household", account: "Everyday", in: app)
+
+		app.typeKey("w", modifierFlags: .command)
+		XCTAssertTrue(app.windows.firstMatch.waitForDisappearance(timeout: 10), "the window closed")
+		app.menuBars.menuBarItems["File"].click()
+		app.menuItems["New Window"].click()
+
+		let switcher = app.descendants(matching: .any)["budgetSwitcher"]
+		XCTAssertTrue(waitUntil { self.text(of: switcher).contains("Household") }, "the budget opens again: \(text(of: switcher))")
+		XCTAssertTrue(sidebarAccount(named: "Everyday", in: app).waitForExistence(timeout: 10), "with its accounts")
+		XCTAssertFalse(app.descendants(matching: .any)["readOnlyBanner"].exists, "the closed window let it go")
+		XCTAssertFalse(app.buttons["newBudget"].exists, "no first-launch screen")
+		attachScreenshot(of: app, named: "budget-reopened")
+	}
+
 	@MainActor
 	private func createBudget(named name: String, account: String, in app: XCUIApplication) {
 		let field = app.textFields["newBudget.name"]

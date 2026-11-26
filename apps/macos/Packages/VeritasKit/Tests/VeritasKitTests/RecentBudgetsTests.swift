@@ -81,6 +81,32 @@ struct RecentBudgetsTests {
 		#expect(RecentBudgets(defaults: defaults, locate: { _ in .here }).entries.isEmpty)
 	}
 
+	@Test func aWindowWithNothingToRestoreReopensTheLastBudgetUnlessItsOpenElsewhere() {
+		var unplugged = false
+		let recents = RecentBudgets(defaults: nil, locate: { _ in unplugged ? .unmounted : .here })
+		recents.opened(name: "Business", folder: Self.folder("b"))
+		recents.opened(name: "Household", folder: Self.folder("a"))
+		#expect(recents.budgetToReopen == nil, "another window has it open")
+		recents.closed(Self.folder("a"))
+		#expect(recents.budgetToReopen?.name == "Household", "the most recent, not the next one down")
+		unplugged = true
+		#expect(recents.budgetToReopen == nil, "its drive isn't connected")
+	}
+
+	@Test func closingTheWindowAndOpeningANewOneReopensTheBudget() async {
+		let library = SwitchingLibrary()
+		let recents = RecentBudgets(defaults: nil, locate: { _ in .here })
+		let first = WorkspaceModel(library: library, recents: recents, format: MoneyFormat())
+		await first.reopen(directory: Self.folder("a"))
+		let alongside = WorkspaceModel(library: library, recents: recents, format: MoneyFormat())
+		await alongside.reopenMostRecent()
+		#expect(alongside.phase == .empty, "a second window doesn't open the same budget")
+		await first.closeBudget()
+		let later = WorkspaceModel(library: library, recents: recents, format: MoneyFormat())
+		await later.reopenMostRecent()
+		#expect(later.overview?.name == "a")
+	}
+
 	@Test func switchingClosesTheOpenBudgetBeforeOpeningTheNext() async throws {
 		let library = SwitchingLibrary()
 		let model = WorkspaceModel(library: library, recents: RecentBudgets(defaults: nil, locate: { _ in .here }), format: MoneyFormat())

@@ -71,7 +71,12 @@ struct WorkspaceWindow: View {
 				if model.phase != .open {
 					storedBudgetDirectory = ""
 				}
+			} else {
+				await model.reopenMostRecent()
 			}
+		}
+		.onDisappear {
+			Task { await model.closeBudget() }
 		}
 	}
 

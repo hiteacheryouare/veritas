@@ -97,6 +97,13 @@ public final class WorkspaceModel {
 		await open(during: .open) { try await library.open(directory: directory) }
 	}
 
+	/// A new window with nothing to restore opens the budget used last, so
+	/// closing the window and coming back from the Dock or a relaunch finds it.
+	public func reopenMostRecent() async {
+		guard phase == .empty, let budget = recents.budgetToReopen else { return }
+		await reopen(directory: budget.folder)
+	}
+
 	/// Holds the zip's sandbox access for each attempt, so a retry can still read it.
 	public func importActualZip(_ zip: URL) async {
 		let library = library
@@ -391,6 +398,7 @@ public final class WorkspaceModel {
 	/// Working until the session has closed, so nothing opens or switches meanwhile.
 	public func closeBudget() async {
 		phase = .working
+		if let directory = overview?.directory { recents.closed(directory) }
 		maintenance?.cancel()
 		maintenance = nil
 		await session?.close()
@@ -501,6 +509,7 @@ public final class WorkspaceModel {
 			}
 			if let session, session !== opened {
 				await session.close()
+				if let previous = self.overview?.directory { recents.closed(previous) }
 			}
 			session = opened
 			canExport = opened.canExport
