@@ -6,10 +6,7 @@ import VeritasCore
 /// docs/finance/assistant.md AI-6 through the core's `resolvePeriod`. Every
 /// row of AI-6.2 and the cross-year ranges are in veritas-ffi's periods module.
 struct AssistantPeriodTests {
-	@Test func theToolsPassTheWordsAndTodayToTheCore() async throws {
-		let context = AssistantContext(queries: RecordingQueries(), format: MoneyFormat(), today: "2026-11-22")
-		let text = try await SpendingTool(context: context).call(arguments: .init(period: "November 2025 to January 2026"))
-		#expect(text.hasPrefix("Spending, November 2025 to January 2026:"), "\(text)")
+	@Test func theCoresRangeKeepsItsMonths() throws {
 		let period = try #require(try resolvePeriod(text: "November 2025 to January", today: "2026-11-22").period)
 		#expect((period.first, period.last) == ("2025-11-01", "2026-01-31"))
 		#expect((period.firstMonth, period.lastMonth) == (Month(year: 2025, month: 11), Month(year: 2026, month: 1)))
@@ -387,6 +384,16 @@ struct AssistantSpendingToolsOnRealBudgetTests {
 			let income = try #require(model.rows.first { $0.line == .income }?.cells.last?.amount)
 			let text = try await IncomeTool(context: context(budget)).call(arguments: .init(period: "this year"))
 			#expect(text.hasPrefix("Income, 2026: \(model.format.currency(income, on: .register))\n"), "\(text)")
+		}
+	}
+
+	@Test func aRangeAcrossYearsReadsTheYearsWritten() async throws {
+		try await RealBudget.with { budget in
+			let context = try context(budget)
+			let report = try await context.queries.netProfitPeriod(first: "2025-11-01", last: "2026-01-31")
+			#expect(report.column.expenses.total != 0, "the fixture has spending in that winter")
+			let text = try await SpendingTool(context: context).call(arguments: .init(period: "November 2025 to January 2026"))
+			#expect(text.hasPrefix("Spending, November 2025 to January 2026: \(context.format.currency(report.column.expenses.total, on: .register))\n"), "\(text)")
 		}
 	}
 
