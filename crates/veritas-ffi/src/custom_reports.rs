@@ -721,9 +721,7 @@ mod tests {
 			settings: edit.clone(),
 		})
 		.unwrap();
-		drop(core);
-
-		let core = reopened(&scratch);
+		let core = reopened(core, &scratch);
 		let after = data(&core).custom_reports[&CustomReportId::new(SPENDING)].clone();
 		assert_eq!(after.name.as_deref(), Some("Where it went"));
 		assert_eq!(after.graph_type.as_deref(), Some("DonutGraph"));
