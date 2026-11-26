@@ -233,6 +233,9 @@ struct AssistantPanelCoalescingTests {
 /// Hands over "Net", then stops the panel inside the model's next step and
 /// hands over "Net Profit" anyway, as a model can when the cancellation
 /// arrives while it is producing a word.
+/// This relies on `AsyncThrowingStream(unfolding:)` still delivering a step
+/// that was already running when the cancel arrived. If it ever dropped that
+/// word, the test would pass without reaching the answer loop's check.
 @MainActor
 final class HandsOverAfterStop: AssistantAnswering {
 	final class Given: Sendable {
