@@ -86,6 +86,50 @@ Status: draft, revised for the PR #93 review round, with budget habits (AI-10) a
 
 - **AI-6.3** "This month" and "this year" are the whole calendar period, matching the Net Profit screen, including days after today. "So far" and "to date" end today. Example: on 2026-11-22, "October" alone is October 2026. On 2026-09-05 it is October 2025. On 2026-10-05 it is October 2026, whole month.
 - **AI-6.4** A row belongs to the period containing its own date (conventions, top of classification.md). A refund dated in a later period than its purchase reduces the later period only, as in CLS-8 C-1.
+- **AI-6.5** **Words are read by the core.** The core's `resolvePeriod(text, today)` resolves the user's words against today and returns the range and its AI-6.1 label, or a refusal. The app and the model do no date arithmetic. The words are folded for case and accents, curly apostrophes are made straight, and runs of whitespace count as one space. **English month names only**: the full names and their 3-letter abbreviations, and `sept`. The Mac's own language does not add month names. A month name in another language is not read, so a question that holds one gets the refusal of AI-6.8 when nothing else names a period.
+- **AI-6.6** **Ranges written in words.** A range names two months. The year of each end is the year written beside it, and a year written before the first month name belongs to the first month name, as in "2025 November". Written years always win. A year beside a month name that already has one is a refusal (AI-6.8).
+  - **Both ends have a year:** as written. "November 2025 to January 2026" is 2025-11-01 to 2026-01-31, and "November 2024 to January 2026" is the 15 months between.
+  - **Only the end has a year:** the start is the latest month of its name that is not after the end. "November to January 2026" is 2025-11-01 to 2026-01-31, and "January to January 2026" is January 2026.
+  - **Only the start has a year:** the end is the first month of its name on or after the start. "November 2025 to January" is 2025-11-01 to 2026-01-31, and "October 2025 to October" is October 2025 alone, because the start already matches. A range may run into the future: "November 2026 to January", on 2026-11-22, is 2026-11-01 to 2027-01-31, whole months, and is neither refused nor clamped to today. Clamping would change the range the label states, and a whole current month already includes days after today (AI-6.3). "So far" or "to date" does cut a range that holds today at today (AI-6.3). A period wholly after today is read the same way, and the tools report the rows dated in it, which is usually none, as the Net Profit screen does for the same range.
+  - **No year at all:** the end is the latest month of its name that is not after today's month, and the start is the latest month of its name that is not after that end. The current month counts whole. "December to February" on 2026-11-22 is 2025-12-01 to 2026-02-28, on 2026-02-10 it is the same range with February still counting whole, and on 2026-01-10 it is 2024-12-01 to 2025-02-28, because this February has not come yet. "this year" or "last year" beside month names gives the end its year: "March to May this year" is 2026-03-01 to 2026-05-31.
+  - **One month name** follows the same rules as a range of one month (AI-6.2, "October" alone).
+- **AI-6.7** **Years written alone.** Two years, "2024 to 2025", mean whole years, 2024-01-01 to 2025-12-31, in order, and the label is the whole-month form `January 2024 to December 2025`. Years in the wrong order are a refusal. A single year is the whole year (AI-6.2). "So far" or "to date" stops a span that holds today at today. A year is in 1900 to 2200, and so is a year reached by "last year", "last month" or any phrase: a period outside it is refused.
+- **AI-6.8** **Refusals.** The core refuses, with the hint and no figure, when:
+  - a month has two years ("November 2025 2026"), or a year has no month name to belong to while month names are present;
+  - a year is outside 1900 to 2200, or the range's start is after its end;
+  - more than two dates are written, or a date is written beside any month name, year or `YYYY-MM`. Dates stand alone: one date, or two in order (`2026-10-01 to 2026-10-15`);
+  - more than two month names are written ("January, March and June"), because that is a list of months and not a range, and reading its first and last as a range would answer a different question;
+  - a day number is written beside a month name ("October 15", "October 1 to 15"). A period inside a month is written as dates, `2026-10-01 to 2026-10-15`, and the hint says so. The core never widens a day to its month;
+  - the words name no period it reads.
+
+  The hint is exactly: `Ask again with a period such as this month, so far this month, last month, this year, October 2026, 2026, or 2026-10-01 to 2026-10-15.`
+- **AI-6.9** **An invalid today is an error, not a refusal.** A `today` that is not a real date, or is outside 1900 to 2200, is the app's bug, not the user's wording, so `resolvePeriod` returns an error and no hint.
+- **AI-6.10** **Examples (tests).** Today is 2026-11-22 unless a row says otherwise.
+
+| User's words | Range | Label |
+|---|---|---|
+| "November 2025 to January 2026" | 2025-11-01 to 2026-01-31 | November 2025 to January 2026 |
+| "November 2025 to January", "November to January 2026", "November to January" | 2025-11-01 to 2026-01-31 | November 2025 to January 2026 |
+| "November 2024 to January 2026" | 2024-11-01 to 2026-01-31 | November 2024 to January 2026 |
+| "November 2026 to January" | 2026-11-01 to 2027-01-31 | November 2026 to January 2027 |
+| "November 2026 to January so far" | 2026-11-01 to 2026-11-22 | November 1 to 22, 2026 |
+| "October 2025 to October" | 2025-10-01 to 2025-10-31 | October 2025 |
+| "September to November" | 2026-09-01 to 2026-11-30 | September to November 2026 |
+| "December to February" | 2025-12-01 to 2026-02-28 | December 2025 to February 2026 |
+| "December to February", today 2026-01-10 | 2024-12-01 to 2025-02-28 | December 2024 to February 2025 |
+| "March to May this year" | 2026-03-01 to 2026-05-31 | March to May 2026 |
+| "2024 to 2025" | 2024-01-01 to 2025-12-31 | January 2024 to December 2025 |
+| "2025 November" | 2025-11-01 to 2025-11-30 | November 2025 |
+| "2025 November to January" | 2025-11-01 to 2026-01-31 | November 2025 to January 2026 |
+| "2025 to 2024", "November 2025 2026" | refused | the hint |
+| "October 1899", "2201-01" | refused | the hint |
+| "2026-10-01 to 2026-10-15 to 2026-10-20" | refused (three dates) | the hint |
+| "2026-10 to 2026-10-15", "October 2026-10-15" | refused (a date beside a month) | the hint |
+| "January, March and June" | refused (three month names) | the hint |
+| "October 15", "October 1 to 15" | refused (a day beside a month name) | the hint |
+| "mars" (French), "Mai" (German) alone | refused (English names only) | the hint |
+| today "2026-02-30" | an error, no hint | |
+
 
 ## AI-7 Budget figures
 
@@ -124,7 +168,7 @@ Today is 2026-11-22. Scenario A (examples 1, 5, 8, 10, 12): one on-budget accoun
 12. **Reconciliation.** Scenario A plus an uncategorized +4000 deposit (CLS-4 row 15, contributes -4000) and a -1200 row in a deleted category Old Gym whose group is gone. Expenses = 56200 - 4000 + 1200 = 53400. Lines: `Everyday: $512.00`, `Fun: $50.00`, `Uncategorized (needs review): -$40.00`, `(deleted) Old Gym: $12.00`. 51200 + 5000 - 4000 + 1200 = 53400.
 13. **Debt paydown, asked by name.** `Debt paydown, November 1 to 22, 2026: $300.00. It is not spending.` A withdrawal-driven negative Savings line of -$50.00 adds `Negative means more was withdrawn than saved.`
 14. **0-place currency.** Yen, made-up. A 500 yen purchase is stored -50000 (R), `expense_total` 50000: `Spending, November 2026: ¥500`. An envelope budgeted 600 (B): `Budgeted for Rice cooker, November 2026: ¥600`, then `Budget screen figures for November 2026: activity <a>, available <v>.` with a and v printed exactly as the Budget screen prints them (CLS-12.10), then the CLS-12.10 fixed line. The tests assert the line, the budgeted text and that "over" is absent. The activity and available digits come from the Budget screen's own formatter, not from this file.
-15. **Periods.** The AI-6.2 table is the test table, one row per case. Expected labels are as written there.
+15. **Periods.** The AI-6.2 table and the AI-6.10 table are the test tables, one row per case. Expected labels are as written there.
 
 ## AI-9 Net Profit summary
 
