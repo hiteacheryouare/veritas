@@ -63,7 +63,7 @@ public final class WorkspaceModel {
 	) {
 		self.library = library
 		self.localSettings = localSettings
-		self.recents = recents ?? RecentBudgets(defaults: nil, exists: { _ in true })
+		self.recents = recents ?? RecentBudgets(defaults: nil, locate: { _ in .here })
 		fallbackFormat = format
 		self.maintenanceInterval = maintenanceInterval
 		self.checkingInterval = checkingInterval
@@ -388,7 +388,9 @@ public final class WorkspaceModel {
 		}
 	}
 
+	/// Working until the session has closed, so nothing opens or switches meanwhile.
 	public func closeBudget() async {
+		phase = .working
 		maintenance?.cancel()
 		maintenance = nil
 		await session?.close()
