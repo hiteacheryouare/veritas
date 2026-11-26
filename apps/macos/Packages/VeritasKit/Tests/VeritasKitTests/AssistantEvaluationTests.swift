@@ -112,7 +112,7 @@ struct AssistantEvaluationTests {
 			Case(question: "How much have I spent since October?", expected: amount(sinceOctober.column.expenses.total), context: lateNovember, label: "October 1 to November 22, 2026"),
 			Case(question: "How much did I spend in Q4 2025?", expected: amount(try total(.expenses, in: fourthQuarter)), context: end, label: "October to December 2025"),
 			Case(question: "How much did I spend over the holidays last year?", expected: "no figure: the period words are refused (AI-6.11)", context: end) { answer in
-				!answer.contains(/\d\.\d\d/) && Self.clean(answer)
+				!answer.hasPrefix("failed:") && !answer.contains(/\d\.\d\d/) && Self.clean(answer)
 			},
 			Case(question: "What was my income this year?", expected: amount(try total(.income, in: year)), context: end, label: "2026"),
 			Case(question: "How much did I earn last month?", expected: amount(try total(.income, in: september)), context: end, label: "September 2026"),
