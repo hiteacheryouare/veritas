@@ -16,23 +16,30 @@ struct BudgetSwitcher: View {
 			Button("Import from Actual…") { model.isImportPanelShown = true }
 		} label: {
 			HStack(spacing: Spacing.s1) {
-				Text(model.overview?.name ?? RecentBudgetItems.untitled)
+				Text(name)
 					.font(.text(.body, weight: .semibold))
 					.foregroundStyle(.textPrimary)
 					.lineLimit(1)
 				Image(systemName: "chevron.up.chevron.down")
 					.imageScale(.small)
 					.foregroundStyle(.textSecondary)
+					.accessibilityHidden(true)
 			}
 			.frame(maxWidth: .infinity, alignment: .leading)
 			.contentShape(.rect)
+			.accessibilityElement(children: .ignore)
 		}
 		.menuStyle(.button)
 		.buttonStyle(.plain)
 		.menuIndicator(.hidden)
 		.disabled(model.phase == .working)
 		.help("Switch budget")
+		.accessibilityLabel(name)
 		.accessibilityIdentifier("budgetSwitcher")
+	}
+
+	private var name: String {
+		model.overview?.name ?? RecentBudgetItems.untitled
 	}
 }
 
@@ -45,12 +52,14 @@ struct RecentBudgetItems: View {
 
 	var body: some View {
 		ForEach(model.recents.entries(besides: model.overview?.directory)) { budget in
+			let isAvailable = model.recents.isAvailable(budget)
 			Button {
 				Task { await model.switchTo(budget) }
 			} label: {
 				Text(budget.name ?? Self.untitled)
-				Text(budget.place)
+				Text(isAvailable ? budget.place : "Not available: \(budget.place)")
 			}
+			.disabled(!isAvailable || model.phase == .working)
 			.accessibilityIdentifier("recentBudget.\(budget.name ?? Self.untitled)")
 		}
 	}

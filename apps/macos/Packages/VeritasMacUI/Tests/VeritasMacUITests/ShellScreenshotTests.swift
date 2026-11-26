@@ -45,7 +45,7 @@ struct ShellScreenshotTests {
 	}
 
 	@Test func sidebarWithTheBudgetSwitcher() async throws {
-		let recents = RecentBudgets(defaults: nil, exists: { _ in true })
+		let recents = RecentBudgets(defaults: nil, locate: { _ in .here })
 		recents.opened(name: "Side business", folder: URL(filePath: "/budgets/9F3A61C2", directoryHint: .isDirectory))
 		let model = WorkspaceModel(library: StubLibrary(readOnly: nil, importError: nil), localSettings: InMemoryBudgetSettings(), recents: recents, format: MoneyFormat())
 		await model.reopen(directory: StubLaunch.budgetDirectory)

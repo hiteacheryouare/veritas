@@ -25,21 +25,26 @@ public final class RecentBudgets {
 		}
 	}
 
+	/// Where a recent budget's folder is now.
+	public enum Location: Sendable {
+		case here
+		/// On a drive or share that isn't connected, so it may come back.
+		case unmounted
+		case gone
+	}
+
 	public static let limit = 10
 	static let defaultsKey = "recentBudgets"
 
 	public private(set) var entries: [Entry]
 
 	@ObservationIgnored private let defaults: UserDefaults?
-	@ObservationIgnored private let exists: (URL) -> Bool
+	@ObservationIgnored private let locate: (URL) -> Location
 
 	/// Without `defaults` the list lives only as long as this object.
-	public init(
-		defaults: UserDefaults?,
-		exists: @escaping (URL) -> Bool = { FileManager.default.fileExists(atPath: $0.path(percentEncoded: false)) }
-	) {
+	public init(defaults: UserDefaults?, locate: @escaping (URL) -> Location = RecentBudgets.location) {
 		self.defaults = defaults
-		self.exists = exists
+		self.locate = locate
 		entries = defaults?.data(forKey: Self.defaultsKey).flatMap { try? JSONDecoder().decode([Entry].self, from: $0) } ?? []
 		forgetMissing()
 	}
@@ -64,9 +69,24 @@ public final class RecentBudgets {
 		save(renamed)
 	}
 
+	/// A budget on a drive that isn't connected stays in the list, unavailable.
+	public func isAvailable(_ entry: Entry) -> Bool {
+		locate(entry.folder) == .here
+	}
+
+	/// Drops budgets whose folder is gone from a connected drive.
 	public func forgetMissing() {
-		let present = entries.filter { exists($0.folder) }
-		if present != entries { save(present) }
+		let kept = entries.filter { locate($0.folder) != .gone }
+		if kept != entries { save(kept) }
+	}
+
+	/// A folder under `/Volumes` whose volume isn't mounted is `unmounted`.
+	public nonisolated static func location(_ folder: URL) -> Location {
+		let files = FileManager.default
+		if files.fileExists(atPath: folder.path(percentEncoded: false)) { return .here }
+		let parts = folder.standardizedFileURL.pathComponents
+		guard parts.count > 2, parts[1] == "Volumes" else { return .gone }
+		return files.fileExists(atPath: "/Volumes/\(parts[2])") ? .gone : .unmounted
 	}
 
 	public func clear() {

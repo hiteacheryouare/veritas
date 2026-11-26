@@ -10,7 +10,7 @@ struct RecentBudgetsTests {
 	}
 
 	@Test func theMostRecentComesFirstAndEachBudgetOnce() {
-		let recents = RecentBudgets(defaults: nil, exists: { _ in true })
+		let recents = RecentBudgets(defaults: nil, locate: { _ in .here })
 		recents.opened(name: "Household", folder: Self.folder("a"))
 		recents.opened(name: "Business", folder: Self.folder("b"))
 		recents.opened(name: "Household", folder: URL(filePath: "/tmp/budgets/a"))
@@ -20,7 +20,7 @@ struct RecentBudgetsTests {
 	}
 
 	@Test func itKeepsTheTenMostRecent() {
-		let recents = RecentBudgets(defaults: nil, exists: { _ in true })
+		let recents = RecentBudgets(defaults: nil, locate: { _ in .here })
 		for index in 1...12 {
 			recents.opened(name: "Budget \(index)", folder: Self.folder("\(index)"))
 		}
@@ -30,7 +30,7 @@ struct RecentBudgetsTests {
 	}
 
 	@Test func aRenamedBudgetKeepsItsPlace() {
-		let recents = RecentBudgets(defaults: nil, exists: { _ in true })
+		let recents = RecentBudgets(defaults: nil, locate: { _ in .here })
 		recents.opened(name: "Household", folder: Self.folder("a"))
 		recents.opened(name: "Business", folder: Self.folder("b"))
 		recents.renamed("Home", folder: Self.folder("a"))
@@ -40,7 +40,7 @@ struct RecentBudgetsTests {
 
 	@Test func aFolderThatsGoneIsDropped() {
 		var gone: Set<URL> = []
-		let recents = RecentBudgets(defaults: nil, exists: { !gone.contains($0) })
+		let recents = RecentBudgets(defaults: nil, locate: { gone.contains($0) ? .gone : .here })
 		recents.opened(name: "Household", folder: Self.folder("a"))
 		recents.opened(name: "Business", folder: Self.folder("b"))
 		gone.insert(Self.folder("a"))
@@ -48,24 +48,42 @@ struct RecentBudgetsTests {
 		#expect(recents.entries.map(\.name) == ["Business"])
 	}
 
+	@Test func aBudgetOnADisconnectedDriveStaysButIsUnavailable() {
+		let places: [URL: RecentBudgets.Location] = [Self.folder("drive"): .unmounted, Self.folder("deleted"): .gone]
+		let recents = RecentBudgets(defaults: nil, locate: { places[$0] ?? .here })
+		recents.opened(name: "Deleted", folder: Self.folder("deleted"))
+		recents.opened(name: "On the drive", folder: Self.folder("drive"))
+		recents.opened(name: "Household", folder: Self.folder("a"))
+		recents.forgetMissing()
+		#expect(recents.entries.map(\.name) == ["Household", "On the drive"], "a deleted folder goes; an unplugged drive's budget stays")
+		#expect(recents.entries.map(recents.isAvailable) == [true, false])
+	}
+
+	@Test func aFolderOnAVolumeThatIsntMountedIsUnmountedNotGone() throws {
+		let here = FileManager.default.temporaryDirectory
+		#expect(RecentBudgets.location(here) == .here)
+		#expect(RecentBudgets.location(URL(filePath: "/Volumes/Veritas-\(UUID().uuidString)/budgets/a")) == .unmounted)
+		#expect(RecentBudgets.location(here.appending(path: "veritas-\(UUID().uuidString)")) == .gone)
+	}
+
 	@Test func theListIsAnAppPreferenceThatOutlivesTheWindow() throws {
 		let suite = "veritas-recent-budgets-tests"
 		let defaults = try #require(UserDefaults(suiteName: suite))
 		defer { defaults.removePersistentDomain(forName: suite) }
 		defaults.removePersistentDomain(forName: suite)
-		RecentBudgets(defaults: defaults, exists: { _ in true }).opened(name: "Household", folder: Self.folder("a"))
-		let later = RecentBudgets(defaults: defaults, exists: { _ in true })
+		RecentBudgets(defaults: defaults, locate: { _ in .here }).opened(name: "Household", folder: Self.folder("a"))
+		let later = RecentBudgets(defaults: defaults, locate: { _ in .here })
 		#expect(later.entries.map(\.name) == ["Household"])
-		let afterADelete = RecentBudgets(defaults: defaults, exists: { _ in false })
+		let afterADelete = RecentBudgets(defaults: defaults, locate: { _ in .gone })
 		#expect(afterADelete.entries.isEmpty, "a folder gone since last launch is dropped on the next")
 		later.opened(name: "Household", folder: Self.folder("a"))
 		later.clear()
-		#expect(RecentBudgets(defaults: defaults, exists: { _ in true }).entries.isEmpty)
+		#expect(RecentBudgets(defaults: defaults, locate: { _ in .here }).entries.isEmpty)
 	}
 
 	@Test func switchingClosesTheOpenBudgetBeforeOpeningTheNext() async throws {
 		let library = SwitchingLibrary()
-		let model = WorkspaceModel(library: library, recents: RecentBudgets(defaults: nil, exists: { _ in true }), format: MoneyFormat())
+		let model = WorkspaceModel(library: library, recents: RecentBudgets(defaults: nil, locate: { _ in .here }), format: MoneyFormat())
 		await model.reopen(directory: Self.folder("a"))
 		await model.reopen(directory: Self.folder("b"))
 		#expect(model.recents.entries.map(\.name) == ["b", "a"])
@@ -83,10 +101,29 @@ struct RecentBudgetsTests {
 		#expect(library.log.isEmpty, "choosing the open budget does nothing")
 	}
 
+	@Test func aSecondSwitchWaitsForTheFirstToFinishClosing() async throws {
+		let library = SwitchingLibrary()
+		let model = WorkspaceModel(library: library, recents: RecentBudgets(defaults: nil, locate: { _ in .here }), format: MoneyFormat())
+		await model.reopen(directory: Self.folder("c"))
+		await model.reopen(directory: Self.folder("a"))
+		await model.reopen(directory: Self.folder("b"))
+		library.log = []
+		library.holdsClose = true
+		let first = Task { await model.switchTo(RecentBudgets.Entry(name: "a", folder: Self.folder("a"))) }
+		while !library.isHoldingClose { await Task.yield() }
+		#expect(model.phase == .working, "the menus are off while the budget closes")
+		await model.switchTo(RecentBudgets.Entry(name: "c", folder: Self.folder("c")))
+		library.releaseClose()
+		await first.value
+		#expect(library.log == ["close b", "open a"], "the second switch never started")
+		#expect(model.overview?.name == "a")
+		#expect(model.phase == .open)
+	}
+
 	@Test func aBudgetThatCantOpenLeavesTheWindowEmptyAndTheListWithoutIt() async {
 		let library = SwitchingLibrary()
 		var gone: Set<URL> = []
-		let model = WorkspaceModel(library: library, recents: RecentBudgets(defaults: nil, exists: { !gone.contains($0) }), format: MoneyFormat())
+		let model = WorkspaceModel(library: library, recents: RecentBudgets(defaults: nil, locate: { gone.contains($0) ? .gone : .here }), format: MoneyFormat())
 		await model.reopen(directory: Self.folder("a"))
 		await model.reopen(directory: Self.folder("b"))
 		gone.insert(Self.folder("a"))
@@ -102,6 +139,23 @@ struct RecentBudgetsTests {
 private final class SwitchingLibrary: BudgetLibrary, @unchecked Sendable {
 	var log: [String] = []
 	var missing: Set<URL> = []
+	/// Holds the next close until `releaseClose`, as a slow close would.
+	var holdsClose = false
+	private(set) var isHoldingClose = false
+	private var heldClose: CheckedContinuation<Void, Never>?
+
+	func closed(_ name: String) async {
+		if holdsClose {
+			holdsClose = false
+			await withCheckedContinuation { heldClose = $0; isHoldingClose = true }
+		}
+		log.append("close \(name)")
+	}
+
+	func releaseClose() {
+		heldClose?.resume()
+		heldClose = nil
+	}
 
 	func newBudgetDirectory() -> URL { RecentBudgetsTests.folder("new") }
 
@@ -109,7 +163,7 @@ private final class SwitchingLibrary: BudgetLibrary, @unchecked Sendable {
 		if missing.contains(directory) { throw FfiError.Io(message: "\(directory.path) doesn't hold a budget") }
 		let name = directory.lastPathComponent
 		log.append("open \(name)")
-		return SwitchingSession(name: name, directory: directory) { [weak self] in self?.log.append("close \(name)") }
+		return SwitchingSession(name: name, directory: directory) { [weak self] in await self?.closed(name) }
 	}
 
 	func importActualZip(_ zip: URL, into directory: URL) async throws -> any BudgetSession { try await open(directory: directory) }
@@ -121,10 +175,10 @@ private final class SwitchingLibrary: BudgetLibrary, @unchecked Sendable {
 private final class SwitchingSession: BudgetSession, @unchecked Sendable {
 	let name: String
 	let directory: URL
-	let closed: () -> Void
+	let closed: () async -> Void
 	let canExport = true
 
-	init(name: String, directory: URL, closed: @escaping () -> Void) {
+	init(name: String, directory: URL, closed: @escaping () async -> Void) {
 		self.name = name
 		self.directory = directory
 		self.closed = closed
@@ -139,5 +193,5 @@ private final class SwitchingSession: BudgetSession, @unchecked Sendable {
 	func maintain() async throws {}
 	func exportActualZip(to destination: URL) async throws -> [AuditFinding] { [] }
 	func observeChanges(_ changed: @escaping @Sendable () -> Void) async throws {}
-	func close() async { closed() }
+	func close() async { await closed() }
 }
