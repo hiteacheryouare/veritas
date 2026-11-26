@@ -29,8 +29,8 @@ Every color has a light and a dark value. There is no pure black or white anywhe
 | `color-accent` | #23169c | #94a8fe | Ryan's primary. Selection, focus ring, primary buttons, links in lists, the tour's Next, Mo Nee's send button and example questions. Never money |
 | `color-accent-fill` | #23169c | #94a8fe | Primary button fill. In dark mode it is light, so `color-text-on-accent` flips to dark |
 | `color-accent-soft` | rgba(35, 22, 156, 0.1) | rgba(148, 168, 254, 0.14) | Selected and editing rows, question bubbles |
-| `color-secondary` | #03698c | #56b8e3 | Ryan's secondary as text: links and secondary emphasis |
-| `color-secondary-fill` | #007ea7 | #007ea7 | Ryan's secondary as a fill |
+| `color-brand-secondary` | #03698c | #56b8e3 | Ryan's secondary as text: links and secondary emphasis |
+| `color-brand-secondary-fill` | #007ea7 | #007ea7 | Ryan's secondary as a fill |
 | `color-brand` | #23169c | #23169c | Ryan's primary in both appearances: Wrapped's cards. Its text is `color-text-on-brand` (#f5f5f7) |
 | `color-money-available` | #036f46 | #56e39f | Good. Available amounts above the low threshold, on-track goals |
 | `color-money-low` | #7d5c02 | #f5b700 | Warning. Envelope at or under 20% left, goals behind schedule |
@@ -57,7 +57,7 @@ Ryan's colors are used exactly for fills, bars, dots and chart marks. Where one 
 | Brand | Fill | Text, light | Text, dark |
 |---|---|---|---|
 | Primary #23169c | accent, brand | #23169c | #94a8fe |
-| Secondary #007ea7 | secondary-fill, money-income-fill | #03698c | #56b8e3 |
+| Secondary #007ea7 | brand-secondary-fill, money-income-fill | #03698c | #56b8e3 |
 | Bad #db162f | money-overspent-fill | #c50125 | #ff8b86 |
 | Good #56e39f | money-available-fill, chart-savings | #036f46 | #56e39f |
 | Warning #f5b700 | money-low-fill | #7d5c02 | #f5b700 |

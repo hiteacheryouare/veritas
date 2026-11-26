@@ -32,8 +32,8 @@
 	--color-surface-selected: rgba(20, 22, 30, 0.08);
 	--color-focus-ring: #23169c;
 	--color-text-on-accent: #f5f5f7;
-	--color-secondary: #03698c;
-	--color-secondary-fill: #007ea7;
+	--color-brand-secondary: #03698c;
+	--color-brand-secondary-fill: #007ea7;
 	--color-brand: #23169c;
 	--color-text-on-brand: #f5f5f7;
 
@@ -100,8 +100,8 @@
 	--color-surface-selected: rgba(240, 240, 250, 0.12);
 	--color-focus-ring: #94a8fe;
 	--color-text-on-accent: #1c1c21;
-	--color-secondary: #56b8e3;
-	--color-secondary-fill: #007ea7;
+	--color-brand-secondary: #56b8e3;
+	--color-brand-secondary-fill: #007ea7;
 	--color-brand: #23169c;
 	--color-text-on-brand: #f5f5f7;
 

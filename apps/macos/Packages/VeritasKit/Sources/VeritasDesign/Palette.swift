@@ -25,8 +25,8 @@ public extension ColorToken {
 	static let surfaceSelected = ColorToken(light: RGBA(0x14161e, alpha: 0.08), dark: RGBA(0xf0f0fa, alpha: 0.12))
 	static let focusRing = ColorToken(light: RGBA(0x23169c), dark: RGBA(0x94a8fe))
 	static let textOnAccent = ColorToken(light: RGBA(0xf5f5f7), dark: RGBA(0x1c1c21))
-	static let secondary = ColorToken(light: RGBA(0x03698c), dark: RGBA(0x56b8e3))
-	static let secondaryFill = ColorToken(light: RGBA(0x007ea7), dark: RGBA(0x007ea7))
+	static let brandSecondary = ColorToken(light: RGBA(0x03698c), dark: RGBA(0x56b8e3))
+	static let brandSecondaryFill = ColorToken(light: RGBA(0x007ea7), dark: RGBA(0x007ea7))
 	static let brand = ColorToken(light: RGBA(0x23169c), dark: RGBA(0x23169c))
 	static let textOnBrand = ColorToken(light: RGBA(0xf5f5f7), dark: RGBA(0xf5f5f7))
 	static let track = ColorToken(light: RGBA(0x14161e, alpha: 0.08), dark: RGBA(0xf0f0fa, alpha: 0.09))
@@ -77,8 +77,8 @@ public extension ShapeStyle where Self == Color {
 	static var surfaceSelected: Color { Color(ColorToken.surfaceSelected) }
 	static var focusRing: Color { Color(ColorToken.focusRing) }
 	static var textOnAccent: Color { Color(ColorToken.textOnAccent) }
-	static var secondary: Color { Color(ColorToken.secondary) }
-	static var secondaryFill: Color { Color(ColorToken.secondaryFill) }
+	static var brandSecondary: Color { Color(ColorToken.brandSecondary) }
+	static var brandSecondaryFill: Color { Color(ColorToken.brandSecondaryFill) }
 	static var brand: Color { Color(ColorToken.brand) }
 	static var textOnBrand: Color { Color(ColorToken.textOnBrand) }
 	static var track: Color { Color(ColorToken.track) }
@@ -130,8 +130,8 @@ extension ColorToken {
 		"surface-selected": .surfaceSelected,
 		"focus-ring": .focusRing,
 		"text-on-accent": .textOnAccent,
-		"secondary": .secondary,
-		"secondary-fill": .secondaryFill,
+		"brand-secondary": .brandSecondary,
+		"brand-secondary-fill": .brandSecondaryFill,
 		"brand": .brand,
 		"text-on-brand": .textOnBrand,
 		"track": .track,

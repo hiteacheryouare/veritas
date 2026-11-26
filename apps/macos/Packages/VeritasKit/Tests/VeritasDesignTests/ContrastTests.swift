@@ -28,7 +28,7 @@ struct ContrastTests {
 	static let textTokens: [(String, ColorToken)] = [
 		("text-primary", .textPrimary), ("text-secondary", .textSecondary), ("text-tertiary", .textTertiary),
 		("money-neutral", .moneyNeutral), ("money-available", .moneyAvailable), ("money-low", .moneyLow),
-		("money-overspent", .moneyOverspent), ("money-income", .moneyIncome), ("secondary", .secondary), ("accent", .accent)
+		("money-overspent", .moneyOverspent), ("money-income", .moneyIncome), ("brand-secondary", .brandSecondary), ("accent", .accent)
 	]
 
 	static func surfaces(dark: Bool) -> [(String, RGBA)] {

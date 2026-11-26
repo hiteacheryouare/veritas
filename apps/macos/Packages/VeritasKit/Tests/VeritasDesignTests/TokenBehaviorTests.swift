@@ -28,7 +28,7 @@ struct TokenBehaviorTests {
 	@Test func moneyFillsAreTheBrandColorsInBothAppearances() {
 		let expected: [(ColorToken, UInt32)] = [
 			(.moneyAvailableFill, 0x56e39f), (.moneyLowFill, 0xf5b700), (.moneyOverspentFill, 0xdb162f),
-			(.moneyIncomeFill, 0x007ea7), (.secondaryFill, 0x007ea7), (.chartSavings, 0x56e39f)
+			(.moneyIncomeFill, 0x007ea7), (.brandSecondaryFill, 0x007ea7), (.chartSavings, 0x56e39f)
 		]
 		for (token, hex) in expected {
 			#expect(token.light == RGBA(hex) && token.dark == RGBA(hex), "\(token)")
