@@ -54,7 +54,11 @@ pub(crate) fn imported(fixture: &str) -> (Scratch, Core<veritas_store::Store>) {
 /// From fork to exec a child process holds a copy of every file this process
 /// has open, and a budget's lock isn't released until every copy closes. So
 /// children start under the read side, and a test that closes a budget and
-/// needs its lock back holds the write side across both.
+/// needs its lock back holds the write side across both. Every test that
+/// reopens a budget it needs to write must reopen it through
+/// `while_no_child_starts` or `reopened`, and every child must start through
+/// `output`. `tests/support/children.rs` holds the same rule for the
+/// integration tests.
 static STARTING_CHILDREN: RwLock<()> = RwLock::new(());
 
 /// `command.output()`, started where `while_no_child_starts` waits for it.
