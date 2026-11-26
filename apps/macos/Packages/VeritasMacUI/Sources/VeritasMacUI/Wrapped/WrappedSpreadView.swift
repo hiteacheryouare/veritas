@@ -8,14 +8,19 @@ import VeritasKit
 struct WrappedSpreadView: View {
 	let spread: WrappedSpread
 	let palette: WrappedPalette
+	/// The same spread in the other mode, with or without amounts, so each
+	/// figure keeps the room of its longer form and Hide amounts never reflows.
+	var twin: WrappedSpread?
 
 	var body: some View {
 		HStack(spacing: 0) {
 			if spread.isFull, let page = spread.pages.first {
 				WrappedPageView(page: page, side: .full, palette: palette)
+					.environment(\.wrappedTwin, twin(of: page))
 			} else {
 				ForEach(Array(spread.pages.enumerated()), id: \.element.id) { index, page in
 					WrappedPageView(page: page, side: index == 0 ? .left : .right, palette: palette)
+						.environment(\.wrappedTwin, twin(of: page))
 						.frame(width: WrappedCanvas.page.width)
 				}
 			}
@@ -36,6 +41,10 @@ struct WrappedSpreadView: View {
 		.accessibilityElement(children: .contain)
 		.accessibilityLabel(spread.title)
 		.accessibilityIdentifier("wrapped.spread.\(spread.id)")
+	}
+
+	private func twin(of page: WrappedPage) -> WrappedPage? {
+		twin?.pages.first { $0.kind == page.kind }
 	}
 }
 
@@ -172,6 +181,7 @@ struct WrappedPageView: View {
 private struct WrappedPageWords: View {
 	let page: WrappedPage
 	let palette: WrappedPalette
+	@Environment(\.wrappedTwin) private var twin
 
 	var body: some View {
 		VStack(alignment: .leading, spacing: 16) {
@@ -181,31 +191,25 @@ private struct WrappedPageWords: View {
 					.accessibilityAddTraits(.isHeader)
 			}
 			if let headline = page.headline {
-				Text(headline)
+				WrappedTwinText(text: headline, twin: twin?.headline, id: "wrapped.headline")
 					.font(WrappedType.headline)
 					.lineSpacing(8)
 					.fixedSize(horizontal: false, vertical: true)
-					.valueChange(headline)
 					.accessibilityAddTraits(.isHeader)
-					.accessibilityIdentifier("wrapped.headline")
 			}
 			if let dek = page.dek {
-				Text(dek)
+				WrappedTwinText(text: dek, twin: twin?.dek, id: "wrapped.dek")
 					.font(WrappedType.dek)
 					.lineSpacing(8)
 					.foregroundStyle(palette.inkSecondary)
 					.fixedSize(horizontal: false, vertical: true)
-					.valueChange(dek)
-					.accessibilityIdentifier("wrapped.dek")
 			}
 			if let hero = page.hero {
-				Text(hero)
+				WrappedTwinText(text: hero, twin: twin?.hero, id: "wrapped.hero")
 					.font(WrappedType.hero)
 					.lineLimit(1)
 					.minimumScaleFactor(0.5)
-					.valueChange(hero)
 					.staged(3)
-					.accessibilityIdentifier("wrapped.hero")
 			}
 		}
 		.staged(0)
@@ -218,6 +222,7 @@ private struct WrappedTable: View {
 	let rows: [WrappedPage.Row]
 	let palette: WrappedPalette
 	let drawsShares: Bool
+	@Environment(\.wrappedTwin) private var twin
 
 	var body: some View {
 		VStack(alignment: .leading, spacing: 0) {
@@ -228,11 +233,10 @@ private struct WrappedTable: View {
 							.font(WrappedType.label)
 							.lineLimit(1)
 						Spacer(minLength: 16)
-						Text(row.value)
+						WrappedTwinText(text: row.value, twin: twin?.rows.first { $0.id == row.id }?.value, alignment: .trailing)
 							.font(WrappedType.figure)
 							.lineLimit(1)
 							.layoutPriority(1)
-							.valueChange(row.value)
 					}
 					if let note = row.note {
 						Text(note)
@@ -396,7 +400,31 @@ struct WrappedMasthead: View {
 	}
 }
 
+/// A figure that holds the room of its other form, with or without amounts,
+/// behind it, so switching modes cross-fades in place (design/wrapped-editorial.md, Hide amounts).
+private struct WrappedTwinText: View {
+	let text: String
+	let twin: String?
+	var alignment: Alignment = .topLeading
+	var id: String?
+
+	var body: some View {
+		ZStack(alignment: alignment) {
+			if let twin, twin != text {
+				Text(twin)
+					.hidden()
+					.accessibilityHidden(true)
+			}
+			Text(text)
+				.valueChange(text)
+				.accessibilityIdentifier(id ?? "")
+		}
+	}
+}
+
 extension EnvironmentValues {
+	/// The page in the other mode, whose figures set each figure's room.
+	@Entry var wrappedTwin: WrappedPage? = nil
 	/// Turns to a spread by its index, from the contents page.
 	@Entry var wrappedOpen: ((Int) -> Void)? = nil
 	/// The spread is being seen for the first time this session, so its parts

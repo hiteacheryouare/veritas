@@ -135,6 +135,8 @@ public struct WrappedPage: Identifiable, Hashable, Sendable {
 	public var columns: [Column] = []
 	public var reference: Reference?
 	public var points: [Point] = []
+	/// What the points measure, for the audio graph's axis.
+	public var pointsTitle = ""
 	public var annotations: [Annotation] = []
 	public var calendar: Calendar?
 	public var contents: [Entry] = []
@@ -241,7 +243,8 @@ private struct WrappedIssueWriter {
 		page.title = "The ledger"
 		let prior = report.priorYear
 		if redacted {
-			page.headline = report.shares.outVsIn.map { "\(percent($0)) of what came in went out." } ?? "The ledger"
+			// A refund-heavy year has a negative share, and "went out" can't be negative in words.
+			page.headline = report.shares.outVsIn.flatMap { $0 >= 0 ? "\(percent($0)) of what came in went out." : nil } ?? "The ledger"
 			page.dek = [report.shares.net.map(netShareSentence), partialPriorYear].compactMap(\.self).joined(separator: " ").nilIfEmpty
 			page.rows = [
 				change(prior.totalIn).map { WrappedPage.Row(id: "in", label: "Came in", value: $0, note: nil, share: nil) },
@@ -378,7 +381,8 @@ private struct WrappedIssueWriter {
 		page.title = "The shape of the year"
 		let name = WrappedWords.monthName(biggest.month)
 		page.headline = "\(name) was the biggest month for spending."
-		let typical = report.biggestVsTypical.map { "\(WrappedWords.basisPoints($0, format: format)) more than your typical month" }
+		// A biggest month that is the typical month (one month of spending) has nothing to compare.
+		let typical = report.biggestVsTypical.flatMap { $0 > 0 ? "\(WrappedWords.basisPoints($0, format: format)) more than your typical month" : nil }
 		if redacted {
 			let share = report.shares.biggestMonth.map { "\(percent($0)) \(isYearToDate ? "of spending so far" : "of the year's spending")" }
 			page.dek = [share, typical].compactMap(\.self).joined(separator: ", ").nilIfEmpty.map { $0.prefix(1).uppercased() + $0.dropFirst() + "." }
@@ -456,7 +460,7 @@ private struct WrappedIssueWriter {
 		page.rows = reached.map { goal in
 			WrappedPage.Row(
 				id: goal.goalId,
-				label: goal.deleted ? "(deleted) \(goal.name)" : goal.name,
+				label: Self.goalLabel(goal),
 				value: WrappedWords.monthName(goal.month),
 				note: nil,
 				share: nil
@@ -465,9 +469,17 @@ private struct WrappedIssueWriter {
 		return page
 	}
 
+	/// ST-10.3: a deleted category keeps its name after "(deleted)", and one
+	/// the core has no name for at all says only that.
+	static func goalLabel(_ goal: WrappedReachedGoal) -> String {
+		guard goal.deleted else { return goal.name }
+		return goal.name.isEmpty ? "(deleted category)" : "(deleted) \(goal.name)"
+	}
+
 	private func netWorth() -> WrappedPage {
 		var page = WrappedPage(kind: .netWorth)
 		page.title = "Net worth"
+		page.pointsTitle = redacted ? "Change since the start of \(report.year)" : "Net worth"
 		let change = report.netWorthChange
 		page.headline = change > 0 ? "Net worth went up." : change < 0 ? "Net worth went down." : "Net worth held steady."
 		let ends = report.monthEnds

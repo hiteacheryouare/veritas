@@ -168,7 +168,7 @@ struct WrappedLineChart: View {
 		.padding(.horizontal, 8)
 		.accessibilityElement(children: .ignore)
 		.accessibilityLabel(page.spoken ?? "")
-		.accessibilityChartDescriptor(WrappedLineDescriptor(points: page.points))
+		.accessibilityChartDescriptor(WrappedLineDescriptor(points: page.points, title: page.pointsTitle))
 		.accessibilityIdentifier("wrapped.line")
 	}
 }
@@ -300,12 +300,14 @@ private struct WrappedColumnDescriptor: AXChartDescriptorRepresentable {
 /// The net worth line as an audio graph.
 private struct WrappedLineDescriptor: AXChartDescriptorRepresentable {
 	let points: [WrappedPage.Point]
+	/// Net worth, or with amounts hidden the change since the start of the year.
+	let title: String
 
 	func makeChartDescriptor() -> AXChartDescriptor {
 		let values = points.map { Double($0.value) }
 		let x = AXCategoricalDataAxisDescriptor(title: "Month", categoryOrder: points.map(\.name))
-		let y = AXNumericDataAxisDescriptor(title: "Net worth", range: (values.min() ?? 0)...(max(values.max() ?? 0, (values.min() ?? 0) + 1)), gridlinePositions: []) { _ in "" }
-		let series = AXDataSeriesDescriptor(name: "Net worth", isContinuous: true, dataPoints: zip(points, points.map(\.spoken)).map { AXDataPoint(x: $0.name, y: Double($0.value), label: $1) })
-		return AXChartDescriptor(title: "Net worth at each month end", summary: nil, xAxis: x, yAxis: y, additionalAxes: [], series: [series])
+		let y = AXNumericDataAxisDescriptor(title: title, range: (values.min() ?? 0)...(max(values.max() ?? 0, (values.min() ?? 0) + 1)), gridlinePositions: []) { _ in "" }
+		let series = AXDataSeriesDescriptor(name: title, isContinuous: true, dataPoints: zip(points, points.map(\.spoken)).map { AXDataPoint(x: $0.name, y: Double($0.value), label: $1) })
+		return AXChartDescriptor(title: "\(title) at each month end", summary: nil, xAxis: x, yAxis: y, additionalAxes: [], series: [series])
 	}
 }

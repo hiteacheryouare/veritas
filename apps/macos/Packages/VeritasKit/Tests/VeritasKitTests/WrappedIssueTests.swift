@@ -295,6 +295,27 @@ struct WrappedIssueTests {
 		#expect(categories?.rows.map(\.share) == shownRows, "the bars are the same either way")
 	}
 
+	@Test func aRefundHeavyYearHasNoNegativeWentOutHeadline() {
+		// Fred: "-0.3% of what came in went out" doesn't read; the headline falls back.
+		var report = Self.report()
+		report.shares.outVsIn = -3
+		report.shares.net = 1_003
+		let ledger = Self.page(.ledger, report, redacted: true)
+		#expect(ledger?.headline == "The ledger")
+		#expect(ledger?.dek == "100.3% was left over.")
+	}
+
+	@Test func aGoalWhoseCategoryIsGoneSaysSo() {
+		var report = Self.report()
+		report.reachedGoals = [WrappedReachedGoal(goalId: "lost", name: "", deleted: true, month: Month(year: 2027, month: 5))]
+		#expect(Self.page(.goals, report)?.rows.map(\.label) == ["(deleted category)"])
+	}
+
+	@Test func theNetWorthLineSaysWhatItMeasures() {
+		#expect(Self.page(.netWorth)?.pointsTitle == "Net worth")
+		#expect(Self.page(.netWorth, redacted: true)?.pointsTitle == "Change since the start of 2027")
+	}
+
 	@Test func aShareTheCoreLeavesOutReadsNA() {
 		var report = Self.report()
 		report.shares.outVsIn = nil
@@ -307,10 +328,23 @@ struct WrappedIssueTests {
 
 	// MARK: FC-8's copy rule
 
-	/// Every way the issue may write a report field, and the copy's own
-	/// constants (copy rule 1). What's left of a line once these are taken out
-	/// must hold no digit.
-	static func allowedFigures(_ report: WrappedReport, _ issue: WrappedIssue) -> [String] {
+	/// A figure as Wrapped writes one, read as a whole: a date with its month
+	/// name, a count with its unit, or a number with its sign, currency,
+	/// grouping, decimals and percent sign. "3 goals" is one token, so an
+	/// unrelated 3 elsewhere can't vouch for it.
+	static var figure: Regex<Substring> {
+		/(?:January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}(?:, \d{4})?|\d+(?:,\d{3})* (?:no-spend days?|days?|months?|payments?|goals?)\b|[+\-\x{2212}]?\$?\d+(?:,\d{3})*(?:\.\d+)?%?/
+	}
+
+	static func tokens(in line: String) -> [String] {
+		line.matches(of: figure).map { String($0.output) }
+	}
+
+	/// Every token the issue may write from the report's fields (copy rule 1),
+	/// read from the same formatted strings the pages use. With `redacted`
+	/// (R-WRAP-2) no amount is allowed in any form: only shares, basis points,
+	/// counts and dates.
+	static func allowedTokens(_ report: WrappedReport, redacted: Bool) -> Set<String> {
 		let format = Self.format
 		var amounts = [report.totalIn, report.totalOut, report.net, report.debtPaydown, report.savings, report.otherCategories, report.otherGroups, report.otherPayees,
 			report.netWorthStart, report.netWorthEnd, report.netWorthChange, report.biggestMonth?.total, report.typicalMonth].compactMap(\.self)
@@ -332,33 +366,84 @@ struct WrappedIssueTests {
 		}
 		var dates = [report.first, report.last, report.noSpend.first, report.noSpend.last, report.noSpend.longest?.start, report.priorYear.from].compactMap(\.self)
 		dates += report.monthEnds.map(\.date)
-		var figures = amounts.flatMap { [format.currency($0, on: .register), format.currencyMagnitude($0, on: .register), format.amount($0, on: .register), "+" + format.currency($0, on: .register)] }
-		figures += shares.flatMap { [WrappedWords.percent($0, format: format), WrappedWords.percent(abs($0), format: format), WrappedWords.signedPercent($0, format: format)] }
-		figures += basisPoints.flatMap { [WrappedWords.basisPoints($0, format: format), WrappedWords.basisPoints(abs($0), format: format), WrappedWords.signedBasisPoints($0, format: format)] }
-		figures += dates.flatMap { [WrappedWords.day($0), WrappedWords.day($0, withYear: true)] }
-		figures += report.noSpend.dates.compactMap { Int($0.suffix(2)) }.map(String.init)
-		figures += [report.noSpend.days, report.noSpend.evaluatedDays].map { WrappedWords.count($0) } + [report.noSpend.longest?.days].compactMap(\.self).map(WrappedWords.days)
-		figures += report.topPayees.map { WrappedWords.payments($0.count) } + [WrappedWords.count(report.reachedGoals.count)]
-		figures += [String(report.year), String(report.year - 1)]
-		figures += issue.pages.map { String($0.number) } + issue.pages.map { String($0.number + 1) }
-		return figures.sorted { $0.count > $1.count }
+		var written = redacted ? [] : amounts.flatMap { [format.currency($0, on: .register), format.currencyMagnitude($0, on: .register), format.amount($0, on: .register), "+" + format.currency($0, on: .register)] }
+		written += shares.flatMap { [WrappedWords.percent($0, format: format), WrappedWords.percent(abs($0), format: format), WrappedWords.signedPercent($0, format: format)] }
+		written += basisPoints.flatMap { [WrappedWords.basisPoints($0, format: format), WrappedWords.basisPoints(abs($0), format: format), WrappedWords.signedBasisPoints($0, format: format)] }
+		written += dates.flatMap { [WrappedWords.day($0), WrappedWords.day($0, withYear: true)] }
+		let noSpend = report.noSpend
+		written += [noSpend.days == 1 ? "1 no-spend day" : "\(WrappedWords.count(noSpend.days)) no-spend days", "\(WrappedWords.count(noSpend.evaluatedDays)) days"]
+		written += [noSpend.longest?.days].compactMap(\.self).map(WrappedWords.days)
+		written += report.topPayees.map { WrappedWords.payments($0.count) }
+		written += [report.reachedGoals.count == 1 ? "1 goal" : "\(WrappedWords.count(report.reachedGoals.count)) goals"]
+		written += [String(report.year), String(report.year - 1)]
+		return Set(written.flatMap(tokens))
+	}
+
+	/// The tokens in `page`'s text that no report field accounts for. Page
+	/// numbers are allowed only in the ledger's "See page" reference, and
+	/// day numbers only in the calendar's lines, where they are N3's dates.
+	static func strays(on page: WrappedPage, issue: WrappedIssue, allowed: Set<String>) -> [String] {
+		let pageNumbers = Set(issue.pages.map { String($0.number) })
+		let calendarDays = Set(page.calendar?.dates.compactMap { Int($0.suffix(2)) }.map(String.init) ?? [])
+		var found: [String] = []
+		for line in page.text {
+			let extra = line == page.footnote ? pageNumbers : page.calendar?.months.contains(line) == true ? calendarDays : []
+			found += tokens(in: line).filter { !allowed.contains($0) && !extra.contains($0) }.map { "\($0) in \(line)" }
+		}
+		return found
 	}
 
 	@Test func everyFigureOnEveryPageIsAReportField() {
-		// FC-8 copy rule 1, populated and redacted.
+		// FC-8 copy rule 1, populated and redacted, a whole year and a year to date.
 		for report in [Self.report(), Self.report(last: "2027-04-10")] {
 			for redacted in [false, true] {
+				let allowed = Self.allowedTokens(report, redacted: redacted)
 				let issue = Self.issue(report, redacted: redacted)
-				let allowed = Self.allowedFigures(report, issue)
-				for line in issue.text {
-					var rest = line
-					for figure in allowed where !figure.isEmpty {
-						rest = rest.replacingOccurrences(of: figure, with: "")
-					}
-					#expect(rest.firstMatch(of: /\d/) == nil, "\(line) leaves \(rest)")
+				for page in issue.pages {
+					let strays = Self.strays(on: page, issue: issue, allowed: allowed)
+					#expect(strays.isEmpty, "\(page.kind): \(strays)")
 				}
 			}
 		}
+	}
+
+	@Test func anInventedFigureIsCaught() {
+		// The check above must fail on a figure the report doesn't hold, even
+		// where its digits happen to appear in an unrelated field.
+		let report = Self.report()
+		let issue = Self.issue(report)
+		let allowed = Self.allowedTokens(report, redacted: false)
+		let planted = ["Lunch came to $12.34.", "A run of 7 days.", "You reached 3 goals.", "That was 15 days.", "It rose 9.9%.",
+			"A total of 164.28.", "Out came 9,876.54.", "Over 37 months."]
+		for line in planted {
+			var page = WrappedPage(kind: .notes)
+			page.notes = [line]
+			#expect(!Self.strays(on: page, issue: issue, allowed: allowed).isEmpty, "\(line)")
+		}
+		var ledger = issue.pages.first { $0.kind == .ledger }
+		ledger?.notes = ["See page 8."]
+		#expect(ledger.map { !Self.strays(on: $0, issue: issue, allowed: allowed).isEmpty } == true, "a page number outside the cross-reference")
+	}
+
+	@Test func aRedactedPageCanHoldNoAmountInAnyForm() {
+		// R-WRAP-2: a whole-number amount (28,400 cents written as 284) passes
+		// every currency check, so the redacted set holds no amount at all.
+		let report = Self.report()
+		let issue = Self.issue(report, redacted: true)
+		let allowed = Self.allowedTokens(report, redacted: true)
+		for line in ["typical month 284", "typical month $284.00", "came to 1,150", "Today 11,183.00"] {
+			var page = WrappedPage(kind: .shape)
+			page.notes = [line]
+			#expect(!Self.strays(on: page, issue: issue, allowed: allowed).isEmpty, "\(line)")
+		}
+	}
+
+	@Test func aBiggestMonthThatIsTheTypicalMonthMakesNoComparison() {
+		// One month of spending: "0% more than your typical month" isn't a comparison.
+		var report = Self.report()
+		report.biggestVsTypical = 0
+		#expect(Self.page(.shape, report)?.dek == "$300.00.")
+		#expect(Self.page(.shape, report, redacted: true)?.dek == "26.1% of the year's spending.")
 	}
 
 	@Test func everyNameIsAReportFieldOrTheCopysOwn() {

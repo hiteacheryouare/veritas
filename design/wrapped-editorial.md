@@ -136,7 +136,7 @@ New Wrapped tokens, each defined as an existing token so there is no new hex val
 | Refund bar | Unfilled, hatched in `color-chart-expense`, the same non-color signal as the overspent drain bar |
 | Cover rule | `color-accent` |
 | The one highlighted mark per chart (the biggest month's bar, the net worth line's end point, the longest no-spend run) | `color-accent` |
-| No-spend days on the calendar | `color-accent-secondary` at 35% |
+| No-spend days on the calendar | `color-accent-secondary`, full strength, so each day reaches 3:1 against the page |
 | Focus ring on contents entries | `color-focus-ring` |
 
 `color-accent` is the brand primary, with the derived dark-mode shade in dark mode. `color-accent-secondary` is the brand secondary. Both names follow whatever `ws/brand` lands. Each accent mark must reach 3:1 against its page in both appearances (WCAG 1.4.11); check this once `ws/brand` merges, and fall back to the ink color for any mark that misses. Text is never set in an accent color.

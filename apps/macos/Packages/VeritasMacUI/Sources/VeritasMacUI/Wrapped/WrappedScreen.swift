@@ -71,7 +71,7 @@ struct WrappedScreen: View {
 		let inset: CGFloat = 72
 		let scale = min(1, (size.width - inset * 2) / WrappedCanvas.spread.width, (size.height - inset) / WrappedCanvas.spread.height)
 		return ZStack {
-			WrappedSpreadView(spread: spread, palette: palette)
+			WrappedSpreadView(spread: spread, palette: palette, twin: model.issue(redacted: !model.hidesAmounts)?.spreads.first { $0.index == spread.index })
 				.environment(\.wrappedEntrance, !seen.contains(spread.id))
 				.onAppear { seen.insert(spread.id) }
 				.scaleEffect(scale)
@@ -96,8 +96,10 @@ struct WrappedScreen: View {
 	private func stacked(_ spread: WrappedSpread) -> some View {
 		ScrollView {
 			VStack(spacing: 24) {
+				let twin = model.issue(redacted: !model.hidesAmounts)?.spreads.first { $0.index == spread.index }
 				ForEach(spread.pages) { page in
 					WrappedPageView(page: page, side: .single, palette: palette)
+						.environment(\.wrappedTwin, twin?.pages.first { $0.kind == page.kind })
 						.frame(width: WrappedCanvas.page.width, height: WrappedCanvas.page.height)
 						.background(palette.paper)
 						.shadow(color: palette.shadow, radius: 12, y: 6)
