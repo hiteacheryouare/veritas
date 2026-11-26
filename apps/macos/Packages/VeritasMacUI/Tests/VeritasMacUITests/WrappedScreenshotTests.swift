@@ -104,7 +104,8 @@ struct WrappedScreenshotTests {
 		try render(WrappedScreen(workspace: workspace, model: model), named: "screen-empty", size: CGSize(width: 1400, height: 900))
 	}
 
-	func render(_ view: some View, named name: String, size: CGSize, settle: TimeInterval = 0.4) throws {
+	/// A second lets a spread's first-view entrance (at most 700 ms) finish before the capture.
+	func render(_ view: some View, named name: String, size: CGSize, settle: TimeInterval = 1) throws {
 		try FileManager.default.createDirectory(at: Self.output, withIntermediateDirectories: true)
 		for (appearance, suffix) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] {
 			let host = NSHostingView(rootView: view.tint(Color.accent).background(.surfaceWindow))

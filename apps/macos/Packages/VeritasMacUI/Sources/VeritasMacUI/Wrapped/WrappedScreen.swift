@@ -76,6 +76,7 @@ struct WrappedScreen: View {
 				.onAppear { seen.insert(spread.id) }
 				.scaleEffect(scale)
 				.frame(width: WrappedCanvas.spread.width * scale, height: WrappedCanvas.spread.height * scale)
+				.compositingGroup()
 				.shadow(color: palette.shadow, radius: 24, y: 10)
 				.motion(.fast, value: model.hidesAmounts)
 				.id(spread.index)
@@ -102,6 +103,7 @@ struct WrappedScreen: View {
 						.environment(\.wrappedTwin, twin?.pages.first { $0.kind == page.kind })
 						.frame(width: WrappedCanvas.page.width, height: WrappedCanvas.page.height)
 						.background(palette.paper)
+						.compositingGroup()
 						.shadow(color: palette.shadow, radius: 12, y: 6)
 				}
 				HStack {
