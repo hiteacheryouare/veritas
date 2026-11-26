@@ -139,7 +139,7 @@ Status: draft, revised for the PR #93 review round, with budget habits (AI-10) a
 
 - **AI-6.11** **Every word must be understood.** The core reads only these words, each with the meaning given. A word outside this list refuses the whole question with the hint, and nothing is guessed from the words that were understood. So "Novembre 2025" is refused, not read as 2025, "may I see this year" is refused, not read as May, and "January and March" is refused. A lone "may" is the month May, because it is on its own. This stops the period words from being a place the model's other words can hide a different question.
   - **Names and numbers:** month names and abbreviations (AI-6.5), numbers, years and dates, `q1` to `q4` and `h1`, `h2` (AI-6.13).
-  - **Period phrases:** `this`, `last`, `month`, `year`, `same`, `today`, `so`, `far`, `date`, `ytd`, `mtd`, as in AI-6.2. `previous` and `past` mean `last` in "previous month", "past month", "previous year" and "past year". `current` means `this` in "current month" and "current year". A hyphen inside a known phrase reads as a space: "year-to-date", "month-to-date" and "so-far" are `year to date`, `month to date` and `so far`, and the hyphen is a range connector only between two periods (AI-6.6).
+  - **Period phrases:** `this`, `last`, `month`, `year`, `same`, `today`, `so`, `far`, `date`, `ytd`, `mtd`, as in AI-6.2. `previous` means `last` in "previous month" and "previous year". `past` is not read: "the past year" usually means the trailing 12 months and not the last calendar year, so "past month", "past year" and "past 12 months" are refused with the hint and not guessed. `current` means `this` in "current month" and "current year". A hyphen inside a known phrase reads as a space: "year-to-date", "month-to-date" and "so-far" are `year to date`, `month to date` and `so far`, and the hyphen is a range connector only between two periods (AI-6.6).
   - **Connectors:** `to`, `through`, `thru`, `until`, `till`, and `up to` (which is `to`, so "up to now" is the open end of AI-6.12). `from` is part of "from X to Y" and means nothing alone, so "from October" is refused. `since` (AI-6.12). `now` and `present` are the open end of AI-6.12, and `the` may precede `present`.
   - **Introducers:** `in`, `for` and `during` may precede a period and add nothing ("in October" is October, "for 2025" is 2025, "during Q4 2025" is Q4 2025). `of` may stand only between a month name, a quarter or a half and a year or a year phrase ("October of last year", "first half of 2026"). `the` may stand only before `present` or before a quarter or half ("the first half of 2026").
   - **Quarter words:** `quarter`, `half`, `first`, `second`, `third` and `fourth` only as a quarter or half (AI-6.13).
@@ -185,7 +185,8 @@ Added examples, today 2026-11-22 unless a row says otherwise:
 | "since 2025 November" | 2025-11-01 to 2026-11-22 | November 1, 2025 to November 22, 2026 |
 | "in October", "during October" | 2026-10-01 to 2026-10-31 | October 2026 |
 | "for 2025" | 2025-01-01 to 2025-12-31 | 2025 |
-| "previous month", "past month" | as "last month" | October 2026 |
+| "previous month" | as "last month" | October 2026 |
+| "past month", "past year", "the past year" | refused (`past` is not read) | the hint |
 | "current year", "current month" | as "this year", "this month" | 2026 and November 2026 |
 | "October of last year", "the first half of 2026" | as AI-6.2 and AI-6.13 | October 2025 and January to June 2026 |
 | "from October" | refused (`from` with no `to`) | the hint |
