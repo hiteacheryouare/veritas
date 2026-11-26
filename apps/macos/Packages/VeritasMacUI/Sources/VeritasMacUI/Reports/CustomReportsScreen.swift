@@ -364,53 +364,41 @@ private struct CustomReportTable: View {
 	let format: MoneyFormat
 
 	var body: some View {
-		TableCard { grid }
+		let intervals = settings.totalMode ? [] : ReportPeriod.intervals(data.intervals.map(\.interval.interval))
+		let headings = intervals + ["Total"]
+		let groups = data.groups.map { group in
+			line(id: group.id, title: group.name, height: 34, rule: .light, weight: .regular, headings: headings,
+				amounts: (settings.totalMode ? [] : group.intervals.map(\.amount)) + [group.amount])
+		}
+		let total = line(id: "total", title: "Total", height: 36, rule: .strong, weight: .bold, headings: headings,
+			amounts: (settings.totalMode ? [] : data.intervals.map(\.interval.amount)) + [data.total])
+		PinnedTable(leadingHeading: settings.groupBy.title, headings: headings, lines: groups + [total])
 			.accessibilityElement(children: .contain)
 			.accessibilityIdentifier("customReport.table")
 	}
 
-	private var grid: some View {
-		let intervals = settings.totalMode ? [] : data.intervals.map(\.interval.interval)
-		return Grid(alignment: .trailing, horizontalSpacing: 0, verticalSpacing: 0) {
-			GridRow {
-				Text(settings.groupBy.title)
-					.font(.text(.caption)).foregroundStyle(.textTertiary).padding(.leading, Spacing.s4)
-					.frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
-					.pinnedColumn()
-					.gridColumnAlignment(.leading)
-				ForEach(ReportPeriod.intervals(intervals), id: \.self) { Text($0).font(.text(.caption)).foregroundStyle(.textTertiary).padding(.horizontal, Spacing.s3) }
-				Text("Total").font(.text(.caption)).foregroundStyle(.textTertiary).padding(.horizontal, Spacing.s4)
+	/// The last amount is the line's total, set heavier than the intervals.
+	private func line(id: String, title: String, height: CGFloat, rule: TableLine.Rule, weight: Font.Weight, headings: [String], amounts: [Int64]) -> TableLine {
+		TableLine(
+			id: id,
+			height: height,
+			rule: rule,
+			leading: AnyView(
+				Text(title)
+					.font(.text(.body, weight: weight))
+					.padding(.leading, Spacing.s4)
+					.padding(.trailing, Spacing.s3)
+			),
+			cells: amounts.indices.map { index in
+				let isTotal = index == amounts.count - 1
+				return AnyView(
+					ReportAmount(amount: amounts[index], format: format, weight: weight == .bold ? .bold : (isTotal ? .semibold : .medium))
+						.padding(.horizontal, Spacing.s4)
+						.accessibilityElement(children: .ignore)
+						.accessibilityLabel("\(title), \(headings[index]): \(format.amount(amounts[index], on: .register))")
+				)
 			}
-			.frame(height: 30)
-			ForEach(data.groups) { group in
-				Divider()
-				GridRow {
-					Text(group.name).lineLimit(1).fixedSize().padding(.leading, Spacing.s4).padding(.trailing, Spacing.s3)
-						.frame(maxWidth: .infinity, minHeight: 34, alignment: .leading)
-						.pinnedColumn()
-					if !settings.totalMode {
-						ForEach(Array(group.intervals.enumerated()), id: \.offset) { _, cell in
-							ReportAmount(amount: cell.amount, format: format).padding(.horizontal, Spacing.s3)
-						}
-					}
-					ReportAmount(amount: group.amount, format: format, weight: .semibold).padding(.horizontal, Spacing.s4)
-				}
-				.frame(minHeight: 34)
-			}
-			Divider().overlay(Color.textTertiary)
-			GridRow {
-				Text("Total").font(.text(.body, weight: .bold)).padding(.leading, Spacing.s4)
-					.frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
-					.pinnedColumn()
-				if !settings.totalMode {
-					ForEach(Array(data.intervals.enumerated()), id: \.offset) { _, interval in
-						ReportAmount(amount: interval.interval.amount, format: format, weight: .bold).padding(.horizontal, Spacing.s3)
-					}
-				}
-				ReportAmount(amount: data.total, format: format, weight: .bold).padding(.horizontal, Spacing.s4)
-			}
-			.frame(minHeight: 36)
-		}
+		)
 	}
 }
 

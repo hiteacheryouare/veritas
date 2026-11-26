@@ -193,53 +193,41 @@ private struct NetProfitTable: View {
 	let open: (NetProfitCell) -> Void
 
 	var body: some View {
-		let columns = model.columns
-		TableCard { grid(columns) }
+		PinnedTable(headings: model.columns.map(model.heading), lines: model.rows.flatMap(lines))
 			.containerIdentifier("netProfit.table")
 	}
 
-	private func grid(_ columns: [NetProfitColumn]) -> some View {
-		Grid(alignment: .trailing, horizontalSpacing: 0, verticalSpacing: 0) {
-			GridRow {
-				Color.clear.frame(maxWidth: .infinity, minHeight: 30).pinnedColumn().gridColumnAlignment(.leading)
-				ForEach(Array(columns.enumerated()), id: \.offset) { _, column in
-					Text(model.heading(column))
-						.font(.text(.caption))
-						.foregroundStyle(.textTertiary)
-						.frame(minWidth: 96, alignment: .trailing)
-						.padding(.horizontal, Spacing.s4)
-				}
-			}
-			.frame(height: 30)
-			ForEach(model.rows) { row in
-				Divider()
-					.overlay(row.style == .total ? Color.textTertiary : Color.separator)
-				GridRow {
-					title(row)
-						.frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
-						.pinnedColumn()
-					ForEach(Array(row.cells.enumerated()), id: \.offset) { index, cell in
-						CellButton(cell: cell, format: model.format, isTotal: row.style == .total, isRange: index == row.cells.count - 1) {
-							open(cell)
-						}
-						.accessibilityIdentifier("netProfit.cell.\(row.id).\(index)")
+	private func lines(_ row: NetProfitRow) -> [TableLine] {
+		let figures = TableLine(
+			id: row.id,
+			height: 38,
+			rule: row.style == .total ? .strong : .light,
+			leading: AnyView(title(row)),
+			cells: row.cells.indices.map { index in
+				AnyView(
+					CellButton(cell: row.cells[index], format: model.format, isTotal: row.style == .total, isRange: index == row.cells.count - 1) {
+						open(row.cells[index])
 					}
-				}
-				.frame(minHeight: 38)
-				if row.style == .note {
-					GridRow {
-						Text(ReportWords.unreviewedNote)
-							.font(.text(.caption))
-							.foregroundStyle(.textSecondary)
-							.padding(.leading, 28)
-							.padding(.bottom, Spacing.s2)
-							.frame(maxWidth: .infinity, alignment: .leading)
-							.pinnedColumn()
-							.gridCellColumns(columns.count + 1)
-					}
-				}
+					.accessibilityIdentifier("netProfit.cell.\(row.id).\(index)")
+				)
 			}
-		}
+		)
+		guard row.style == .note else { return [figures] }
+		let note = TableLine(
+			id: "\(row.id).note",
+			height: 40,
+			rule: nil,
+			span: AnyView(
+				Text(ReportWords.unreviewedNote)
+					.font(.text(.caption))
+					.foregroundStyle(.textSecondary)
+					.lineLimit(2)
+					.padding(.leading, 28)
+					.padding(.trailing, Spacing.s4)
+					.padding(.bottom, Spacing.s2)
+			)
+		)
+		return [figures, note]
 	}
 
 	@ViewBuilder private func title(_ row: NetProfitRow) -> some View {
@@ -256,7 +244,6 @@ private struct NetProfitTable: View {
 			Text(row.title)
 				.font(.text(.body, weight: weight(row)))
 				.lineLimit(1)
-				.fixedSize()
 				.foregroundStyle(row.style == .below || row.style == .category || row.style == .note ? Color.textSecondary : (row.line == .income && row.style == .line ? Color.moneyIncome : Color.textPrimary))
 		}
 		.padding(.leading, row.style == .below || row.style == .note ? 28 : (row.style == .category ? 44 : Spacing.s4))

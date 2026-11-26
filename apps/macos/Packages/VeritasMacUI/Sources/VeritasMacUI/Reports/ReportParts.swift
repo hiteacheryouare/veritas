@@ -36,53 +36,104 @@ struct ReportAmount: View {
 	}
 }
 
-/// A report table's card. The table fills the card when its columns fit, and
-/// otherwise scrolls sideways inside the card, so a wide table never widens
-/// the page or pushes an inspector off screen.
-struct TableCard<Table: View>: View {
-	@ViewBuilder let table: Table
-	@State private var scrolled: CGFloat = 0
+/// One line of a `PinnedTable`: its first column and one cell per column, or
+/// `span`, which runs the card's full width, such as a note under a line.
+struct TableLine: Identifiable {
+	enum Rule {
+		case light, strong
+	}
+
+	let id: String
+	let height: CGFloat
+	var rule: Rule? = .light
+	var leading: AnyView = AnyView(Color.clear)
+	var cells: [AnyView] = []
+	var span: AnyView?
+}
+
+/// A report table in its card. The first column stays put while the figures
+/// scroll sideways under it, and the figures are built a column at a time as
+/// they come into view, so a year of weeks never widens the page or slows a
+/// scroll. Lines have fixed heights so the two parts line up.
+struct PinnedTable: View {
+	static let headingHeight: CGFloat = 30
+	static let leadingWidth: CGFloat = 200
+
+	var leadingHeading = ""
+	let headings: [String]
+	let lines: [TableLine]
+	@State private var viewport: CGFloat = 0
 
 	var body: some View {
-		ViewThatFits(in: .horizontal) {
-			table
-			ScrollView(.horizontal) {
-				table.environment(\.tableScrolled, scrolled)
+		HStack(alignment: .top, spacing: 0) {
+			VStack(alignment: .leading, spacing: 0) {
+				heading(leadingHeading, alignment: .leading)
+				ForEach(lines) { line in
+					rule(line)
+					line.leading
+						.lineLimit(1)
+						.frame(maxWidth: Self.leadingWidth, alignment: .leading)
+						.frame(height: line.height, alignment: .leading)
+				}
 			}
-			.onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.x } action: { _, offset in
-				scrolled = max(offset, 0)
+			.fixedSize(horizontal: true, vertical: false)
+			ScrollView(.horizontal) {
+				LazyHStack(alignment: .top, spacing: 0) {
+					ForEach(headings.indices, id: \.self) { column in
+						VStack(alignment: .trailing, spacing: 0) {
+							heading(headings[column], alignment: .trailing)
+							ForEach(lines) { line in
+								rule(line)
+								(line.cells.indices.contains(column) ? line.cells[column] : AnyView(Color.clear))
+									.frame(maxWidth: .infinity, alignment: .trailing)
+									.frame(height: line.height)
+							}
+						}
+					}
+				}
+				.frame(minWidth: viewport, alignment: .trailing)
+			}
+			.scrollIndicators(.automatic)
+			.onScrollGeometryChange(for: CGFloat.self) { $0.containerSize.width } action: { _, width in
+				viewport = width
 			}
 		}
+		.background(alignment: .top) { rules }
 		.padding(.vertical, Spacing.s1)
 		.background(.surfaceGrouped, in: .rect(cornerRadius: Radius.section))
 		.clipShape(.rect(cornerRadius: Radius.section))
 		.overlay { RoundedRectangle(cornerRadius: Radius.section).strokeBorder(Color.edgeGrouped) }
 	}
-}
 
-extension EnvironmentValues {
-	@Entry var tableScrolled: CGFloat = 0
-}
-
-extension View {
-	/// Keeps a first-column cell at the card's leading edge while its table
-	/// scrolls sideways. Apply it after the cell's frame, so it covers the column.
-	func pinnedColumn() -> some View {
-		modifier(PinnedColumn())
+	private func heading(_ text: String, alignment: Alignment) -> some View {
+		Text(text)
+			.font(.text(.caption))
+			.foregroundStyle(.textTertiary)
+			.lineLimit(1)
+			.padding(.horizontal, Spacing.s4)
+			.frame(height: Self.headingHeight, alignment: alignment)
 	}
-}
 
-private struct PinnedColumn: ViewModifier {
-	@Environment(\.tableScrolled) private var scrolled
+	/// Each part leaves a rule's room above a line; the rules themselves are
+	/// drawn once behind the table, so they run the card's full width.
+	private func rule(_ line: TableLine) -> some View {
+		Color.clear.frame(height: line.rule == nil ? 0 : 1)
+	}
 
-	func body(content: Content) -> some View {
-		content
-			.background(Color.surfaceGrouped)
-			.overlay(alignment: .trailing) {
-				if scrolled > 0 { Rectangle().fill(Color.separator).frame(width: 1) }
+	private var rules: some View {
+		VStack(spacing: 0) {
+			Color.clear.frame(height: Self.headingHeight)
+			ForEach(lines) { line in
+				switch line.rule {
+				case .light: Rectangle().fill(Color.separator).frame(height: 1)
+				case .strong: Rectangle().fill(Color.textTertiary).frame(height: 1)
+				case nil: EmptyView()
+				}
+				(line.span ?? AnyView(Color.clear))
+					.frame(maxWidth: .infinity, alignment: .leading)
+					.frame(height: line.height)
 			}
-			.offset(x: scrolled)
-			.zIndex(1)
+		}
 	}
 }
 

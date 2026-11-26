@@ -110,44 +110,33 @@ struct RowsTable: View {
 	let id: String
 
 	var body: some View {
-		TableCard { grid }
+		PinnedTable(headings: headings, lines: rows.map(line))
 			.containerIdentifier(id)
 	}
 
-	private var grid: some View {
-		Grid(alignment: .trailing, horizontalSpacing: 0, verticalSpacing: 0) {
-			GridRow {
-				Color.clear.frame(maxWidth: .infinity, minHeight: 30).pinnedColumn().gridColumnAlignment(.leading)
-				ForEach(Array(headings.enumerated()), id: \.offset) { _, heading in
-					Text(heading)
-						.font(.text(.caption))
-						.foregroundStyle(.textTertiary)
+	private func line(_ row: ReportRow) -> TableLine {
+		let weight: Font.Weight = row.isTotal ? .bold : .medium
+		return TableLine(
+			id: row.id,
+			height: 38,
+			rule: row.isTotal ? .strong : .light,
+			leading: AnyView(
+				Text(row.title)
+					.font(.text(.body, weight: weight))
+					.padding(.leading, Spacing.s4)
+					.padding(.trailing, Spacing.s3)
+					.accessibilityIdentifier("\(id).\(row.id)")
+			),
+			cells: row.values.indices.map { index in
+				AnyView(
+					ReportAmount(amount: row.values[index], tone: row.tones[index], format: format, weight: weight)
 						.frame(minWidth: 96, alignment: .trailing)
 						.padding(.horizontal, Spacing.s4)
-				}
+						.accessibilityElement(children: .ignore)
+						.accessibilityLabel("\(row.title), \(headings.indices.contains(index) ? headings[index] : ""): \(format.amount(row.values[index], on: .register))")
+				)
 			}
-			.frame(height: 30)
-			ForEach(rows) { row in
-				Divider().overlay(row.isTotal ? Color.textTertiary : Color.separator)
-				GridRow {
-					Text(row.title)
-						.font(.text(.body, weight: row.isTotal ? .bold : .medium))
-						.lineLimit(1)
-						.fixedSize()
-						.padding(.leading, Spacing.s4)
-						.padding(.trailing, Spacing.s3)
-						.frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
-						.pinnedColumn()
-					ForEach(Array(row.values.enumerated()), id: \.offset) { index, value in
-						ReportAmount(amount: value, tone: row.tones[index], format: format, weight: row.isTotal ? .bold : .medium)
-							.frame(minWidth: 96, alignment: .trailing)
-							.padding(.horizontal, Spacing.s4)
-					}
-				}
-				.frame(minHeight: 38)
-				.accessibilityIdentifier("\(id).\(row.id)")
-			}
-		}
+		)
 	}
 }
 
