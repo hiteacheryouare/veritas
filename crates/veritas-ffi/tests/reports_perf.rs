@@ -6,9 +6,12 @@
 )]
 
 //! R-PERF-4 through the exported API on perf-100k: a typical report within
-//! 100 ms and a year-long Sankey within 500 ms, timed the way the app meets
-//! them, right after an edit made the session classify again. A budget edit
-//! must not cost a reclassification.
+//! 100 ms and a year-long Sankey within 500 ms. Each report is timed the two
+//! ways the app meets it: right after an edit that makes the session classify
+//! the whole budget again (a category rename, as after opening or a category,
+//! account, payee or mapping edit), and right after a transaction edit, which
+//! updates the classification in place. Neither a transaction edit nor a
+//! budget edit may cost classifying the whole budget again.
 
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -152,68 +155,52 @@ fn reports_on_perf_100k_meet_r_perf_4_right_after_an_edit() {
 	let first = format!("{year}-01-01");
 	let last = format!("{year}-12-31");
 	let token = CancelToken::new;
-	let mut timings = Vec::new();
-	let mut time = |name: &str, budget: Duration, took: Duration| {
-		eprintln!("{name}: {took:?}");
-		timings.push((name.to_owned(), budget, took));
+	let mut renames = 0;
+	let mut reclassify = || {
+		renames += 1;
+		session
+			.perform(Command::RenameCategory {
+				category_id: category.clone(),
+				name: format!("Renamed {renames}"),
+			})
+			.unwrap();
 	};
+	let mut timings = Vec::new();
+	{
+		let mut time = |name: &str, budget: Duration, report: &dyn Fn()| {
+			let after_reclassifying = fastest(&mut reclassify, report);
+			let after_edit = fastest(&mut edit, report);
+			eprintln!(
+				"{name}: {after_reclassifying:?} after classifying again, {after_edit:?} after a transaction edit"
+			);
+			timings.push((name.to_owned(), budget, after_reclassifying, after_edit));
+		};
 
-	time(
-		"net profit, 12 months",
-		TYPICAL,
-		fastest(&mut edit, || {
+		time("net profit, 12 months", TYPICAL, &|| {
 			block_on(session.net_profit(month(year, 1), month(year, 12), token())).unwrap();
-		}),
-	);
-	time(
-		"net worth, 12 months",
-		TYPICAL,
-		fastest(&mut edit, || {
+		});
+		time("net worth, 12 months", TYPICAL, &|| {
 			block_on(session.net_worth(month(year, 1), month(year, 12), token())).unwrap();
-		}),
-	);
-	time(
-		"cash flow, 12 months",
-		TYPICAL,
-		fastest(&mut edit, || {
+		});
+		time("cash flow, 12 months", TYPICAL, &|| {
 			block_on(session.cash_flow(month(year, 1), month(year, 12), token())).unwrap();
-		}),
-	);
-	time(
-		"balance sheet",
-		TYPICAL,
-		fastest(&mut edit, || {
+		});
+		time("balance sheet", TYPICAL, &|| {
 			block_on(session.balance_sheet(last.clone(), token())).unwrap();
-		}),
-	);
-	time(
-		"owner's equity, a year",
-		TYPICAL,
-		fastest(&mut edit, || {
+		});
+		time("owner's equity, a year", TYPICAL, &|| {
 			block_on(session.owners_equity(first.clone(), last.clone(), token())).unwrap();
-		}),
-	);
-	time(
-		"tax summary, a year",
-		TYPICAL,
-		fastest(&mut edit, || {
+		});
+		time("tax summary, a year", TYPICAL, &|| {
 			block_on(session.tax_summary(year, token())).unwrap();
-		}),
-	);
-	time(
-		"dashboards",
-		TYPICAL,
-		fastest(&mut edit, || {
+		});
+		time("dashboards", TYPICAL, &|| {
 			block_on(session.dashboards(today.clone(), token())).unwrap();
-		}),
-	);
-	time(
-		"Sankey, a year",
-		YEAR_SANKEY,
-		fastest(&mut edit, || {
+		});
+		time("Sankey, a year", YEAR_SANKEY, &|| {
 			block_on(session.sankey(first.clone(), last.clone(), token())).unwrap();
-		}),
-	);
+		});
+	}
 
 	let after_edit = fastest(&mut edit, || {
 		block_on(session.net_profit(month(year, 6), month(year, 6), token())).unwrap();
@@ -234,14 +221,28 @@ fn reports_on_perf_100k_meet_r_perf_4_right_after_an_edit() {
 			block_on(session.net_profit(month(year, 6), month(year, 6), token())).unwrap();
 		},
 	);
+	let after_reclassifying = fastest(&mut reclassify, || {
+		block_on(session.net_profit(month(year, 6), month(year, 6), token())).unwrap();
+	});
 	eprintln!(
-		"one month after an edit: {after_edit:?}, after a budget edit: {after_budget_edit:?}"
+		"one month after an edit: {after_edit:?}, after a budget edit: {after_budget_edit:?}, after a category rename (classifying again): {after_reclassifying:?}"
 	);
-	for (name, budget, took) in &timings {
-		assert!(took <= budget, "{name} took {took:?}, over {budget:?}");
+	for (name, budget, after_reclassifying, after_edit) in &timings {
+		assert!(
+			after_reclassifying <= budget,
+			"{name} took {after_reclassifying:?} after classifying again, over {budget:?}"
+		);
+		assert!(
+			after_edit <= budget,
+			"{name} took {after_edit:?} after a transaction edit, over {budget:?}"
+		);
 	}
 	assert!(
-		after_budget_edit * 3 < after_edit,
+		after_edit * 3 < after_reclassifying,
+		"a transaction edit updated the classification in place, so the next report skips classifying"
+	);
+	assert!(
+		after_budget_edit * 3 < after_reclassifying,
 		"a budget edit kept the classification, so the next report skips classifying"
 	);
 	session.close().unwrap();

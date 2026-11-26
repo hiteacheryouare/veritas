@@ -90,8 +90,10 @@ final class ScriptedAnswerer: AssistantAnswering {
 
 /// Closing the panel or switching budgets stops an answer mid-stream. The
 /// test holds the stream's continuation, so it decides when each word
-/// arrives, and a word sent after the stop is refused by the stream itself.
-/// Nothing here waits on a clock.
+/// arrives. The stream may notice the cancellation a moment after `stop()`,
+/// because its `next()` runs off the main actor, so the tests wait for that
+/// moment rather than assume it, and check a word sent in between never
+/// lands. Nothing here waits on a clock.
 @MainActor
 struct AssistantPanelCancelTests {
 	private func context() -> AssistantContext? {
@@ -121,13 +123,30 @@ struct AssistantPanelCancelTests {
 		try #require(panel.exchanges.first?.answer == "Net")
 
 		panel.stop()
-		#expect(answerer.terminated, "stopping cancels the model's stream before stop() returns")
-		#expect(refused(stream.yield("Net Profit")), "so the stream refuses any later word")
+		#expect(panel.exchanges.first?.state == .failed(AssistantPanelModel.stopped))
+		stream.yield("Net Profit")
 		await panel.settle()
-		await letThePanelRun { false }
-		#expect(panel.exchanges.first?.answer == "Net", "no more text lands")
+		await answerer.waitUntilTerminated()
+		#expect(refused(stream.yield("Net Profit for October")), "the model's stream was cancelled, so it refuses any later word")
+		#expect(panel.exchanges.first?.answer == "Net", "a word sent before the stream noticed the stop never lands")
 		#expect(panel.exchanges.first?.state == .failed(AssistantPanelModel.stopped))
 		#expect(!panel.isAnswering)
+	}
+
+	/// The model hands the answer loop a word after the panel has stopped,
+	/// the case `stop()` promises nothing more lands for. Every word shows at
+	/// once, so a word that got past the stop would be on screen here.
+	@Test func aWordTheModelHandsOverAfterTheStopNeverLands() async throws {
+		let answerer = HandsOverAfterStop()
+		let panel = AssistantPanelModel(makeAnswerer: { _ in answerer }, context: context)
+		panel.frameInterval = .zero
+		answerer.panel = panel
+		panel.draft = "What changed?"
+		panel.ask()
+		await panel.settle()
+		#expect(answerer.handedOver == ["Net", "Net Profit"], "the loop was handed a word after the stop")
+		#expect(panel.exchanges.first?.answer == "Net")
+		#expect(panel.exchanges.first?.state == .failed(AssistantPanelModel.stopped))
 	}
 
 	@Test func switchingBudgetsDropsThePanelAndStopsTheAnswer() async throws {
@@ -144,8 +163,8 @@ struct AssistantPanelCancelTests {
 		weak let dropped = panel
 		panel = nil
 		#expect(dropped == nil, "the old budget's panel is gone")
-		#expect(answerer.terminated, "and dropping it cancelled its model stream")
-		#expect(refused(stream.yield("Net Profit")))
+		await answerer.waitUntilTerminated()
+		#expect(refused(stream.yield("Net Profit")), "and dropping it cancelled its model stream")
 	}
 }
 
@@ -211,19 +230,83 @@ struct AssistantPanelCoalescingTests {
 	}
 }
 
+/// Hands over "Net", then stops the panel inside the model's next step and
+/// hands over "Net Profit" anyway, as a model can when the cancellation
+/// arrives while it is producing a word.
+/// This relies on `AsyncThrowingStream(unfolding:)` still delivering a step
+/// that was already running when the cancel arrived. If it ever dropped that
+/// word, the test would pass without reaching the answer loop's check.
+@MainActor
+final class HandsOverAfterStop: AssistantAnswering {
+	final class Given: Sendable {
+		private let words = Mutex<[String]>([])
+		var all: [String] { words.withLock { $0 } }
+		func hand(_ word: String) -> String {
+			words.withLock { $0.append(word) }
+			return word
+		}
+	}
+
+	weak var panel: AssistantPanelModel?
+	private let given = Given()
+
+	var handedOver: [String] { given.all }
+
+	func answer(_ question: String) -> AsyncThrowingStream<String, any Error> {
+		let given = given
+		let panel = panel
+		return AsyncThrowingStream(unfolding: { [weak panel] in
+			switch given.all.count {
+			case 0:
+				return given.hand("Net")
+			case 1:
+				await MainActor.run { panel?.stop() }
+				return given.hand("Net Profit")
+			default:
+				return nil
+			}
+		})
+	}
+
+	func reset() {}
+}
+
 /// Hands the test the stream's continuation instead of producing words itself.
 @MainActor
 final class GatedAnswerer: AssistantAnswering {
+	/// Set when the stream terminates; `wait()` returns once it has.
 	final class Ended: Sendable {
-		private let flag = Mutex(false)
-		var value: Bool { flag.withLock { $0 } }
-		func set() { flag.withLock { $0 = true } }
+		private let state = Mutex<(ended: Bool, waiters: [CheckedContinuation<Void, Never>])>((false, []))
+		var value: Bool { state.withLock { $0.ended } }
+
+		func set() {
+			let waiters = state.withLock { state in
+				state.ended = true
+				defer { state.waiters = [] }
+				return state.waiters
+			}
+			waiters.forEach { $0.resume() }
+		}
+
+		func wait() async {
+			await withCheckedContinuation { continuation in
+				let ended = state.withLock { state in
+					if !state.ended { state.waiters.append(continuation) }
+					return state.ended
+				}
+				if ended { continuation.resume() }
+			}
+		}
 	}
 
 	private(set) var continuation: AsyncThrowingStream<String, any Error>.Continuation?
 	private let ended = Ended()
 
 	var terminated: Bool { ended.value }
+
+	func waitUntilTerminated() async {
+		await ended.wait()
+	}
 
 	func answer(_ question: String) -> AsyncThrowingStream<String, any Error> {
 		let (stream, continuation) = AsyncThrowingStream.makeStream(of: String.self, throwing: (any Error).self)
