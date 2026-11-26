@@ -23,7 +23,7 @@
 
 	--color-text-primary: #1c1c21;
 	--color-text-secondary: #5d5d66;
-	--color-text-tertiary: #606069;
+	--color-text-tertiary: #5f5f68;
 	--color-text-paper: #23232a;
 
 	--color-accent: #23169c;
@@ -32,7 +32,7 @@
 	--color-surface-selected: rgba(20, 22, 30, 0.08);
 	--color-focus-ring: #23169c;
 	--color-text-on-accent: #f5f5f7;
-	--color-brand-secondary: #03698c;
+	--color-brand-secondary: #00688b;
 	--color-brand-secondary-fill: #007ea7;
 	--color-brand: #23169c;
 	--color-text-on-brand: #f5f5f7;
@@ -41,13 +41,13 @@
 
 	--color-money-available: #036f46;
 	--color-money-available-fill: #56e39f;
-	--color-money-low: #7d5c02;
+	--color-money-low: #7c5b02;
 	--color-money-low-fill: #f5b700;
-	--color-money-overspent: #c50125;
+	--color-money-overspent: #c30225;
 	--color-money-overspent-fill: #db162f;
-	--color-money-income: #03698c;
+	--color-money-income: #00688b;
 	--color-money-income-fill: #007ea7;
-	--color-money-neutral: #606069;
+	--color-money-neutral: #5f5f68;
 
 	--color-chart-expense: #6e6e78;
 	--color-chart-expense-soft: rgba(110, 110, 120, 0.28);
@@ -91,16 +91,16 @@
 
 	--color-text-primary: #ececf0;
 	--color-text-secondary: #b0b0b9;
-	--color-text-tertiary: #acacb4;
+	--color-text-tertiary: #afafb7;
 	--color-text-paper: #23232a;
 
-	--color-accent: #94a8fe;
-	--color-accent-fill: #94a8fe;
-	--color-accent-soft: rgba(148, 168, 254, 0.14);
+	--color-accent: #98acff;
+	--color-accent-fill: #98acff;
+	--color-accent-soft: rgba(152, 172, 255, 0.14);
 	--color-surface-selected: rgba(240, 240, 250, 0.12);
-	--color-focus-ring: #94a8fe;
+	--color-focus-ring: #98acff;
 	--color-text-on-accent: #1c1c21;
-	--color-brand-secondary: #56b8e3;
+	--color-brand-secondary: #59bbe6;
 	--color-brand-secondary-fill: #007ea7;
 	--color-brand: #23169c;
 	--color-text-on-brand: #f5f5f7;
@@ -111,11 +111,11 @@
 	--color-money-available-fill: #56e39f;
 	--color-money-low: #f5b700;
 	--color-money-low-fill: #f5b700;
-	--color-money-overspent: #ff8b86;
+	--color-money-overspent: #ff908a;
 	--color-money-overspent-fill: #db162f;
-	--color-money-income: #56b8e3;
+	--color-money-income: #59bbe6;
 	--color-money-income-fill: #007ea7;
-	--color-money-neutral: #acacb4;
+	--color-money-neutral: #afafb7;
 
 	--color-chart-expense: #a5a5ae;
 	--color-chart-expense-soft: rgba(165, 165, 174, 0.3);

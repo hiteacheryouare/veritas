@@ -1,4 +1,4 @@
-"""Derive Veritas's text-safe brand shades.
+"""Derive Veritas's text-safe brand and grey shades.
 
 Each brand colour keeps its OKLCH hue. Its lightness moves only as far as it
 must for the shade to reach the target contrast on every surface it sits on;
@@ -15,6 +15,11 @@ BRAND = {
     "bad": 0xDB162F,
     "good": 0x56E39F,
     "warning": 0xF5B700,
+}
+
+GREYS = {
+    "secondary": (0x66666F, 0xA2A2AB),
+    "tertiary": (0x6C6C75, 0x97979F),
 }
 
 LIGHT_SURFACES = {
@@ -34,7 +39,13 @@ TEXT = 4.5
 ACCENT_SOFT_LIGHT = 0.1
 ACCENT_SOFT_DARK = 0.14
 UI = 3.0
-MARGIN = 0.1
+MARGIN = 0.15
+HOVER_LIGHT = (0x14161E, 0.04)
+HOVER_DARK = (0xF0F0FA, 0.05)
+SIDEBAR_LIGHT = (0xECEEF3, 0.78, 0xFFFFFF)
+SIDEBAR_DARK = (0x2C2D34, 0.72, 0x1E1E22)
+SIDEBAR_SELECTED_LIGHT = (0x14161E, 0.08)
+SIDEBAR_SELECTED_DARK = (0xF0F0FA, 0.12)
 
 
 def channels(hex_value):
@@ -121,23 +132,27 @@ def over(top, alpha, bottom):
     return to_hex(mixed)
 
 
-def with_selection(surfaces, accent, alpha):
-    """Rows tint with the accent at low alpha when selected, so text must read there too."""
+def with_selection(surfaces, accent, alpha, hover, sidebar, sidebar_selected):
+    """Text must also read on rows tinted by selection or hover, and on the sidebar and its selected row."""
     result = dict(surfaces)
     for name, (hex_value, _) in surfaces.items():
         result[f"{name} selected"] = (over(accent, alpha, hex_value), 1.0)
+        result[f"{name} hover"] = (over(hover[0], hover[1], hex_value), 1.0)
+    side = over(sidebar[0], sidebar[1], sidebar[2])
+    result["sidebar"] = (side, 1.0)
+    result["sidebar selected"] = (over(sidebar_selected[0], sidebar_selected[1], side), 1.0)
     return result
 
 
 def main():
     accent_dark = derive(BRAND["primary"], DARK_SURFACES, TEXT, lighter=True)
     while True:
-        dark = with_selection(DARK_SURFACES, accent_dark, ACCENT_SOFT_DARK)
+        dark = with_selection(DARK_SURFACES, accent_dark, ACCENT_SOFT_DARK, HOVER_DARK, SIDEBAR_DARK, SIDEBAR_SELECTED_DARK)
         settled = derive(BRAND["primary"], dark, TEXT, lighter=True)
         if settled == accent_dark:
             break
         accent_dark = settled
-    light = with_selection(LIGHT_SURFACES, BRAND["primary"], ACCENT_SOFT_LIGHT)
+    light = with_selection(LIGHT_SURFACES, BRAND["primary"], ACCENT_SOFT_LIGHT, HOVER_LIGHT, SIDEBAR_LIGHT, SIDEBAR_SELECTED_LIGHT)
     print(f"{'colour':<10} {'brand':<8} {'light text':<11} {'min':>5} {'dark text':<10} {'min':>5}")
     for name, base in BRAND.items():
         light_text = derive(base, light, TEXT, lighter=False)
@@ -146,7 +161,13 @@ def main():
             f"{name:<10} #{base:06X}  #{light_text:06X}     {worst(light_text, light):5.2f} "
             f"#{dark_text:06X}    {worst(dark_text, dark):5.2f}"
         )
-    print(f"\nselected rows: light #{light['grouped selected'][0]:06X}, dark #{dark['raised selected'][0]:06X}")
+    for name, (light_base, dark_base) in GREYS.items():
+        light_text = derive(light_base, light, TEXT, lighter=False)
+        dark_text = derive(dark_base, dark, TEXT, lighter=True)
+        print(
+            f"{name:<10} grey      #{light_text:06X}     {worst(light_text, light):5.2f} "
+            f"#{dark_text:06X}    {worst(dark_text, dark):5.2f}"
+        )
 
 
 if __name__ == "__main__":

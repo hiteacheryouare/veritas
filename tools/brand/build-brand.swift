@@ -17,7 +17,7 @@ let fm = FileManager.default
 
 enum Palette {
 	static let primary = "#23169C"
-	static let primaryDarkMode = "#94A8FE"
+	static let primaryDarkMode = "#98ACFF"
 	static let dark = "#141418"
 	static let black = "#000000"
 	static let white = "#FFFFFF"

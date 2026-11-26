@@ -8,8 +8,8 @@ import VeritasDesign
 struct TokenBehaviorTests {
 	@Test func aColorTokenResolvesToItsValueForEachAppearance() throws {
 		let color = NSColor(Color(ColorToken.moneyOverspent))
-		#expect(try components(of: color, in: .aqua) == [0xc5, 0x01, 0x25, 255])
-		#expect(try components(of: color, in: .darkAqua) == [0xff, 0x8b, 0x86, 255])
+		#expect(try components(of: color, in: .aqua) == [0xc3, 0x02, 0x25, 255])
+		#expect(try components(of: color, in: .darkAqua) == [0xff, 0x90, 0x8a, 255])
 	}
 
 	@Test func translucentTokensKeepTheirAlpha() throws {
