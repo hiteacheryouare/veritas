@@ -86,7 +86,7 @@ Status: draft, revised for the PR #93 review round, with budget habits (AI-10) a
 
 - **AI-6.3** "This month" and "this year" are the whole calendar period, matching the Net Profit screen, including days after today. "So far" and "to date" end today. Example: on 2026-11-22, "October" alone is October 2026. On 2026-09-05 it is October 2025. On 2026-10-05 it is October 2026, whole month.
 - **AI-6.4** A row belongs to the period containing its own date (conventions, top of classification.md). A refund dated in a later period than its purchase reduces the later period only, as in CLS-8 C-1.
-- **AI-6.5** **Words are read by the core.** The core's `resolvePeriod(text, today)` resolves the user's words against today and returns the range and its AI-6.1 label, or a refusal. The app and the model do no date arithmetic. The words are folded for case and accents, curly apostrophes are made straight, and runs of whitespace count as one space. **English month names only**: the full names and their 3-letter abbreviations, and `sept`. The Mac's own language does not add month names. A month name in another language is not read, so a question that holds one gets the refusal of AI-6.8 when nothing else names a period.
+- **AI-6.5** **Words are read by the core.** The core's `resolvePeriod(text, today)` resolves the user's words against today and returns the range and its AI-6.1 label, or a refusal. The app and the model do no date arithmetic. The words are folded for case and accents, curly apostrophes are made straight, and runs of whitespace count as one space. **English month names only**: the full names and their 3-letter abbreviations, and `sept`. The Mac's own language does not add month names. A month name in another language is an unread word and the whole question is refused (AI-6.11).
 - **AI-6.6** **Ranges written in words.** A range names two months. The year of each end is the year written beside it, and a year written before the first month name belongs to the first month name, as in "2025 November". Written years always win. A year beside a month name that already has one is a refusal (AI-6.8).
   - **Both ends have a year:** as written. "November 2025 to January 2026" is 2025-11-01 to 2026-01-31, and "November 2024 to January 2026" is the 15 months between.
   - **Only the end has a year:** the start is the latest month of its name that is not after the end. "November to January 2026" is 2025-11-01 to 2026-01-31, and "January to January 2026" is January 2026.
@@ -100,6 +100,7 @@ Status: draft, revised for the PR #93 review round, with budget habits (AI-10) a
   - more than two dates are written, or a date is written beside any month name, year or `YYYY-MM`. Dates stand alone: one date, or two in order (`2026-10-01 to 2026-10-15`);
   - more than two month names are written ("January, March and June"), because that is a list of months and not a range, and reading its first and last as a range would answer a different question;
   - a day number is written beside a month name ("October 15", "October 1 to 15"). A period inside a month is written as dates, `2026-10-01 to 2026-10-15`, and the hint says so. The core never widens a day to its month;
+  - a word is not understood (AI-6.11);
   - the words name no period it reads.
 
   The hint is exactly: `Ask again with a period such as this month, so far this month, last month, this year, October 2026, 2026, or 2026-10-01 to 2026-10-15.`
@@ -130,6 +131,42 @@ Status: draft, revised for the PR #93 review round, with budget habits (AI-10) a
 | "mars" (French), "Mai" (German) alone | refused (English names only) | the hint |
 | today "2026-02-30" | an error, no hint | |
 
+
+- **AI-6.11** **Every word must be understood.** The core reads only these words: month names and abbreviations (AI-6.5), numbers and dates, and the words of the AI-6.2 phrases and of AI-6.12 and AI-6.13: `this`, `last`, `previous`, `past`, `current`, `same`, `month`, `year`, `quarter`, `half`, `first`, `second`, `third`, `fourth`, `q1` to `q4`, `h1`, `h2`, `so`, `far`, `date`, `ytd`, `mtd`, `today`, `now`, `present`, `since`, `from`, `to`, `through`, `thru`, `until`, `till`, `up`, `in`, `of`, `the`, `during`, `for`. A word outside this list refuses the whole question with the hint, and nothing is guessed from the words that were understood. So "Novembre 2025" is refused, not read as 2025, "may I see this year" is refused, not read as May, and "January and March" is refused. A lone "may" is the month May, because it is on its own. This is what stops the period words from being a place the model's other words can hide a different question.
+- **AI-6.12** **Open ends: "since" and "to now".** `since <start>` and `<start> to now` (also `until now`, `through today`, `to the present`, with `now`, `today` or `present` after the connecting word) read from the start to today. The start is a month (the latest such month not after today's month if no year is written), a year, or a date: its first day. The label is the partial form, `October 1 to November 22, 2026`. A start after today is refused. These words do not stop at the named period: "October to now" on 2026-11-22 is 2026-10-01 to 2026-11-22, whereas "October so far" and "October to date" only cut a period that holds today at today (AI-6.3), so on 2026-11-22 they are all of October. "since November" on 2026-11-22 is 2026-11-01 to 2026-11-22. With no start, `until now` is "so far this month" (AI-6.2).
+- **AI-6.13** **Quarters and halves.** `Q1` to `Q4`, "first" to "fourth quarter", `H1` and `H2`, "first half" and "second half", each with an optional year and the words `of` and `the`. A quarter is three whole calendar months (Q1 January to March, Q4 October to December), a half is six (the first half January to June). With a year it is that year's. Without one it is the latest such quarter or half that has started, so the current one counts whole, including days after today: on 2026-11-22 "Q4" is 2026-10-01 to 2026-12-31 and "second half" is 2026-07-01 to 2026-12-31, and on 2026-03-10 "Q4" is Q4 2025. "this year" and "last year" give the year. The label is the whole-month form (`October to December 2025`, `January to June 2026`). One quarter or half only: two, or one beside a month name, is refused. "So far" cuts it at today (AI-6.3).
+- **AI-6.14** **A single date and the balance sheet.** One written date, or "today", is a one-day period: `first == last`, and the label is `November 22, 2026`. The balance sheet tool (ST-2, as of a date) reads its words through the core and takes the period's last day as its date:
+  - a single date or "today" is that date. A date after today is **refused**, with the hint `Ask again with today or an earlier date, such as today or 2026-10-31.`, because a balance on a day that has not come is not a recorded fact, and answering for another date would change the question. The old clamp of a later date to today is withdrawn;
+  - a period (a month, a year, "this month", "last month") is the balance at its last day, and a period whose last day is after today is the balance as of today. "this month" on 2026-11-22 is as of 2026-11-22, and "last month" is as of 2026-10-31;
+  - the first line states the date used: `Balance sheet as of November 22, 2026`.
+- **AI-6.15** **The tax year.** The tax summary tool (TAX-5) reads one whole calendar year through the core: the words must resolve to one whole year, 1 January to 31 December of the same year ("2025", "last year", "this year"). Anything else is refused with the existing hint `Ask again with a calendar year such as 2026.`: two years ("2024 to 2025"), a month or quarter, a partial year ("so far this year", "year to date"), or a single date. A summary has no partial form, and reading "year to date" as the whole year would change what was asked.
+
+Added examples, today 2026-11-22 unless a row says otherwise:
+
+| User's words | Range | Label |
+|---|---|---|
+| "since October" | 2026-10-01 to 2026-11-22 | October 1 to November 22, 2026 |
+| "October to now", "October through today" | 2026-10-01 to 2026-11-22 | October 1 to November 22, 2026 |
+| "since October 2025" | 2025-10-01 to 2026-11-22 | October 1, 2025 to November 22, 2026 |
+| "since 2026-10-15" | 2026-10-15 to 2026-11-22 | October 15 to November 22, 2026 |
+| "since December" | 2025-12-01 to 2026-11-22 (the latest December not after today's month, then to today) | December 1, 2025 to November 22, 2026 |
+| "since 2027" | refused (a start after today) | the hint |
+| "October so far", "October to date" | 2026-10-01 to 2026-10-31 | October 2026 |
+| "Q4 2025" | 2025-10-01 to 2025-12-31 | October to December 2025 |
+| "Q4" | 2026-10-01 to 2026-12-31 | October to December 2026 |
+| "Q4", today 2026-03-10 | 2025-10-01 to 2025-12-31 | October to December 2025 |
+| "first half of 2026" | 2026-01-01 to 2026-06-30 | January to June 2026 |
+| "second half" | 2026-07-01 to 2026-12-31 | July to December 2026 |
+| "Q1 to Q3 2026", "Q4 and March" | refused (more than one quarter, or a quarter beside a month) | the hint |
+| "Novembre 2025", "may I see this year", "January and March" | refused (an unread word) | the hint |
+| "may" | 2026-05-01 to 2026-05-31 | May 2026 |
+| "2026-10-01 to October 15" | refused (a date beside a month name) | the hint |
+| balance sheet, "today" | as of 2026-11-22 | Balance sheet as of November 22, 2026 |
+| balance sheet, "2026-12-31" | refused (a later date) | the balance-sheet hint |
+| balance sheet, "this month" | as of 2026-11-22 | Balance sheet as of November 22, 2026 |
+| balance sheet, "last month" | as of 2026-10-31 | Balance sheet as of October 31, 2026 |
+| tax summary, "last year" | 2025 | the tax year 2025 |
+| tax summary, "2024 to 2025", "so far this year", "October 2026" | refused | `Ask again with a calendar year such as 2026.` |
 
 ## AI-7 Budget figures
 
