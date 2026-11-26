@@ -127,7 +127,7 @@ private struct NetProfitChart: View {
 	var body: some View {
 		VStack(alignment: .leading, spacing: Spacing.s2) {
 			HStack(spacing: Spacing.s4) {
-				legend("Income", .moneyIncomeFill)
+				legend("Income", .chartMark(.moneyIncomeFill))
 				legend("Expenses", .chartExpense)
 			}
 			.font(.text(.caption))
@@ -139,7 +139,7 @@ private struct NetProfitChart: View {
 					width: .fixed(26)
 				)
 				.position(by: .value("Series", bar.series))
-				.foregroundStyle(bar.series == "Income" ? Color.moneyIncomeFill : Color.chartExpense)
+				.foregroundStyle(bar.series == "Income" ? Color.chartMark(.moneyIncomeFill) : Color.chartExpense)
 				.clipShape(.rect(cornerRadius: 4))
 			}
 			.chartLegend(.hidden)
