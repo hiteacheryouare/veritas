@@ -35,7 +35,7 @@ These exact values are for fills, bars, dots and chart marks. Text and small ico
 | `white` | White | Photos and dark surfaces, one-color print |
 | no suffix | `currentColor` | Inherits the text color: web pages, icons in other apps |
 
-In the app, the logo takes `color-accent`: primary in light mode and #94A8FE in dark mode.
+In the app, the logo takes `color-accent`: primary in light mode and #98ACFF in dark mode.
 
 ## Clear space and minimum size
 
