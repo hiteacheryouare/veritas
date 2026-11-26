@@ -70,6 +70,7 @@ struct BudgetScreen: View {
 			.padding(.bottom, Spacing.s6)
 			.frame(maxWidth: .infinity, alignment: .leading)
 			.environment(\.shownMonth, screen.sheet?.month)
+			.environment(\.largeBudgetMonth, Self.isLarge(screen.groups) ? screen.sheet?.month : nil)
 			.stillOnRapidRepeat(of: screen.sheet?.month)
 			.onGeometryChange(for: Bool.self) { $0.size.width - 2 * Spacing.s5 >= EnvelopeLayout.widthWithBar } action: { showsBar = $0 }
 			.environment(\.showsDrainBar, showsBar)
@@ -144,6 +145,11 @@ struct BudgetScreen: View {
 		ForEach(screen.groups, id: \.id) { group in
 			EnvelopeGroupView(group: group, screen: screen, dense: workspace.isDense)
 		}
+	}
+
+	/// Too many rows to cross-fade each one when the month changes.
+	static func isLarge(_ groups: [EnvelopeGroup]) -> Bool {
+		groups.reduce(0) { $0 + $1.envelopes.count } > Motion.animatedRowLimit
 	}
 
 	static func title(_ month: Month) -> String {

@@ -124,6 +124,11 @@ public extension Motion {
 	static let turn = Motion("turn", .spring(duration: Duration.story, bounce: 0), reduced: fade)
 
 	static let all: [Motion] = [.instant, .fast, .leave, .sheet, .pageIn, .pageOut, .settle, .morph, .push, .turn]
+
+	/// A change touching more rows than this happens without animation
+	/// (design/motion.md, performance): hundreds of cross-fades at once cost
+	/// frames and tell the user nothing more than one would.
+	static let animatedRowLimit = 20
 }
 
 // MARK: Debug time scale

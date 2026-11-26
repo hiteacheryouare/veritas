@@ -34,7 +34,7 @@ struct AvailableLabel: View {
 			}
 			Text(format.amount(amount, on: .budget))
 				.font(.figures(.body, weight: .semibold))
-				.valueChange(amount)
+				.rowFigureChange(amount)
 			Text(word ?? tone.word ?? "")
 				.font(.text(.caption))
 				.opacity(0.85)
@@ -49,6 +49,29 @@ extension EnvironmentValues {
 	/// The month on screen. A drain bar never animates when it changes, so a
 	/// bar doesn't appear to drain from one month into the next.
 	@Entry var shownMonth: Month? = nil
+	/// The month on screen when the budget has more envelopes than
+	/// `Motion.animatedRowLimit`, otherwise nil. Row figures don't cross-fade
+	/// when it changes, so a month change on a large budget is one swap.
+	@Entry var largeBudgetMonth: Month? = nil
+}
+
+extension View {
+	/// A row's money figure: it cross-fades after a commit, and on a month
+	/// change only when the budget is small enough to animate every row.
+	func rowFigureChange<Value: Equatable>(_ value: Value) -> some View {
+		modifier(RowFigureChange(value: value))
+	}
+}
+
+private struct RowFigureChange<Value: Equatable>: ViewModifier {
+	let value: Value
+	@Environment(\.largeBudgetMonth) private var largeBudgetMonth
+
+	func body(content: Content) -> some View {
+		content
+			.valueChange(value)
+			.still(whenChanging: largeBudgetMonth)
+	}
 }
 
 /// What's left of the envelope, draining as it's spent. Overspent is a red

@@ -84,7 +84,7 @@ Tokens are in `tokens.md`; the full system is in `motion.md`.
 | Drain bar after a budget change | `fast` | Width eases to the new value when Return commits |
 | A figure changed by a commit | `fast` cross-fade | Never rolls through digits |
 | Row selection, hover, focus ring | `fast` | Background only |
-| Month change | `fast` cross-fade of the figures | Drain bars change at once. No sliding. A held ⌘← or ⌘→ changes without animation after the first press |
+| Month change | `fast` cross-fade of the figures | Drain bars change at once. No sliding. On a budget with more than 20 envelopes, only To Budget cross-fades and the rows change at once. A held ⌘← or ⌘→ changes without animation after the first press |
 | Dashboard drag | `settle` | The card follows the pointer, settles into its slot on release and holds it while the core moves it. Neighbours settle around it |
 | Banners and the find bar | `settle` | The page below settles as one comes or goes |
 | Sheets and popovers | AppKit | New budget's steps cross-fade and the sheet's height settles. A loading sheet opens at its final height |
