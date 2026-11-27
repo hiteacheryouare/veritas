@@ -70,22 +70,31 @@ Every amount field (budgeted, quick entry, Move money, Paid, split amounts) beha
 
 - Every number in Net Profit and every Sankey node can take focus. Return opens its transactions, the same as a click.
 - Forecast: the horizon control is a segmented control (←/→ when focused). Up to three what-ifs; the add button says how many are left.
-- Wrapped: ← / → change cards, Space pauses.
+- Wrapped: ← / → change cards.
 
 ## Motion
 
-| What | Duration | Notes |
-|---|---|---|
-| Drain bar after a budget change | 150 ms | Width eases to the new value when Return commits |
-| Row selection, hover, focus ring | 150 ms | Background only |
-| Month change | 150 ms | Cross-fade of the numbers. No sliding |
-| Group collapse and Dense toggle | 150 ms | Height change |
-| Sheets and popovers | 220 ms | Fade and a short drop from the toolbar. Exit uses `easing-exit` |
-| Wrapped card change | 220 ms | Cross-fade. The story advances on its own every 6 s unless paused |
+Tokens are in `tokens.md`; the full system is in `motion.md`.
 
-- Amounts never count up or roll. They change in place.
-- Nothing moves unless the user did something, apart from Wrapped's auto-advance.
-- With Reduce Motion on, every duration is 0. Wrapped still advances, without transitions.
+| What | Motion | Notes |
+|---|---|---|
+| Sidebar, ⌘1 … ⌘6, ⌘K | Page fade-through | The old page fades out over 100 ms; the new one fades in over 200 ms, starting 60 ms in and rising 4 pt. Its content appears when loaded, and a spinner only after 250 ms |
+| A row opening its page (Accounts to a register) | Push | Comes in 24 pt from the trailing side as the list leaves |
+| Dashboard card to its page | Morph | The card grows into the page and shrinks back into its slot. The grid keeps its scroll position |
+| Drain bar after a budget change | `fast` | Width eases to the new value when Return commits |
+| A figure changed by a commit | `fast` cross-fade | Never rolls through digits |
+| Row selection, hover, focus ring | `fast` | Background only |
+| Month change | `fast` cross-fade of the figures | Drain bars change at once. No sliding. On a budget with more than 20 envelopes, only To Budget cross-fades and the rows change at once. A held ⌘← or ⌘→ changes without animation after the first press |
+| Dashboard drag | `settle` | The card follows the pointer, settles into its slot on release and holds it while the core moves it. Neighbours settle around it |
+| Banners and the find bar | `settle` | The page below settles as one comes or goes |
+| Sheets and popovers | AppKit | New budget's steps cross-fade and the sheet's height settles. A loading sheet opens at its final height |
+| Coach mark | `settle` | Moves to its next anchor, or to a target that appears late |
+| Mo Nee question | `sheet` | The new question and answer rise 8 pt as they fade in. The answer grows without animation |
+| Wrapped card change | `turn` | The next card drifts in 12 pt from the side it came from. The reader pages it; nothing advances on its own |
+
+- Amounts never count up or roll. They cross-fade or change in place, and an amount being typed never animates.
+- Nothing moves unless the user did something. The Mo Nee typing dots are the only loop.
+- With Reduce Motion on, movement becomes a 150 ms fade at most, and small changes happen at once.
 
 ## Focus and accessibility
 
