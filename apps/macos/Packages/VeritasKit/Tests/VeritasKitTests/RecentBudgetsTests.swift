@@ -86,8 +86,9 @@ struct RecentBudgetsTests {
 		let recents = RecentBudgets(defaults: nil, locate: { _ in unplugged ? .unmounted : .here })
 		recents.opened(name: "Business", folder: Self.folder("b"))
 		recents.opened(name: "Household", folder: Self.folder("a"))
+		recents.hold(Self.folder("a"))
 		#expect(recents.budgetToReopen == nil, "another window has it open")
-		recents.closed(Self.folder("a"))
+		recents.release(Self.folder("a"))
 		#expect(recents.budgetToReopen?.name == "Household", "the most recent, not the next one down")
 		unplugged = true
 		#expect(recents.budgetToReopen == nil, "its drive isn't connected")
@@ -105,6 +106,59 @@ struct RecentBudgetsTests {
 		let later = WorkspaceModel(library: library, recents: recents, format: MoneyFormat())
 		await later.reopenMostRecent()
 		#expect(later.overview?.name == "a")
+	}
+
+	@Test func twoWindowsOpeningAtOnceDontBothPickTheLastBudget() async {
+		let library = SwitchingLibrary()
+		let recents = RecentBudgets(defaults: nil, locate: { _ in .here })
+		recents.opened(name: "a", folder: Self.folder("a"))
+		library.holdsOpen = true
+		let first = WorkspaceModel(library: library, recents: recents, format: MoneyFormat())
+		let second = WorkspaceModel(library: library, recents: recents, format: MoneyFormat())
+		let opening = Task { await first.reopenMostRecent() }
+		while !library.isHoldingOpen { await Task.yield() }
+		await second.reopenMostRecent()
+		#expect(second.phase == .empty, "the first window already holds it, though it hasn't finished opening")
+		library.releaseOpen()
+		await opening.value
+		#expect(first.overview?.name == "a")
+		#expect(library.log == ["open a"])
+	}
+
+	@Test func aBudgetThatFailsToReopenIsntLeftHeld() async {
+		let library = SwitchingLibrary()
+		library.missing.insert(Self.folder("a"))
+		let recents = RecentBudgets(defaults: nil, locate: { _ in .here })
+		recents.opened(name: "a", folder: Self.folder("a"))
+		let window = WorkspaceModel(library: library, recents: recents, format: MoneyFormat())
+		await window.reopenMostRecent()
+		#expect(window.phase == .empty)
+		#expect(recents.budgetToReopen?.name == "a", "the next window may try it again")
+	}
+
+	@Test func closingOneOfTwoWindowsOnABudgetKeepsItHeld() async {
+		let library = SwitchingLibrary()
+		let recents = RecentBudgets(defaults: nil, locate: { _ in .here })
+		let first = WorkspaceModel(library: library, recents: recents, format: MoneyFormat())
+		let second = WorkspaceModel(library: library, recents: recents, format: MoneyFormat())
+		await first.reopen(directory: Self.folder("a"))
+		await second.reopen(directory: Self.folder("a"))
+		await first.closeBudget()
+		#expect(recents.budgetToReopen == nil, "the second window still has it open")
+		await second.closeBudget()
+		#expect(recents.budgetToReopen?.name == "a")
+	}
+
+	@Test func drawingTheMenusNeverLooksAtTheDisk() {
+		var looks = 0
+		let recents = RecentBudgets(defaults: nil, locate: { _ in looks += 1; return .here })
+		recents.opened(name: "Household", folder: Self.folder("a"))
+		recents.opened(name: "Business", folder: Self.folder("b"))
+		let afterOpening = looks
+		for _ in 0..<20 {
+			_ = recents.entries.map(recents.isAvailable)
+		}
+		#expect(looks == afterOpening, "a drive that doesn't answer can't freeze the menu")
 	}
 
 	@Test func switchingClosesTheOpenBudgetBeforeOpeningTheNext() async throws {
@@ -165,6 +219,16 @@ struct RecentBudgetsTests {
 private final class SwitchingLibrary: BudgetLibrary, @unchecked Sendable {
 	var log: [String] = []
 	var missing: Set<URL> = []
+	/// Holds the next open until `releaseOpen`, as a slow open would.
+	var holdsOpen = false
+	private(set) var isHoldingOpen = false
+	private var heldOpen: CheckedContinuation<Void, Never>?
+
+	func releaseOpen() {
+		heldOpen?.resume()
+		heldOpen = nil
+	}
+
 	/// Holds the next close until `releaseClose`, as a slow close would.
 	var holdsClose = false
 	private(set) var isHoldingClose = false
@@ -187,6 +251,10 @@ private final class SwitchingLibrary: BudgetLibrary, @unchecked Sendable {
 
 	func open(directory: URL) async throws -> any BudgetSession {
 		if missing.contains(directory) { throw FfiError.Io(message: "\(directory.path) doesn't hold a budget") }
+		if holdsOpen {
+			holdsOpen = false
+			await withCheckedContinuation { heldOpen = $0; isHoldingOpen = true }
+		}
 		let name = directory.lastPathComponent
 		log.append("open \(name)")
 		return SwitchingSession(name: name, directory: directory) { [weak self] in await self?.closed(name) }

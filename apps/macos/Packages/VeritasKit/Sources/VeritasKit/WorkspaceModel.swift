@@ -48,6 +48,8 @@ public final class WorkspaceModel {
 	@ObservationIgnored private var session: (any BudgetSession)?
 	@ObservationIgnored private var retry: (@MainActor () async -> Void)?
 	@ObservationIgnored private var maintenance: Task<Void, Never>?
+	/// The folder this window holds in `recents`, while it opens or has it open.
+	@ObservationIgnored private var held: URL?
 	@ObservationIgnored private let maintenanceInterval: Duration
 	@ObservationIgnored private let checkingInterval: Duration
 
@@ -101,7 +103,17 @@ public final class WorkspaceModel {
 	/// closing the window and coming back from the Dock or a relaunch finds it.
 	public func reopenMostRecent() async {
 		guard phase == .empty, let budget = recents.budgetToReopen else { return }
+		hold(budget.folder)
 		await reopen(directory: budget.folder)
+		if phase != .open { hold(nil) }
+	}
+
+	/// Swaps the folder this window holds in `recents` for `folder`.
+	private func hold(_ folder: URL?) {
+		if let held, let folder, RecentBudgets.key(held) == RecentBudgets.key(folder) { return }
+		if let held { recents.release(held) }
+		held = folder
+		if let folder { recents.hold(folder) }
 	}
 
 	/// Holds the zip's sandbox access for each attempt, so a retry can still read it.
@@ -398,7 +410,7 @@ public final class WorkspaceModel {
 	/// Working until the session has closed, so nothing opens or switches meanwhile.
 	public func closeBudget() async {
 		phase = .working
-		if let directory = overview?.directory { recents.closed(directory) }
+		hold(nil)
 		maintenance?.cancel()
 		maintenance = nil
 		await session?.close()
@@ -509,12 +521,12 @@ public final class WorkspaceModel {
 			}
 			if let session, session !== opened {
 				await session.close()
-				if let previous = self.overview?.directory { recents.closed(previous) }
 			}
 			session = opened
 			canExport = opened.canExport
 			apply(overview)
 			phase = .open
+			hold(overview.directory)
 			recents.opened(name: overview.name, folder: overview.directory)
 			let settings = BudgetSettingsModel(session: opened, local: localSettings, budget: overview.directory) { [weak self] error in
 				self?.present(error)

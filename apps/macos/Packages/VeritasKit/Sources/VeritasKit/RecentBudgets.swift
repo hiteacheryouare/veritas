@@ -40,8 +40,12 @@ public final class RecentBudgets {
 
 	@ObservationIgnored private let defaults: UserDefaults?
 	@ObservationIgnored private let locate: (URL) -> Location
-	/// Folders some window has open now, so a new window doesn't open one again.
-	@ObservationIgnored private var open: Set<String> = []
+	/// How many windows hold each folder now, so a new window doesn't open one
+	/// again, and closing one of two windows on a budget doesn't forget the other.
+	@ObservationIgnored private var holders: [String: Int] = [:]
+	/// Where each folder was when the list last changed. The menus read this,
+	/// so drawing them never waits on a drive or share that isn't answering.
+	@ObservationIgnored private var locations: [String: Location] = [:]
 
 	/// Without `defaults` the list lives only as long as this object.
 	public init(defaults: UserDefaults?, locate: @escaping (URL) -> Location = RecentBudgets.location) {
@@ -60,18 +64,25 @@ public final class RecentBudgets {
 
 	public func opened(name: String?, folder: URL) {
 		let entry = Entry(name: name, folder: folder)
-		open.insert(entry.id)
 		save([entry] + entries.filter { $0.id != entry.id })
 	}
 
-	public func closed(_ folder: URL) {
-		open.remove(Self.key(folder))
+	/// A window holds this folder from before it starts opening it until it
+	/// closes it, so a second window can't pick the same budget meanwhile.
+	public func hold(_ folder: URL) {
+		holders[Self.key(folder), default: 0] += 1
+	}
+
+	public func release(_ folder: URL) {
+		let key = Self.key(folder)
+		guard let count = holders[key] else { return }
+		holders[key] = count > 1 ? count - 1 : nil
 	}
 
 	/// What a window with nothing to restore opens: the most recent budget,
-	/// if its folder is here and no other window has it open.
+	/// if its folder is here and no window holds it.
 	public var budgetToReopen: Entry? {
-		guard let latest = entries.first, !open.contains(latest.id), locate(latest.folder) == .here else { return nil }
+		guard let latest = entries.first, holders[latest.id] == nil, locate(latest.folder) == .here else { return nil }
 		return latest
 	}
 
@@ -85,12 +96,14 @@ public final class RecentBudgets {
 
 	/// A budget on a drive that isn't connected stays in the list, unavailable.
 	public func isAvailable(_ entry: Entry) -> Bool {
-		locate(entry.folder) == .here
+		locations[entry.id, default: .here] == .here
 	}
 
-	/// Drops budgets whose folder is gone from a connected drive.
+	/// Looks for every folder again, drops those gone from a connected drive,
+	/// and remembers where the rest are for the menus.
 	public func forgetMissing() {
-		let kept = entries.filter { locate($0.folder) != .gone }
+		locations = Dictionary(entries.map { ($0.id, locate($0.folder)) }, uniquingKeysWith: { first, _ in first })
+		let kept = entries.filter { locations[$0.id] != .gone }
 		if kept != entries { save(kept) }
 	}
 
@@ -108,6 +121,9 @@ public final class RecentBudgets {
 	}
 
 	private func save(_ list: [Entry]) {
+		for entry in list where locations[entry.id] == nil {
+			locations[entry.id] = locate(entry.folder)
+		}
 		entries = Array(list.prefix(Self.limit))
 		defaults?.set(try? JSONEncoder().encode(entries), forKey: Self.defaultsKey)
 	}
