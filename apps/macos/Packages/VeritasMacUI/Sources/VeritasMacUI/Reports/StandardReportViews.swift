@@ -20,10 +20,10 @@ struct StandardReportView: View {
 					let stop = ZeroSplit.lineStop(model.netWorth.map { model.format.chartValue($0.netWorth, on: .register) })
 					Chart(model.netWorth, id: \.month) { point in
 						LineMark(x: .value("Month", ReportPeriod.shortMonth(point.month)), y: .value("Net worth", model.format.chartValue(point.netWorth, on: .register)))
-							.foregroundStyle(LinearGradient(stops: [.init(color: .moneyIncomeFill, location: 0), .init(color: .moneyIncomeFill, location: stop), .init(color: .moneyOverspent, location: stop), .init(color: .moneyOverspent, location: 1)], startPoint: .top, endPoint: .bottom))
+							.foregroundStyle(LinearGradient(stops: [.init(color: .chartMark(.moneyIncomeFill), location: 0), .init(color: .chartMark(.moneyIncomeFill), location: stop), .init(color: .moneyOverspent, location: stop), .init(color: .moneyOverspent, location: 1)], startPoint: .top, endPoint: .bottom))
 							.lineStyle(StrokeStyle(lineWidth: 2.5))
 						PointMark(x: .value("Month", ReportPeriod.shortMonth(point.month)), y: .value("Net worth", model.format.chartValue(point.netWorth, on: .register)))
-							.foregroundStyle(point.netWorth < 0 ? Color.moneyOverspent : Color.moneyIncomeFill)
+							.foregroundStyle(point.netWorth < 0 ? Color.moneyOverspent : Color.chartMark(.moneyIncomeFill))
 					}
 					.chartYAxis { thousandsAxis }
 					.frame(height: 220)
@@ -40,7 +40,7 @@ struct StandardReportView: View {
 						let month = column.month.map(ReportPeriod.shortMonth) ?? ""
 						BarMark(x: .value("Month", month), y: .value("Amount", model.format.chartValue(column.income.total, on: .register)), width: .fixed(22))
 							.position(by: .value("Series", "Income"))
-							.foregroundStyle(Color.moneyIncomeFill)
+							.foregroundStyle(Color.chartMark(.moneyIncomeFill))
 						BarMark(x: .value("Month", month), y: .value("Amount", model.format.chartValue(column.expenses.total, on: .register)), width: .fixed(22))
 							.position(by: .value("Series", "Expenses"))
 							.foregroundStyle(Color.chartExpense)
