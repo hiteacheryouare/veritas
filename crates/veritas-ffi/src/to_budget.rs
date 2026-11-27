@@ -23,8 +23,8 @@ pub enum ToBudgetState {
 pub enum ToBudgetBlock {
 	/// "To Budget is $0.00".
 	Zero,
-	/// "Overbudgeted by {amount}. Cover it from a category first." `amount`
-	/// is the overbudgeted figure as a positive number.
+	/// "Overbudgeted by {amount}. Move budget from an envelope to cover it."
+	/// `amount` is the overbudgeted figure as a positive number.
 	Overbudgeted { amount: i64 },
 	/// "Nothing is underfunded".
 	NothingUnderfunded,
@@ -117,7 +117,7 @@ pub struct ToBudgetActions {
 
 /// TB-2.6: outside a 2-place currency To Budget mixes two scales, so every
 /// cap would be measured against a figure that isn't true.
-fn mixed_scale(data: &BudgetData) -> Option<ToBudgetBlock> {
+pub(crate) fn mixed_scale(data: &BudgetData) -> Option<ToBudgetBlock> {
 	let places = data.format.decimal_places();
 	(places != 2).then_some(ToBudgetBlock::MixedScale { places })
 }
@@ -133,21 +133,51 @@ fn empty(to_budget: i64) -> Option<ToBudgetBlock> {
 	}
 }
 
+/// A quick action's plan and, when it can't act, why. A plan that writes
+/// nothing keeps its hidden count and skipped goals, so the row can still
+/// say what was left out (TB-2.3, TB-4.3).
+pub(crate) struct Planned {
+	pub(crate) block: Option<ToBudgetBlock>,
+	pub(crate) plan: ToBudgetPlan,
+}
+
+impl Planned {
+	fn blocked(block: ToBudgetBlock) -> Self {
+		Planned {
+			block: Some(block),
+			plan: ToBudgetPlan::default(),
+		}
+	}
+
+	fn from(plan: ToBudgetPlan, nothing: ToBudgetBlock) -> Self {
+		Planned {
+			block: plan.fills.is_empty().then_some(nothing),
+			plan,
+		}
+	}
+
+	/// The command's writes, or its refusal.
+	pub(crate) fn writes(self) -> Result<veritas_engine::BudgetWrites, CoreError> {
+		match self.block {
+			Some(block) => Err(refusal(&block)),
+			None => Ok(self.plan.writes),
+		}
+	}
+}
+
 /// Assign to underfunded's plan for `month`, or why it can't act.
 pub(crate) fn plan_assign(
 	data: &BudgetData,
 	editor: &BudgetEditor<'_>,
 	month: YearMonth,
-) -> Result<Result<ToBudgetPlan, ToBudgetBlock>, CoreError> {
+) -> Result<Planned, CoreError> {
 	if let Some(block) = mixed_scale(data).or_else(|| empty(editor.to_budget(month))) {
-		return Ok(Err(block));
+		return Ok(Planned::blocked(block));
 	}
-	let plan = editor.assign_to_underfunded(month)?;
-	Ok(if plan.fills.is_empty() {
-		Err(ToBudgetBlock::NothingUnderfunded)
-	} else {
-		Ok(plan)
-	})
+	Ok(Planned::from(
+		editor.assign_to_underfunded(month)?,
+		ToBudgetBlock::NothingUnderfunded,
+	))
 }
 
 /// Fund goals' monthly's plan for `month`, or why it can't act. `current` is
@@ -157,20 +187,18 @@ pub(crate) fn plan_fund_goals(
 	editor: &BudgetEditor<'_>,
 	month: YearMonth,
 	current: YearMonth,
-) -> Result<Result<ToBudgetPlan, ToBudgetBlock>, CoreError> {
+) -> Result<Planned, CoreError> {
 	let not_current = (month != current).then_some(ToBudgetBlock::NotCurrentMonth);
 	if let Some(block) = mixed_scale(data)
 		.or(not_current)
 		.or_else(|| empty(editor.to_budget(month)))
 	{
-		return Ok(Err(block));
+		return Ok(Planned::blocked(block));
 	}
-	let plan = editor.fund_goals_monthly(month)?;
-	Ok(if plan.fills.is_empty() {
-		Err(ToBudgetBlock::NoGoalNeedsFunding)
-	} else {
-		Ok(plan)
-	})
+	Ok(Planned::from(
+		editor.fund_goals_monthly(month)?,
+		ToBudgetBlock::NoGoalNeedsFunding,
+	))
 }
 
 /// The command's refusal for a blocked row, in words without figures: the
@@ -179,7 +207,7 @@ pub(crate) fn refusal(block: &ToBudgetBlock) -> CoreError {
 	CoreError::Invalid(match block {
 		ToBudgetBlock::Zero => "There's nothing in To Budget to assign.".to_owned(),
 		ToBudgetBlock::Overbudgeted { .. } => {
-			"To Budget is overbudgeted. Cover it from a category first.".to_owned()
+			"To Budget is overbudgeted. Move budget from an envelope to cover it.".to_owned()
 		}
 		ToBudgetBlock::NothingUnderfunded => "Nothing is underfunded.".to_owned(),
 		ToBudgetBlock::NoGoalNeedsFunding => "No active goal needs funding.".to_owned(),
@@ -190,45 +218,38 @@ pub(crate) fn refusal(block: &ToBudgetBlock) -> CoreError {
 	})
 }
 
-fn view(
-	data: &BudgetData,
-	planned: Result<ToBudgetPlan, ToBudgetBlock>,
-) -> Result<ToBudgetPlanView, CoreError> {
+fn view(data: &BudgetData, planned: Planned) -> Result<ToBudgetPlanView, CoreError> {
 	let name = |category: &CategoryId| {
 		data.categories
 			.get(category)
 			.map(|c| c.name.clone())
 			.unwrap_or_default()
 	};
-	match planned {
-		Err(block) => Ok(ToBudgetPlanView {
-			block: Some(block),
-			fills: Vec::new(),
-			envelopes: 0,
-			total: 0,
-			hidden_left_out: 0,
-			skipped: Vec::new(),
-		}),
-		Ok(plan) => Ok(ToBudgetPlanView {
-			block: None,
-			envelopes: u32::try_from(plan.envelopes()).unwrap_or(u32::MAX),
-			total: plan.total()?.minor(),
-			hidden_left_out: plan.hidden_left_out,
-			skipped: plan
-				.skipped
-				.iter()
-				.map(|(goal, Skip::NoTargetDate)| ToBudgetSkip {
-					goal_id: goal.to_string(),
-					name: data
-						.goals
-						.get(goal)
-						.map(|g| name(&g.category))
-						.unwrap_or_default(),
-					reason: ToBudgetSkipReason::NoTargetDate,
-				})
-				.collect(),
-			fills: plan
-				.fills
+	let Planned { block, plan } = planned;
+	let acts = block.is_none();
+	Ok(ToBudgetPlanView {
+		envelopes: if acts {
+			u32::try_from(plan.envelopes()).unwrap_or(u32::MAX)
+		} else {
+			0
+		},
+		total: if acts { plan.total()?.minor() } else { 0 },
+		hidden_left_out: plan.hidden_left_out,
+		skipped: plan
+			.skipped
+			.iter()
+			.map(|(goal, Skip::NoTargetDate)| ToBudgetSkip {
+				goal_id: goal.to_string(),
+				name: data
+					.goals
+					.get(goal)
+					.map(|g| name(&g.category))
+					.unwrap_or_default(),
+				reason: ToBudgetSkipReason::NoTargetDate,
+			})
+			.collect(),
+		fills: if acts {
+			plan.fills
 				.iter()
 				.map(|fill| {
 					let (reason, goal_id) = match &fill.reason {
@@ -247,9 +268,12 @@ fn view(
 						amount: fill.amount.minor(),
 					}
 				})
-				.collect(),
-		}),
-	}
+				.collect()
+		} else {
+			Vec::new()
+		},
+		block,
+	})
 }
 
 /// The popover for `month`, clamped to the months Actual has created as the
@@ -526,17 +550,26 @@ mod tests {
 	fn tb_8_example_7_a_currency_without_two_places_disables_all_three() {
 		let (_scratch, core) = imported("small");
 		core.pin_today(TODAY).unwrap();
-		let (block, sheet_to_budget) = core
+		let (block, sheet_to_budget, hold, reset) = core
 			.call(|session| {
 				let mut data = session.data()?.clone();
 				data.format.currency_code = Some("JPY".to_owned());
 				let sheet = EnvelopeSheet::compute(&data, crate::budget::civil_date(TODAY)?)?;
 				let read = actions(&data, &sheet, NOVEMBER)?;
+				let plan = |command: Command| {
+					veritas_session::Command::plan_with_sheet(&command, &data, &sheet)
+				};
 				Ok((
 					(read.assign.block, read.fund_goals.block, read.hold.block),
 					sheet
 						.summary(YearMonth::new(2026, 11)?)
 						.map(|s| s.to_budget),
+					plan(Command::HoldForNextMonth {
+						month: NOVEMBER,
+						amount: 1_000,
+					})
+					.map_err(|refused| refused.to_string()),
+					plan(Command::ResetHold { month: NOVEMBER }).is_ok(),
 				))
 			})
 			.unwrap();
@@ -544,8 +577,41 @@ mod tests {
 		assert_eq!(block, (yen.clone(), yen.clone(), yen), "TB-2.6");
 		assert!(sheet_to_budget.is_some_and(|figure| figure != Money::ZERO));
 		assert_eq!(
+			hold.err().as_deref(),
+			Some(
+				"Spending is recorded at 2 places and budgets at 0, so To Budget can't be trusted here."
+			),
+			"TB-5.4: the Hold command is refused with the block the row shows"
+		);
+		assert!(reset, "TB-5.4: Reset only sets the hold to 0");
+		assert_eq!(
 			refusal(&ToBudgetBlock::MixedScale { places: 3 }).to_string(),
 			"Spending is recorded at 2 places and budgets at 3, so To Budget can't be trusted here."
+		);
+	}
+
+	#[test]
+	fn tb_2_3_a_row_with_only_hidden_envelopes_still_counts_them() {
+		let (_scratch, core) = imported("small");
+		core.pin_today(TODAY).unwrap();
+		let (first, _, account) = places(&core);
+		spend(&core, "tb-hidden-1", &account, &first, -1_000_000);
+		let assign = core
+			.call(|session| {
+				let mut data = session.data()?.clone();
+				for category in data.categories.values_mut() {
+					category.hidden = true;
+				}
+				let sheet = EnvelopeSheet::compute(&data, crate::budget::civil_date(TODAY)?)?;
+				Ok(actions(&data, &sheet, NOVEMBER)?.assign)
+			})
+			.unwrap();
+		assert_eq!(assign.block, Some(ToBudgetBlock::NothingUnderfunded));
+		assert!(assign.fills.is_empty());
+		assert_eq!((assign.envelopes, assign.total), (0, 0));
+		assert!(
+			assign.hidden_left_out >= 1,
+			"the overspent hidden envelope is counted, not filled"
 		);
 	}
 

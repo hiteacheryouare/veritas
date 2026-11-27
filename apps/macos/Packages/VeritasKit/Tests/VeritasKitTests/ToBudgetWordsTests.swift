@@ -28,18 +28,26 @@ struct ToBudgetWordsTests {
 		)
 		#expect(ToBudgetWords.subtitle(example1, counting: .envelopes, format: format) == "3 envelopes, $300.00")
 		#expect(ToBudgetWords.notes(example1) == ["1 hidden envelope isn't included"])
-		#expect(ToBudgetWords.result(assigned: 30_000, plan: example1, counting: .envelopes, format: format) == "Assigned $300.00 to 3 envelopes")
+		#expect(ToBudgetWords.result(assigned: 30_000, count: 3, counting: .envelopes, format: format) == "Assigned $300.00 to 3 envelopes")
+		#expect(ToBudgetWords.result(assigned: 3_475, count: 1, counting: .envelopes, format: format) == "Assigned $34.75 to 1 envelope")
+		#expect(ToBudgetWords.result(assigned: 10_000, count: 1, counting: .goals, format: format) == "Assigned $100.00 to 1 goal")
 	}
 
 	@Test func tb_1_3_aRowThatCantActSaysWhy() {
 		let words = { (block: ToBudgetBlock) in ToBudgetWords.subtitle(self.plan([], envelopes: 0, total: 0, block: block), counting: .envelopes, format: self.format) }
 		#expect(words(.zero) == "To Budget is $0.00")
-		#expect(words(.overbudgeted(amount: 5_000)) == "Overbudgeted by $50.00. Cover it from a category first.")
+		#expect(words(.overbudgeted(amount: 5_000)) == "Overbudgeted by $50.00. Move budget from an envelope to cover it.")
 		#expect(words(.nothingUnderfunded) == "Nothing is underfunded")
 		#expect(words(.noGoalNeedsFunding) == "No active goal needs funding")
 		#expect(words(.notCurrentMonth) == "Goals are funded for the current month only.", "TB-1.4, TB-8 example 8")
 		#expect(words(.mixedScale(places: 0)) == "Spending is recorded at 2 places and budgets at 0, so To Budget can't be trusted here.", "TB-2.6, TB-8 example 7")
 		#expect(words(.mixedScale(places: 3)) == "Spending is recorded at 2 places and budgets at 3, so To Budget can't be trusted here.")
+	}
+
+	@Test func tb_2_3_aRowWithOnlyHiddenEnvelopesStillCountsThem() {
+		let hiddenOnly = plan([], envelopes: 0, total: 0, hidden: 2, block: .nothingUnderfunded)
+		#expect(ToBudgetWords.subtitle(hiddenOnly, counting: .envelopes, format: format) == "Nothing is underfunded")
+		#expect(ToBudgetWords.notes(hiddenOnly) == ["2 hidden envelopes aren't included"])
 	}
 
 	@Test func tb_8_example_4_aGoalCutShortByToBudgetSaysOfWhat() {

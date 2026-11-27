@@ -21,7 +21,7 @@ public enum ToBudgetWords {
 		case .zero:
 			"To Budget is \(format.currency(0, on: .budget))"
 		case .overbudgeted(let amount):
-			"Overbudgeted by \(format.currency(amount, on: .budget)). Cover it from a category first."
+			"Overbudgeted by \(format.currency(amount, on: .budget)). Move budget from an envelope to cover it."
 		case .nothingUnderfunded:
 			"Nothing is underfunded"
 		case .noGoalNeedsFunding:
@@ -67,9 +67,14 @@ public enum ToBudgetWords {
 		return fill.amount < fill.need ? "\(amount) of \(format.currency(fill.need, on: .budget))" : amount
 	}
 
-	/// TB-2.4's result line: "Assigned $412.00 to 3 envelopes".
-	public static func result(assigned: Int64, plan: ToBudgetPlanView, counting: Counting, format: MoneyFormat) -> String {
-		"Assigned \(format.currency(assigned, on: .budget)) to \(count(plan, counting))"
+	/// TB-2.4's result line: "Assigned $412.00 to 3 envelopes", from what the
+	/// command wrote.
+	public static func result(assigned: Int64, count: Int, counting: Counting, format: MoneyFormat) -> String {
+		let noun = switch counting {
+		case .envelopes: count == 1 ? "envelope" : "envelopes"
+		case .goals: count == 1 ? "goal" : "goals"
+		}
+		return "Assigned \(format.currency(assigned, on: .budget)) to \(count) \(noun)"
 	}
 
 	/// Hold's subtitle: how much it can hold, or why it can't.

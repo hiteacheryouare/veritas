@@ -271,6 +271,23 @@ struct BudgetScreenTests {
 		#expect(WorkspaceModel.today(Date(timeIntervalSince1970: 1_794_740_400), calendar: calendar) == "2026-11-16")
 	}
 
+	@Test func tb_2_4_theResultLineSaysWhatTheCommandWrote() async {
+		let screen = await openScreen()
+		await screen.assignToUnderfunded()
+		#expect(session.commands == [.assignToUnderfunded(month: BudgetFakeSession.month)])
+		#expect(screen.quickResult == "Assigned $34.75 to 1 envelope", "the count and the amount come from the same writes")
+	}
+
+	@Test func tb_2_4_undoIsOfferedOnlyWhileTheQuickActionIsTheLastStep() async {
+		let screen = await openScreen()
+		await screen.assignToUnderfunded()
+		#expect(screen.quickResult != nil)
+		_ = await screen.coverOverspending("groceries", from: nil)
+		#expect(screen.quickResult == nil, "Undo would undo the cover, not the assign")
+		await screen.undoQuickAction()
+		#expect(session.undos == 0, "nothing is undone once the line is gone")
+	}
+
 	private func openScreen() async -> BudgetScreenModel {
 		let workspace = WorkspaceModel(library: BudgetFakeLibrary(session: session), format: MoneyFormat())
 		await workspace.reopen(directory: URL(filePath: "/tmp/budget"))
@@ -290,6 +307,8 @@ final class BudgetFakeSession: BudgetSession, @unchecked Sendable {
 	/// Answers with the month asked for instead of always November.
 	var echoesMonth = false
 	var slowMonth: Month?
+	/// Set by Assign to underfunded: Dining's overspending covered.
+	var diningCovered = false
 
 	func goals(today: String) async throws -> GoalList {
 		GoalList(goals: goals, mixedScaleNote: nil, zeroPlaces: false)
@@ -303,7 +322,8 @@ final class BudgetFakeSession: BudgetSession, @unchecked Sendable {
 		BudgetOverview(name: "Household", directory: URL(filePath: "/tmp/budget"), readOnly: nil, accountGroups: [])
 	}
 
-	func undo() async throws {}
+	var undos = 0
+	func undo() async throws { undos += 1 }
 	func redo() async throws {}
 	func maintain() async throws {}
 	func exportActualZip(to destination: URL) async throws -> [AuditFinding] { [] }
@@ -312,6 +332,7 @@ final class BudgetFakeSession: BudgetSession, @unchecked Sendable {
 
 	func perform(_ command: Command) async throws {
 		commands.append(command)
+		if case .assignToUnderfunded = command { diningCovered = true }
 	}
 
 	func budgetMonth(_ month: Month, today: String) async throws -> BudgetMonth {
@@ -321,13 +342,14 @@ final class BudgetFakeSession: BudgetSession, @unchecked Sendable {
 		let row = { (id: String, budgeted: Int64, spent: Int64, available: Int64, tone: VeritasCore.MoneyTone) in
 			EnvelopeRow(id: id, name: id.capitalized, hidden: false, budgeted: budgeted, spent: spent, available: available, carryover: false, tone: tone, fill: 0.5, note: nil)
 		}
+		let cover: Int64 = diningCovered ? 3_475 : 0
 		return BudgetMonth(
 			month: echoesMonth ? month : Self.month, firstMonth: Month(year: 2026, month: 1), lastMonth: Self.month,
-			toBudget: 31_240, toBudgetTone: .income, income: 400_000, fromLastMonth: 0, overspentLastMonth: 0, budgeted: 0, forNextMonth: 0, spent: 0, available: 0,
+			toBudget: 31_240 - cover, toBudgetTone: .income, income: 400_000, fromLastMonth: 0, overspentLastMonth: 0, budgeted: 0, forNextMonth: 0, spent: 0, available: 0,
 			groups: [
 				EnvelopeGroup(id: "everyday", name: "Everyday", isIncome: false, hidden: false, budgeted: 0, spent: 0, available: 0, envelopes: [
 					row("groceries", 41_200, -31_862, 9_338, .available),
-					row("dining", 18_000, -21_475, -3_475, .overspent)
+					row("dining", 18_000 + cover, -21_475, -3_475 + cover, diningCovered ? .neutral : .overspent)
 				]),
 				EnvelopeGroup(id: "housing", name: "Housing", isIncome: false, hidden: false, budgeted: 0, spent: 0, available: 0, envelopes: [
 					EnvelopeRow(id: "rent", name: "Rent", hidden: hideRent, budgeted: 165_000, spent: -165_000, available: 0, carryover: false, tone: .neutral, fill: 0, note: nil)

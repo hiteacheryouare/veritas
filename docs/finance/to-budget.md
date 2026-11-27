@@ -10,7 +10,7 @@ Status: draft for the independent Fred's D49 review. Owner: Fred. Builds on debt
   - **Fund goals' monthly** (TB-4)
   - **Hold for next month…** (TB-5)
   - and Actual's own rows, as the Budget screen already offers them, with Actual's conditions (`ToBudgetMenu.tsx:30-80`): `Move to a category` when To Budget is above 0, `Cover from a category` when it is below 0, and `Reset next month's buffer` or `Disable current auto hold` when something is held.
-- **TB-1.3** A row that cannot act is disabled and says why in its subtitle: "To Budget is $0.00" when it is 0, "Overbudgeted by $50.00. Cover it from a category first." when it is negative (the card says Overbudgeted:, and Actual offers Cover from a category), "Nothing is underfunded", "No active goal needs funding". Opening the popover writes nothing.
+- **TB-1.3** A row that cannot act is disabled and says why in its subtitle: "To Budget is $0.00" when it is 0, "Overbudgeted by $50.00. Move budget from an envelope to cover it." when it is negative (the card says Overbudgeted:, and the Budget screen's Move budget makes that move), "Nothing is underfunded", "No active goal needs funding". Opening the popover writes nothing.
 - **TB-1.4** Assign to underfunded and Hold apply to the **displayed month `M`**, which may be any month Actual has created. Fund goals' monthly applies to the **current month only** (TB-4.1), and is disabled for any other month with the subtitle "Goals are funded for the current month only.", because DEBT-8.1's months left and carry are defined for the current month. **In a currency without 2 places all three actions are disabled** (TB-2.6).
 
 ## TB-2 What the three actions share

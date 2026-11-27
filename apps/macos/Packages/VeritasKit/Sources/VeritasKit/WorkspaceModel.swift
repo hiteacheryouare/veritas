@@ -22,6 +22,10 @@ public final class WorkspaceModel {
 	public var isOpenPickerShown = false
 	/// Goes up after every change the core announces, so open screens refetch.
 	public private(set) var changeCount = 0
+	/// Goes up with each step this window adds to or takes off the undo
+	/// stack: a command, a write, an undo or a redo. Changes announced from
+	/// elsewhere don't move it, so it tells whether a step is still the latest.
+	public private(set) var stepCount = 0
 	public var destination = Destination.start
 	public var sheet: WorkspaceSheet?
 	public var alert: ErrorAlert?
@@ -246,6 +250,7 @@ public final class WorkspaceModel {
 		do {
 			let result = try await write(session)
 			changeCount += 1
+			stepCount += 1
 			await refresh()
 			return result
 		} catch {
@@ -262,6 +267,7 @@ public final class WorkspaceModel {
 		do {
 			let result = try await write(session)
 			changeCount += 1
+			stepCount += 1
 			await refresh()
 			return result
 		} catch {
@@ -308,6 +314,7 @@ public final class WorkspaceModel {
 		do {
 			try await session.perform(command)
 			changeCount += 1
+			stepCount += 1
 			await refresh()
 			return true
 		} catch {
@@ -324,6 +331,7 @@ public final class WorkspaceModel {
 		do {
 			try await session.perform(command)
 			changeCount += 1
+			stepCount += 1
 			await refresh()
 			return true
 		} catch {
@@ -365,6 +373,7 @@ public final class WorkspaceModel {
 		guard let session, canUndo else { return }
 		do {
 			try await session.undo()
+			stepCount += 1
 			await refresh()
 		} catch {
 			present(error)
@@ -375,6 +384,7 @@ public final class WorkspaceModel {
 		guard let session, canRedo else { return }
 		do {
 			try await session.redo()
+			stepCount += 1
 			await refresh()
 		} catch {
 			present(error)

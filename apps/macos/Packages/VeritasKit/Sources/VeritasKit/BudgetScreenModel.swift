@@ -14,8 +14,14 @@ public final class BudgetScreenModel {
 	/// The popover's read failed; it offers Try Again rather than an alert.
 	public private(set) var toBudgetActionsFailed = false
 	/// What the last quick action did, shown under To Budget with Undo
-	/// (TB-2.4). Cleared when the month changes.
-	public private(set) var quickResult: String?
+	/// (TB-2.4), only while that action is still the latest step, so its Undo
+	/// can't undo a later edit instead. Cleared when the month changes.
+	public var quickResult: String? {
+		guard let quickStep, quickStep.step == workspace.stepCount else { return nil }
+		return quickStep.text
+	}
+
+	private var quickStep: (text: String, step: Int)?
 	public private(set) var goals: [GoalSummary] = []
 	public var selection: String?
 	public private(set) var editing: AmountFieldModel?
@@ -115,14 +121,14 @@ public final class BudgetScreenModel {
 
 	public func previousMonth() async {
 		guard canGoBack else { return }
-		quickResult = nil
+		quickStep = nil
 		month = Self.shift(month, by: -1)
 		await load()
 	}
 
 	public func nextMonth() async {
 		guard canGoForward else { return }
-		quickResult = nil
+		quickStep = nil
 		month = Self.shift(month, by: 1)
 		await load()
 	}
@@ -219,31 +225,40 @@ public final class BudgetScreenModel {
 
 	/// TB-3: one command, one undo step. The result line says what it wrote.
 	public func assignToUnderfunded() async {
-		await quickAction(.assignToUnderfunded(month: month), plan: toBudgetActions?.assign, counting: .envelopes)
+		await quickAction(.assignToUnderfunded(month: month), counting: .envelopes)
 	}
 
 	/// TB-4: the current month only; the read disables it otherwise.
 	public func fundGoalsMonthly() async {
-		await quickAction(.fundGoalsMonthly(month: month), plan: toBudgetActions?.fundGoals, counting: .goals)
+		await quickAction(.fundGoalsMonthly(month: month), counting: .goals)
 	}
 
 	/// Undoes the last quick action, the step its result line offers.
 	public func undoQuickAction() async {
-		quickResult = nil
+		guard quickResult != nil else { return }
+		quickStep = nil
 		await workspace.undo()
 		await load()
 	}
 
 	public func dismissQuickResult() {
-		quickResult = nil
+		quickStep = nil
 	}
 
-	private func quickAction(_ command: Command, plan: ToBudgetPlanView?, counting: ToBudgetWords.Counting) async {
-		let before = toBudgetActions?.toBudget
+	private func quickAction(_ command: Command, counting: ToBudgetWords.Counting) async {
+		guard let before = sheet else { return }
 		guard await workspace.perform(command) else { return }
+		let step = workspace.stepCount
 		await load()
-		guard let before, let after = toBudgetActions?.toBudget, let plan else { return }
-		quickResult = ToBudgetWords.result(assigned: before - after, plan: plan, counting: counting, format: format)
+		guard let after = sheet else { return }
+		// Both figures come from the sheet before and after the command, so the
+		// count and the amount describe the same writes.
+		let budgeted = { (month: BudgetMonth) in
+			Dictionary(month.groups.flatMap(\.envelopes).map { ($0.id, $0.budgeted) }, uniquingKeysWith: { first, _ in first })
+		}
+		let was = budgeted(before)
+		let written = budgeted(after).filter { id, amount in amount != (was[id] ?? 0) }.count
+		quickStep = (ToBudgetWords.result(assigned: before.toBudget - after.toBudget, count: written, counting: counting, format: format), step)
 	}
 
 	public func resetHold() async {

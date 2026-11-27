@@ -667,6 +667,10 @@ impl veritas_session::Command for Command {
 				)
 			}),
 			Command::HoldForNextMonth { month, amount } => {
+				// TB-5.4: Actual would clamp the hold against a mixed To Budget.
+				if let Some(block) = crate::to_budget::mixed_scale(data) {
+					return Err(crate::to_budget::refusal(&block));
+				}
 				edit(data, sheet, *month, |editor, month| {
 					editor
 						.hold_for_next_month(month, money(*amount))?
@@ -679,16 +683,12 @@ impl veritas_session::Command for Command {
 				Ok(editor.reset_hold(month))
 			}),
 			Command::AssignToUnderfunded { month } => edit(data, sheet, *month, |editor, month| {
-				crate::to_budget::plan_assign(data, editor, month)?
-					.map(|plan| plan.writes)
-					.map_err(|block| crate::to_budget::refusal(&block))
+				crate::to_budget::plan_assign(data, editor, month)?.writes()
 			}),
 			Command::FundGoalsMonthly { month } => {
 				let current = sheet.today().year_month();
 				edit(data, sheet, *month, |editor, month| {
-					crate::to_budget::plan_fund_goals(data, editor, month, current)?
-						.map(|plan| plan.writes)
-						.map_err(|block| crate::to_budget::refusal(&block))
+					crate::to_budget::plan_fund_goals(data, editor, month, current)?.writes()
 				})
 			}
 			Command::SetCarryover {

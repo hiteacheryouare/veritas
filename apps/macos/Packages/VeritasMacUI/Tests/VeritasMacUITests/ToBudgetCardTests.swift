@@ -42,12 +42,15 @@ struct ToBudgetCardTests {
 	@Test func tb_2_4_assignToUnderfundedSaysWhatItDidAndUndoes() async throws {
 		let (_, screen) = await openBudget()
 		let before = try #require(screen.toBudgetActions)
+		let toBudget = try #require(screen.sheet).toBudget
 		let dining = try #require(screen.envelope("dining"))
 		#expect(dining.available < 0)
 		await screen.assignToUnderfunded()
 		let covered = try #require(screen.envelope("dining"))
 		#expect(covered.available >= 0, "TB-3.2: the overspending is covered")
-		#expect(screen.quickResult == ToBudgetWords.result(assigned: before.assign.total, plan: before.assign, counting: .envelopes, format: screen.format))
+		let assigned = toBudget - (try #require(screen.sheet).toBudget)
+		#expect(assigned == before.assign.total, "TB-2.2: To Budget falls by what the popover offered")
+		#expect(screen.quickResult == ToBudgetWords.result(assigned: assigned, count: Int(before.assign.envelopes), counting: .envelopes, format: screen.format))
 		try render(
 			ToBudgetCard(sheet: try #require(screen.sheet), dense: false, screen: screen, moveToCategory: {}).frame(width: 900),
 			named: "card-after-assign"
