@@ -353,3 +353,64 @@ fn mig_1_8_offering_and_dismissing_leave_no_undo_step() {
 	let session = reopen(&scratch, session);
 	assert!(session.migration_offered().unwrap(), "it survives a reopen");
 }
+
+/// MIG-7.5 (and MIG-2.3): undo leaves a `zero_budgets` cell the command
+/// created with no goal figure, while a cell that existed gets its goal back
+/// exactly, as `createGoal` and `retargetGoal` write them.
+#[test]
+fn mig_7_5_undo_clears_a_created_cells_goal_and_restores_an_existing_one() {
+	let scratch = Scratch::new("cells");
+	let session = import(&scratch);
+	let before = actual_tables(&session, &scratch.join("before.zip"));
+	session
+		.perform(Command::CreateGoal {
+			name: "Boat".to_owned(),
+			target: 120_000,
+			target_date: None,
+			icon: None,
+			color: None,
+		})
+		.unwrap();
+	session.undo().unwrap();
+	let undone = actual_tables(&session, &scratch.join("undone.zip"));
+	let created: Vec<&Value> = undone["zero_budgets"]
+		.iter()
+		.filter(|(key, _)| !before["zero_budgets"].contains_key(*key))
+		.map(|(_, row)| row)
+		.collect();
+	assert!(!created.is_empty(), "the goal wrote cells of its own");
+	for row in created {
+		assert_eq!(row["goal"], Value::Null, "{row}");
+		assert_eq!(row["long_goal"], 0, "{row}");
+		assert_eq!(row["amount"], 0, "{row}");
+	}
+	for (key, row) in &before["zero_budgets"] {
+		assert_eq!(
+			&undone["zero_budgets"][key], row,
+			"an existing cell is as it was"
+		);
+	}
+
+	session.redo().unwrap();
+	let goal = session
+		.goals(TODAY.to_owned())
+		.unwrap()
+		.goals
+		.into_iter()
+		.find(|goal| goal.name == "Boat")
+		.unwrap();
+	let created = actual_tables(&session, &scratch.join("created.zip"));
+	session
+		.perform(Command::RetargetGoal {
+			goal_id: goal.id.clone(),
+			target: 150_000,
+			target_date: None,
+		})
+		.unwrap();
+	session.undo().unwrap();
+	let retargeted_back = actual_tables(&session, &scratch.join("retargeted.zip"));
+	assert_eq!(
+		created["zero_budgets"], retargeted_back["zero_budgets"],
+		"undoing a re-target puts every existing cell's goal back"
+	);
+}
