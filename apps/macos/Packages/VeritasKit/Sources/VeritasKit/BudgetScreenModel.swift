@@ -11,6 +11,8 @@ public final class BudgetScreenModel {
 	public private(set) var sheet: BudgetMonth?
 	/// The To Budget card's popover for the month (TB-10.1).
 	public private(set) var toBudgetActions: ToBudgetActions?
+	/// The popover's read failed; it offers Try Again rather than an alert.
+	public private(set) var toBudgetActionsFailed = false
 	/// What the last quick action did, shown under To Budget with Undo
 	/// (TB-2.4). Cleared when the month changes.
 	public private(set) var quickResult: String?
@@ -92,6 +94,7 @@ public final class BudgetScreenModel {
 		guard generation == loadGeneration else { return }
 		sheet = loaded
 		toBudgetActions = actions
+		toBudgetActionsFailed = actions == nil
 		month = loaded.month
 		goals = openGoals
 		if let selection, !envelopeIDs.contains(selection) {
@@ -205,6 +208,13 @@ public final class BudgetScreenModel {
 		let held = await workspace.perform(.holdForNextMonth(month: month, amount: amount))
 		if held { await load() }
 		return held
+	}
+
+	/// Reads the popover's actions again after a failure.
+	public func reloadToBudgetActions() async {
+		let actions = await workspace.toBudgetActions(month)
+		toBudgetActions = actions
+		toBudgetActionsFailed = actions == nil
 	}
 
 	/// TB-3: one command, one undo step. The result line says what it wrote.

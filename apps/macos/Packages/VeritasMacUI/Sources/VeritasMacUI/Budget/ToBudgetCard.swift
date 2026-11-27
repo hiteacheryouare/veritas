@@ -195,6 +195,16 @@ struct ToBudgetActionsPopover: View {
 						Task { await screen.resetHold() }
 					}
 				}
+			} else if screen.toBudgetActionsFailed {
+				HStack(spacing: Spacing.s3) {
+					Text("Couldn't load these actions.")
+						.font(.text(.body))
+						.foregroundStyle(.textSecondary)
+					Spacer()
+					Button("Try Again") { Task { await screen.reloadToBudgetActions() } }
+						.accessibilityIdentifier("toBudget.retry")
+				}
+				.padding(Spacing.s2)
 			} else {
 				ScreenState(kind: .loading)
 					.frame(height: 120)
