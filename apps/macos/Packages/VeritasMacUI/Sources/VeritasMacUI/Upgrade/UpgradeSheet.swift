@@ -222,6 +222,13 @@ private struct UpgradeRow: View {
 	let model: UpgradeModel
 	let suggestion: MigrationSuggestion
 
+	/// MIG-6.3: any symbol the user likes, the proposed one first.
+	static func icons(including proposed: String?) -> [String] {
+		var seen = Set<String>()
+		return ([proposed].compactMap(\.self) + ["arrow.down.circle", "banknote"] + GoalIcon.symbols)
+			.filter { seen.insert($0).inserted }
+	}
+
 	private var isTicked: Bool { model.ticked.contains(suggestion.key) }
 
 	var body: some View {
@@ -279,6 +286,40 @@ private struct UpgradeRow: View {
 					.accessibilityIdentifier("upgrade.noteInActual.\(suggestion.key)")
 				}
 			}
+			if suggestion.conversion == .kind, isTicked {
+				Picker("Kind", selection: Binding(get: { model.kind(for: suggestion) }, set: { model.kinds[suggestion.key] = $0 })) {
+					Text("Debt principal").tag(CategoryKind.debtPrincipal)
+					Text("Savings").tag(CategoryKind.savings)
+				}
+				.pickerStyle(.radioGroup)
+				.horizontalRadioGroupLayout()
+				.padding(.leading, Spacing.s5)
+				.accessibilityIdentifier("upgrade.kind.\(suggestion.key)")
+			}
+			if suggestion.conversion == .bill, isTicked {
+				HStack {
+					Text("Name in Veritas")
+					TextField("Name in Veritas", text: Binding(get: { model.displayName(for: suggestion) }, set: { model.displayNames[suggestion.key] = $0 }))
+						.textFieldStyle(.roundedBorder)
+						.labelsHidden()
+						.frame(width: 220)
+						.accessibilityIdentifier("upgrade.billName.\(suggestion.key)")
+				}
+				.padding(.leading, Spacing.s5)
+				HStack {
+					Text("Icon")
+					Picker("Icon", selection: Binding(get: { model.icon(for: suggestion) }, set: { model.icons[suggestion.key] = $0 })) {
+						Text("None").tag("")
+						ForEach(UpgradeRow.icons(including: suggestion.proposal.icon), id: \.self) { symbol in
+							Image(systemName: symbol).tag(symbol)
+						}
+					}
+					.labelsHidden()
+					.fixedSize()
+					.accessibilityIdentifier("upgrade.billIcon.\(suggestion.key)")
+				}
+				.padding(.leading, Spacing.s5)
+			}
 			HStack {
 				Spacer()
 				Button(suggestion.dismissed ? "Suggest Again" : "Don't Suggest Again") {
@@ -296,7 +337,7 @@ private struct UpgradeRow: View {
 
 /// What a Revert asks before it writes: MIG-5.6's reversed confirm, or
 /// MIG-4.7's group picker.
-private struct UpgradeQuestionSheet: View {
+struct UpgradeQuestionSheet: View {
 	let model: UpgradeModel
 	let question: UpgradeModel.Question
 	let format: MoneyFormat

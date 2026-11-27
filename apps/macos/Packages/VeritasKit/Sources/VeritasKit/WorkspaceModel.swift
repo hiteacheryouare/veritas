@@ -30,6 +30,13 @@ public final class WorkspaceModel {
 	/// "Upgrade to Veritas features" (MIG-1), offered once after an import
 	/// and opened from the File menu.
 	public var upgrade: UpgradeModel?
+	/// The keys of upgraded items (`goal:<category>`, `kind:<category>`,
+	/// `bill:<schedule>`, `report:<widget>`), so each screen offers Revert
+	/// where the item lives (MIG-1.5).
+	public private(set) var upgradedKeys: Set<String> = []
+	/// A Revert started from a screen, kept while it asks a question
+	/// (MIG-4.7, MIG-5.6).
+	public var reverting: UpgradeModel?
 	public var isPaletteShown = false
 	public var isFindShown = false
 	public var isAssistantShown = false
@@ -107,6 +114,21 @@ public final class WorkspaceModel {
 		}
 		if phase == .open {
 			await offerUpgrade()
+		}
+	}
+
+	public func isUpgraded(_ key: String) -> Bool {
+		upgradedKeys.contains(key)
+	}
+
+	/// Revert from the screen an upgraded item lives on. A kind change or a
+	/// goal whose group is gone asks first, through `reverting`.
+	public func revertUpgrade(_ key: String) async {
+		let model = UpgradeModel(workspace: self, offering: false)
+		reverting = model
+		await model.revert(key)
+		if model.question == nil {
+			reverting = nil
 		}
 	}
 
@@ -415,6 +437,7 @@ public final class WorkspaceModel {
 		guard let session else { return }
 		do {
 			apply(try await session.overview())
+			upgradedKeys = Set(try await session.appliedMigrations().map(\.key))
 			if sheet == .integrityReport, integrityReport == .budget(findings: nil) {
 				integrityReport = .budget(findings: try await session.integrityFindings())
 			}

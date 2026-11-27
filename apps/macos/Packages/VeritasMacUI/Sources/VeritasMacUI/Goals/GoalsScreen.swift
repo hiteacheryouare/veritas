@@ -154,6 +154,12 @@ struct GoalsScreen: View {
 			Button("Reopen Goal") { Task { await goals.reopen(goal) } }
 		}
 		Button("Change Icon…") { choosingIcon = goal }
+		let upgrade = "goal:\(goal.categoryId)"
+		if workspace.isUpgraded(upgrade) {
+			Divider()
+			Button("Revert Upgrade…") { Task { await workspace.revertUpgrade(upgrade) } }
+				.accessibilityIdentifier("goal.revertUpgrade")
+		}
 	}
 }
 

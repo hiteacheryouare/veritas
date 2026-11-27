@@ -165,7 +165,7 @@ pub struct CustomReportItem {
 	pub name: String,
 	/// Set when Veritas can't read the report's settings.
 	pub problem: Option<String>,
-	/// v25: a native card stands in for it on its dashboard (MIG-3.4), so the
+	/// v26: a native card stands in for it on its dashboard (MIG-3.4), so the
 	/// list shows it only with "Show hidden reports".
 	#[uniffi(default = false)]
 	pub hidden: bool,

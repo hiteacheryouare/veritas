@@ -75,6 +75,36 @@ struct UpgradeModelTests {
 		#expect(model.question?.id == nil)
 	}
 
+	@Test func reviewEditsForAKindAndABillReachTheCommand() async {
+		let (model, session) = await openUpgrade()
+		model.toggle(model.visible.first { $0.key == "kind:carloan" }!)
+		model.kinds["kind:carloan"] = .savings
+		model.displayNames["bill:netflix"] = "Streaming"
+		model.icons["bill:netflix"] = "tv"
+		#expect(await model.apply())
+		let items = session.applied.first?.items ?? []
+		#expect(items.first { $0.key == "kind:carloan" }?.edits.kind == .savings)
+		let bill = items.first { $0.key == "bill:netflix" }
+		#expect(bill?.edits.displayName == "Streaming")
+		#expect(bill?.edits.icon == "tv")
+	}
+
+	@Test func aScreenRevertAsksThroughTheWorkspaceAndKnowsWhatIsUpgraded() async {
+		let session = UpgradeSession()
+		session.upgraded = ["kind:carloan", "bill:netflix"]
+		let library = UpgradeLibrary(session: session)
+		let workspace = WorkspaceModel(library: library, format: MoneyFormat())
+		await workspace.reopen(directory: URL(filePath: "/tmp/budget"))
+		#expect(workspace.isUpgraded("kind:carloan"))
+		#expect(!workspace.isUpgraded("goal:vacation"))
+		await workspace.revertUpgrade("kind:carloan")
+		#expect(workspace.reverting?.question?.id == "kind:carloan", "a kind change asks first")
+		#expect(session.reverts.isEmpty)
+		await workspace.revertUpgrade("bill:netflix")
+		#expect(session.reverts == ["bill:netflix"])
+		#expect(workspace.reverting == nil)
+	}
+
 	@Test func theOverviewCountsEachConversion() async {
 		let (model, _) = await openUpgrade()
 		#expect(model.counts.map(\.count) == [2, 1, 1])
@@ -122,6 +152,7 @@ private final class UpgradeSession: BudgetSession, @unchecked Sendable {
 	var goalsGroupHidden = false
 	var applied: [MigrationSelection] = []
 	var reverts: [String] = []
+	var upgraded: [String] = []
 
 	func overview() async throws -> BudgetOverview {
 		BudgetOverview(name: "Household", directory: URL(filePath: "/tmp/budget"), readOnly: nil, accountGroups: [])
@@ -155,7 +186,10 @@ private final class UpgradeSession: BudgetSession, @unchecked Sendable {
 		return .reverted(change: Change(entities: [], everything: false), notes: [])
 	}
 
-	func appliedMigrations() async throws -> [AppliedMigration] { [] }
+	func appliedMigrations() async throws -> [AppliedMigration] {
+		upgraded.map { AppliedMigration(key: $0, conversion: $0.hasPrefix("kind:") ? .kind : .bill, subjectId: String($0.split(separator: ":").last ?? "")) }
+	}
+
 	func migrationOffered() async throws -> Bool { offered }
 
 	func markMigrationOffered() async throws {

@@ -74,10 +74,10 @@ pub enum EntityKind {
 	Widget,
 	/// v16. A what-if scenario with its events (R-FC-2).
 	Scenario,
-	/// v25. A dashboard widget Veritas shows as a native card (MIG-3.4);
+	/// v26. A dashboard widget Veritas shows as a native card (MIG-3.4);
 	/// `id` is the widget's id.
 	WidgetOverride,
-	/// v25. An upgraded item's Revert record (MIG-7.1); `id` is its key.
+	/// v26. An upgraded item's Revert record (MIG-7.1); `id` is its key.
 	MigrationRecord,
 }
 

@@ -35,6 +35,12 @@ public final class UpgradeModel: Identifiable {
 	public var showsDismissed = false
 	public var consentShowGoalsGroup = false
 	public var writesNoteInActual: Set<String> = []
+	/// (c) The kind the user picked, when it differs from the proposal.
+	public var kinds: [String: CategoryKind] = [:]
+	/// (d) The name and icon the user typed or picked. An empty name or icon
+	/// sets none.
+	public var displayNames: [String: String] = [:]
+	public var icons: [String: String] = [:]
 	public private(set) var targets: [String: AmountFieldModel] = [:]
 	public private(set) var isApplying = false
 	public private(set) var problem: String?
@@ -127,6 +133,21 @@ public final class UpgradeModel: Identifiable {
 		}
 	}
 
+	/// (c) The kind Apply will set: the user's pick, else the proposal.
+	public func kind(for suggestion: MigrationSuggestion) -> CategoryKind {
+		kinds[suggestion.key] ?? suggestion.proposal.kind ?? .debtPrincipal
+	}
+
+	/// (d) The name Apply will set: what the user typed, else the proposal.
+	public func displayName(for suggestion: MigrationSuggestion) -> String {
+		displayNames[suggestion.key] ?? suggestion.proposal.displayName ?? ""
+	}
+
+	/// (d) The icon Apply will set; empty is none.
+	public func icon(for suggestion: MigrationSuggestion) -> String {
+		icons[suggestion.key] ?? suggestion.proposal.icon ?? ""
+	}
+
 	public var needsGoalsGroupConsent: Bool {
 		tickedSuggestions.contains(where: \.asksToShowGoalsGroup)
 	}
@@ -154,13 +175,21 @@ public final class UpgradeModel: Identifiable {
 		var items: [MigrationItem] = []
 		for suggestion in tickedSuggestions {
 			var edits = MigrationEdits(target: nil, targetDate: nil, writeNoteInActual: false, kind: nil, displayName: nil, icon: nil)
-			if suggestion.conversion == .goal {
+			switch suggestion.conversion {
+			case .goal:
 				guard let target = await targets[suggestion.key]?.commit(), target > 0 else {
 					problem = "Enter a target for \(suggestion.subjectName)."
 					return false
 				}
 				edits.target = target
 				edits.writeNoteInActual = writesNoteInActual.contains(suggestion.key)
+			case .kind:
+				edits.kind = kinds[suggestion.key]
+			case .bill:
+				edits.displayName = displayNames[suggestion.key]
+				edits.icon = icons[suggestion.key]
+			case .report:
+				break
 			}
 			items.append(MigrationItem(key: suggestion.key, edits: edits))
 		}

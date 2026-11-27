@@ -72,6 +72,16 @@ struct BillEditor: View {
 					.accessibilityIdentifier("billEditor.problem")
 			}
 			HStack {
+				if let id = editing.id, model.hasUpgrade(id), !model.isReadOnly {
+					Button("Revert Upgrade") {
+						Task {
+							await model.revertUpgrade(id)
+							model.cancelEditing()
+						}
+					}
+					.help("Puts back the name and icon this bill had in Veritas before the upgrade.")
+					.accessibilityIdentifier("billEditor.revertUpgrade")
+				}
 				Spacer()
 				Button("Cancel", role: .cancel) { model.cancelEditing() }
 					.keyboardShortcut(.cancelAction)

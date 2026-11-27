@@ -214,11 +214,11 @@ pub struct BillSummary {
 	/// v13. Whether Skip moves the bill: active, with a later date to move to.
 	#[uniffi(default = false)]
 	pub can_skip: bool,
-	/// v25: the name Bills shows in Veritas only (MIG-6.2), before `name`
+	/// v26: the name Bills shows in Veritas only (MIG-6.2), before `name`
 	/// and the payee's. Actual never sees it.
 	#[uniffi(default = None)]
 	pub display_name: Option<String>,
-	/// v25: an SF Symbol name or one emoji, Veritas only (MIG-6.3).
+	/// v26: an SF Symbol name or one emoji, Veritas only (MIG-6.3).
 	#[uniffi(default = None)]
 	pub icon: Option<String>,
 }
@@ -237,7 +237,7 @@ pub struct BillDetail {
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct UpcomingBill {
 	pub bill_id: String,
-	/// v25: the Veritas display name when there is one (MIG-6.2), else
+	/// v26: the Veritas display name when there is one (MIG-6.2), else
 	/// Actual's name.
 	pub name: Option<String>,
 	pub payee_name: Option<String>,

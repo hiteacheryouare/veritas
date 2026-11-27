@@ -501,11 +501,11 @@ pub struct DashboardWidget {
 	pub min_height: i64,
 	pub config: WidgetConfig,
 	pub view: WidgetView,
-	/// v25: Actual stores a custom report here, and Veritas shows its native
+	/// v26: Actual stores a custom report here, and Veritas shows its native
 	/// card instead (MIG-3.4). The slot offers Revert.
 	#[uniffi(default = false)]
 	pub upgraded: bool,
-	/// v25: "This report changed in Actual, so Veritas shows it again."
+	/// v26: "This report changed in Actual, so Veritas shows it again."
 	/// (MIG-3.6).
 	#[uniffi(default = None)]
 	pub notice: Option<String>,

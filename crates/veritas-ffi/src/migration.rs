@@ -1,4 +1,4 @@
-//! v25, docs/finance/migration.md: the "Upgrade to Veritas features" read,
+//! v26, docs/finance/migration.md: the "Upgrade to Veritas features" read,
 //! its one Apply command, per-item Revert, and the two settings the sheet
 //! records outside undo (MIG-1.8).
 
