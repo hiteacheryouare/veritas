@@ -267,9 +267,9 @@ struct BalanceGraph: View {
 				let baseline = ZeroSplit.baseline(in: domain)
 				Chart(history.points, id: \.date) { point in
 					AreaMark(x: .value("Day", point.date), yStart: .value("Floor", baseline), yEnd: .value("Balance", Double(point.balance) / 100))
-						.foregroundStyle(Self.split(ZeroSplit.areaStop(values, baseline: baseline), above: Color.moneyAvailableFill.opacity(0.22), below: belowArea))
+						.foregroundStyle(Self.split(ZeroSplit.areaStop(values, baseline: baseline), above: Self.aboveArea().color, below: Self.belowArea(isLiability: isLiability).color))
 					LineMark(x: .value("Day", point.date), y: .value("Balance", Double(point.balance) / 100))
-						.foregroundStyle(Self.split(ZeroSplit.lineStop(values), above: .chartMark(.moneyAvailableFill), below: belowLine))
+						.foregroundStyle(Self.split(ZeroSplit.lineStop(values), above: Self.aboveLine().color, below: Self.belowLine(isLiability: isLiability).color))
 						.lineStyle(StrokeStyle(lineWidth: 1.5))
 				}
 				.chartXAxis(.hidden)
@@ -307,8 +307,22 @@ struct BalanceGraph: View {
 		return (low - pad)...(high + pad)
 	}
 
-	private var belowLine: Color { isLiability ? .textPrimary : .chartMark(.moneyOverspentFill) }
-	private var belowArea: Color { isLiability ? Color.textPrimary.opacity(0.08) : Color.moneyOverspentFill.opacity(0.18) }
+	/// The tokens and opacities the graph draws with, as a seam for tests.
+	struct Ink: Equatable {
+		let token: ColorToken
+		let opacity: Double
+
+		var color: Color { Color(token).opacity(opacity) }
+	}
+
+	static func aboveLine() -> Ink { Ink(token: ColorToken.moneyAvailableFill.chartMark, opacity: 1) }
+	static func aboveArea() -> Ink { Ink(token: .moneyAvailableFill, opacity: 0.22) }
+	static func belowLine(isLiability: Bool) -> Ink {
+		isLiability ? Ink(token: .textPrimary, opacity: 1) : Ink(token: ColorToken.moneyOverspentFill.chartMark, opacity: 1)
+	}
+	static func belowArea(isLiability: Bool) -> Ink {
+		isLiability ? Ink(token: .textPrimary, opacity: 0.08) : Ink(token: .moneyOverspentFill, opacity: 0.18)
+	}
 
 	/// Green above zero for every account: an overpaid card is an asset that day
 	/// (ST-2). Below zero, an asset is red and a liability neutral. The color
