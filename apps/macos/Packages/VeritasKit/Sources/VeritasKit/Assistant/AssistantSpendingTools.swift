@@ -53,9 +53,10 @@ struct SpendingTool: AssistantTool {
 	}
 
 	func call(arguments: Arguments) async throws -> String {
-		guard let period = AssistantPeriod.resolve(arguments.period, today: context.today) else { return AssistantPeriod.hint }
+		let resolved = try resolvePeriod(text: arguments.period, today: context.today)
+		guard let period = resolved.period else { return resolved.hint }
 		let report = try await context.queries.netProfitPeriod(first: period.first, last: period.last)
-		return Self.text(report, period: period, format: context.format)
+		return period.marked(Self.text(report, period: period, format: context.format))
 	}
 
 	/// AI-2.2 and AI-2.5: the group lines, then every expense line in no
@@ -64,12 +65,12 @@ struct SpendingTool: AssistantTool {
 		func amount(_ value: Int64) -> String { format.currency(value, on: .register) }
 		let expenses = report.column.expenses
 		var text = [
-			"Spending, \(period.title): \(amount(expenses.total))",
+			"Spending, \(period.label): \(amount(expenses.total))",
 			"This is the Expenses line of the Net Profit report. Debt paydown and savings are not included."
 		]
 		let ungrouped = expenses.categories.filter { $0.groupId == nil }
 		guard !report.expenseGroups.isEmpty || !ungrouped.isEmpty else { return text.joined(separator: "\n") }
-		text.append("Spending by category group, \(period.title):")
+		text.append("Spending by category group, \(period.label):")
 		text += report.expenseGroups.map { "\(AssistantLabels.group($0)): \(amount($0.total))" }
 		text += ungrouped.map { "\(AssistantLabels.category($0)): \(amount($0.total))" }
 		return text.joined(separator: "\n")
@@ -94,24 +95,25 @@ struct SpendingByCategoryTool: AssistantTool {
 	}
 
 	func call(arguments: Arguments) async throws -> String {
-		guard let period = AssistantPeriod.resolve(arguments.period, today: context.today) else { return AssistantPeriod.hint }
+		let resolved = try resolvePeriod(text: arguments.period, today: context.today)
+		guard let period = resolved.period else { return resolved.hint }
 		let breakdown = try await context.queries.spendingByCategory(first: period.first, last: period.last)
-		return Self.text(breakdown, period: period, format: context.format)
+		return period.marked(Self.text(breakdown, period: period, format: context.format))
 	}
 
 	/// AI-12.6's lines for the core's `CategoryBreakdown`, which is already ranked and summed.
 	static func text(_ breakdown: CategoryBreakdown, period: AssistantPeriod, format: MoneyFormat) -> String {
 		func amount(_ value: Int64) -> String { format.currency(value, on: .register) }
 		var text = [
-			"Spending, \(period.title): \(amount(breakdown.expenseTotal))",
+			"Spending, \(period.label): \(amount(breakdown.expenseTotal))",
 			"This is the Expenses line of the Net Profit report. Debt paydown and savings are not included."
 		]
 		guard !breakdown.shown.isEmpty || breakdown.uncategorized != nil else {
-			text.append("No spending lines in \(period.title).")
+			text.append("No spending lines in \(period.label).")
 			return text.joined(separator: "\n")
 		}
 		let keys = breakdown.shown.map { AssistantNames.key($0.name) }
-		text.append("Spending by category, \(period.title), largest first:")
+		text.append("Spending by category, \(period.label), largest first:")
 		text += breakdown.shown.enumerated().map { index, line in
 			let label = AssistantLabels.category(line)
 			let named = !line.name.isEmpty && keys.filter { $0 == keys[index] }.count > 1 ? "\(label) in \(line.groupName ?? "")" : label
@@ -143,20 +145,21 @@ struct IncomeTool: AssistantTool {
 	}
 
 	func call(arguments: Arguments) async throws -> String {
-		guard let period = AssistantPeriod.resolve(arguments.period, today: context.today) else { return AssistantPeriod.hint }
+		let resolved = try resolvePeriod(text: arguments.period, today: context.today)
+		guard let period = resolved.period else { return resolved.hint }
 		let report = try await context.queries.netProfitPeriod(first: period.first, last: period.last)
-		return Self.text(report, period: period, format: context.format)
+		return period.marked(Self.text(report, period: period, format: context.format))
 	}
 
 	static func text(_ report: NetProfitPeriod, period: AssistantPeriod, format: MoneyFormat) -> String {
 		func amount(_ value: Int64) -> String { format.currency(value, on: .register) }
 		let income = report.column.income
 		var text = [
-			"Income, \(period.title): \(amount(income.total))",
+			"Income, \(period.label): \(amount(income.total))",
 			"This is the Income line of the Net Profit report."
 		]
 		guard !income.categories.isEmpty else { return text.joined(separator: "\n") }
-		text.append("Income by category, \(period.title):")
+		text.append("Income by category, \(period.label):")
 		text += income.categories.map { "From \(AssistantLabels.category($0)): \(amount($0.total))" }
 		return text.joined(separator: "\n")
 	}
@@ -179,11 +182,12 @@ struct CategorySpendingTool: AssistantTool {
 	}
 
 	func call(arguments: Arguments) async throws -> String {
-		guard let period = AssistantPeriod.resolve(arguments.period, today: context.today) else { return AssistantPeriod.hint }
+		let resolved = try resolvePeriod(text: arguments.period, today: context.today)
+		guard let period = resolved.period else { return resolved.hint }
 		guard !arguments.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return AssistantArguments.nameHint }
 		let report = try await context.queries.netProfitPeriod(first: period.first, last: period.last)
 		let sheet = try await context.queries.budgetMonth(Month(date: context.today) ?? period.lastMonth, today: context.today)
-		return Self.text(arguments.name, report: report, sheet: sheet, period: period, format: context.format)
+		return period.marked(Self.text(arguments.name, report: report, sheet: sheet, period: period, format: context.format))
 	}
 
 	/// The Net Profit lines, in the order a category's figures are given (AI-3.3).
@@ -251,14 +255,14 @@ struct CategorySpendingTool: AssistantTool {
 			let rows = count == 1 ? "From 1 transaction" : "From \(count) transactions"
 			switch line {
 			case .income:
-				let answer = "Income from \(label), \(period.title): \(amount)"
+				let answer = "Income from \(label), \(period.label): \(amount)"
 				return first ? [answer, "\(rows), on the Income line of the Net Profit report."] : [answer]
 			case .debtPaydown:
-				return ["Debt paydown for \(label), \(period.title): \(amount). It is not spending.\(total < 0 ? " \(NetProfitTool.negativeDebtPaydown)" : "")"]
+				return ["Debt paydown for \(label), \(period.label): \(amount). It is not spending.\(total < 0 ? " \(NetProfitTool.negativeDebtPaydown)" : "")"]
 			case .savings:
-				return ["Savings for \(label), \(period.title): \(amount). It is not spending.\(total < 0 ? " \(NetProfitTool.negativeSavings)" : "")"]
+				return ["Savings for \(label), \(period.label): \(amount). It is not spending.\(total < 0 ? " \(NetProfitTool.negativeSavings)" : "")"]
 			default:
-				let answer = "Spending on \(label), \(period.title): \(amount)"
+				let answer = "Spending on \(label), \(period.label): \(amount)"
 				return first ? [answer, "\(rows), on the Expenses line of the Net Profit report."] : [answer]
 			}
 		}
@@ -287,7 +291,8 @@ struct BudgetTool: AssistantTool {
 	}
 
 	func call(arguments: Arguments) async throws -> String {
-		guard let period = AssistantPeriod.resolve(arguments.period, today: context.today) else { return AssistantPeriod.hint }
+		let resolved = try resolvePeriod(text: arguments.period, today: context.today)
+		guard let period = resolved.period else { return resolved.hint }
 		guard period.firstMonth == period.lastMonth else { return Self.oneMonth }
 		let sheet = try await context.queries.budgetMonth(period.firstMonth, today: context.today)
 		return Self.text(arguments.name, sheet: sheet, format: context.format)

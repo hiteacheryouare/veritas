@@ -3,56 +3,49 @@ import Testing
 import VeritasCore
 @testable import VeritasKit
 
-/// docs/finance/assistant.md AI-6: the app works out the dates from the user's words.
+/// docs/finance/assistant.md AI-6 through the core's `resolvePeriod`. Every
+/// row of AI-6.2 and the cross-year ranges are in veritas-ffi's periods module.
 struct AssistantPeriodTests {
-	static let today = "2026-11-22"
-
-	@Test(arguments: [
-		("", "2026-11-01", "2026-11-30", "November 2026"),
-		("this month", "2026-11-01", "2026-11-30", "November 2026"),
-		("so far this month", "2026-11-01", "2026-11-22", "November 1 to 22, 2026"),
-		("this month so far", "2026-11-01", "2026-11-22", "November 1 to 22, 2026"),
-		("Month to date", "2026-11-01", "2026-11-22", "November 1 to 22, 2026"),
-		("so far", "2026-11-01", "2026-11-22", "November 1 to 22, 2026"),
-		("last month", "2026-10-01", "2026-10-31", "October 2026"),
-		("this year", "2026-01-01", "2026-12-31", "2026"),
-		("so far this year", "2026-01-01", "2026-11-22", "January 1 to November 22, 2026"),
-		("year to date", "2026-01-01", "2026-11-22", "January 1 to November 22, 2026"),
-		("last year", "2025-01-01", "2025-12-31", "2025"),
-		("this month last year", "2025-11-01", "2025-11-30", "November 2025"),
-		("same month last year", "2025-11-01", "2025-11-30", "November 2025"),
-		("this month this year", "2026-11-01", "2026-11-30", "November 2026"),
-		("October", "2026-10-01", "2026-10-31", "October 2026"),
-		("december", "2025-12-01", "2025-12-31", "December 2025"),
-		("Oct 2026", "2026-10-01", "2026-10-31", "October 2026"),
-		("in October of last year", "2025-10-01", "2025-10-31", "October 2025"),
-		("2026-10", "2026-10-01", "2026-10-31", "October 2026"),
-		("February 2024", "2024-02-01", "2024-02-29", "February 2024"),
-		("2025", "2025-01-01", "2025-12-31", "2025"),
-		("2026-10-01 to 2026-10-15", "2026-10-01", "2026-10-15", "October 1 to 15, 2026"),
-		("2026-10-01 to 2026-10-31", "2026-10-01", "2026-10-31", "October 2026"),
-		("2025-12-15 to 2026-01-03", "2025-12-15", "2026-01-03", "December 15, 2025 to January 3, 2026"),
-		("May to October 2026", "2026-05-01", "2026-10-31", "May to October 2026"),
-		("November to February", "2025-11-01", "2026-02-28", "November 2025 to February 2026"),
-		("today", "2026-11-22", "2026-11-22", "November 22, 2026")
-	])
-	func wordsResolveAgainstToday(_ words: String, first: String, last: String, title: String) throws {
-		let period = try #require(AssistantPeriod.resolve(words, today: Self.today), "\(words)")
-		#expect(period.first == first, "\(words)")
-		#expect(period.last == last, "\(words)")
-		#expect(period.title == title, "\(words)")
+	@Test func theCoresRangeKeepsItsMonths() throws {
+		let period = try #require(try resolvePeriod(text: "November 2025 to January", today: "2026-11-22").period)
+		#expect((period.first, period.last) == ("2025-11-01", "2026-01-31"))
+		#expect((period.firstMonth, period.lastMonth) == (Month(year: 2025, month: 11), Month(year: 2026, month: 1)))
 	}
 
-	@Test func theEdgesOfTheYearAndAMonthNamedAlone() throws {
-		let january = try #require(AssistantPeriod.resolve("last month", today: "2026-01-15"))
-		#expect((january.first, january.last, january.title) == ("2025-12-01", "2025-12-31", "December 2025"))
-		#expect(AssistantPeriod.resolve("October", today: "2026-09-05")?.first == "2025-10-01")
-		#expect(AssistantPeriod.resolve("October", today: "2026-10-05")?.last == "2026-10-31", "the whole month, days after today included")
+	@Test func wordsItCantReadGetTheCoresHint() throws {
+		let refused = try resolvePeriod(text: "next fortnight", today: "2026-11-22")
+		#expect(refused.period == nil)
+		#expect(refused.hint == AssistantPeriod.hint)
+		#expect(AssistantPeriod.hint.hasPrefix("Ask again with a period"))
 	}
 
-	@Test(arguments: ["2026-13", "2026-02-30", "1899", "next fortnight", "last 3 months", "x-y", "2026-11-10 to 2026-11-05"])
-	func wordsItCantReadGetTheHint(_ words: String) {
-		#expect(AssistantPeriod.resolve(words, today: Self.today) == nil, "\(words)")
+	@Test func aPeriodThatHasNotStartedSaysSoAfterTheFirstLine() throws {
+		let march = try #require(try resolvePeriod(text: "March 2027", today: "2026-11-22").period)
+		#expect(march.notStarted)
+		#expect(march.marked("Spending, March 2027: $0.00\nThis is the Expenses line") == "Spending, March 2027: $0.00\nThis period has not started.\nThis is the Expenses line")
+		#expect(march.marked("Spending, March 2027: $0.00") == "Spending, March 2027: $0.00\nThis period has not started.")
+		let thisMonth = try #require(try resolvePeriod(text: "this month", today: "2026-11-22").period)
+		#expect(thisMonth.marked("Spending, November 2026: $1.00") == "Spending, November 2026: $1.00", "a period that has started, though it runs past today")
+	}
+}
+
+extension AssistantPeriod {
+	static func month(_ year: Int32, _ month: UInt32) -> AssistantPeriod {
+		let month = Month(year: year, month: month)
+		return AssistantPeriod(first: month.firstDay, last: month.lastDay, label: ReportPeriod.monthYear(month), notStarted: false)
+	}
+
+	static var hint: String {
+		(try? resolvePeriod(text: "next fortnight", today: "2026-11-22"))?.hint ?? "no hint"
+	}
+
+	static var balanceDateHint: String {
+		(try? resolveBalanceSheetDate(text: "2099-01-01", today: "2026-11-22"))?.hint ?? "no hint"
+	}
+
+	static var yearHint: String {
+		guard case .refused(let hint)? = try? resolveTaxYear(text: "", today: "2026-11-22") else { return "no hint" }
+		return hint
 	}
 }
 
@@ -120,8 +113,8 @@ struct AssistantNamesTests {
 /// Groceries and Gas in Everyday, Dining out in Fun, a principal transfer,
 /// a savings transfer and Salary.
 struct AssistantSpendingTextTests {
-	static let november = AssistantPeriod(month: Month(year: 2026, month: 11))
-	static let soFar = AssistantPeriod(first: "2026-11-01", last: "2026-11-22")
+	static let november = AssistantPeriod.month(2026, 11)
+	static let soFar = AssistantPeriod(first: "2026-11-01", last: "2026-11-22", label: "November 1 to 22, 2026", notStarted: false)
 	static let format = MoneyFormat()
 	static let minus = MoneyFormat.minus
 
@@ -240,7 +233,7 @@ struct AssistantSpendingTextTests {
 
 	@Test func ex6IncomeIsTheIncomeLine() {
 		let report = Self.scenarioA()
-		let text = IncomeTool.text(report, period: AssistantPeriod(first: "2026-01-01", last: "2026-11-22"), format: Self.format)
+		let text = IncomeTool.text(report, period: AssistantPeriod(first: "2026-01-01", last: "2026-11-22", label: "January 1 to November 22, 2026", notStarted: false), format: Self.format)
 		#expect(Array(Self.lines(text).prefix(2)) == ["Income, January 1 to November 22, 2026: $5,000.00", "This is the Income line of the Net Profit report."])
 	}
 
@@ -409,6 +402,16 @@ struct AssistantSpendingToolsOnRealBudgetTests {
 			let income = try #require(model.rows.first { $0.line == .income }?.cells.last?.amount)
 			let text = try await IncomeTool(context: context(budget)).call(arguments: .init(period: "this year"))
 			#expect(text.hasPrefix("Income, 2026: \(model.format.currency(income, on: .register))\n"), "\(text)")
+		}
+	}
+
+	@Test func aRangeAcrossYearsReadsTheYearsWritten() async throws {
+		try await RealBudget.with { budget in
+			let context = try context(budget)
+			let report = try await context.queries.netProfitPeriod(first: "2025-11-01", last: "2026-01-31")
+			#expect(report.column.expenses.total != 0, "the fixture has spending in that winter")
+			let text = try await SpendingTool(context: context).call(arguments: .init(period: "November 2025 to January 2026"))
+			#expect(text.hasPrefix("Spending, November 2025 to January 2026: \(context.format.currency(report.column.expenses.total, on: .register))\n"), "\(text)")
 		}
 	}
 

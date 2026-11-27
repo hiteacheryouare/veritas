@@ -70,6 +70,10 @@ struct AssistantEvaluationTests {
 		let september = await netProfit(budget, Self.september, Self.september)
 		let october = await netProfit(budget, Self.october, Self.october)
 		let year = await netProfit(budget, Month(year: 2026, month: 1), Month(year: 2026, month: 12))
+		let acrossYears = await netProfit(budget, Month(year: 2025, month: 11), Month(year: 2026, month: 1))
+		let fourthQuarter = await netProfit(budget, Month(year: 2025, month: 10), Month(year: 2025, month: 12))
+		let lateNovember = AssistantContext(queries: queries, format: format, today: "2026-11-22")
+		let sinceOctober = try await queries.netProfitPeriod(first: "2026-10-01", last: "2026-11-22")
 		let firstHalf = try await queries.netProfitPeriod(first: "2026-10-01", last: Self.midOctober)
 		let groceriesInSeptember = try category(AllFeatures.groceries, in: september)
 		let groceriesInOctober = try category(AllFeatures.groceries, in: october)
@@ -104,6 +108,12 @@ struct AssistantEvaluationTests {
 			Case(question: "how much did i spend on \(busiest.name.lowercased()) so far this month?", expected: amount(busiest.total), context: end, label: "October 2026", known: fixtureNames, sources: try await spentOn(busiest.name, "so far this month", end)),
 			Case(question: "How much did I spend on \(groceriesInOctober.name.uppercased()) in October?", expected: amount(groceriesInOctober.total), context: end, label: "October 2026", known: fixtureNames, sources: try await spentOn(groceriesInOctober.name, "October", end)),
 			Case(question: "What did I spend on \(everydayName) last month?", expected: amount(everyday.reduce(0) { $0 + $1.total }), context: end, label: "September 2026", known: fixtureNames, sources: try await spentOn(everydayName, "last month", end)),
+			Case(question: "How much did I spend from November 2025 to January 2026?", expected: amount(try total(.expenses, in: acrossYears)), context: end, label: "November 2025 to January 2026"),
+			Case(question: "How much have I spent since October?", expected: amount(sinceOctober.column.expenses.total), context: lateNovember, label: "October 1 to November 22, 2026"),
+			Case(question: "How much did I spend in Q4 2025?", expected: amount(try total(.expenses, in: fourthQuarter)), context: end, label: "October to December 2025"),
+			Case(question: "How much did I spend over the holidays last year?", expected: "no figure: the period words are refused (AI-6.11)", context: end) { answer in
+				!answer.hasPrefix("failed:") && !answer.contains(/\d\.\d\d/) && Self.clean(answer)
+			},
 			Case(question: "What was my income this year?", expected: amount(try total(.income, in: year)), context: end, label: "2026"),
 			Case(question: "How much did I earn last month?", expected: amount(try total(.income, in: september)), context: end, label: "September 2026"),
 			Case(question: "How much did I budget for \(groceriesInOctober.name) this month?", expected: format.currency(budgeted, on: .budget), context: end, label: "October 2026"),

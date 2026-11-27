@@ -77,7 +77,7 @@ struct AssistantReadOnlyTests {
 		_ = try? await BalanceSheetTool(context: context).call(arguments: .init(date: "2026-10-31"))
 		_ = try? await CashFlowTool(context: context).call(arguments: .init(period: "October 2026"))
 		_ = try? await GoalsTool(context: context).call(arguments: .init())
-		_ = try? await TaxSummaryTool(context: context).call(arguments: .init(year: 2026))
+		_ = try? await TaxSummaryTool(context: context).call(arguments: .init(year: "2026"))
 		_ = try? await SavedReportTool(context: context).call(arguments: .init(name: "Spending"))
 		#expect(queries.calls.isSubset(of: Self.allowedQueries))
 		#expect(queries.calls == Self.allowedQueries.subtracting(["customReport(_:today:)"]), "customReport runs only once customReports finds the name")
