@@ -455,6 +455,9 @@ enum BrandArtwork {
 	static let coinViewBox = CGRect(x: 0, y: 0, width: 64, height: 64)
 	static let coin = "\(svgPath(coinPath))"
 	static let smallCoin = "\(svgPath(smallCoinPath))"
+	static let dollar = "\(svgPath(coinDollar))"
+	static let outerRing = (radius: CGFloat(\(number(32 - fullCoin.outerRing / 2))), width: CGFloat(\(number(fullCoin.outerRing))))
+	static let innerRing = (radius: CGFloat(\(number(fullCoin.innerRadius))), width: CGFloat(\(number(fullCoin.innerRing ?? 0))))
 	static let wordmarkViewBox = CGRect(x: \(number(wordBox.minX)), y: \(number(wordBox.minY)), width: \(number(wordBox.width)), height: \(number(wordBox.height)))
 	static let wordmark = "\(svgPath(wordmark))"
 	static let capHeight: CGFloat = \(number(capHeight))

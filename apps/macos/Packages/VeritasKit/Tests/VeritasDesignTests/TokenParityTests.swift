@@ -31,7 +31,7 @@ struct TokenParityTests {
 	/// Each motion token and the motion whose duration it mirrors, normally and with Reduce Motion.
 	static let motions: [String: Motion] = [
 		"duration-instant": .instant, "duration-fast": .fast, "duration-sheet": .sheet,
-		"duration-page": .pageIn, "duration-page-exit": .pageOut, "duration-story": .turn,
+		"duration-page": .pageIn, "duration-page-exit": .pageOut, "duration-story": .turn, "duration-mint-in": .mintIn,
 		"spring-settle": .settle, "spring-morph": .morph, "spring-push": .push, "spring-turn": .turn
 	]
 

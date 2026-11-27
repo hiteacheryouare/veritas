@@ -41,6 +41,9 @@ Every color has a light and a dark value. There is no pure black or white anywhe
 | `color-chart-expense` | #6e6e78 | #a5a5ae | Spending in charts. Spending is not a warning, so it is graphite |
 | `color-chart-savings` | #56e39f | #56e39f | Savings in Net Profit and the Sankey (good) |
 | `color-chart-debt-paydown` | #8b5e34 | #c99a6b | Debt paydown in Net Profit and the Sankey |
+| `color-category-1..8` | | | Chart categories: custom reports, dashboard cards, Sankey groups. See Categories |
+| `color-brand-deep` | #1b107e | #120a4e | The splash's gradient runs from `color-brand` down to this |
+| `color-text-on-brand-secondary` | #cfcbf2 | #cfcbf2 | The splash's sentence, under `color-text-on-brand` |
 | `color-scenario-1..3` | blue, umber, teal | | What-if lines. Baseline uses `color-scenario-baseline` |
 | `color-surface-*` | | | window, sidebar (glass), grouped, raised (sheets, popovers), field, paper, scrim |
 | `color-text-*` | | | primary, secondary, tertiary, on-accent, paper. Secondary is #5d5d66 / #b0b0b9 and tertiary #5f5f68 / #afafb7: every text token reaches 4.5:1 on every surface, including rows tinted by selection or hover |
@@ -66,6 +69,7 @@ Ryan's colors are used exactly for fills, bars, dots and chart marks. Where one 
 
 `ContrastTests` in VeritasDesignTests fails if any of these drops below its threshold.
 
+- **Splash, 4.5:1:** text-on-brand and text-on-brand-secondary on brand and on brand-deep, and text-on-brand on a splash button's fill and its pressed fill over each.
 - **4.5:1, in both appearances:** every text token (primary, secondary, tertiary, accent, brand-secondary) and every money text token (available, low, overspent, income, neutral) on the window, grouped, raised and field surfaces. The same holds on each of those surfaces tinted by selection (`color-accent-soft`) or hover, on the sidebar and its selected row, and on RuleApplySheet's reconciled-warning row (money-low at 8%). Also text-on-accent on accent-fill, text-on-brand on brand, and the statement's notice on paper.
 - **3:1, in both appearances:** the focus ring and accent fill on the four surfaces, and every brand fill's chart edge and chart mark on the window, grouped and raised surfaces, where charts sit (dashboard cards draw on raised).
 - **7:1:** primary text on the selected sidebar row.
@@ -75,6 +79,31 @@ The fills themselves are not 3:1 everywhere. In light mode the mint is 1.6:1 and
 - **Chart marks that take a stroke** keep the fill and draw a 1 pt edge in the fill's text shade (`ColorToken.chartEdge`): Sankey nodes, the calendar card's bars, the money in and out bars, and legend dots.
 - **Chart marks that can't** (lines, and Swift Charts series) use `ColorToken.chartMark`: the fill where it reaches 3:1, else the edge shade.
 - **Drain bars and goal rings are exempt.** The amount beside them, with its icon and word, carries the state, so the bar is decoration and keeps the plain fill.
+
+### Categories
+
+Charts that color by category (custom reports, dashboard cards, the dashboard Sankey, and the spending groups on the Sankey screen) use eight hues from Ryan's brand, in this order. Actual's chart colors 1 to 9 map onto them in turn.
+
+| # | Light | Dark | Hue |
+|---|---|---|---|
+| 1 | #23169c | #7285db | Indigo (Ryan's primary) |
+| 2 | #007ea7 | #86d7fd | Cerulean (Ryan's secondary) |
+| 3 | #9c76e3 | #af92eb | Orchid |
+| 4 | #b87c58 | #e0a17c | Copper |
+| 5 | #6b106c | #b66eb4 | Plum |
+| 6 | #03544b | #70b3a8 | Pine |
+| 7 | #4e6376 | #aac1d6 | Slate |
+| 8 | #707102 | #909235 | Olive |
+
+- **Not money:** no category sits within 26° of bad's OKLCH hue, 20° of warning's or 22° of good's. Good, warning and bad keep their meaning, and only a money state uses them. On the Sankey screen, the spending groups skip cerulean and copper, because income is cerulean and debt paydown is brown.
+- **Readable:** every category reaches 3:1 on the window, grouped and raised surfaces in its own appearance, so its marks need no edge.
+- **Distinct:** in OKLab ×100, every pair stays at least 7 apart in light mode and 5 apart in dark mode. That holds under normal vision and under full protanopia, deuteranopia and tritanopia (Machado, Oliveira and Fernandes 2009). The legend and tooltips name every series, so color is never the only cue.
+- **Dark mode:** each category keeps its light hue, with chroma capped at 0.13 so nothing glows.
+- **Checks:** `tools/brand/chart-palette.py` chose the palette and prints these figures. `CategoryPaletteTests` and `ContrastTests` fail if any of them slips.
+
+### Balance graphs
+
+The account page's balance graph is green above zero and red below. It changes color exactly where the balance crosses zero. The line takes each fill's chart mark (`money-available` and `money-overspent`, at 3:1). The area between the line and zero keeps the fills, faint.
 
 ### Tags
 
@@ -134,6 +163,7 @@ A bar shows what is left: `available / (carried in + budgeted)`, clamped to 0–
 | `delay-page` | 60 ms | 0 | The arriving page waits for the old one to mostly fade |
 | `duration-story` | 480 ms | 150 ms fade | Wrapped turns |
 | `duration-stage` | 700 ms | none | The total budget for a staged entrance |
+| `duration-mint-in` | 1200 ms | 150 ms fade | The splash's coin mint-in, once per launch. One even clock: the rings draw (0–45%), the $ fades up (30–60%), the wordmark settles (42–80%), the buttons rise in (66–100%), each eased with `easing-standard`. Then nothing moves |
 | `spring-settle` | 320 ms, bounce 0 | 0 | Layout moves: reorder, drop, collapse, sheet height, the coach mark |
 | `spring-morph` | 400 ms, bounce 0 | 150 ms fade | A card growing into its page |
 | `spring-push` | 320 ms, bounce 0 | 150 ms fade | A row's page pushing in |

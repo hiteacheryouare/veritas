@@ -78,6 +78,25 @@ struct ContrastTests {
 			pairs.append(Pair(name: "text-on-accent on accent-fill, \(mode)", foreground: ColorToken.textOnAccent.value(dark: dark), background: ColorToken.accentFill.value(dark: dark), use: .text))
 			pairs.append(Pair(name: "text-on-brand on brand, \(mode)", foreground: ColorToken.textOnBrand.value(dark: dark), background: ColorToken.brand.value(dark: dark), use: .text))
 		}
+		for dark in [false, true] {
+			let mode = dark ? "dark" : "light"
+			for (groundName, ground) in [("brand", ColorToken.brand), ("brand-deep", .brandDeep)] {
+				let surface = ground.value(dark: dark)
+				for (textName, text) in [("text-on-brand", ColorToken.textOnBrand), ("text-on-brand-secondary", .textOnBrandSecondary)] {
+					pairs.append(Pair(name: "\(textName) on \(groundName) (the splash), \(mode)", foreground: text.value(dark: dark), background: surface, use: .text))
+				}
+				// The splash buttons' labels are text-on-brand; the secondary sentence never sits on a button.
+				for alpha in [0.14, 0.24] {
+					let button = Contrast.over(RGBA(0xffffff, alpha: alpha), surface)
+					pairs.append(Pair(name: "text-on-brand on a splash button (\(alpha)) over \(groundName), \(mode)", foreground: ColorToken.textOnBrand.value(dark: dark), background: button, use: .text))
+				}
+			}
+			for category in ColorToken.categories {
+				for surface in ColorToken.chartSurfaces {
+					pairs.append(Pair(name: "\(category) on \(surface), \(mode)", foreground: category.value(dark: dark), background: surface.value(dark: dark), use: .ui))
+				}
+			}
+		}
 		for paper in [ColorToken.surfacePaper.light, ColorToken.surfacePaper.dark] {
 			pairs.append(Pair(name: "money-overspent (light) on paper", foreground: ColorToken.moneyOverspent.light, background: paper, use: .text))
 		}

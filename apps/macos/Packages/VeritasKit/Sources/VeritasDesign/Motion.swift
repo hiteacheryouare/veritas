@@ -94,6 +94,8 @@ public extension Motion {
 		public static let story = 0.48
 		/// The whole budget for a staged entrance, every part included.
 		public static let stage = 0.70
+		/// The splash's coin mint-in: the one brand moment, played once per launch.
+		public static let mintIn = 1.2
 		/// How long a page waits for its content before showing a spinner.
 		public static let readyGate = 0.25
 		/// A command repeated sooner than this changes without animation.
@@ -122,8 +124,11 @@ public extension Motion {
 	static let push = Motion("push", .spring(duration: 0.32, bounce: 0), reduced: fade)
 	/// Wrapped: a spread or card turning.
 	static let turn = Motion("turn", .spring(duration: Duration.story, bounce: 0), reduced: fade)
+	/// The splash's mint-in clock. It runs at an even pace and each part eases on
+	/// its own stretch of it (`MintIn`); with Reduce Motion the whole splash fades in.
+	static let mintIn = Motion("mintIn", .timing(.linear, duration: Duration.mintIn), reduced: fade)
 
-	static let all: [Motion] = [.instant, .fast, .leave, .sheet, .pageIn, .pageOut, .settle, .morph, .push, .turn]
+	static let all: [Motion] = [.instant, .fast, .leave, .sheet, .pageIn, .pageOut, .settle, .morph, .push, .turn, .mintIn]
 
 	/// A change touching more rows than this happens without animation
 	/// (design/motion.md, performance): hundreds of cross-fades at once cost
@@ -150,11 +155,14 @@ public extension Motion {
 public enum Easing: Hashable, Sendable {
 	case standard
 	case exit
+	/// Only for a staged entrance's clock, whose parts ease on their own.
+	case linear
 
 	public var controlPoints: (x1: Double, y1: Double, x2: Double, y2: Double) {
 		switch self {
 		case .standard: (0.2, 0.7, 0.2, 1)
 		case .exit: (0.4, 0, 1, 1)
+		case .linear: (0, 0, 1, 1)
 		}
 	}
 }
