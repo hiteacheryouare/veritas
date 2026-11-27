@@ -10,6 +10,9 @@
 //! veritas-reports gives on a fresh load, and saved reports and widget moves
 //! that survive undo, reopen and Actual.
 
+#[path = "support/children.rs"]
+mod children;
+
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::pin;
@@ -117,7 +120,9 @@ fn import(scratch: &Scratch, name: &str) -> Arc<Session> {
 }
 
 fn open(scratch: &Scratch) -> Arc<Session> {
-	let session = block_on(Session::open(scratch.budget(), CancelToken::new())).unwrap();
+	let session = children::while_no_child_starts(|| {
+		block_on(Session::open(scratch.budget(), CancelToken::new())).unwrap()
+	});
 	pin_today(&session);
 	session
 }
@@ -843,14 +848,15 @@ fn oracle() -> Option<PathBuf> {
 
 /// Actual imports and loads `zip`, then dumps its tables.
 fn actual_reads(oracle: &Path, zip: &str) -> serde_json::Value {
-	let output = std::process::Command::new("node")
-		.current_dir(oracle)
-		.arg("src/main.ts")
-		.arg("dump")
-		.arg(zip)
-		.args(["--today", TODAY])
-		.output()
-		.expect("node runs");
+	let output = children::output(
+		std::process::Command::new("node")
+			.current_dir(oracle)
+			.arg("src/main.ts")
+			.arg("dump")
+			.arg(zip)
+			.args(["--today", TODAY]),
+	)
+	.expect("node runs");
 	assert!(
 		output.status.success(),
 		"Actual couldn't read {zip}: {}",

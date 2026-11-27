@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::hash::{BuildHasherDefault, Hasher};
 use std::num::NonZero;
 
@@ -169,17 +169,80 @@ impl Classification {
 	}
 
 	pub fn get(&self, id: &TransactionId) -> Option<&ClassifiedRow> {
-		let found = self
-			.by_id
+		let found = self.find(id)?;
+		self.by_id
+			.get(found)
+			.and_then(|&position| self.rows.get(position))
+	}
+
+	/// Where `id` sits in `by_id`.
+	fn find(&self, id: &TransactionId) -> Option<usize> {
+		self.by_id
 			.binary_search_by(|&position| {
 				self.rows
 					.get(position)
 					.map_or(std::cmp::Ordering::Less, |row| row.id.cmp(id))
 			})
-			.ok()?;
-		self.by_id
-			.get(found)
-			.and_then(|&position| self.rows.get(position))
+			.ok()
+	}
+
+	/// Brings the classification up to date with `budget` after only the
+	/// transactions in `changed` were written: added, edited or deleted.
+	/// Everything else a classification reads (accounts, categories, payees,
+	/// their mappings and transaction metadata) must be as it was; when it
+	/// isn't, [`classify`] afresh. The result is what [`classify`] gives.
+	pub fn reclassify(&mut self, budget: &BudgetData, changed: &BTreeSet<TransactionId>) {
+		let affected = affected_rows(budget, changed);
+		if affected.len() > RECLASSIFY_AT_MOST {
+			*self = classify(budget);
+			return;
+		}
+		let (rows, orphans) = classify_rows(budget, &affected);
+		for id in &affected {
+			self.remove(id);
+		}
+		for row in rows {
+			self.insert(row);
+		}
+		for orphan in orphans {
+			if let Err(at) = self.orphans.binary_search(&orphan) {
+				self.orphans.insert(at, orphan);
+			}
+		}
+	}
+
+	fn remove(&mut self, id: &TransactionId) {
+		if let Ok(at) = self.orphans.binary_search(id) {
+			self.orphans.remove(at);
+		}
+		let Some(found) = self.find(id) else {
+			return;
+		};
+		let position = self.by_id.remove(found);
+		if position < self.rows.len() {
+			self.rows.remove(position);
+		}
+		for slot in &mut self.by_id {
+			if *slot > position {
+				*slot -= 1;
+			}
+		}
+	}
+
+	fn insert(&mut self, row: ClassifiedRow) {
+		let position = self
+			.rows
+			.partition_point(|other| (other.date, &other.id) < (row.date, &row.id));
+		let found = self
+			.by_id
+			.partition_point(|&other| self.rows.get(other).is_some_and(|other| other.id < row.id));
+		for slot in &mut self.by_id {
+			if *slot >= position {
+				*slot += 1;
+			}
+		}
+		self.by_id.insert(found, position);
+		self.rows.insert(position, row);
 	}
 
 	pub fn within(&self, period: Period) -> &[ClassifiedRow] {
@@ -288,6 +351,11 @@ pub fn classify(budget: &BudgetData) -> Classification {
 /// The result is the same for any count.
 pub fn classify_on(budget: &BudgetData, threads: usize) -> Classification {
 	let transactions: Vec<&Transaction> = budget.transactions.values().collect();
+	let parents: IdMap<&TransactionId, &Transaction> = transactions
+		.iter()
+		.filter(|transaction| transaction.split == SplitRole::Parent)
+		.map(|transaction| (&transaction.id, *transaction))
+		.collect();
 	let mut orphans = Vec::new();
 	let mut candidates = Vec::with_capacity(transactions.len());
 	for (chunk_candidates, chunk_orphans) in in_chunks(&transactions, threads, |_, chunk| {
@@ -295,7 +363,7 @@ pub fn classify_on(budget: &BudgetData, threads: usize) -> Classification {
 		let mut candidates = Vec::with_capacity(chunk.len());
 		let mut orphans = Vec::new();
 		for &transaction in chunk {
-			if !is_row(budget, transaction) {
+			if !is_live_row(budget, &parents, transaction) {
 				continue;
 			}
 			match Candidate::new(budget, &mut lookups, transaction) {
@@ -309,82 +377,104 @@ pub fn classify_on(budget: &BudgetData, threads: usize) -> Classification {
 		orphans.extend(chunk_orphans);
 	}
 
-	let mut decided: Vec<Option<ClassifiedRow>> = Vec::with_capacity(candidates.len());
-	let mut mirrors = Vec::new();
-	for (chunk_decided, chunk_mirrors) in in_chunks(&candidates, threads, |offset, chunk| {
-		let mut decided = Vec::with_capacity(chunk.len());
-		let mut mirrors = Vec::new();
-		for (index, candidate) in chunk.iter().enumerate() {
-			let partner = partner(&candidates, candidate);
-			let partner_candidate = partner.and_then(|other| candidates.get(other));
-			let row = ClassifiedRow {
-				partner: partner_candidate.map(|other| Partner {
-					id: other.transaction.id.clone(),
-					date: other.transaction.date,
-				}),
-				..candidate.row()
-			};
-			match decide(candidate, partner_candidate) {
-				Outcome::Decided(decision, flags) => decided.push(Some(ClassifiedRow {
-					decision,
-					flags,
-					..row
-				})),
-				Outcome::Mirror => {
-					decided.push(None);
-					mirrors.push((offset + index, row, partner));
-				}
-			}
-		}
-		(decided, mirrors)
+	// Only a transfer can be another row's partner (`pairs` requires it).
+	let transfers: IdMap<&TransactionId, usize> = candidates
+		.iter()
+		.enumerate()
+		.filter(|(_, candidate)| candidate.transfer.is_some())
+		.map(|(position, candidate)| (&candidate.transaction.id, position))
+		.collect();
+	let mut decided: Vec<(Option<usize>, Option<Verdict>)> = Vec::with_capacity(candidates.len());
+	for chunk in in_chunks(&candidates, threads, |_, chunk| {
+		chunk
+			.iter()
+			.map(|candidate| {
+				let partner = partner_id(candidate)
+					.and_then(|id| transfers.get(id).copied())
+					.filter(|&other| {
+						candidates
+							.get(other)
+							.is_some_and(|other| pairs(candidate, other))
+					});
+				let partner_candidate = partner.and_then(|other| candidates.get(other));
+				let verdict = match decide(candidate, partner_candidate) {
+					Outcome::Decided(decision, flags) => Some(Verdict {
+						decision,
+						flags,
+						leg: Leg::Primary,
+					}),
+					Outcome::Mirror => None,
+				};
+				(partner, verdict)
+			})
+			.collect::<Vec<_>>()
 	}) {
-		decided.extend(chunk_decided);
-		mirrors.extend(chunk_mirrors);
+		decided.extend(chunk);
 	}
-	for (position, row, primary) in mirrors {
-		let primary = primary
-			.and_then(|primary| decided.get(primary))
-			.and_then(|primary| primary.as_ref().map(|primary| primary.decision));
-		let classified = match primary {
-			Some(decision) => ClassifiedRow {
-				decision,
-				leg: Leg::Mirror,
-				..row
-			},
-			None => ClassifiedRow {
-				decision: Decision::UncategorizedTransfer,
-				flags: Flags {
-					needs_review: true,
-					unpaired: true,
-					..Flags::default()
-				},
-				..row
-			},
+	for position in 0..decided.len() {
+		let Some(&(partner, None)) = decided.get(position) else {
+			continue;
 		};
+		let primary = partner
+			.and_then(|primary| decided.get(primary))
+			.and_then(|(_, verdict)| verdict.map(|verdict| verdict.decision));
 		if let Some(slot) = decided.get_mut(position) {
-			*slot = Some(classified);
+			slot.1 = Some(mirror_verdict(primary));
 		}
 	}
 
 	// Rows arrive in id order, so sorting by date then position gives
 	// date-then-id.
-	let mut order: Vec<(Option<CivilDate>, usize)> = decided
+	let mut order: Vec<u128> = candidates
 		.iter()
 		.enumerate()
-		.map(|(position, row)| (row.as_ref().map(|row| row.date), position))
+		.map(|(position, candidate)| {
+			(u128::from(date_key(candidate.transaction.date)) << 64) | position as u128
+		})
 		.collect();
 	order.sort_unstable();
-	let mut by_id = vec![0; decided.len()];
-	for (sorted, &(_, position)) in order.iter().enumerate() {
+	let order: Vec<usize> = order
+		.into_iter()
+		.map(|key| (key & u128::from(u64::MAX)) as usize)
+		.collect();
+	let mut by_id = vec![0; candidates.len()];
+	for (sorted, &position) in order.iter().enumerate() {
 		if let Some(slot) = by_id.get_mut(position) {
 			*slot = sorted;
 		}
 	}
-	let mut slots: Vec<Option<ClassifiedRow>> = decided;
-	let rows = order
-		.iter()
-		.filter_map(|&(_, position)| slots.get_mut(position).and_then(Option::take))
-		.collect();
+	let mut chunks = in_chunks(&order, threads, |_, chunk| {
+		let mut rows = Vec::with_capacity(chunk.len());
+		for &position in chunk {
+			let (Some(candidate), Some(&(partner, Some(verdict)))) =
+				(candidates.get(position), decided.get(position))
+			else {
+				continue;
+			};
+			rows.push(ClassifiedRow {
+				partner: partner
+					.and_then(|other| candidates.get(other))
+					.map(|other| Partner {
+						id: other.transaction.id.clone(),
+						date: other.transaction.date,
+					}),
+				decision: verdict.decision,
+				flags: verdict.flags,
+				leg: verdict.leg,
+				..candidate.row()
+			});
+		}
+		rows
+	});
+	let rows = if chunks.len() == 1 {
+		chunks.pop().unwrap_or_default()
+	} else {
+		let mut rows = Vec::with_capacity(candidates.len());
+		for mut chunk in chunks {
+			rows.append(&mut chunk);
+		}
+		rows
+	};
 	Classification {
 		rows,
 		by_id,
@@ -392,11 +482,53 @@ pub fn classify_on(budget: &BudgetData, threads: usize) -> Classification {
 	}
 }
 
-/// A multiply-rotate hash that takes ids eight bytes at a time. The maps
-/// below are keyed by ids from the budget itself, and std's SipHash costs
-/// more than the lookups they save.
-#[derive(Default)]
+/// `date` as a number that sorts the way dates do.
+fn date_key(date: CivilDate) -> u64 {
+	let year = u64::try_from(i64::from(date.year()) + (1 << 20)).unwrap_or(0);
+	(year << 9) | (u64::from(date.month()) << 5) | u64::from(date.day())
+}
+
+/// What the decision table settled for a row: its decision, flags and leg.
+#[derive(Clone, Copy)]
+struct Verdict {
+	decision: Decision,
+	flags: Flags,
+	leg: Leg,
+}
+
+/// A mirror leg takes its primary leg's decision. Without one it is an
+/// unpaired transfer for review.
+fn mirror_verdict(primary: Option<Decision>) -> Verdict {
+	match primary {
+		Some(decision) => Verdict {
+			decision,
+			flags: Flags::default(),
+			leg: Leg::Mirror,
+		},
+		None => Verdict {
+			decision: Decision::UncategorizedTransfer,
+			flags: Flags {
+				needs_review: true,
+				unpaired: true,
+				..Flags::default()
+			},
+			leg: Leg::Primary,
+		},
+	}
+}
+
+/// A hash that takes an id eight bytes at a time and mixes each word in with
+/// a folded 64-by-64-bit multiply, so every input bit reaches every output
+/// bit. The maps below are keyed by ids from the budget itself, and std's
+/// SipHash costs more than the lookups they save. Ids that share a prefix
+/// and suffix around a counter still hash apart.
 struct IdHasher(u64);
+
+impl Default for IdHasher {
+	fn default() -> Self {
+		IdHasher(0x243f_6a88_85a3_08d3)
+	}
+}
 
 impl Hasher for IdHasher {
 	fn finish(&self) -> u64 {
@@ -408,16 +540,21 @@ impl Hasher for IdHasher {
 		for &word in words {
 			self.add(u64::from_le_bytes(word));
 		}
-		let tail = tail
-			.iter()
-			.fold(0, |tail, &byte| (tail << 8) | u64::from(byte));
-		self.add(tail);
+		self.add(
+			tail.iter()
+				.fold(0, |word, &byte| (word << 8) | u64::from(byte)),
+		);
+	}
+
+	fn write_u8(&mut self, byte: u8) {
+		self.add(u64::from(byte));
 	}
 }
 
 impl IdHasher {
 	fn add(&mut self, word: u64) {
-		self.0 = (self.0.rotate_left(5) ^ word).wrapping_mul(0x517c_c1b7_2722_0a95);
+		let product = u128::from(self.0 ^ word) * u128::from(0x9e37_79b9_7f4a_7c15_u64);
+		self.0 = (product as u64) ^ ((product >> 64) as u64);
 	}
 }
 
@@ -475,6 +612,27 @@ impl<'a> Lookups<'a> {
 				.resolve_payee(id)
 				.and_then(|payee| budget.payees.get(payee))
 		})
+	}
+}
+
+/// [`is_row`], finding a child's parent among `parents` (the split parents)
+/// before looking through every transaction.
+fn is_live_row(
+	budget: &BudgetData,
+	parents: &IdMap<&TransactionId, &Transaction>,
+	transaction: &Transaction,
+) -> bool {
+	if transaction.tombstone {
+		return false;
+	}
+	match &transaction.split {
+		SplitRole::None => true,
+		SplitRole::Parent => false,
+		SplitRole::Child { parent } => parents
+			.get(parent)
+			.copied()
+			.or_else(|| budget.transactions.get(parent))
+			.is_some_and(|parent| !parent.tombstone),
 	}
 }
 
@@ -585,15 +743,21 @@ impl<'a> Candidate<'a> {
 /// The other leg, only when the link is reciprocal (each row points at the
 /// other and sits in the other's transfer account) and the amounts net to
 /// zero. Dates may differ.
-/// `candidates` are in id order, as the budget's transactions are keyed.
-fn partner(candidates: &[Candidate], candidate: &Candidate) -> Option<usize> {
+/// The row a transfer's `transfer` field names, unless it names itself.
+fn partner_id<'c>(candidate: &'c Candidate) -> Option<&'c TransactionId> {
+	candidate.transfer.as_ref()?;
 	let own = candidate.transaction;
-	let transfer = candidate.transfer.as_ref()?;
-	let id = own.transfer.as_ref().filter(|id| *id != &own.id)?;
-	let position = candidates
-		.binary_search_by(|other| other.transaction.id.cmp(id))
-		.ok()?;
-	let other = candidates.get(position)?;
+	own.transfer.as_ref().filter(|id| *id != &own.id)
+}
+
+/// Whether `other`, the row `candidate` names, is its other leg: the link is
+/// reciprocal (each row points at the other and sits in the other's transfer
+/// account) and the amounts net to zero. Dates may differ.
+fn pairs(candidate: &Candidate, other: &Candidate) -> bool {
+	let own = candidate.transaction;
+	let Some(transfer) = &candidate.transfer else {
+		return false;
+	};
 	let points_back = other.transaction.transfer.as_ref() == Some(&own.id);
 	let other_points_here = other
 		.transfer
@@ -603,11 +767,105 @@ fn partner(candidates: &[Candidate], candidate: &Candidate) -> Option<usize> {
 		.amount
 		.checked_add(other.transaction.amount)
 		.is_ok_and(|sum| sum == Money::ZERO);
-	(points_back
+	points_back
 		&& other_points_here
 		&& nets_to_zero
-		&& other.transaction.account == transfer.account)
-		.then_some(position)
+		&& other.transaction.account == transfer.account
+}
+
+/// More rows than this changing at once cost more to splice in one at a
+/// time than to classify afresh.
+const RECLASSIFY_AT_MOST: usize = 32;
+
+/// The rows whose classification can change when the transactions in
+/// `changed` are written: those transactions, the split children whose
+/// liveness follows them, and every row whose transfer names one of those.
+/// A row reads nothing else from other transactions.
+fn affected_rows(
+	budget: &BudgetData,
+	changed: &BTreeSet<TransactionId>,
+) -> BTreeSet<TransactionId> {
+	let mut named = changed.clone();
+	for transaction in budget.transactions.values() {
+		if let SplitRole::Child { parent } = &transaction.split
+			&& changed.contains(parent)
+		{
+			named.insert(transaction.id.clone());
+		}
+	}
+	let mut affected = named.clone();
+	for transaction in budget.transactions.values() {
+		if transaction
+			.transfer
+			.as_ref()
+			.is_some_and(|to| named.contains(to))
+		{
+			affected.insert(transaction.id.clone());
+		}
+	}
+	affected
+}
+
+/// What [`classify`] decides for `ids` in `budget`: their rows, and those
+/// that are orphans. Ids that aren't live rows are left out.
+fn classify_rows(
+	budget: &BudgetData,
+	ids: &BTreeSet<TransactionId>,
+) -> (Vec<ClassifiedRow>, Vec<TransactionId>) {
+	let mut lookups = Lookups::new(budget);
+	let mut rows = Vec::new();
+	let mut orphans = Vec::new();
+	for id in ids {
+		let Some(transaction) = budget
+			.transactions
+			.get(id)
+			.filter(|transaction| is_row(budget, transaction))
+		else {
+			continue;
+		};
+		let Some(candidate) = Candidate::new(budget, &mut lookups, transaction) else {
+			orphans.push(id.clone());
+			continue;
+		};
+		let partner = partner_id(&candidate)
+			.and_then(|other| budget.transactions.get(other))
+			.filter(|other| is_row(budget, other))
+			.and_then(|other| Candidate::new(budget, &mut lookups, other))
+			.filter(|other| pairs(&candidate, other));
+		let row = ClassifiedRow {
+			partner: partner.as_ref().map(|other| Partner {
+				id: other.transaction.id.clone(),
+				date: other.transaction.date,
+			}),
+			..candidate.row()
+		};
+		rows.push(match decide(&candidate, partner.as_ref()) {
+			Outcome::Decided(decision, flags) => ClassifiedRow {
+				decision,
+				flags,
+				..row
+			},
+			// A mirror always has a partner, and the partner's own partner
+			// is this row, as the pairing is reciprocal.
+			Outcome::Mirror => {
+				let primary =
+					partner
+						.as_ref()
+						.and_then(|primary| match decide(primary, Some(&candidate)) {
+							Outcome::Decided(decision, _) => Some(decision),
+							Outcome::Mirror => None,
+						});
+				let verdict = mirror_verdict(primary);
+				ClassifiedRow {
+					decision: verdict.decision,
+					flags: verdict.flags,
+					leg: verdict.leg,
+					..row
+				}
+			}
+		});
+	}
+	(rows, orphans)
 }
 
 enum Outcome {
@@ -715,7 +973,21 @@ fn transfer_decision(
 
 #[cfg(test)]
 mod tests {
+	use std::hash::BuildHasher;
+
 	use super::*;
+
+	#[test]
+	fn ids_that_share_a_prefix_and_suffix_hash_apart() {
+		let ids: Vec<TransactionId> = (0..5_000)
+			.map(|n| TransactionId::new(format!("acme-bank-import-{n:08}-transfer")))
+			.collect();
+		let hashes: BTreeSet<u64> = ids
+			.iter()
+			.map(|id| BuildHasherDefault::<IdHasher>::default().hash_one(id))
+			.collect();
+		assert_eq!(hashes.len(), ids.len());
+	}
 
 	#[test]
 	fn every_decision_maps_to_its_table_row_and_kind() {

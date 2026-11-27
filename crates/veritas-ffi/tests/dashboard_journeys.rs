@@ -11,6 +11,9 @@
 //! reading Veritas's export must see the same pages, widgets, settings and
 //! reports, with saved filters selecting the same rows.
 
+#[path = "support/children.rs"]
+mod children;
+
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
@@ -235,13 +238,14 @@ fn oracle() -> Option<PathBuf> {
 }
 
 fn node(oracle: &Path, args: &[&str]) -> Vec<u8> {
-	let output = std::process::Command::new("node")
-		.current_dir(oracle)
-		.arg("src/main.ts")
-		.args(args)
-		.args(["--today", TODAY])
-		.output()
-		.expect("node runs");
+	let output = children::output(
+		std::process::Command::new("node")
+			.current_dir(oracle)
+			.arg("src/main.ts")
+			.args(args)
+			.args(["--today", TODAY]),
+	)
+	.expect("node runs");
 	assert!(
 		output.status.success(),
 		"the oracle failed on {args:?}: {}",
