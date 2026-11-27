@@ -98,4 +98,26 @@ struct RegisterAccessibilityTests {
 		#expect(!table.rows(in: table.visibleRect).contains(2), "and doesn't jump back to the selection")
 		#expect(table.selectedRowIndexes == [2], "the selection is kept")
 	}
+
+	@Test func aRowReadsItsDatePayeeEnvelopeNotesAmountAndStatus() async throws {
+		let (model, host, window) = await register()
+		defer { window.close() }
+		let table = try #require(Self.table(in: host))
+		let index = try #require((0..<model.loadedRows.count).first { model.loadedRow(at: $0)?.notes?.isEmpty == false && model.loadedRow(at: $0)?.reconciled == false })
+		let row = try #require(model.loadedRow(at: index))
+		let label = { ((table.accessibilityRows() ?? [])[index] as? NSAccessibilityElement)?.accessibilityLabel() ?? "" }
+		let status = { (cleared: Bool) in cleared ? "Cleared" : "Uncleared" }
+		for part in [row.shortDate(thisYear: model.thisYear), PayeeText(row).label, row.envelopeText, row.notes ?? "", model.format.amount(row.amount, on: .register), status(row.cleared)] {
+			#expect(label().contains(part), "\(part) in \(label())")
+		}
+		#expect(await model.setCleared([row.id], !row.cleared))
+		await model.load()
+		let deadline = ContinuousClock.now + .seconds(5)
+		while !label().hasSuffix(status(!row.cleared)), ContinuousClock.now < deadline {
+			try await Task.sleep(for: .milliseconds(20))
+		}
+		#expect(label().hasSuffix(status(!row.cleared)), "the label follows the change: \(label())")
+		let cleared = try #require(((table.accessibilityRows() ?? [])[index] as? NSAccessibilityElement)?.accessibilityChildren()?.last as? NSAccessibilityElement)
+		#expect(cleared.accessibilityLabel() == status(!row.cleared))
+	}
 }
