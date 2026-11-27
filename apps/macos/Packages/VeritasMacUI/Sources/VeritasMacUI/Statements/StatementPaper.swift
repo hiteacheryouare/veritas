@@ -76,7 +76,7 @@ struct StatementPaper: View {
 			if let notice = document.notice(format: format) {
 				Text(notice)
 					.font(Self.font(PaperMetrics.rowSize))
-					.foregroundStyle(.moneyOverspent)
+					.foregroundStyle(Color(rgba: ColorToken.moneyOverspent.light))
 					.frame(maxWidth: .infinity, alignment: .leading)
 					.padding(.top, PaperMetrics.noticeGap)
 					.accessibilityIdentifier("statements.notice")
