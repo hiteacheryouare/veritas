@@ -36,6 +36,8 @@
 	--color-brand-secondary-fill: #007ea7;
 	--color-brand: #23169c;
 	--color-text-on-brand: #f5f5f7;
+	--color-brand-deep: #1b107e;
+	--color-text-on-brand-secondary: #cfcbf2;
 
 	--color-track: rgba(20, 22, 30, 0.08);
 
@@ -56,6 +58,14 @@
 	--color-chart-unallocated: rgba(0, 126, 167, 0.35);
 	--color-chart-band: rgba(58, 58, 66, 0.2);
 	--color-chart-grid: rgba(20, 22, 30, 0.07);
+	--color-category-1: #23169c;
+	--color-category-2: #007ea7;
+	--color-category-3: #9c76e3;
+	--color-category-4: #b87c58;
+	--color-category-5: #6b106c;
+	--color-category-6: #03544b;
+	--color-category-7: #4e6376;
+	--color-category-8: #707102;
 	--color-scenario-baseline: #3a3a42;
 	--color-scenario-1: #2f84dc;
 	--color-scenario-2: #8b5e34;
@@ -104,6 +114,8 @@
 	--color-brand-secondary-fill: #007ea7;
 	--color-brand: #23169c;
 	--color-text-on-brand: #f5f5f7;
+	--color-brand-deep: #120a4e;
+	--color-text-on-brand-secondary: #cfcbf2;
 
 	--color-track: rgba(240, 240, 250, 0.09);
 
@@ -124,6 +136,14 @@
 	--color-chart-unallocated: rgba(0, 126, 167, 0.4);
 	--color-chart-band: rgba(226, 226, 232, 0.2);
 	--color-chart-grid: rgba(240, 240, 250, 0.07);
+	--color-category-1: #7285db;
+	--color-category-2: #86d7fd;
+	--color-category-3: #af92eb;
+	--color-category-4: #e0a17c;
+	--color-category-5: #b66eb4;
+	--color-category-6: #70b3a8;
+	--color-category-7: #aac1d6;
+	--color-category-8: #909235;
 	--color-scenario-baseline: #e2e2e8;
 	--color-scenario-1: #5eaaf5;
 	--color-scenario-2: #c99a6b;
@@ -191,6 +211,7 @@
 	--delay-page: 60ms;
 	--duration-story: 480ms;
 	--duration-stage: 700ms;
+	--duration-mint-in: 1200ms;
 	--spring-settle: 320ms;
 	--spring-morph: 400ms;
 	--spring-push: 320ms;
@@ -208,6 +229,7 @@
 		--duration-page-exit: 90ms;
 		--delay-page: 0ms;
 		--duration-story: 150ms;
+		--duration-mint-in: 150ms;
 		--spring-settle: 0ms;
 		--spring-morph: 150ms;
 		--spring-push: 150ms;

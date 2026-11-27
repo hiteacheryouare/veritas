@@ -1293,12 +1293,10 @@ struct SankeyReadoutView: View {
 	}
 }
 
-/// The core's chart colours 0 to 8 (Actual's `chartQual1` to `chartQual9`),
-/// drawn in Veritas's own palette.
+/// The core's chart colours (Actual's `chartQual1` to `chartQual9`), drawn
+/// in Veritas's category palette. Money-state colours never stand in for a category.
 enum CardPalette {
-	static let tokens: [ColorToken] = [
-		.moneyIncomeFill, .chartSavings, .chartDebtPaydown, .scenario3, .moneyLowFill, .chartExpense, .moneyOverspentFill, .scenarioBaseline, .moneyAvailable
-	]
+	static let tokens = ColorToken.categories
 
 	static func token(_ index: UInt8) -> ColorToken {
 		tokens[Int(index) % tokens.count]

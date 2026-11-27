@@ -29,6 +29,8 @@ public extension ColorToken {
 	static let brandSecondaryFill = ColorToken(light: RGBA(0x007ea7), dark: RGBA(0x007ea7))
 	static let brand = ColorToken(light: RGBA(0x23169c), dark: RGBA(0x23169c))
 	static let textOnBrand = ColorToken(light: RGBA(0xf5f5f7), dark: RGBA(0xf5f5f7))
+	static let brandDeep = ColorToken(light: RGBA(0x1b107e), dark: RGBA(0x120a4e))
+	static let textOnBrandSecondary = ColorToken(light: RGBA(0xcfcbf2), dark: RGBA(0xcfcbf2))
 	static let track = ColorToken(light: RGBA(0x14161e, alpha: 0.08), dark: RGBA(0xf0f0fa, alpha: 0.09))
 	static let moneyAvailable = ColorToken(light: RGBA(0x036f46), dark: RGBA(0x56e39f))
 	static let moneyAvailableFill = ColorToken(light: RGBA(0x56e39f), dark: RGBA(0x56e39f))
@@ -46,10 +48,23 @@ public extension ColorToken {
 	static let chartUnallocated = ColorToken(light: RGBA(0x007ea7, alpha: 0.35), dark: RGBA(0x007ea7, alpha: 0.4))
 	static let chartBand = ColorToken(light: RGBA(0x3a3a42, alpha: 0.2), dark: RGBA(0xe2e2e8, alpha: 0.2))
 	static let chartGrid = ColorToken(light: RGBA(0x14161e, alpha: 0.07), dark: RGBA(0xf0f0fa, alpha: 0.07))
+	static let category1 = ColorToken(light: RGBA(0x23169c), dark: RGBA(0x7285db))
+	static let category2 = ColorToken(light: RGBA(0x007ea7), dark: RGBA(0x86d7fd))
+	static let category3 = ColorToken(light: RGBA(0x9c76e3), dark: RGBA(0xaf92eb))
+	static let category4 = ColorToken(light: RGBA(0xb87c58), dark: RGBA(0xe0a17c))
+	static let category5 = ColorToken(light: RGBA(0x6b106c), dark: RGBA(0xb66eb4))
+	static let category6 = ColorToken(light: RGBA(0x03544b), dark: RGBA(0x70b3a8))
+	static let category7 = ColorToken(light: RGBA(0x4e6376), dark: RGBA(0xaac1d6))
+	static let category8 = ColorToken(light: RGBA(0x707102), dark: RGBA(0x909235))
 	static let scenarioBaseline = ColorToken(light: RGBA(0x3a3a42), dark: RGBA(0xe2e2e8))
 	static let scenario1 = ColorToken(light: RGBA(0x2f84dc), dark: RGBA(0x5eaaf5))
 	static let scenario2 = ColorToken(light: RGBA(0x8b5e34), dark: RGBA(0xc99a6b))
 	static let scenario3 = ColorToken(light: RGBA(0x0f8a9a), dark: RGBA(0x4cc0cf))
+}
+
+public extension ColorToken {
+	/// Chart categories (design/tokens.md, Categories): Actual's chart colors 1 to 8.
+	static let categories: [ColorToken] = [.category1, .category2, .category3, .category4, .category5, .category6, .category7, .category8]
 }
 
 public extension ShapeStyle where Self == Color {
@@ -81,6 +96,8 @@ public extension ShapeStyle where Self == Color {
 	static var brandSecondaryFill: Color { Color(ColorToken.brandSecondaryFill) }
 	static var brand: Color { Color(ColorToken.brand) }
 	static var textOnBrand: Color { Color(ColorToken.textOnBrand) }
+	static var brandDeep: Color { Color(ColorToken.brandDeep) }
+	static var textOnBrandSecondary: Color { Color(ColorToken.textOnBrandSecondary) }
 	static var track: Color { Color(ColorToken.track) }
 	static var moneyAvailable: Color { Color(ColorToken.moneyAvailable) }
 	static var moneyAvailableFill: Color { Color(ColorToken.moneyAvailableFill) }
@@ -134,6 +151,8 @@ extension ColorToken {
 		"brand-secondary-fill": .brandSecondaryFill,
 		"brand": .brand,
 		"text-on-brand": .textOnBrand,
+		"brand-deep": .brandDeep,
+		"text-on-brand-secondary": .textOnBrandSecondary,
 		"track": .track,
 		"money-available": .moneyAvailable,
 		"money-available-fill": .moneyAvailableFill,
@@ -151,6 +170,14 @@ extension ColorToken {
 		"chart-unallocated": .chartUnallocated,
 		"chart-band": .chartBand,
 		"chart-grid": .chartGrid,
+		"category-1": .category1,
+		"category-2": .category2,
+		"category-3": .category3,
+		"category-4": .category4,
+		"category-5": .category5,
+		"category-6": .category6,
+		"category-7": .category7,
+		"category-8": .category8,
 		"scenario-baseline": .scenarioBaseline,
 		"scenario-1": .scenario1,
 		"scenario-2": .scenario2,

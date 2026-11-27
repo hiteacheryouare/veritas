@@ -107,16 +107,16 @@ struct SankeyCanvas: View {
 				Canvas { context, _ in
 					for ribbon in layout.ribbons {
 						let opacity = lit.map { $0.flows.contains(ribbon.flow) ? 0.55 : 0.12 } ?? 0.28
-						context.fill(Path(ribbon.outline), with: .color(color(report.nodes[ribbon.to]).opacity(opacity)))
+						context.fill(Path(ribbon.outline), with: .color(Color(token(at: Int(ribbon.to))).opacity(opacity)))
 					}
 					for node in layout.nodes {
 						let shape = Path(roundedRect: node.rect, cornerRadius: 3)
 						let isLit = lit?.nodes.contains(node.index) ?? false
 						let dimmed = lit != nil && !isLit
 						let isShown = isLit && shown == .node(node.index)
-						context.fill(shape, with: .color(isShown ? .textPrimary : color(report.nodes[node.index]).opacity(dimmed ? 0.45 : 1)))
+						context.fill(shape, with: .color(isShown ? .textPrimary : Color(token(at: node.index)).opacity(dimmed ? 0.45 : 1)))
 						if !isShown {
-							context.stroke(shape, with: .color(Color.chartEdge(token(report.nodes[node.index])).opacity(dimmed ? 0.45 : 1)), lineWidth: 1)
+							context.stroke(shape, with: .color(Color.chartEdge(token(at: node.index)).opacity(dimmed ? 0.45 : 1)), lineWidth: 1)
 						}
 					}
 				}
@@ -277,15 +277,27 @@ struct SankeyCanvas: View {
 		}
 	}
 
-	func color(_ node: SankeyNode) -> Color { Color(token(node)) }
+	/// Spending groups take the category palette in order, and each category its
+	/// group's. Income and its sources are cerulean and debt paydown is brown, so the
+	/// groups skip cerulean and copper; savings keeps the good color.
+	static let groupTokens: [ColorToken] = ColorToken.categories.filter { $0 != .category2 && $0 != .category4 }
 
-	func token(_ node: SankeyNode) -> ColorToken {
+	func token(at index: Int) -> ColorToken {
+		let node = report.nodes[index]
 		switch node.key.kind {
-		case .incomeCategory, .income, .refundsAndWithdrawals, .unreviewedTransfersIn, .shortfall: .moneyIncomeFill
-		case .savings: .chartSavings
-		case .debtPaydown: .chartDebtPaydown
-		case .unallocated: .chartUnallocated
-		default: .chartExpense
+		case .incomeCategory, .income, .refundsAndWithdrawals, .unreviewedTransfersIn, .shortfall: return .moneyIncomeFill
+		case .savings: return .chartSavings
+		case .debtPaydown: return .chartDebtPaydown
+		case .unallocated: return .chartUnallocated
+		case .categoryGroup:
+			let order = report.nodes[..<index].filter { $0.key.kind == .categoryGroup }.count
+			return Self.groupTokens[order % Self.groupTokens.count]
+		case .category:
+			if let group = report.flows.first(where: { Int($0.to) == index && report.nodes[Int($0.from)].key.kind == .categoryGroup }) {
+				return token(at: Int(group.from))
+			}
+			return .chartExpense
+		default: return .chartExpense
 		}
 	}
 
