@@ -133,6 +133,22 @@ struct AssistantPanelCancelTests {
 		#expect(!panel.isAnswering)
 	}
 
+	/// The model hands the answer loop a word after the panel has stopped,
+	/// the case `stop()` promises nothing more lands for. Every word shows at
+	/// once, so a word that got past the stop would be on screen here.
+	@Test func aWordTheModelHandsOverAfterTheStopNeverLands() async throws {
+		let answerer = HandsOverAfterStop()
+		let panel = AssistantPanelModel(makeAnswerer: { _ in answerer }, context: context)
+		panel.frameInterval = .zero
+		answerer.panel = panel
+		panel.draft = "What changed?"
+		panel.ask()
+		await panel.settle()
+		#expect(answerer.handedOver == ["Net", "Net Profit"], "the loop was handed a word after the stop")
+		#expect(panel.exchanges.first?.answer == "Net")
+		#expect(panel.exchanges.first?.state == .failed(AssistantPanelModel.stopped))
+	}
+
 	@Test func switchingBudgetsDropsThePanelAndStopsTheAnswer() async throws {
 		let answerer = GatedAnswerer()
 		var panel: AssistantPanelModel? = AssistantPanelModel(makeAnswerer: { _ in answerer }, context: context)
@@ -212,6 +228,47 @@ struct AssistantPanelCoalescingTests {
 		#expect(panel.exchanges.first?.answer == "Net", "text already shown stays, and nothing held lands")
 		#expect(panel.exchanges.first?.state == .failed(AssistantPanelModel.stopped))
 	}
+}
+
+/// Hands over "Net", then stops the panel inside the model's next step and
+/// hands over "Net Profit" anyway, as a model can when the cancellation
+/// arrives while it is producing a word.
+/// This relies on `AsyncThrowingStream(unfolding:)` still delivering a step
+/// that was already running when the cancel arrived. If it ever dropped that
+/// word, the test would pass without reaching the answer loop's check.
+@MainActor
+final class HandsOverAfterStop: AssistantAnswering {
+	final class Given: Sendable {
+		private let words = Mutex<[String]>([])
+		var all: [String] { words.withLock { $0 } }
+		func hand(_ word: String) -> String {
+			words.withLock { $0.append(word) }
+			return word
+		}
+	}
+
+	weak var panel: AssistantPanelModel?
+	private let given = Given()
+
+	var handedOver: [String] { given.all }
+
+	func answer(_ question: String) -> AsyncThrowingStream<String, any Error> {
+		let given = given
+		let panel = panel
+		return AsyncThrowingStream(unfolding: { [weak panel] in
+			switch given.all.count {
+			case 0:
+				return given.hand("Net")
+			case 1:
+				await MainActor.run { panel?.stop() }
+				return given.hand("Net Profit")
+			default:
+				return nil
+			}
+		})
+	}
+
+	func reset() {}
 }
 
 /// Hands the test the stream's continuation instead of producing words itself.
