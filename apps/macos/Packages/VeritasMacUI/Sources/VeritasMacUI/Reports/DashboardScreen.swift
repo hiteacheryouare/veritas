@@ -209,6 +209,12 @@ private struct WidgetCard: View {
 			WidgetHeader(card: card, format: model.format)
 			WidgetBody(card: card, format: model.format)
 				.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+			if let notice = card.notice {
+				Text(notice)
+					.font(.text(.caption))
+					.foregroundStyle(.secondary)
+					.accessibilityIdentifier("widget.\(card.id).notice")
+			}
 		}
 		.padding(Spacing.s4)
 		.background(.surfaceGrouped, in: .rect(cornerRadius: Radius.section))
@@ -295,8 +301,11 @@ private struct WidgetCard: View {
 		if opens {
 			Button("Open") { open(card) }
 		}
-		if model.canEdit, card.kind != nil {
+		if model.canEdit, card.kind != nil, !card.upgraded {
 			Button("Configure…") { configure(card) }
+		}
+		if card.upgraded, !model.isReadOnly {
+			Button("Show Actual's Report Again") { Task { await model.revertUpgrade(card) } }
 		}
 		if model.canPlace {
 			Menu("Move") {

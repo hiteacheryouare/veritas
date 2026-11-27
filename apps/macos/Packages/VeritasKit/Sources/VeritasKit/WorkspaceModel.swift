@@ -27,6 +27,9 @@ public final class WorkspaceModel {
 	public var alert: ErrorAlert?
 	public var isImportPanelShown = false
 	public var newBudgetSetup: NewBudgetSetup?
+	/// "Upgrade to Veritas features" (MIG-1), offered once after an import
+	/// and opened from the File menu.
+	public var upgrade: UpgradeModel?
 	public var isPaletteShown = false
 	public var isFindShown = false
 	public var isAssistantShown = false
@@ -102,6 +105,24 @@ public final class WorkspaceModel {
 			defer { if access { zip.stopAccessingSecurityScopedResource() } }
 			return try await library.importActualZip(zip, into: directory)
 		}
+		if phase == .open {
+			await offerUpgrade()
+		}
+	}
+
+	/// File, "Upgrade to Veritas features…", for any budget at any time.
+	public func showUpgrade() {
+		guard phase == .open else { return }
+		upgrade = UpgradeModel(workspace: self, offering: false)
+	}
+
+	/// MIG-1.1: the first time an imported budget opens, once per file. The
+	/// offer is recorded outside undo (MIG-1.8), so it never opens by itself
+	/// again, even after an export and a new import.
+	private func offerUpgrade() async {
+		guard let offered = await report({ try await $0.migrationOffered() }), !offered else { return }
+		await change { try await $0.markMigrationOffered() }
+		upgrade = UpgradeModel(workspace: self, offering: true)
 	}
 
 	public func startNewBudget() {

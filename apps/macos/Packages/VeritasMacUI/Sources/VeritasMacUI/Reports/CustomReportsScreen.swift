@@ -80,7 +80,7 @@ struct CustomReportsScreen: View {
 }
 
 private struct ReportList: View {
-	let model: CustomReportsModel
+	@Bindable var model: CustomReportsModel
 
 	var body: some View {
 		ScrollView {
@@ -90,11 +90,19 @@ private struct ReportList: View {
 					row(kind.title, .standard(kind), id: "reports.standard.\(kind.rawValue)")
 				}
 				heading("Saved in Actual").padding(.top, Spacing.s4)
-				ForEach(model.items) { item in
+				ForEach(model.listed) { item in
 					row(item.name, .custom(id: item.id), id: "reports.custom.\(item.id)")
 				}
-				if model.items.isEmpty {
+				if model.listed.isEmpty {
 					Text("No custom reports").foregroundStyle(.textSecondary).padding(.horizontal, Spacing.s3)
+				}
+				if model.hasHiddenReports {
+					Toggle("Show hidden reports", isOn: $model.showsHiddenReports)
+						.toggleStyle(.checkbox)
+						.font(.text(.caption))
+						.padding(.horizontal, Spacing.s3)
+						.padding(.top, Spacing.s2)
+						.accessibilityIdentifier("reports.showHidden")
 				}
 			}
 			.padding(Spacing.s3)

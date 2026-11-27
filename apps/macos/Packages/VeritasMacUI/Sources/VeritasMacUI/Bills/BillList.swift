@@ -64,7 +64,8 @@ private struct BillRow: View {
 	let bill: BillSummary
 	let model: BillsModel
 
-	private var name: String { bill.name ?? bill.payeeName ?? "Unnamed bill" }
+	/// MIG-6.2: the Veritas display name first, then Actual's, then the payee.
+	private var name: String { bill.displayName ?? bill.name ?? bill.payeeName ?? "Unnamed bill" }
 	private var isActive: Bool { bill.state == .active }
 	private var canEdit: Bool { bill.draft != nil && !model.isReadOnly }
 	private var amount: BillAmount? { bill.draft?.amount ?? bill.scheduledAmount.map { .exact(amount: $0) } }
@@ -83,10 +84,15 @@ private struct BillRow: View {
 	var body: some View {
 		VStack(alignment: .leading, spacing: Spacing.s1) {
 			HStack(spacing: Spacing.s4) {
-				Text(name)
-					.font(.text(.body, weight: .semibold))
-					.lineLimit(1)
-					.frame(minWidth: BillList.Column.name, maxWidth: .infinity, alignment: .leading)
+				HStack(spacing: Spacing.s2) {
+					if let icon = GoalIcon(bill.icon) {
+						GoalIconView(icon: icon, size: 14)
+					}
+					Text(name)
+						.font(.text(.body, weight: .semibold))
+						.lineLimit(1)
+				}
+				.frame(minWidth: BillList.Column.name, maxWidth: .infinity, alignment: .leading)
 				Group {
 					if let amount {
 						BillAmountLabel(amount: amount, isIncome: bill.isIncome, format: model.format)

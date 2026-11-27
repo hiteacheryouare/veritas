@@ -14,6 +14,15 @@ extension BudgetSession {
 	func setRetention(_ retention: Retention) async throws {}
 	func budgetMonth(_ month: Month, today: String) async throws -> BudgetMonth { throw FfiError.Cancelled }
 	func perform(_ command: Command) async throws {}
+	func migrationSuggestions(today: String) async throws -> [MigrationSuggestion] { [] }
+	func applyMigration(_ selection: MigrationSelection, today: String) async throws {}
+	func revertMigration(key: String, groupID: String?, confirmed: Bool, today: String) async throws -> MigrationRevert {
+		.reverted(change: Change(entities: [], everything: false), notes: [])
+	}
+	func appliedMigrations() async throws -> [AppliedMigration] { [] }
+	func migrationOffered() async throws -> Bool { true }
+	func markMigrationOffered() async throws {}
+	func setMigrationDismissed(_ key: String, dismissed: Bool) async throws {}
 	func goals(today: String) async throws -> GoalList { GoalList(goals: [], mixedScaleNote: nil, zeroPlaces: false) }
 	func goalClosePreview(_ goalID: String, releaseTo: String?, today: String) async throws -> GoalClosePreview {
 		GoalClosePreview(leftover: 0, laterBudget: [], destinationAvailableAfter: 0)

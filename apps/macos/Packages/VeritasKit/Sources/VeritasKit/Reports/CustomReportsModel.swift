@@ -105,6 +105,9 @@ public extension ReportSortOrder {
 @Observable
 public final class CustomReportsModel {
 	public private(set) var items: [CustomReportItem] = []
+	/// MIG-3.4's "Show hidden reports": reports a native dashboard card
+	/// stands in for are listed only with this on.
+	public var showsHiddenReports = false
 	public private(set) var choice: ReportChoice = .standard(.netWorth)
 	public private(set) var view: CustomReportView?
 	/// The report being edited, filters included, with its live preview.
@@ -130,6 +133,12 @@ public final class CustomReportsModel {
 	public var numberStyle: NumberStyle { workspace.numberStyle }
 	public var isReadOnly: Bool { workspace.readOnly != nil }
 	public var isEditing: Bool { draft != nil }
+
+	public var listed: [CustomReportItem] {
+		items.filter { showsHiddenReports || !$0.hidden }
+	}
+
+	public var hasHiddenReports: Bool { items.contains(where: \.hidden) }
 
 	public func load() async {
 		if let items = await workspace.report({ try await $0.customReports() }) {
@@ -346,6 +355,14 @@ public final class DashboardModel {
 	public func remove(_ card: DashboardCard) async {
 		let id = card.id
 		await workspace.change { try await $0.removeWidget(id) }
+		await load()
+	}
+
+	/// MIG-3.7: the report returns to its slot and the report list.
+	public func revertUpgrade(_ card: DashboardCard) async {
+		let key = "report:\(card.id)"
+		let today = WorkspaceModel.today()
+		await workspace.change { try await $0.revertMigration(key: key, groupID: nil, confirmed: false, today: today) }
 		await load()
 	}
 
