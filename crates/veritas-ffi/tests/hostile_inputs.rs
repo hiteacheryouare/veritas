@@ -10,6 +10,9 @@
 //! caught bug), and a refused open, import or create leaves the user's
 //! folders as they were.
 
+#[path = "support/children.rs"]
+mod children;
+
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::pin;
@@ -343,13 +346,14 @@ fn actual_reads(zip: &Path) -> Option<serde_json::Value> {
 	let today = chrono::DateTime::<chrono::Utc>::from(std::time::SystemTime::now())
 		.format("%Y-%m-%d")
 		.to_string();
-	let output = std::process::Command::new("node")
-		.current_dir(&oracle)
-		.args(["src/main.ts", "dump"])
-		.arg(zip)
-		.args(["--today", &today])
-		.output()
-		.expect("node runs");
+	let output = children::output(
+		std::process::Command::new("node")
+			.current_dir(&oracle)
+			.args(["src/main.ts", "dump"])
+			.arg(zip)
+			.args(["--today", &today]),
+	)
+	.expect("node runs");
 	assert!(
 		output.status.success(),
 		"Actual couldn't read the export: {}",

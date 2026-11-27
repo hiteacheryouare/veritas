@@ -281,7 +281,7 @@ struct CustomReportChart: View {
 
 	var body: some View {
 		chart
-			.chartForegroundStyleScale(domain: series.map(\.id), range: series.map { CardPalette.color($0.color) })
+			.chartForegroundStyleScale(domain: series.map(\.id), range: series.map { CardPalette.mark($0.color) })
 			.chartLegend(.hidden)
 			.chartYAxis {
 				if expanded {
@@ -343,7 +343,9 @@ struct ReportLegend: View {
 			VStack(alignment: .leading, spacing: Spacing.s2) {
 				ForEach(series) { group in
 					HStack(spacing: Spacing.s2) {
-						Circle().fill(CardPalette.color(group.color)).frame(width: 10, height: 10)
+						Circle().fill(CardPalette.color(group.color))
+							.overlay { Circle().strokeBorder(CardPalette.edge(group.color), lineWidth: 1) }
+							.frame(width: 10, height: 10)
 						Text(group.name).lineLimit(1).truncationMode(.tail)
 					}
 					.font(.text(.caption))
