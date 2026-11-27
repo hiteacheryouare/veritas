@@ -56,6 +56,7 @@ public extension ColorToken {
 	static let category6 = ColorToken(light: RGBA(0x03544b), dark: RGBA(0x70b3a8))
 	static let category7 = ColorToken(light: RGBA(0x4e6376), dark: RGBA(0xaac1d6))
 	static let category8 = ColorToken(light: RGBA(0x707102), dark: RGBA(0x909235))
+	static let category9 = ColorToken(light: RGBA(0x544f08), dark: RGBA(0xd2ce8d))
 	static let scenarioBaseline = ColorToken(light: RGBA(0x3a3a42), dark: RGBA(0xe2e2e8))
 	static let scenario1 = ColorToken(light: RGBA(0x2f84dc), dark: RGBA(0x5eaaf5))
 	static let scenario2 = ColorToken(light: RGBA(0x8b5e34), dark: RGBA(0xc99a6b))
@@ -63,8 +64,8 @@ public extension ColorToken {
 }
 
 public extension ColorToken {
-	/// Chart categories (design/tokens.md, Categories): Actual's chart colors 1 to 8.
-	static let categories: [ColorToken] = [.category1, .category2, .category3, .category4, .category5, .category6, .category7, .category8]
+	/// Chart categories (design/tokens.md, Categories): Actual's chart colors 1 to 9, one each.
+	static let categories: [ColorToken] = [.category1, .category2, .category3, .category4, .category5, .category6, .category7, .category8, .category9]
 }
 
 public extension ShapeStyle where Self == Color {
@@ -178,6 +179,7 @@ extension ColorToken {
 		"category-6": .category6,
 		"category-7": .category7,
 		"category-8": .category8,
+		"category-9": .category9,
 		"scenario-baseline": .scenarioBaseline,
 		"scenario-1": .scenario1,
 		"scenario-2": .scenario2,

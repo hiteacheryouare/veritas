@@ -10,7 +10,7 @@ struct CategoryPaletteTests {
 	static let floors = (light: 7.0, dark: 5.0)
 
 	@Test func theCategoriesStartFromRyansPrimaryAndSecondary() {
-		#expect(ColorToken.categories.count == 8)
+		#expect(ColorToken.categories.count == 9, "one per core chart series, so series 9 never repeats series 1")
 		#expect(ColorToken.category1.light == RGBA(0x23169c))
 		#expect(ColorToken.category2.light == RGBA(0x007ea7))
 	}

@@ -143,9 +143,44 @@ def lift(light, levels=(0.64, 0.68, 0.72, 0.76, 0.80, 0.84), tries=4000):
     return best[1], best[0]
 
 
+DEBT_PAYDOWN = 0x8B5E34
+
+
+def near_debt_paydown(hex_value):
+    """Debt paydown is brown in every chart, so no category may read as it."""
+    _, _, a = palette.to_oklch(hex_value)
+    _, _, b = palette.to_oklch(DEBT_PAYDOWN)
+    apart = abs(math.degrees(a) - math.degrees(b)) % 360
+    return min(apart, 360 - apart) < 20
+
+
+def ninth(light, dark):
+    """The core has nine chart series. No ninth hue clears the money states and
+    the distance floors, so the ninth reuses a hue at a lightness far from it."""
+    best = None
+    for hue in range(0, 360, 3):
+        for big_l in (0.38, 0.42, 0.46, 0.5, 0.54, 0.58, 0.62, 0.66):
+            for chroma in (0.03, 0.06, 0.09, 0.12, 0.15):
+                l = make(big_l, chroma, hue)
+                if not allowed(l, LIGHT_CHART) or near_debt_paydown(l):
+                    continue
+                _, c, h = palette.to_oklch(l)
+                for dark_l in (0.64, 0.68, 0.72, 0.76, 0.80, 0.84):
+                    d = make(dark_l, min(c, 0.13), math.degrees(h) % 360)
+                    if not allowed(d, DARK_CHART):
+                        continue
+                    score = min(worst_distance(light + [l]) / 7, worst_distance(dark + [d]) / 5)
+                    if best is None or score > best[0]:
+                        best = (score, l, d)
+    return best[1], best[2]
+
+
 def main():
     light, light_score = refine(ANCHORS_LIGHT, SEEDS, LIGHT_CHART, 0, band=(0.38, 0.66))
     dark, dark_score = lift(light)
+    extra_light, extra_dark = ninth(light, dark)
+    light, dark = light + [extra_light], dark + [extra_dark]
+    light_score, dark_score = worst_distance(light), worst_distance(dark)
     for name, colors, surfaces, score in (("light", light, LIGHT_CHART, light_score), ("dark", dark, DARK_CHART, dark_score)):
         print(f"{name}: closest pair under any vision {score:.1f} (OKLab x100)")
         pairs = sorted(((distance(a, b, v), v or "normal", a, b) for a, b in itertools.combinations(colors, 2) for v in (None, "protan", "deutan", "tritan")))[:3]
