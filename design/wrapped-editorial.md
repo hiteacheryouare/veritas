@@ -347,16 +347,16 @@ The chart spans all twelve columns across the spine. February sits below the bas
 |                                       |                                       |
 |  Net worth went up.                   |                            $111,830   |
 |                                       |                       +----  Dec 31   |
-|                                       |                ___/  color-accent   |
-|                                       |              ____/                    |
-|                                       |   ___    ___/                         |
+|  From $72,000 at the start of 2026    |                ___/  color-accent   |
+|  to $111,830 on December 31.          |              ____/                    |
+|  New York 20/28 dek                   |   ___    ___/                         |
 |                                       |  /   \__/                             |
 |  +$39,830                             |  |     +---- lowest month end         |
 |  New York 96 hero figure              |  |          February  $70,200         |
 |                                       |  ---------------------------------    |
-|  Start of 2026           $72,000      |  J F M A M J J A S O N D              |
-|  End of 2026            $111,830      |                                       |
-|  SF Pro 13 table, hairline between    |  month-end line needs N1              |
+|                                       |  J F M A M J J A S O N D              |
+|  No table: start and end are in the   |                                       |
+|  dek, the same shape hidden or shown  |  month-end line needs N1              |
 |                                       |                                       |
 |                                  13   |  14                                   |
 +---------------------------------------+---------------------------------------+
@@ -364,7 +364,7 @@ The chart spans all twelve columns across the spine. February sits below the bas
 
 ## New figures for the core
 
-For Fred to spec in FC-8. Each page works without its new figure, so Wrapped can ship before all of them land: the shape of the year drops the typical rule, quiet days show the streak figures without the calendar, goals list names without months, and net worth shows start and end without the line.
+For Fred to spec in FC-8. Each page works without its new figure, so Wrapped can ship before all of them land: the shape of the year drops the typical rule, quiet days show the streak figures without the calendar, goals list names without months, and net worth keeps its hero and its dek, which carries start and end, without the line.
 
 | # | Figure | Used on | Definition to settle | Redacted form |
 |---|---|---|---|---|
