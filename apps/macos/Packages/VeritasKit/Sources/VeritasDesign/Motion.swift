@@ -10,11 +10,15 @@ public struct Motion: Hashable, Sendable {
 		/// A spring with a perceptual duration. Every spring in Veritas has a
 		/// bounce of 0: an overshooting bar would show an amount that isn't real.
 		case spring(duration: Double, bounce: Double)
+		/// An even pace, only for a staged entrance's clock (`MintIn`), whose parts
+		/// ease on their own. Screens can't name it: the enforcement scan rejects `.linear(duration`.
+		case linear(duration: Double)
 
 		public var duration: Double {
 			switch self {
 			case .timing(_, let duration, _): duration
 			case .spring(let duration, _): duration
+			case .linear(let duration): duration
 			}
 		}
 
@@ -33,6 +37,8 @@ public struct Motion: Hashable, Sendable {
 				return .timingCurve(curve.x1, curve.y1, curve.x2, curve.y2, duration: duration * scale).delay(delay * scale)
 			case .spring(let duration, let bounce):
 				return .spring(duration: duration * scale, bounce: bounce)
+			case .linear(let duration):
+				return .linear(duration: duration * scale)
 			}
 		}
 	}
@@ -69,6 +75,8 @@ public struct Motion: Hashable, Sendable {
 			return unit.value(at: elapsed / duration)
 		case .spring(let duration, let bounce):
 			return Spring(duration: duration, bounce: bounce).value(target: 1.0, time: elapsed)
+		case .linear(let duration):
+			return min(elapsed / duration, 1)
 		}
 	}
 
@@ -126,7 +134,7 @@ public extension Motion {
 	static let turn = Motion("turn", .spring(duration: Duration.story, bounce: 0), reduced: fade)
 	/// The splash's mint-in clock. It runs at an even pace and each part eases on
 	/// its own stretch of it (`MintIn`); with Reduce Motion the whole splash fades in.
-	static let mintIn = Motion("mintIn", .timing(.linear, duration: Duration.mintIn), reduced: fade)
+	static let mintIn = Motion("mintIn", .linear(duration: Duration.mintIn), reduced: fade)
 
 	static let all: [Motion] = [.instant, .fast, .leave, .sheet, .pageIn, .pageOut, .settle, .morph, .push, .turn, .mintIn]
 
@@ -155,14 +163,11 @@ public extension Motion {
 public enum Easing: Hashable, Sendable {
 	case standard
 	case exit
-	/// Only for a staged entrance's clock, whose parts ease on their own.
-	case linear
 
 	public var controlPoints: (x1: Double, y1: Double, x2: Double, y2: Double) {
 		switch self {
 		case .standard: (0.2, 0.7, 0.2, 1)
 		case .exit: (0.4, 0, 1, 1)
-		case .linear: (0, 0, 1, 1)
 		}
 	}
 }
