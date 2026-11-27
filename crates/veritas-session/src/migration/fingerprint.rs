@@ -16,7 +16,9 @@ enum Cell<'a> {
 /// in the canonical dump's encoding (docs/oracle.md), with JSON columns
 /// re-encoded with sorted keys first.
 pub fn fingerprint(report: &CustomReportRow, widget: &Widget) -> String {
-	let text = |value: &Option<String>| value.as_deref().map_or(Cell::Null, Cell::Text);
+	fn text(value: &Option<String>) -> Cell<'_> {
+		value.as_deref().map_or(Cell::Null, Cell::Text)
+	}
 	let integer = |value: Option<i64>| value.map_or(Cell::Null, Cell::Integer);
 	let json = |value: &Option<String>| {
 		value
@@ -141,10 +143,10 @@ fn sha256(message: &[u8]) -> [u8; 32] {
 		padded.push(0);
 	}
 	padded.extend_from_slice(&bits.to_be_bytes());
-	for block in padded.chunks_exact(64) {
+	for block in padded.as_chunks::<64>().0 {
 		let mut w = [0u32; 64];
-		for (word, bytes) in w.iter_mut().zip(block.chunks_exact(4)) {
-			*word = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+		for (word, bytes) in w.iter_mut().zip(block.as_chunks::<4>().0) {
+			*word = u32::from_be_bytes(*bytes);
 		}
 		for i in 16..64 {
 			let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
@@ -180,8 +182,8 @@ fn sha256(message: &[u8]) -> [u8; 32] {
 		}
 	}
 	let mut out = [0u8; 32];
-	for (chunk, word) in out.chunks_exact_mut(4).zip(state) {
-		chunk.copy_from_slice(&word.to_be_bytes());
+	for (chunk, word) in out.as_chunks_mut::<4>().0.iter_mut().zip(state) {
+		*chunk = word.to_be_bytes();
 	}
 	out
 }

@@ -255,7 +255,7 @@ fn mig_7_3_apply_changes_only_the_allowed_actual_rows_and_undo_puts_them_back() 
 	for (table, key, column) in differences(&before, &undone) {
 		let retired = table == "category_groups"
 			&& column == "+"
-			&& undone["category_groups"][&key]["tombstone"] == Value::from(1);
+			&& undone["category_groups"][&key]["tombstone"] == 1;
 		assert!(retired, "after undo, {table} {key} {column} differs");
 	}
 	assert!(
@@ -297,9 +297,9 @@ fn mig_7_4_a_goal_reverts_after_a_reopen_from_its_record_alone() {
 	assert_eq!(
 		applied
 			.iter()
-			.map(|item| item.key.clone())
+			.map(|item| item.key.as_str())
 			.collect::<Vec<_>>(),
-		[key.clone()]
+		[key.as_str()]
 	);
 	match session
 		.revert_migration(key.clone(), None, false, TODAY.to_owned())

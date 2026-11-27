@@ -42,7 +42,7 @@ pub struct KindRevert {
 	pub replaces: Option<CategoryKind>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum RevertPlan {
 	/// Write these rows. `notes` are what Revert left alone and why.
 	Rows { rows: Vec<Row>, notes: Vec<String> },
@@ -256,7 +256,7 @@ fn revert_goal(
 	let group = match chosen {
 		Some(group) if live(group) => group.clone(),
 		Some(_) => return Err(refuse("Choose a group that still exists")),
-		None => match recorded.filter(|group| live(group)) {
+		None => match recorded.clone().filter(|group| live(group)) {
 			Some(group) => group,
 			None => {
 				let group_name = recorded
@@ -304,7 +304,11 @@ fn revert_goal(
 			let kept: Vec<&str> = now
 				.unwrap_or("")
 				.lines()
-				.filter(|line| !line.trim_start().starts_with("#goal"))
+				.filter(|line| {
+					!line
+						.find('#')
+						.is_some_and(|start| line[start..].starts_with("#goal"))
+				})
 				.collect();
 			let kept = kept.join("\n");
 			rows.push(Row::Note(Note {

@@ -46,7 +46,11 @@ pub(super) struct Target {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Source {
 	Settings,
+	/// A `#goal` line: Actual's own goal representation (DEBT-8).
 	Note,
+	/// A `#template … by` line, which budgets toward a target but isn't
+	/// Actual's goal representation.
+	Template,
 	LongGoal,
 }
 
@@ -55,6 +59,7 @@ impl Source {
 		match self {
 			Source::Settings => "s1_goal_def",
 			Source::Note => "s1_note",
+			Source::Template => "s1_template",
 			Source::LongGoal => "s1_long_goal",
 		}
 	}
@@ -62,7 +67,7 @@ impl Source {
 	fn words(self) -> &'static str {
 		match self {
 			Source::Settings => "Actual's goal settings",
-			Source::Note => "the category's note",
+			Source::Note | Source::Template => "the category's note",
 			Source::LongGoal => "Actual's long-term goal",
 		}
 	}
@@ -161,10 +166,13 @@ pub(super) fn suggestions(inputs: &Inputs<'_>) -> Result<Vec<Suggestion>, CoreEr
 				None => suggestion
 					.confirm_lines
 					.push("A new group, \"Goals\", is made after your other groups.".to_owned()),
-				Some(goals) if goals.hidden => suggestion.confirm_lines.push(format!(
-					"Your group \"{}\" is hidden. Show it again and add these goals to it?",
-					goals.name
-				)),
+				Some(goals) if goals.hidden => {
+					suggestion.asks_to_show_goals_group = true;
+					suggestion.confirm_lines.push(format!(
+						"Your group \"{}\" is hidden. Show it again and add these goals to it?",
+						goals.name
+					));
+				}
 				Some(_) => {}
 			}
 			suggestion.confirm_lines.push(format!(
@@ -300,7 +308,7 @@ pub(super) fn from_line(line: &str, places: u8) -> Option<Target> {
 		_ => return None,
 	};
 	(date.0 > Money::ZERO).then_some(Target {
-		source: Source::Note,
+		source: Source::Template,
 		amount: date.0,
 		date: Some(date.1),
 	})

@@ -154,6 +154,9 @@ pub struct Suggestion {
 	/// (b) Actual already shows the target (a `#goal` line or long-term goal
 	/// rows), so "Also show this target in Actual" doesn't apply (MIG-4.5).
 	pub target_in_actual: bool,
+	/// (b) The Goals group is hidden, so Apply needs the user's yes to show
+	/// it again (MIG-4.5).
+	pub asks_to_show_goals_group: bool,
 	pub dismissed: bool,
 }
 
@@ -174,6 +177,7 @@ impl Suggestion {
 			effects: Vec::new(),
 			kind_change: None,
 			target_in_actual: false,
+			asks_to_show_goals_group: false,
 			dismissed: false,
 		}
 	}

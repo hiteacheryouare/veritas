@@ -114,6 +114,8 @@ pub struct MigrationSuggestion {
 	/// (b) Actual already shows the target, so there's no "Also show this
 	/// target in Actual" box.
 	pub target_in_actual: bool,
+	/// (b) The Goals group is hidden; Apply needs `consent_show_goals_group`.
+	pub asks_to_show_goals_group: bool,
 	/// "Don't suggest again" was chosen; shown only with "Show dismissed".
 	pub dismissed: bool,
 }
@@ -230,6 +232,7 @@ impl From<&core::Suggestion> for MigrationSuggestion {
 			effects: suggestion.effects.iter().map(effect).collect(),
 			kind_change: suggestion.kind_change.as_ref().map(kind_change),
 			target_in_actual: suggestion.target_in_actual,
+			asks_to_show_goals_group: suggestion.asks_to_show_goals_group,
 			dismissed: suggestion.dismissed,
 		}
 	}

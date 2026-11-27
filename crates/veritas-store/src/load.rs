@@ -284,7 +284,7 @@ fn load_tables(conn: &Connection) -> Result<Loaded, CoreError> {
 				goal_def: text(at(row, 7)?)?,
 				template_settings: text(at(row, 8)?)?,
 			};
-			if templates != CategoryTemplates::default() {
+			if templates.goal_def.is_some() {
 				data.category_templates.insert(id.clone(), templates);
 			}
 			data.categories.insert(id, category);

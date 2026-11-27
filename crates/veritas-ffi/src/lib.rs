@@ -62,6 +62,11 @@ pub use forecast::{
 	ScenarioSummary, SuggestionBasis, SuggestionList, UnforecastItem,
 };
 pub use goals::{GoalClosePreview, GoalList, GoalPace, GoalState, GoalSummary, MonthAmount};
+pub use migration::{
+	AppliedMigration, MigrationConfidence, MigrationConversion, MigrationEdits, MigrationEffect,
+	MigrationFigure, MigrationItem, MigrationKindChange, MigrationProposal, MigrationRevert,
+	MigrationSelection, MigrationSignal, MigrationSuggestion,
+};
 pub use money::{
 	BalanceAfter, BalanceHistory, BalancePoint, CategoryKind, HiddenCategoryMatch,
 	KindCategoryPlan, KindTarget, LoanPaymentDefaults, LoanPaymentDraft, LoanPaymentPreview,

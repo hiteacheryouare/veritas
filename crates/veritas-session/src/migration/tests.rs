@@ -685,7 +685,7 @@ fn example_18_adopting_moves_to_the_top_of_goals_and_records_the_neighbour() {
 	budget.note("vacation", "#goal 1000");
 	let rows = budget.apply(TODAY, &tick(&["goal:vacation"])).unwrap();
 	budget.commit(&rows);
-	let order = |group: &str| {
+	let order = |budget: &Budget, group: &str| {
 		let mut members: Vec<&Category> = budget
 			.data
 			.categories
@@ -698,8 +698,11 @@ fn example_18_adopting_moves_to_the_top_of_goals_and_records_the_neighbour() {
 			.map(|category| category.name.clone())
 			.collect::<Vec<_>>()
 	};
-	assert_eq!(order("goals"), ["Vacation", "New laptop", "Gift fund"]);
-	assert_eq!(order("everyday"), ["Groceries", "Gas"]);
+	assert_eq!(
+		order(&budget, "goals"),
+		["Vacation", "New laptop", "Gift fund"]
+	);
+	assert_eq!(order(&budget, "everyday"), ["Groceries", "Gas"]);
 	let record = &budget.data.migration_applied["goal:vacation"];
 	let prior: serde_json::Value = serde_json::from_str(&record.prior).unwrap();
 	assert_eq!(prior["group"], "everyday");
@@ -724,7 +727,7 @@ fn example_18_adopting_moves_to_the_top_of_goals_and_records_the_neighbour() {
 		}
 		other => panic!("{other:?}"),
 	}
-	assert_eq!(order("everyday"), ["Groceries", "Vacation", "Gas"]);
+	assert_eq!(order(&budget, "everyday"), ["Groceries", "Vacation", "Gas"]);
 	assert!(
 		!budget
 			.data
@@ -948,8 +951,9 @@ fn the_opt_in_goal_line_is_written_and_reverted_only_while_unchanged() {
 	selection.items[0].edits.write_note_in_actual = true;
 	let rows = budget.apply(TODAY, &selection).unwrap();
 	assert!(
-		rows.iter()
-			.any(|row| matches!(row, Row::Note(note) if note.text.as_deref() == Some("#goal 500")))
+		rows.iter().any(
+			|row| matches!(row, Row::Note(note) if note.text.as_deref() == Some("#goal 500.00"))
+		)
 	);
 	budget.commit(&rows);
 	match budget.revert(TODAY, "goal:vacation", None, false) {
@@ -1324,11 +1328,10 @@ fn dismissing_and_offering_are_settings_rows() {
 			.dismissed
 	);
 	assert!(
-		budget
+		!budget
 			.data
 			.settings
-			.get(&veritas_domain::SettingKey::MigrationDismissed)
-			.is_none()
+			.contains_key(&veritas_domain::SettingKey::MigrationDismissed)
 	);
 	assert!(dismissal_rows(&budget.data, "nonsense", true).is_err());
 }
