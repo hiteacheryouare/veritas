@@ -245,12 +245,12 @@ private struct WrappedIssueWriter {
 		if redacted {
 			// A refund-heavy year has a negative share, and "went out" can't be negative in words.
 			page.headline = report.shares.outVsIn.flatMap { $0 >= 0 ? "\(percent($0)) of what came in went out." : nil } ?? "The ledger"
-			page.dek = [report.shares.net.map(netShareSentence), partialPriorYear].compactMap(\.self).joined(separator: " ").nilIfEmpty
+			page.dek = [report.shares.net.map(netShareSentence) ?? netWordsSentence, partialPriorYear].compactMap(\.self).joined(separator: " ")
 			page.rows = [
-				change(prior.totalIn).map { WrappedPage.Row(id: "in", label: "Came in", value: $0, note: nil, share: nil) },
+				WrappedPage.Row(id: "in", label: "Came in", value: change(prior.totalIn) ?? WrappedWords.notApplicable, note: nil, share: nil),
 				WrappedPage.Row(id: "out", label: "Went out", value: ofIncome(report.shares.outVsIn), note: change(prior.totalOut), share: nil),
 				WrappedPage.Row(id: "net", label: netLabel, value: ofIncome(report.shares.net.map(abs)), note: change(prior.net), share: nil)
-			].compactMap(\.self)
+			]
 		} else {
 			page.headline = "\(money(report.totalIn)) came in.\n\(money(report.totalOut)) went out."
 			page.dek = [netSentence, partialPriorYear].compactMap(\.self).joined(separator: " ")
@@ -283,6 +283,12 @@ private struct WrappedIssueWriter {
 			sentence += ", \(WrappedWords.basisPoints(abs(value), format: format)) \(value > 0 ? "more" : "less") than \(base)"
 		}
 		return sentence + "."
+	}
+
+	/// With amounts hidden and no share to give (nothing came in), the net in
+	/// words alone, so the page keeps the dek the shown page has.
+	private var netWordsSentence: String {
+		report.net < 0 ? "That came up short." : "What came in covered what went out."
 	}
 
 	private func netShareSentence(_ tenths: Int64) -> String {
@@ -384,8 +390,12 @@ private struct WrappedIssueWriter {
 		// A biggest month that is the typical month (one month of spending) has nothing to compare.
 		let typical = report.biggestVsTypical.flatMap { $0 > 0 ? "\(WrappedWords.basisPoints($0, format: format)) more than your typical month" : nil }
 		if redacted {
-			let share = report.shares.biggestMonth.map { "\(percent($0)) \(isYearToDate ? "of spending so far" : "of the year's spending")" }
-			page.dek = [share, typical].compactMap(\.self).joined(separator: ", ").nilIfEmpty.map { $0.prefix(1).uppercased() + $0.dropFirst() + "." }
+			if let share = report.shares.biggestMonth {
+				page.dek = ["\(percent(share)) \(isYearToDate ? "of spending so far" : "of the year's spending")", typical].compactMap(\.self).joined(separator: ", ") + "."
+			} else {
+				// Total out of 0 or less leaves no share, and the page still keeps its dek.
+				page.dek = typical.map { "It was \($0)." } ?? "Its share of \(isYearToDate ? "spending so far" : "the year's spending") is \(WrappedWords.notApplicable)."
+			}
 		} else {
 			page.dek = [money(biggest.total), typical].compactMap(\.self).joined(separator: ", ") + "."
 		}
@@ -479,13 +489,13 @@ private struct WrappedIssueWriter {
 	private func netWorth() -> WrappedPage {
 		var page = WrappedPage(kind: .netWorth)
 		page.title = "Net worth"
-		page.pointsTitle = redacted ? "Change since the start of \(report.year)" : "Net worth"
+		page.pointsTitle = redacted ? "Change in net worth since the start of \(report.year)" : "Net worth"
 		let change = report.netWorthChange
 		page.headline = change > 0 ? "Net worth went up." : change < 0 ? "Net worth went down." : "Net worth held steady."
 		let ends = report.monthEnds
 		if redacted {
 			page.hero = report.shares.netWorthChange.map { WrappedWords.signedPercent($0, format: format) } ?? WrappedWords.notApplicable
-			page.dek = report.shares.netWorthChange == nil ? nil : "Since the start of \(report.year)."
+			page.dek = "Since the start of \(report.year)."
 			let shares = ends.compactMap(\.share)
 			if shares.count == ends.count, !ends.isEmpty {
 				page.points = ends.enumerated().map { index, end in
@@ -494,10 +504,8 @@ private struct WrappedIssueWriter {
 			}
 		} else {
 			page.hero = (change > 0 ? "+" : "") + money(change)
-			page.rows = [
-				WrappedPage.Row(id: "start", label: "Start of \(report.year)", value: money(report.netWorthStart), note: nil, share: nil),
-				WrappedPage.Row(id: "end", label: isYearToDate ? "Today" : "End of \(report.year)", value: money(report.netWorthEnd), note: nil, share: nil)
-			]
+			// The start and end go in the dek, not in rows, so the redacted page has the same shape.
+			page.dek = "From \(money(report.netWorthStart)) at the start of \(report.year) to \(money(report.netWorthEnd)) on \(WrappedWords.day(report.last))."
 			page.points = ends.map { end in
 				WrappedPage.Point(id: end.date, slot: Int(end.month.month) - 1, name: WrappedWords.monthName(end.month), value: end.netWorth, spoken: "\(WrappedWords.monthName(end.month)), \(money(end.netWorth))")
 			}
@@ -554,11 +562,12 @@ private struct WrappedIssueWriter {
 		return nil
 	}
 
+	/// The row is there in both modes exactly when the core has an Everything
+	/// else amount, so Hide amounts never adds or drops it.
 	private func everythingElse(_ amount: Int64, share: Int64?) -> [WrappedPage.Row] {
-		if redacted {
-			return share.map { [WrappedPage.Row(id: "other", label: "Everything else", value: percent($0), note: nil, share: $0)] } ?? []
-		}
-		return amount > 0 ? [WrappedPage.Row(id: "other", label: "Everything else", value: money(amount), note: nil, share: share)] : []
+		guard amount > 0 else { return [] }
+		let value = redacted ? share.map(percent) ?? WrappedWords.notApplicable : money(amount)
+		return [WrappedPage.Row(id: "other", label: "Everything else", value: value, note: nil, share: share)]
 	}
 
 	private func money(_ amount: Int64) -> String {

@@ -16,6 +16,9 @@ public final class WrappedModel {
 	public var hidesAmounts = false
 
 	@ObservationIgnored let workspace: WorkspaceModel
+	/// Both modes of the issue for the report and format they were written
+	/// from, so a frame of a page turn or a mode switch reads them, not rebuilds them.
+	@ObservationIgnored private var written: (report: WrappedReport, format: MoneyFormat, shown: WrappedIssue, hidden: WrappedIssue)?
 	@ObservationIgnored public let today: String
 	@ObservationIgnored public let thisYear: Int32
 
@@ -60,7 +63,15 @@ public final class WrappedModel {
 	}
 
 	public func issue(redacted: Bool) -> WrappedIssue? {
-		report.map { WrappedIssue(report: $0, format: format, redacted: redacted) }
+		guard let report else { return nil }
+		let format = format
+		if let written, written.report == report, written.format == format {
+			return redacted ? written.hidden : written.shown
+		}
+		let shown = WrappedIssue(report: report, format: format, redacted: false)
+		let hidden = WrappedIssue(report: report, format: format, redacted: true)
+		written = (report, format, shown, hidden)
+		return redacted ? hidden : shown
 	}
 
 	public var issue: WrappedIssue? { issue(redacted: hidesAmounts) }

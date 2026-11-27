@@ -80,6 +80,11 @@ struct WrappedScreenshotTests {
 		let shown = try renderedText(shownIssue.spreads)
 		#expect(shown.contains("$19,800.00"))
 		#expect(shown.contains("$84,210.00"))
+		// An export draws one mode only: the hidden twin that keeps a figure's
+		// room on screen never reaches the file (the PNG draws the same view).
+		#expect(!shown.contains("72.9% of what came in went out."), "no redacted twin in the shown export")
+		#expect(!shown.contains("Since the start of 2026."))
+		#expect(!hidden.contains("From "), "no shown twin, the net worth dek, in the redacted export")
 		try FileManager.default.createDirectory(at: Self.output, withIntermediateDirectories: true)
 		try #require(WrappedExport.pdf(shownIssue.spreads, paper: .light)).write(to: Self.output.appending(path: "issue.pdf"))
 	}

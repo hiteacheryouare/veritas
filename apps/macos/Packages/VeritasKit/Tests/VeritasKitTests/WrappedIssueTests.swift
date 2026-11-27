@@ -153,7 +153,8 @@ struct WrappedIssueTests {
 		#expect(Self.page(.goals)?.rows.map(\.value) == ["February", "July"])
 		#expect(Self.page(.netWorth)?.headline == "Net worth went up.")
 		#expect(Self.page(.netWorth)?.hero == "+$3,983.00")
-		#expect(Self.page(.netWorth)?.rows.map(\.label) == ["Start of 2027", "End of 2027"])
+		#expect(Self.page(.netWorth)?.dek == "From $7,200.00 at the start of 2027 to $11,183.00 on December 31.")
+		#expect(Self.page(.netWorth)?.rows.isEmpty == true)
 	}
 
 	@Test func aSurplusYearSaysWhatWasLeftAndComparesWithLastYear() {
@@ -211,7 +212,7 @@ struct WrappedIssueTests {
 		report.monthEnds = report.monthEnds.map { WrappedMonthEnd(month: $0.month, date: $0.date, netWorth: $0.netWorth, share: nil) }
 		let hidden = Self.page(.netWorth, report, redacted: true)
 		#expect(hidden?.hero == "n/a")
-		#expect(hidden?.dek == nil)
+		#expect(hidden?.dek == "Since the start of 2027.", "the dek stays, so the page keeps the shown page's shape")
 		#expect(hidden?.points.isEmpty == true)
 		#expect(hidden?.annotations.isEmpty == true)
 		#expect(Self.page(.netWorth, report)?.points.count == 4, "with amounts shown the line is drawn from the amounts")
@@ -242,7 +243,7 @@ struct WrappedIssueTests {
 		#expect(issue.isYearToDate)
 		#expect(issue.pages.first?.dek == "Household\nJanuary 1 to April 10")
 		#expect(issue.pages.first { $0.kind == .ledger }?.rows.first?.note == "+7.5% vs this point in 2026")
-		#expect(issue.pages.first { $0.kind == .netWorth }?.rows.last?.label == "Today")
+		#expect(issue.pages.first { $0.kind == .netWorth }?.dek == "From $7,200.00 at the start of 2027 to $11,183.00 on April 10.")
 		let hidden = Self.issue(Self.report(last: "2027-04-10"), redacted: true)
 		#expect(hidden.pages.first { $0.kind == .shape }?.dek == "26.1% of spending so far, 56% more than your typical month.")
 	}
@@ -313,7 +314,7 @@ struct WrappedIssueTests {
 
 	@Test func theNetWorthLineSaysWhatItMeasures() {
 		#expect(Self.page(.netWorth)?.pointsTitle == "Net worth")
-		#expect(Self.page(.netWorth, redacted: true)?.pointsTitle == "Change since the start of 2027")
+		#expect(Self.page(.netWorth, redacted: true)?.pointsTitle == "Change in net worth since the start of 2027")
 	}
 
 	@Test func aShareTheCoreLeavesOutReadsNA() {
@@ -323,7 +324,60 @@ struct WrappedIssueTests {
 		let ledger = Self.page(.ledger, report, redacted: true)
 		#expect(ledger?.rows.dropFirst().map(\.value) == ["n/a", "n/a"])
 		#expect(ledger?.headline == "The ledger", "FC-8 copy rule 3: no sentence about an absent figure")
-		#expect(ledger?.dek == nil)
+		#expect(ledger?.dek == "That came up short.", "the net in words alone, so the dek stays")
+	}
+
+	// MARK: Hide amounts never reflows
+
+	/// The cowboy's six reports: a full year, a year to date, no shares, no
+	/// opening net worth, a refund-heavy year, and no typical share.
+	static var parityReports: [(String, WrappedReport)] {
+		var noShares = Self.report()
+		noShares.shares = WrappedShares(outVsIn: nil, net: nil, debtPaydown: nil, savings: nil, biggestMonth: nil, netWorthChange: nil, otherCategories: nil, otherGroups: nil, otherPayees: nil, typicalMonth: nil)
+		noShares.months = noShares.months.map { WrappedSpendingMonth(month: $0.month, total: $0.total, share: nil) }
+		var noOpening = Self.report()
+		noOpening.netWorthStart = 0
+		noOpening.shares.netWorthChange = nil
+		noOpening.monthEnds = noOpening.monthEnds.map { WrappedMonthEnd(month: $0.month, date: $0.date, netWorth: $0.netWorth, share: nil) }
+		var refundHeavy = Self.report()
+		refundHeavy.totalOut = -250
+		refundHeavy.shares.outVsIn = -3
+		refundHeavy.shares.net = 1_003
+		var noTypical = Self.report()
+		noTypical.shares.typicalMonth = nil
+		return [("full year", Self.report()), ("year to date", Self.report(last: "2027-04-10")), ("no shares", noShares),
+			("no opening net worth", noOpening), ("refund-heavy", refundHeavy), ("no typical share", noTypical)]
+	}
+
+	/// A page's shape: which of its words exist and which rows it has.
+	struct Shape: Equatable {
+		let heading: Bool
+		let headline: Bool
+		let dek: Bool
+		let hero: Bool
+		let rows: [String]
+
+		init(_ page: WrappedPage) {
+			heading = page.heading != nil
+			headline = page.headline != nil
+			dek = page.dek != nil
+			hero = page.hero != nil
+			rows = page.rows.map(\.id)
+		}
+	}
+
+	@Test func bothModesHaveTheSameShapeOnEveryPage() {
+		// Each figure keeps its room through its other form, so the two modes
+		// must hold the same elements: present in both, or absent in both.
+		for (name, report) in Self.parityReports {
+			let shown = Self.issue(report, redacted: false)
+			let hidden = Self.issue(report, redacted: true)
+			#expect(shown.spreads.map(\.id) == hidden.spreads.map(\.id), "\(name): the same spreads")
+			for (page, twin) in zip(shown.pages, hidden.pages) {
+				#expect(page.kind == twin.kind, "\(name)")
+				#expect(Shape(page) == Shape(twin), "\(name), \(page.kind): shown \(Shape(page)) hidden \(Shape(twin))")
+			}
+		}
 	}
 
 	// MARK: FC-8's copy rule
@@ -333,7 +387,7 @@ struct WrappedIssueTests {
 	/// grouping, decimals and percent sign. "3 goals" is one token, so an
 	/// unrelated 3 elsewhere can't vouch for it.
 	static var figure: Regex<Substring> {
-		/(?:January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}(?:, \d{4})?|\d+(?:,\d{3})* (?:no-spend days?|days?|months?|payments?|goals?)\b|[+\-\x{2212}]?\$?\d+(?:,\d{3})*(?:\.\d+)?%?/
+		/(?:January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}(?:, \d{4})?|\d+(?:,\d{3})* (?:no-spend days?|days?|months?|payments?|goals?)\b|[+\-\x{2212}]?[$€£¥]?\d+(?:,\d{3})*(?:\.\d+)?%?/
 	}
 
 	static func tokens(in line: String) -> [String] {
@@ -394,8 +448,8 @@ struct WrappedIssueTests {
 	}
 
 	@Test func everyFigureOnEveryPageIsAReportField() {
-		// FC-8 copy rule 1, populated and redacted, a whole year and a year to date.
-		for report in [Self.report(), Self.report(last: "2027-04-10")] {
+		// FC-8 copy rule 1, populated and redacted, over the six parity reports.
+		for (_, report) in Self.parityReports {
 			for redacted in [false, true] {
 				let allowed = Self.allowedTokens(report, redacted: redacted)
 				let issue = Self.issue(report, redacted: redacted)
@@ -414,7 +468,7 @@ struct WrappedIssueTests {
 		let issue = Self.issue(report)
 		let allowed = Self.allowedTokens(report, redacted: false)
 		let planted = ["Lunch came to $12.34.", "A run of 7 days.", "You reached 3 goals.", "That was 15 days.", "It rose 9.9%.",
-			"A total of 164.28.", "Out came 9,876.54.", "Over 37 months."]
+			"A total of 164.28.", "Out came 9,876.54.", "Over 37 months.", "€1,000.00 came in.", "£1,000.00 came in.", "¥1,000.00 came in."]
 		for line in planted {
 			var page = WrappedPage(kind: .notes)
 			page.notes = [line]
@@ -451,7 +505,7 @@ struct WrappedIssueTests {
 		let report = Self.report()
 		var names = Set(report.topCategories.map { ReportWords.category($0.name, labels: $0.labels) } + report.topGroups.map(\.name) + report.topPayees.map(\.name))
 		names.formUnion(report.reachedGoals.map { $0.deleted ? "(deleted) \($0.name)" : $0.name })
-		let fixed: Set = ["Everything else", "Came in", "Went out", "Left over", "Came up short", "Debt paydown", "Savings", "Start of 2027", "End of 2027", "Today"]
+		let fixed: Set = ["Everything else", "Came in", "Went out", "Left over", "Came up short", "Debt paydown", "Savings"]
 		for redacted in [false, true] {
 			for row in Self.issue(report, redacted: redacted).pages.flatMap(\.rows) {
 				#expect(names.contains(row.label) || fixed.contains(row.label), "\(row.label)")
