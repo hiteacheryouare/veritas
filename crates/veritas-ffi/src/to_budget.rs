@@ -183,16 +183,17 @@ pub(crate) fn refusal(block: &ToBudgetBlock) -> CoreError {
 		}
 		ToBudgetBlock::NothingUnderfunded => "Nothing is underfunded.".to_owned(),
 		ToBudgetBlock::NoGoalNeedsFunding => "No active goal needs funding.".to_owned(),
-		ToBudgetBlock::NotCurrentMonth => {
-			"Goals are funded for the current month only.".to_owned()
-		}
+		ToBudgetBlock::NotCurrentMonth => "Goals are funded for the current month only.".to_owned(),
 		ToBudgetBlock::MixedScale { places } => format!(
 			"Spending is recorded at 2 places and budgets at {places}, so To Budget can't be trusted here."
 		),
 	})
 }
 
-fn view(data: &BudgetData, planned: Result<ToBudgetPlan, ToBudgetBlock>) -> Result<ToBudgetPlanView, CoreError> {
+fn view(
+	data: &BudgetData,
+	planned: Result<ToBudgetPlan, ToBudgetBlock>,
+) -> Result<ToBudgetPlanView, CoreError> {
 	let name = |category: &CategoryId| {
 		data.categories
 			.get(category)
@@ -218,7 +219,11 @@ fn view(data: &BudgetData, planned: Result<ToBudgetPlan, ToBudgetBlock>) -> Resu
 				.iter()
 				.map(|(goal, Skip::NoTargetDate)| ToBudgetSkip {
 					goal_id: goal.to_string(),
-					name: data.goals.get(goal).map(|g| name(&g.category)).unwrap_or_default(),
+					name: data
+						.goals
+						.get(goal)
+						.map(|g| name(&g.category))
+						.unwrap_or_default(),
 					reason: ToBudgetSkipReason::NoTargetDate,
 				})
 				.collect(),
@@ -229,7 +234,9 @@ fn view(data: &BudgetData, planned: Result<ToBudgetPlan, ToBudgetBlock>) -> Resu
 					let (reason, goal_id) = match &fill.reason {
 						FillReason::Overspent => (ToBudgetFillReason::Overspent, None),
 						FillReason::GoalShortfall => (ToBudgetFillReason::GoalShortfall, None),
-						FillReason::GoalMonthly(goal) => (ToBudgetFillReason::GoalMonthly, Some(goal.to_string())),
+						FillReason::GoalMonthly(goal) => {
+							(ToBudgetFillReason::GoalMonthly, Some(goal.to_string()))
+						}
 					};
 					ToBudgetFill {
 						category_id: fill.category.to_string(),
@@ -247,9 +254,15 @@ fn view(data: &BudgetData, planned: Result<ToBudgetPlan, ToBudgetBlock>) -> Resu
 
 /// The popover for `month`, clamped to the months Actual has created as the
 /// Budget screen clamps it. Writes nothing (TB-1.3).
-pub(crate) fn actions(data: &BudgetData, sheet: &EnvelopeSheet, month: Month) -> Result<ToBudgetActions, CoreError> {
+pub(crate) fn actions(
+	data: &BudgetData,
+	sheet: &EnvelopeSheet,
+	month: Month,
+) -> Result<ToBudgetActions, CoreError> {
 	let (Some(&first), Some(&last)) = (sheet.months().first(), sheet.months().last()) else {
-		return Err(CoreError::Invalid("This budget has no months yet.".to_owned()));
+		return Err(CoreError::Invalid(
+			"This budget has no months yet.".to_owned(),
+		));
 	};
 	let month = year_month(month)?.clamp(first, last);
 	let summary = sheet
@@ -258,7 +271,10 @@ pub(crate) fn actions(data: &BudgetData, sheet: &EnvelopeSheet, month: Month) ->
 	let editor = BudgetEditor::new(data, sheet);
 	let to_budget = summary.to_budget.minor();
 	let assign = view(data, plan_assign(data, &editor, month)?)?;
-	let fund_goals = view(data, plan_fund_goals(data, &editor, month, sheet.today().year_month())?)?;
+	let fund_goals = view(
+		data,
+		plan_fund_goals(data, &editor, month, sheet.today().year_month())?,
+	)?;
 	let held = summary.manual_hold.minor();
 	let auto_held = summary.auto_hold.minor();
 	Ok(ToBudgetActions {
@@ -287,7 +303,11 @@ impl Session {
 	/// v25, docs/finance/to-budget.md TB-10.1: everything the To Budget card's
 	/// popover shows for `month`, with each quick action's plan or the reason
 	/// it can't act. `today` is the local civil date, `YYYY-MM-DD`. Writes nothing.
-	pub fn to_budget_actions(&self, month: Month, today: String) -> Result<ToBudgetActions, FfiError> {
+	pub fn to_budget_actions(
+		&self,
+		month: Month,
+		today: String,
+	) -> Result<ToBudgetActions, FfiError> {
 		self.core.call(|session| {
 			let today = crate::budget::civil_date(&today)?;
 			session.with_sheet(today, |data, sheet| actions(data, sheet, month))
@@ -307,7 +327,10 @@ mod tests {
 	use crate::test_support::imported;
 
 	const TODAY: &str = "2026-11-15";
-	const NOVEMBER: Month = Month { year: 2026, month: 11 };
+	const NOVEMBER: Month = Month {
+		year: 2026,
+		month: 11,
+	};
 
 	/// The first two expense envelopes on the Budget screen, and the first
 	/// on-budget account.
@@ -317,9 +340,17 @@ mod tests {
 			let sheet = EnvelopeSheet::compute(data, crate::budget::civil_date(TODAY)?)?;
 			let envelopes: Vec<String> = sheet
 				.group_order()
-				.filter(|(group, _)| data.category_groups.get(*group).is_some_and(|g| !g.is_income && !g.hidden))
+				.filter(|(group, _)| {
+					data.category_groups
+						.get(*group)
+						.is_some_and(|g| !g.is_income && !g.hidden)
+				})
 				.flat_map(|(_, categories)| categories)
-				.filter(|id| data.categories.get(*id).is_some_and(|c| !c.hidden && !c.is_income))
+				.filter(|id| {
+					data.categories
+						.get(*id)
+						.is_some_and(|c| !c.hidden && !c.is_income)
+				})
 				.map(ToString::to_string)
 				.collect();
 			let account = data
@@ -334,7 +365,13 @@ mod tests {
 		.unwrap()
 	}
 
-	fn spend(core: &crate::session::Core<veritas_store::Store>, id: &str, account: &str, category: &str, amount: i64) {
+	fn spend(
+		core: &crate::session::Core<veritas_store::Store>,
+		id: &str,
+		account: &str,
+		category: &str,
+		amount: i64,
+	) {
 		let draft = TransactionDraft {
 			id: Some(id.to_owned()),
 			account_id: account.to_owned(),
@@ -352,8 +389,12 @@ mod tests {
 	}
 
 	fn read(core: &crate::session::Core<veritas_store::Store>) -> ToBudgetActions {
-		core.call(|session| session.with_sheet(crate::budget::civil_date(TODAY)?, |data, sheet| actions(data, sheet, NOVEMBER)))
-			.unwrap()
+		core.call(|session| {
+			session.with_sheet(crate::budget::civil_date(TODAY)?, |data, sheet| {
+				actions(data, sheet, NOVEMBER)
+			})
+		})
+		.unwrap()
 	}
 
 	fn budgeted(core: &crate::session::Core<veritas_store::Store>, category: &str) -> i64 {
@@ -368,8 +409,15 @@ mod tests {
 	}
 
 	fn month_note(core: &crate::session::Core<veritas_store::Store>) -> Option<String> {
-		core.call(|session| Ok(session.data()?.notes.get("budget-2026-11").cloned().flatten()))
-			.unwrap()
+		core.call(|session| {
+			Ok(session
+				.data()?
+				.notes
+				.get("budget-2026-11")
+				.cloned()
+				.flatten())
+		})
+		.unwrap()
 	}
 
 	#[test]
@@ -380,47 +428,98 @@ mod tests {
 		spend(&core, "tb-over-1", &account, &first, -1_000_000);
 		spend(&core, "tb-over-2", &account, &second, -1_000_000);
 		let before = read(&core);
-		assert!(before.to_budget > 0, "small.zip has money to budget in November");
+		assert!(
+			before.to_budget > 0,
+			"small.zip has money to budget in November"
+		);
 		assert_eq!(before.state, ToBudgetState::Positive);
 		assert_eq!(before.assign.block, None);
-		assert!(before.assign.fills.iter().any(|fill| fill.category_id == first && fill.reason == ToBudgetFillReason::Overspent));
-		let (first_before, second_before, note_before) = (budgeted(&core, &first), budgeted(&core, &second), month_note(&core));
+		assert!(
+			before
+				.assign
+				.fills
+				.iter()
+				.any(|fill| fill.category_id == first
+					&& fill.reason == ToBudgetFillReason::Overspent)
+		);
+		let (first_before, second_before, note_before) = (
+			budgeted(&core, &first),
+			budgeted(&core, &second),
+			month_note(&core),
+		);
 		assert_eq!(read(&core), before, "TB-1.3: the read writes nothing");
 
-		core.call(|session| session.perform(&Command::AssignToUnderfunded { month: NOVEMBER })).unwrap();
+		core.call(|session| session.perform(&Command::AssignToUnderfunded { month: NOVEMBER }))
+			.unwrap();
 		let after = read(&core);
-		assert_eq!(after.to_budget, before.to_budget - before.assign.total, "TB-2.2: To Budget falls by exactly what was written");
+		assert_eq!(
+			after.to_budget,
+			before.to_budget - before.assign.total,
+			"TB-2.2: To Budget falls by exactly what was written"
+		);
 		assert!(after.to_budget >= 0);
 		assert!(budgeted(&core, &first) > first_before);
 		let note = month_note(&core).unwrap();
-		let added = note.strip_prefix(note_before.as_deref().unwrap_or("")).unwrap().trim_start_matches('\n');
-		let covered = before.assign.fills.iter().filter(|fill| fill.reason == ToBudgetFillReason::Overspent).count();
-		assert_eq!(added.lines().count(), covered, "TB-10.3: a movement note per covered envelope, appended");
+		let added = note
+			.strip_prefix(note_before.as_deref().unwrap_or(""))
+			.unwrap()
+			.trim_start_matches('\n');
+		let covered = before
+			.assign
+			.fills
+			.iter()
+			.filter(|fill| fill.reason == ToBudgetFillReason::Overspent)
+			.count();
+		assert_eq!(
+			added.lines().count(),
+			covered,
+			"TB-10.3: a movement note per covered envelope, appended"
+		);
 
 		core.call(|session| session.undo()).unwrap();
 		assert_eq!(budgeted(&core, &first), first_before, "TB-8 example 9");
 		assert_eq!(budgeted(&core, &second), second_before);
 		assert_eq!(month_note(&core), note_before, "the notes return exactly");
-		assert_eq!(read(&core).to_budget, before.to_budget, "one undo step undoes the whole action");
+		assert_eq!(
+			read(&core).to_budget,
+			before.to_budget,
+			"one undo step undoes the whole action"
+		);
 	}
 
 	#[test]
 	fn a_blocked_row_is_a_command_the_core_refuses() {
 		let (_scratch, core) = imported("small");
 		core.pin_today(TODAY).unwrap();
-		let actions = read(&core);
-		if actions.assign.block == Some(ToBudgetBlock::NothingUnderfunded) {
-			let refused = core.call(|session| session.perform(&Command::AssignToUnderfunded { month: NOVEMBER }));
+		let november = read(&core);
+		if november.assign.block == Some(ToBudgetBlock::NothingUnderfunded) {
+			let refused = core
+				.call(|session| session.perform(&Command::AssignToUnderfunded { month: NOVEMBER }));
 			assert!(refused.is_err(), "Nothing is underfunded");
 		}
-		let october = Month { year: 2026, month: 10 };
-		let refused = core.call(|session| session.perform(&Command::FundGoalsMonthly { month: october }));
-		assert!(matches!(refused, Err(FfiError::Invalid { message }) if message == "Goals are funded for the current month only."), "TB-8 example 8");
+		let october = Month {
+			year: 2026,
+			month: 10,
+		};
+		let refused =
+			core.call(|session| session.perform(&Command::FundGoalsMonthly { month: october }));
+		assert!(
+			matches!(refused, Err(FfiError::Invalid { message }) if message == "Goals are funded for the current month only."),
+			"TB-8 example 8"
+		);
 		let other = core
-			.call(|session| session.with_sheet(crate::budget::civil_date(TODAY)?, |data, sheet| actions(data, sheet, october)))
+			.call(|session| {
+				session.with_sheet(crate::budget::civil_date(TODAY)?, |data, sheet| {
+					actions(data, sheet, october)
+				})
+			})
 			.unwrap();
 		assert_eq!(other.fund_goals.block, Some(ToBudgetBlock::NotCurrentMonth));
-		assert_ne!(other.assign.block, Some(ToBudgetBlock::NotCurrentMonth), "Assign to underfunded stays available in another month");
+		assert_ne!(
+			other.assign.block,
+			Some(ToBudgetBlock::NotCurrentMonth),
+			"Assign to underfunded stays available in another month"
+		);
 	}
 
 	#[test]
@@ -433,7 +532,12 @@ mod tests {
 				data.format.currency_code = Some("JPY".to_owned());
 				let sheet = EnvelopeSheet::compute(&data, crate::budget::civil_date(TODAY)?)?;
 				let read = actions(&data, &sheet, NOVEMBER)?;
-				Ok(((read.assign.block, read.fund_goals.block, read.hold.block), sheet.summary(YearMonth::new(2026, 11)?).map(|s| s.to_budget)))
+				Ok((
+					(read.assign.block, read.fund_goals.block, read.hold.block),
+					sheet
+						.summary(YearMonth::new(2026, 11)?)
+						.map(|s| s.to_budget),
+				))
 			})
 			.unwrap();
 		let yen = Some(ToBudgetBlock::MixedScale { places: 0 });
@@ -448,7 +552,10 @@ mod tests {
 	#[test]
 	fn tb_1_3_an_empty_to_budget_names_its_state() {
 		assert_eq!(empty(0), Some(ToBudgetBlock::Zero));
-		assert_eq!(empty(-5_000), Some(ToBudgetBlock::Overbudgeted { amount: 5_000 }));
+		assert_eq!(
+			empty(-5_000),
+			Some(ToBudgetBlock::Overbudgeted { amount: 5_000 })
+		);
 		assert_eq!(empty(1), None);
 	}
 }

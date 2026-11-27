@@ -18,9 +18,9 @@ mod rules;
 mod session;
 mod statements;
 mod tax_setup;
-mod to_budget;
 #[cfg(test)]
 mod test_support;
+mod to_budget;
 mod wrapped;
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -89,8 +89,8 @@ pub use session::{ChangeListener, Session};
 pub use statements::{IncomeStatement, StatementEntity, StatementGroup};
 pub use tax_setup::{TaxCategoryBucket, TaxSetup, TaxTagMapping, TaxTagMeaning};
 pub use to_budget::{
-	ToBudgetActions, ToBudgetBlock, ToBudgetFill, ToBudgetFillReason, ToBudgetHold, ToBudgetPlanView,
-	ToBudgetSkip, ToBudgetSkipReason, ToBudgetState,
+	ToBudgetActions, ToBudgetBlock, ToBudgetFill, ToBudgetFillReason, ToBudgetHold,
+	ToBudgetPlanView, ToBudgetSkip, ToBudgetSkipReason, ToBudgetState,
 };
 pub use wrapped::{
 	WrappedCategory, WrappedFact, WrappedGroup, WrappedMeasure, WrappedMonth, WrappedNoSpend,

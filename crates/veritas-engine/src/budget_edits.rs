@@ -631,7 +631,9 @@ impl<'a> BudgetEditor<'a> {
 			Destination::Category(category) => name(category),
 		};
 		let day = note_day(self.sheet.today());
-		Ok(format!("- Reassigned {display} from {from} \u{2192} {to} on {day}"))
+		Ok(format!(
+			"- Reassigned {display} from {from} \u{2192} {to} on {day}"
+		))
 	}
 }
 

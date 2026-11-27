@@ -113,7 +113,12 @@ impl<'e, 'a> Working<'e, 'a> {
 
 	/// Adds `min(need, To Budget left)` to the envelope's budget. Returns the
 	/// amount written, 0 once To Budget is used up.
-	fn fill(&mut self, category: &CategoryId, reason: FillReason, need: i64) -> Result<i64, CoreError> {
+	fn fill(
+		&mut self,
+		category: &CategoryId,
+		reason: FillReason,
+		need: i64,
+	) -> Result<i64, CoreError> {
 		let amount = need.min(self.left).max(0);
 		if amount == 0 {
 			return Ok(0);
@@ -155,7 +160,10 @@ impl<'e, 'a> Working<'e, 'a> {
 			.cloned()
 			.flatten();
 		if let Some(note) = self.note.filter(|note| Some(note) != original.as_ref()) {
-			self.plan.writes.notes.push((month_note_id(self.month), note));
+			self.plan
+				.writes
+				.notes
+				.push((month_note_id(self.month), note));
 		}
 		self.plan.hidden_left_out = u32::try_from(self.hidden.len()).unwrap_or(u32::MAX);
 		self.plan
@@ -169,11 +177,19 @@ impl BudgetEditor<'_> {
 		let budget = self.budget();
 		let mut candidates = Vec::new();
 		for (group_id, categories) in self.sheet().group_order() {
-			let Some(group) = budget.category_groups.get(group_id).filter(|g| !g.tombstone && !g.is_income) else {
+			let Some(group) = budget
+				.category_groups
+				.get(group_id)
+				.filter(|g| !g.tombstone && !g.is_income)
+			else {
 				continue;
 			};
 			for id in categories {
-				let Some(category) = budget.categories.get(id).filter(|c| !c.tombstone && !c.is_income) else {
+				let Some(category) = budget
+					.categories
+					.get(id)
+					.filter(|c| !c.tombstone && !c.is_income)
+				else {
 					continue;
 				};
 				candidates.push(Candidate {
@@ -248,10 +264,16 @@ impl BudgetEditor<'_> {
 		goals.sort_by(|a, b| a.id.cmp(&b.id));
 		let mut working = Working::new(self, month);
 		for candidate in self.candidates() {
-			for goal in goals.iter().filter(|goal| goal.category == candidate.category) {
+			for goal in goals
+				.iter()
+				.filter(|goal| goal.category == candidate.category)
+			{
 				let Some(suggested) = suggestion(self.sheet(), goal, month)? else {
 					if !candidate.hidden {
-						working.plan.skipped.push((goal.id.clone(), Skip::NoTargetDate));
+						working
+							.plan
+							.skipped
+							.push((goal.id.clone(), Skip::NoTargetDate));
 					}
 					continue;
 				};
@@ -268,7 +290,11 @@ impl BudgetEditor<'_> {
 					working.hidden.insert(candidate.category.clone());
 					continue;
 				}
-				working.fill(&candidate.category, FillReason::GoalMonthly(goal.id.clone()), need)?;
+				working.fill(
+					&candidate.category,
+					FillReason::GoalMonthly(goal.id.clone()),
+					need,
+				)?;
 			}
 		}
 		Ok(working.finish())

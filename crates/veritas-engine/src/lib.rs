@@ -15,7 +15,7 @@ pub use amount_field::{
 };
 pub use arithmetic::{NumberFormat, currency_to_amount, eval_arithmetic};
 pub use budget_edits::{AverageSpan, BudgetEditor, BudgetWrites, CellWrite, Envelope, GoalColumns};
-pub use to_budget::{Fill, FillReason, Skip, ToBudgetPlan};
 pub use envelope::{
 	CategoryMonth, EnvelopeSheet, GroupMonth, MonthSheet, MonthSummary, SheetChange,
 };
+pub use to_budget::{Fill, FillReason, Skip, ToBudgetPlan};
