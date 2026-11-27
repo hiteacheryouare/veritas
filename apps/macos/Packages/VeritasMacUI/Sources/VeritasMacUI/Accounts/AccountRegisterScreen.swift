@@ -252,19 +252,21 @@ private struct RegisterFilters: View {
 
 /// The account's end-of-day balance over the date filter, and how much it
 /// changed, as in the register mockup.
-private struct BalanceGraph: View {
+struct BalanceGraph: View {
 	let history: BalanceHistory?
 	let format: MoneyFormat
 
 	var body: some View {
 		if let history, history.points.count > 1, let first = history.points.first, let last = history.points.last {
 			ZStack {
-				let domain = Self.domain(history.points.map { Double($0.balance) / 100 })
+				let values = history.points.map { Double($0.balance) / 100 }
+				let domain = Self.domain(values)
+				let baseline = ZeroSplit.baseline(in: domain)
 				Chart(history.points, id: \.date) { point in
-					AreaMark(x: .value("Day", point.date), yStart: .value("Floor", domain.lowerBound), yEnd: .value("Balance", Double(point.balance) / 100))
-						.foregroundStyle(.linearGradient(colors: [Color.textPrimary.opacity(0.10), Color.textPrimary.opacity(0)], startPoint: .top, endPoint: .bottom))
+					AreaMark(x: .value("Day", point.date), yStart: .value("Floor", baseline), yEnd: .value("Balance", Double(point.balance) / 100))
+						.foregroundStyle(Self.split(ZeroSplit.areaStop(values, baseline: baseline), above: Color.moneyAvailableFill.opacity(0.22), below: Color.moneyOverspentFill.opacity(0.18)))
 					LineMark(x: .value("Day", point.date), y: .value("Balance", Double(point.balance) / 100))
-						.foregroundStyle(Color.textPrimary)
+						.foregroundStyle(Self.split(ZeroSplit.lineStop(values), above: .chartMark(.moneyAvailableFill), below: .chartMark(.moneyOverspentFill)))
 						.lineStyle(StrokeStyle(lineWidth: 1.5))
 				}
 				.chartXAxis(.hidden)
@@ -300,6 +302,15 @@ private struct BalanceGraph: View {
 		guard let low = values.min(), let high = values.max() else { return 0...1 }
 		let pad = max((high - low) * 0.2, max(abs(high), abs(low)) * 0.02, 1)
 		return (low - pad)...(high + pad)
+	}
+
+	/// Green above zero and red below, changing exactly where the balance crosses zero.
+	/// Lines take the 3:1 chart shade of each fill; the area under them keeps the fill.
+	static func split(_ stop: Double, above: Color, below: Color) -> LinearGradient {
+		LinearGradient(
+			stops: [.init(color: above, location: 0), .init(color: above, location: stop), .init(color: below, location: stop), .init(color: below, location: 1)],
+			startPoint: .top, endPoint: .bottom
+		)
 	}
 
 	/// "+101.4%": the core's fraction, with its sign.
