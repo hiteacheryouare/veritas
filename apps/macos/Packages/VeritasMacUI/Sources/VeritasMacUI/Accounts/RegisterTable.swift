@@ -146,13 +146,11 @@ struct RegisterTable: NSViewRepresentable {
 			if scrolling, let first = rows.first { table.scrollRowToVisible(first) }
 		}
 
-		func accessibilityRows(of table: RegisterNSTable) -> [RegisterRowElement] {
-			(0..<model.total).map { index in
-				if let element = rowElements[index] { return element }
-				let element = RegisterRowElement(table: table, index: index)
-				rowElements[index] = element
-				return element
-			}
+		func accessibilityRow(_ index: Int, of table: RegisterNSTable) -> RegisterRowElement {
+			if let element = rowElements[index] { return element }
+			let element = RegisterRowElement(table: table, index: index)
+			rowElements[index] = element
+			return element
 		}
 
 		/// What VoiceOver reads for a row, built once per row until the rows reload.
@@ -267,21 +265,35 @@ final class RegisterNSTable: NSTableView {
 	weak var coordinator: RegisterTable.Coordinator?
 
 	override func accessibilityRows() -> [any NSAccessibilityRow]? {
-		coordinator?.accessibilityRows(of: self)
+		guard let coordinator else { return nil }
+		return (0..<coordinator.model.total).map { coordinator.accessibilityRow($0, of: self) }
 	}
 
 	override func accessibilityVisibleRows() -> [any NSAccessibilityRow]? {
+		guard let coordinator else { return nil }
 		let visible = rows(in: visibleRect)
-		return accessibilityRows()?.dropFirst(visible.location).prefix(visible.length).map(\.self)
+		return (visible.location..<(visible.location + visible.length)).map { coordinator.accessibilityRow($0, of: self) }
 	}
 
 	override func accessibilitySelectedRows() -> [any NSAccessibilityRow]? {
-		let rows = accessibilityRows() ?? []
-		return selectedRowIndexes.compactMap { rows.indices.contains($0) ? rows[$0] : nil }
+		guard let coordinator else { return nil }
+		return selectedRowIndexes.map { coordinator.accessibilityRow($0, of: self) }
 	}
 
 	override func accessibilityChildren() -> [Any]? {
 		(accessibilityRows() ?? []) + (accessibilityColumns() ?? [])
+	}
+
+	/// Every row, made into an element only when a client reads it.
+	private func lazyRows(then extra: [Any] = []) -> RegisterRowList {
+		RegisterRowList(rows: coordinator?.model.total ?? 0, then: extra) { [weak self] index in
+			// AppKit reads accessibility on the main thread.
+			nonisolated(unsafe) var element: Any = NSNull()
+			MainActor.assumeIsolated {
+				if let self, let coordinator = self.coordinator { element = coordinator.accessibilityRow(index, of: self) }
+			}
+			return element
+		}
 	}
 
 	/// Accessibility clients, UI tests and VoiceOver among them, read a table's
@@ -296,10 +308,10 @@ final class RegisterNSTable: NSTableView {
 		nonisolated(unsafe) var value: Any?
 		MainActor.assumeIsolated {
 			value = switch attribute {
-			case .rows: accessibilityRows()
+			case .rows: lazyRows()
 			case .visibleRows: accessibilityVisibleRows()
 			case .selectedRows: accessibilitySelectedRows()
-			default: accessibilityChildren()
+			default: lazyRows(then: accessibilityColumns() ?? [])
 			}
 		}
 		return value

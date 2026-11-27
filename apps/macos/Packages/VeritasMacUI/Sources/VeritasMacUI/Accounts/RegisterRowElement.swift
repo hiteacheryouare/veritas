@@ -103,29 +103,41 @@ final class RegisterCellElement: NSAccessibilityElement {
 	}
 }
 
-/// The cleared toggle, as the first column's button.
+/// The cleared toggle, as the first column's button. It reads the row as it
+/// is now, so a toggle reads its new state as soon as the rows reload.
 final class RegisterClearedElement: NSAccessibilityElement {
 	private weak var table: RegisterNSTable?
 	private weak var parentRow: RegisterRowElement?
-	private let row: RegisterRow
+	private let id: String
 	private let index: Int
 
 	init(table: RegisterNSTable, row: RegisterRow, index: Int, parent: RegisterRowElement) {
 		self.table = table
-		self.row = row
+		self.id = row.id
 		self.index = index
 		self.parentRow = parent
 		super.init()
 	}
 
+	private var row: RegisterRow? {
+		let (table, index, id) = (table, index, id)
+		return MainActor.assumeIsolated { table?.coordinator?.model.loadedRow(at: index).flatMap { $0.id == id ? $0 : nil } }
+	}
+
 	override func accessibilityRole() -> NSAccessibility.Role? { .button }
 	override func accessibilityParent() -> Any? { parentRow }
-	override func accessibilityIdentifier() -> String { "register.cleared.\(row.id)" }
-	override func accessibilityLabel() -> String? { row.reconciled ? "Reconciled" : (row.cleared ? "Cleared" : "Uncleared") }
+	override func accessibilityIdentifier() -> String { "register.cleared.\(id)" }
 	override func isAccessibilityElement() -> Bool { true }
+
+	override func accessibilityLabel() -> String? {
+		guard let row else { return nil }
+		return row.reconciled ? "Reconciled" : (row.cleared ? "Cleared" : "Uncleared")
+	}
+
 	override func isAccessibilityEnabled() -> Bool {
+		guard let row, !row.reconciled else { return false }
 		let table = table
-		return !row.reconciled && MainActor.assumeIsolated { table?.coordinator?.model.isReadOnly == false }
+		return MainActor.assumeIsolated { table?.coordinator?.model.isReadOnly == false }
 	}
 
 	override func accessibilityFrame() -> NSRect {
@@ -135,9 +147,39 @@ final class RegisterClearedElement: NSAccessibilityElement {
 	}
 
 	override func accessibilityPerformPress() -> Bool {
-		guard isAccessibilityEnabled() else { return false }
-		let (table, row) = (table, row)
+		guard isAccessibilityEnabled(), let row else { return false }
+		let table = table
 		MainActor.assumeIsolated { table?.coordinator?.toggleCleared(row) }
 		return true
+	}
+}
+
+/// The register's rows as AppKit lists them. Each row's element is made when
+/// it's first read, so listing 100,000 rows after a reload costs nothing.
+final class RegisterRowList: NSArray {
+	private var rows = 0
+	private var extra: [Any] = []
+	private var row: (Int) -> Any = { _ in NSNull() }
+
+	// Overriding every designated initializer lets Swift inherit NSArray's
+	// required array-literal initializer, which a subclass can't declare.
+	override init() { super.init() }
+	override init(objects: UnsafePointer<AnyObject>?, count: Int) { super.init(objects: objects, count: count) }
+	required init?(coder: NSCoder) { nil }
+
+	convenience init(rows: Int, then extra: [Any] = [], row: @escaping (Int) -> Any) {
+		self.init()
+		self.rows = rows
+		self.extra = extra
+		self.row = row
+	}
+
+	override var count: Int { rows + extra.count }
+
+	/// Immutable, so a copy is the list itself rather than every row made at once.
+	override func copy(with zone: NSZone? = nil) -> Any { self }
+
+	override func object(at index: Int) -> Any {
+		index < rows ? row(index) : extra[index - rows]
 	}
 }
