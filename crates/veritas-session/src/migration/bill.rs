@@ -1,10 +1,9 @@
 //! (d) MIG-6: schedules that are bills get a Veritas-only name and icon.
 //! No `schedules` or `rules` row is ever written.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
-use veritas_domain::{AccountId, AccountKind, CategoryId, CoreError, ScheduleId, ScheduleMeta};
-use veritas_reports::{Side, account_balances};
+use veritas_domain::{AccountKind, CategoryId, CoreError, ScheduleId, ScheduleMeta};
 use veritas_rules::{BillAmount, read_bill};
 
 use super::{Confidence, Conversion, Inputs, Suggestion, signal};
@@ -38,11 +37,6 @@ impl Candidate {
 
 pub(super) fn suggestions(inputs: &Inputs<'_>) -> Result<Vec<Suggestion>, CoreError> {
 	let data = inputs.data;
-	let sides: HashMap<AccountId, Side> =
-		account_balances(data, inputs.classification, inputs.today)?
-			.into_iter()
-			.map(|balance| (balance.account, balance.side))
-			.collect();
 	let mut candidates = Vec::new();
 	for schedule in data
 		.schedules
@@ -58,12 +52,16 @@ pub(super) fn suggestions(inputs: &Inputs<'_>) -> Result<Vec<Suggestion>, CoreEr
 			BillAmount::Exact(amount) | BillAmount::About(amount) => amount.minor() > 0,
 			BillAmount::Between(low, high) => low.minor() > 0 && high.minor() > 0,
 		});
+		// MIG-6.3: ST-9.1's rule 1 or 2 only, never a balance below zero.
 		let loan = payee
 			.and_then(|payee| payee.transfer_account.as_ref())
 			.filter(|account| {
-				let stored = data.account_meta.get(*account).and_then(|meta| meta.kind);
-				stored == Some(AccountKind::Liability)
-					|| sides.get(*account) == Some(&Side::Liability)
+				data.account_meta.get(*account).is_some_and(|meta| {
+					meta.kind == Some(AccountKind::Liability)
+						|| meta.loan_rate_bps.is_some()
+						|| meta.loan_payment.is_some()
+						|| meta.loan_payment_day.is_some()
+				})
 			})
 			.and_then(|account| data.accounts.get(account))
 			.map(|account| account.name.clone());
@@ -130,7 +128,7 @@ pub(super) fn suggestions(inputs: &Inputs<'_>) -> Result<Vec<Suggestion>, CoreEr
 		if let (Some(LOAN_ICON), Some(account)) = (icon, &candidate.loan) {
 			suggestion.signals.push(signal(
 				"loan",
-				format!("It pays {account}, a loan"),
+				format!("It pays {account}, a debt"),
 				Vec::new(),
 			));
 		}

@@ -239,6 +239,10 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 		upgradeStore.suggestions()
 	}
 
+	func migrationPreview(_ selection: MigrationSelection, today: String) async throws -> [MigrationSuggestion] {
+		upgradeStore.preview(selection)
+	}
+
 	func applyMigration(_ selection: MigrationSelection, today: String) async throws {
 		if let readOnly { throw FfiError.ReadOnly(reason: readOnly) }
 		upgradeStore.apply(selection)

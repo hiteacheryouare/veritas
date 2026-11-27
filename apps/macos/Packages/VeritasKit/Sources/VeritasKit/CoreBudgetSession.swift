@@ -461,6 +461,11 @@ final class CoreBudgetSession: BudgetSession {
 		return try await Core.run { try session.migrationSuggestions(today: today) }
 	}
 
+	func migrationPreview(_ selection: MigrationSelection, today: String) async throws -> [MigrationSuggestion] {
+		let session = session
+		return try await Core.run { try session.migrationPreview(selection: selection, today: today) }
+	}
+
 	func applyMigration(_ selection: MigrationSelection, today: String) async throws {
 		let session = session
 		_ = try await Core.run { try session.applyMigration(selection: selection, today: today) }

@@ -201,10 +201,11 @@ fn equal_on(
 	let Ok(evaluated) = evaluate_report(inputs.data, &ending, day.naive(), 0) else {
 		return Ok(None);
 	};
+	// MIG-3.3: ST-2 counts closed accounts and deleted ones that still have
+	// live rows, and an account the report doesn't list counts as 0.
 	let native: BTreeMap<String, Money> =
 		account_balances(inputs.data, inputs.classification, day)?
 			.into_iter()
-			.filter(|balance| !balance.deleted)
 			.filter(|balance| accounts.is_empty() || accounts.contains(&balance.account))
 			.map(|balance| (balance.account.as_str().to_owned(), balance.balance))
 			.collect();

@@ -36,7 +36,11 @@ struct UpgradeScreenshotTests {
 		#expect(model.ticked == ["goal:vacation"], "the debt kind needs the user's judgment, so it starts unticked")
 		try render(UpgradeSheet(model: model, format: workspace.format), named: "review", size: CGSize(width: 560, height: 640))
 		model.toggle(try #require(model.visible.first { $0.key == "kind:carloan" }))
-		model.step = .confirm
+		await model.continueToConfirm()
+		#expect(model.step == .confirm)
+		let confirm = try DrawnText.texts(in: UpgradeSheet(model: model, format: workspace.format), size: CGSize(width: 560, height: 520))
+		#expect(confirm.contains("The Goals screen lists the goal."), "MIG-2.4")
+		#expect(confirm.contains { $0.hasPrefix("It suggests") })
 		try render(UpgradeSheet(model: model, format: workspace.format), named: "confirm", size: CGSize(width: 560, height: 520))
 	}
 

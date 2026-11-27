@@ -37,6 +37,26 @@ public enum UpgradeWords {
 		return "\(effect.report)\(month): \(format.amount(effect.before, on: .register)) → \(format.amount(effect.after, on: .register))"
 	}
 
+	/// MIG-2.4's goal lines: the Goals screen, Wrapped, and the suggestion
+	/// and ETA (DEBT-8.1, FC-6, D77).
+	public static func goalLines(_ preview: MigrationGoalPreview, format: MoneyFormat) -> [String] {
+		var lines = ["The Goals screen lists the goal."]
+		if let reached = preview.reachedMonth {
+			lines.append("Wrapped counts it as a goal reached in \(ReportPeriod.monthYear(reached)).")
+		} else {
+			lines.append("Wrapped counts it in the year it's reached.")
+		}
+		if preview.spendingRecorded {
+			lines.append("No suggestion or ETA, because spending is recorded.")
+		} else if let monthly = preview.monthly, let months = preview.monthsLeft {
+			let span = months == 1 ? "1 month" : "\(months) months"
+			lines.append("It suggests \(format.currency(monthly, on: .budget)) a month for \(span), and shows an ETA.")
+		} else if preview.reachedMonth == nil {
+			lines.append("It shows an ETA once it has a pace.")
+		}
+		return lines
+	}
+
 	/// `2027-06-30` as the Mac writes a date.
 	public static func day(_ text: String) -> String {
 		guard let date = CivilDate.date(text) else { return text }

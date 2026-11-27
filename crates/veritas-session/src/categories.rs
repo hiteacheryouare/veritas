@@ -103,7 +103,7 @@ fn groups_order(data: &BudgetData) -> Vec<(CategoryGroupId, f64)> {
 
 /// Actual refuses a second live category with the same name, ignoring case,
 /// in one group (db/index.ts:459-468).
-fn ensure_free_name(
+pub(crate) fn ensure_free_name(
 	data: &BudgetData,
 	group: &CategoryGroupId,
 	name: &str,

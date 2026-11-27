@@ -437,7 +437,7 @@ public final class WorkspaceModel {
 		guard let session else { return }
 		do {
 			apply(try await session.overview())
-			upgradedKeys = Set(try await session.appliedMigrations().map(\.key))
+			upgradedKeys = Set(try await session.appliedMigrations().filter { !$0.closed }.map(\.key))
 			if sheet == .integrityReport, integrityReport == .budget(findings: nil) {
 				integrityReport = .budget(findings: try await session.integrityFindings())
 			}

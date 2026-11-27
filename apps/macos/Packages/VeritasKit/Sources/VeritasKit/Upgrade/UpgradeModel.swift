@@ -43,6 +43,8 @@ public final class UpgradeModel: Identifiable {
 	public var icons: [String: String] = [:]
 	public private(set) var targets: [String: AmountFieldModel] = [:]
 	public private(set) var isApplying = false
+	/// The Confirm step's items, with figures for the user's edits (MIG-2.4).
+	public private(set) var confirming: [MigrationSuggestion] = []
 	public private(set) var problem: String?
 	public var question: Question?
 	/// What the last Revert left alone and why.
@@ -165,13 +167,9 @@ public final class UpgradeModel: Identifiable {
 		await load()
 	}
 
-	/// MIG-1.5: every ticked item as one command and one undo step.
-	@discardableResult
-	public func apply() async -> Bool {
-		guard canApply else { return false }
-		isApplying = true
-		defer { isApplying = false }
-		problem = nil
+	/// The ticked items with every edit. `nil`, with `problem` set, when a
+	/// goal has no target above 0.
+	private func selection() async -> MigrationSelection? {
 		var items: [MigrationItem] = []
 		for suggestion in tickedSuggestions {
 			var edits = MigrationEdits(target: nil, targetDate: nil, writeNoteInActual: false, kind: nil, displayName: nil, icon: nil)
@@ -179,7 +177,7 @@ public final class UpgradeModel: Identifiable {
 			case .goal:
 				guard let target = await targets[suggestion.key]?.commit(), target > 0 else {
 					problem = "Enter a target for \(suggestion.subjectName)."
-					return false
+					return nil
 				}
 				edits.target = target
 				edits.writeNoteInActual = writesNoteInActual.contains(suggestion.key)
@@ -193,7 +191,27 @@ public final class UpgradeModel: Identifiable {
 			}
 			items.append(MigrationItem(key: suggestion.key, edits: edits))
 		}
-		let selection = MigrationSelection(items: items, consentShowGoalsGroup: consentShowGoalsGroup)
+		return MigrationSelection(items: items, consentShowGoalsGroup: consentShowGoalsGroup)
+	}
+
+	/// Review to Confirm: the figures are recomputed for the user's edits,
+	/// such as a changed target or kind (MIG-2.4).
+	public func continueToConfirm() async {
+		problem = nil
+		guard let selection = await selection() else { return }
+		let today = today
+		confirming = await workspace.report { try await $0.migrationPreview(selection, today: today) } ?? tickedSuggestions
+		step = .confirm
+	}
+
+	/// MIG-1.5: every ticked item as one command and one undo step.
+	@discardableResult
+	public func apply() async -> Bool {
+		guard canApply else { return false }
+		isApplying = true
+		defer { isApplying = false }
+		problem = nil
+		guard let selection = await selection() else { return false }
 		let today = today
 		let done: Void? = await workspace.change({ try await $0.applyMigration(selection, today: today) }, inline: { problem = $0 })
 		guard done != nil else { return false }

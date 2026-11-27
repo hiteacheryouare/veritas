@@ -64,7 +64,7 @@ pub use forecast::{
 pub use goals::{GoalClosePreview, GoalList, GoalPace, GoalState, GoalSummary, MonthAmount};
 pub use migration::{
 	AppliedMigration, MigrationConfidence, MigrationConversion, MigrationEdits, MigrationEffect,
-	MigrationFigure, MigrationItem, MigrationKindChange, MigrationProposal, MigrationRevert,
+	MigrationFigure, MigrationGoalPreview, MigrationItem, MigrationKindChange, MigrationProposal, MigrationRevert,
 	MigrationSelection, MigrationSignal, MigrationSuggestion,
 };
 pub use money::{

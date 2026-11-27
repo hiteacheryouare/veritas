@@ -16,6 +16,7 @@ extension BudgetSession {
 	func perform(_ command: Command) async throws {}
 	func migrationSuggestions(today: String) async throws -> [MigrationSuggestion] { [] }
 	func applyMigration(_ selection: MigrationSelection, today: String) async throws {}
+	func migrationPreview(_ selection: MigrationSelection, today: String) async throws -> [MigrationSuggestion] { [] }
 	func revertMigration(key: String, groupID: String?, confirmed: Bool, today: String) async throws -> MigrationRevert {
 		.reverted(change: Change(entities: [], everything: false), notes: [])
 	}

@@ -98,6 +98,43 @@ pub fn apply(inputs: &Inputs<'_>, selection: &Selection) -> Result<Vec<Row>, Cor
 	Ok(planned)
 }
 
+/// The ticked suggestions with their Confirm figures recomputed for what the
+/// user edited (MIG-2.4): a goal's lines for its edited target and date, and
+/// a kind's counts and report figures for the kind the user picked.
+pub fn preview(inputs: &Inputs<'_>, selection: &Selection) -> Result<Vec<Suggestion>, CoreError> {
+	let current: BTreeMap<String, Suggestion> = suggestions(inputs)?
+		.into_iter()
+		.map(|suggestion| (suggestion.key.clone(), suggestion))
+		.collect();
+	let mut previewed = Vec::new();
+	for item in &selection.items {
+		let Some(suggestion) = current.get(&item.key) else {
+			continue;
+		};
+		let mut suggestion = suggestion.clone();
+		match suggestion.conversion {
+			Conversion::Goal => {
+				let target = item.edits.target.or(suggestion.proposed.target);
+				let date = item.edits.target_date.or(suggestion.proposed.target_date);
+				let category = CategoryId::new(suggestion.subject_id.as_str());
+				suggestion.goal_preview = super::goal::preview(inputs, &category, target, date)?;
+			}
+			Conversion::Kind => {
+				if let Some(kind) = item.edits.kind.filter(|kind| Some(*kind) != suggestion.proposed.kind) {
+					let category = CategoryId::new(suggestion.subject_id.as_str());
+					let (change, effects) = super::kind::change_to(inputs, &category, Some(kind))?;
+					suggestion.proposed.kind = Some(kind);
+					suggestion.kind_change = Some(change);
+					suggestion.effects = effects;
+				}
+			}
+			Conversion::Report | Conversion::Bill => {}
+		}
+		previewed.push(suggestion);
+	}
+	Ok(previewed)
+}
+
 fn record(key: &str, prior: Value) -> Row {
 	Row::MigrationApplied(MigrationAppliedRow {
 		key: key.to_owned(),

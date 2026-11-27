@@ -250,6 +250,8 @@ public protocol BudgetSession: AnyObject, Sendable {
 	/// Upgrade to Veritas features (docs/finance/migration.md): every
 	/// suggestion, recomputed now. Writes nothing.
 	func migrationSuggestions(today: String) async throws -> [MigrationSuggestion]
+	/// The ticked items with the Confirm figures for the user's edits (MIG-2.4).
+	func migrationPreview(_ selection: MigrationSelection, today: String) async throws -> [MigrationSuggestion]
 	/// The ticked items as one command and one undo step (MIG-1.5).
 	func applyMigration(_ selection: MigrationSelection, today: String) async throws
 	/// One item's Revert (MIG-2.3), or what the user must answer first.

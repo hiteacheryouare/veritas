@@ -16,6 +16,9 @@ pub struct AppliedItem {
 	pub key: String,
 	pub conversion: Conversion,
 	pub subject_id: String,
+	/// MIG-4.7: the goal was closed since, so Revert isn't offered and the
+	/// Upgraded list marks it "Closed".
+	pub closed: bool,
 }
 
 /// Every converted item that can still be reverted.
@@ -24,10 +27,15 @@ pub fn applied_items(data: &veritas_domain::BudgetData) -> Vec<AppliedItem> {
 		.keys()
 		.filter_map(|key| {
 			let (conversion, subject) = Conversion::parse_key(key)?;
+			let closed = conversion == Conversion::Goal
+				&& data.goals.values().any(|goal| {
+					goal.category.as_str() == subject && goal.status == veritas_domain::GoalStatus::Closed
+				});
 			Some(AppliedItem {
 				key: key.clone(),
 				conversion,
 				subject_id: subject.to_owned(),
+				closed,
 			})
 		})
 		.collect()
@@ -253,6 +261,11 @@ fn revert_goal(
 			.get(group)
 			.is_some_and(|group| !group.tombstone && !group.is_income)
 	};
+	if data.goals.values().any(|goal| &goal.category == category && goal.status == veritas_domain::GoalStatus::Closed) {
+		return Err(refuse(format!(
+			"{name} is a closed goal, so its upgrade can't be reverted. Its closing and archive are kept."
+		)));
+	}
 	let group = match chosen {
 		Some(group) if live(group) => group.clone(),
 		Some(_) => return Err(refuse("Choose a group that still exists")),

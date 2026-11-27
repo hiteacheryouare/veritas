@@ -20,7 +20,7 @@ use veritas_domain::{
 use veritas_engine::EnvelopeSheet;
 use veritas_reports::Classification;
 
-pub use apply::{Edits, Selected, Selection, apply};
+pub use apply::{Edits, Selected, Selection, apply, preview};
 pub use fingerprint::fingerprint;
 pub use revert::{AppliedItem, KindRevert, RevertPlan, applied_items, kind_revert, revert};
 
@@ -120,6 +120,21 @@ pub struct Effect {
 	pub after: Money,
 }
 
+/// MIG-2.4's goal lines for the Confirm step: the Goals screen lists the
+/// goal, Wrapped counts it in the year of its backfilled `reached_month`,
+/// and its DEBT-8.1 monthly suggestion and ETA appear.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GoalPreview {
+	/// GOAL-9's backfill when the envelope already holds the target.
+	pub reached_month: Option<YearMonth>,
+	/// DEBT-8.1, with a target date.
+	pub monthly: Option<Money>,
+	pub months_left: Option<u32>,
+	/// D77: outside a 2-place budget, recorded spending means no suggestion
+	/// and no ETA.
+	pub spending_recorded: bool,
+}
+
 /// MIG-5.4's counts, over all history: `rows` change, `transfers` of
 /// `amount` move between spending and `to`, `purchases` gain or lose the
 /// misfiled flag.
@@ -151,6 +166,8 @@ pub struct Suggestion {
 	pub confirm_lines: Vec<String>,
 	pub effects: Vec<Effect>,
 	pub kind_change: Option<KindChange>,
+	/// (b) MIG-2.4's goal lines, for the proposed or edited target.
+	pub goal_preview: Option<GoalPreview>,
 	/// (b) Actual already shows the target (a `#goal` line or long-term goal
 	/// rows), so "Also show this target in Actual" doesn't apply (MIG-4.5).
 	pub target_in_actual: bool,
@@ -176,6 +193,7 @@ impl Suggestion {
 			confirm_lines: Vec::new(),
 			effects: Vec::new(),
 			kind_change: None,
+			goal_preview: None,
 			target_in_actual: false,
 			asks_to_show_goals_group: false,
 			dismissed: false,

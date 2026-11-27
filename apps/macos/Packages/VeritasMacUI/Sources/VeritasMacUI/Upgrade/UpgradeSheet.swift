@@ -104,8 +104,12 @@ struct UpgradeSheet: View {
 				ForEach(Array(model.applied.enumerated()), id: \.element.key) { index, item in
 					if index > 0 { Divider().padding(.leading, Spacing.s4) }
 					LabeledRow(Self.conversionName(item.conversion)) {
-						Button("Revert") { Task { await model.revert(item.key) } }
-							.accessibilityIdentifier("upgrade.revert.\(item.key)")
+						if item.closed {
+							Text("Closed").foregroundStyle(.textSecondary)
+						} else {
+							Button("Revert") { Task { await model.revert(item.key) } }
+								.accessibilityIdentifier("upgrade.revert.\(item.key)")
+						}
 					}
 				}
 			}
@@ -132,7 +136,7 @@ struct UpgradeSheet: View {
 					.accessibilityIdentifier("upgrade.selectSuggested")
 				Spacer()
 				Button("Back") { model.step = .overview }
-				Button("Continue") { model.step = .confirm }
+				Button("Continue") { Task { await model.continueToConfirm() } }
 					.buttonStyle(.borderedProminent)
 					.keyboardShortcut(.defaultAction)
 					.disabled(model.ticked.isEmpty)
@@ -147,12 +151,17 @@ struct UpgradeSheet: View {
 		VStack(alignment: .leading, spacing: Spacing.s4) {
 			ScrollView {
 				VStack(alignment: .leading, spacing: Spacing.s4) {
-					ForEach(model.tickedSuggestions, id: \.key) { suggestion in
+					ForEach(model.confirming, id: \.key) { suggestion in
 						VStack(alignment: .leading, spacing: Spacing.s1) {
 							Text(suggestion.subjectName)
 								.font(.text(.body, weight: .semibold))
 							ForEach(suggestion.confirmLines, id: \.self) { line in
 								Text(line).fixedSize(horizontal: false, vertical: true)
+							}
+							if let preview = suggestion.goalPreview {
+								ForEach(UpgradeWords.goalLines(preview, format: format), id: \.self) { line in
+									Text(line).fixedSize(horizontal: false, vertical: true)
+								}
 							}
 							if let change = suggestion.kindChange {
 								Text(UpgradeWords.kindChange(change, format: format, reverting: false))

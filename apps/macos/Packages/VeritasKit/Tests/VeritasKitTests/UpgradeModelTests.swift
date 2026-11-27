@@ -105,6 +105,22 @@ struct UpgradeModelTests {
 		#expect(workspace.reverting == nil)
 	}
 
+	@Test func confirmShowsFiguresForTheChosenKindAndClosedGoalsOfferNoRevert() async {
+		let (model, session) = await openUpgrade()
+		model.toggle(model.visible.first { $0.key == "kind:carloan" }!)
+		model.kinds["kind:carloan"] = .savings
+		await model.continueToConfirm()
+		#expect(model.step == .confirm)
+		#expect(session.previews.first?.items.first { $0.key == "kind:carloan" }?.edits.kind == .savings, "MIG-2.4: the preview gets the chosen kind")
+		#expect(model.confirming.first { $0.key == "kind:carloan" }?.kindChange?.kind == .savings)
+
+		session.upgraded = ["goal:vacation"]
+		session.closedGoals = ["goal:vacation"]
+		let workspace = WorkspaceModel(library: UpgradeLibrary(session: session), format: MoneyFormat())
+		await workspace.reopen(directory: URL(filePath: "/tmp/budget"))
+		#expect(!workspace.isUpgraded("goal:vacation"), "MIG-4.7: a closed goal offers no Revert")
+	}
+
 	@Test func theOverviewCountsEachConversion() async {
 		let (model, _) = await openUpgrade()
 		#expect(model.counts.map(\.count) == [2, 1, 1])
@@ -139,6 +155,7 @@ private func suggestion(
 		confirmLines: [],
 		effects: [],
 		kindChange: nil,
+		goalPreview: nil,
 		targetInActual: false,
 		asksToShowGoalsGroup: asksToShowGoalsGroup,
 		dismissed: false
@@ -153,6 +170,8 @@ private final class UpgradeSession: BudgetSession, @unchecked Sendable {
 	var applied: [MigrationSelection] = []
 	var reverts: [String] = []
 	var upgraded: [String] = []
+	var closedGoals: Set<String> = []
+	var previews: [MigrationSelection] = []
 
 	func overview() async throws -> BudgetOverview {
 		BudgetOverview(name: "Household", directory: URL(filePath: "/tmp/budget"), readOnly: nil, accountGroups: [])
@@ -178,6 +197,18 @@ private final class UpgradeSession: BudgetSession, @unchecked Sendable {
 		applied.append(selection)
 	}
 
+	func migrationPreview(_ selection: MigrationSelection, today: String) async throws -> [MigrationSuggestion] {
+		previews.append(selection)
+		let all = try await migrationSuggestions(today: today)
+		return selection.items.compactMap { item in
+			guard var suggestion = all.first(where: { $0.key == item.key }) else { return nil }
+			if let kind = item.edits.kind {
+				suggestion.kindChange = MigrationKindChange(rows: 3, transfers: 3, amount: 115_650, purchases: 0, kind: kind)
+			}
+			return suggestion
+		}
+	}
+
 	func revertMigration(key: String, groupID: String?, confirmed: Bool, today: String) async throws -> MigrationRevert {
 		if key.hasPrefix("kind:"), !confirmed {
 			return .confirmKind(change: MigrationKindChange(rows: 3, transfers: 3, amount: 115_650, purchases: 0, kind: .debtPrincipal), effects: [], replaces: nil)
@@ -187,7 +218,10 @@ private final class UpgradeSession: BudgetSession, @unchecked Sendable {
 	}
 
 	func appliedMigrations() async throws -> [AppliedMigration] {
-		upgraded.map { AppliedMigration(key: $0, conversion: $0.hasPrefix("kind:") ? .kind : .bill, subjectId: String($0.split(separator: ":").last ?? "")) }
+		upgraded.map { key in
+			let conversion: MigrationConversion = key.hasPrefix("kind:") ? .kind : key.hasPrefix("goal:") ? .goal : .bill
+			return AppliedMigration(key: key, conversion: conversion, subjectId: String(key.split(separator: ":").last ?? ""), closed: closedGoals.contains(key))
+		}
 	}
 
 	func migrationOffered() async throws -> Bool { offered }

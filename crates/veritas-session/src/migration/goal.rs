@@ -10,7 +10,8 @@ use veritas_domain::{
 use veritas_reports::Classification;
 
 use super::{
-	Confidence, Conversion, Effect, Inputs, Suggestion, figure, kind, last_complete_month, signal,
+	Confidence, Conversion, Effect, GoalPreview, Inputs, Suggestion, figure, kind,
+	last_complete_month, signal,
 };
 
 pub(super) const GOALS: &str = "Goals";
@@ -147,13 +148,13 @@ pub(super) fn suggestions(inputs: &Inputs<'_>) -> Result<Vec<Suggestion>, CoreEr
 				}
 				None => suggestion.confidence = Confidence::Shown,
 			}
-			let name_key = category.name.trim().to_lowercase();
+			// MIG-4.1: the move's own predicate, Unicode upper case with no
+			// trimming, so a name called free here can't fail Apply.
+			let name_key = category.name.to_uppercase();
 			let in_goals = goals.is_some_and(|goals| {
-				data.categories.values().any(|other| {
-					!other.tombstone
-						&& &other.id != id && other.group == goals.id
-						&& other.name.trim().to_lowercase() == name_key
-				})
+				goals.id != category.group
+					&& crate::categories::ensure_free_name(data, &goals.id, &category.name, Some(id))
+						.is_err()
 			});
 			if in_goals {
 				suggestion.blocked = Some(RENAME_FIRST.to_owned());
@@ -179,6 +180,12 @@ pub(super) fn suggestions(inputs: &Inputs<'_>) -> Result<Vec<Suggestion>, CoreEr
 				"\"{}\" moves to the top of the Goals group. Its budget amounts, notes and transactions stay with it, and every total stays the same.",
 				category.name
 			));
+			suggestion.goal_preview = preview(
+				inputs,
+				id,
+				suggestion.proposed.target,
+				suggestion.proposed.target_date,
+			)?;
 			suggestion.effects = group_effects(
 				data,
 				group,
@@ -191,6 +198,61 @@ pub(super) fn suggestions(inputs: &Inputs<'_>) -> Result<Vec<Suggestion>, CoreEr
 		}
 	}
 	Ok(out)
+}
+
+/// MIG-2.4's goal lines for `target` and `date`, as Apply would write the
+/// goal: reached now and backfilled (GOAL-9), and DEBT-8.1's suggestion.
+pub(super) fn preview(
+	inputs: &Inputs<'_>,
+	category: &CategoryId,
+	target: Option<Money>,
+	date: Option<CivilDate>,
+) -> Result<Option<GoalPreview>, CoreError> {
+	let Some(target) = target.filter(|target| *target > Money::ZERO) else {
+		return Ok(None);
+	};
+	let month = inputs.today.year_month();
+	let goal = veritas_domain::Goal {
+		id: veritas_domain::GoalId::new("preview"),
+		category: category.clone(),
+		target,
+		target_date: date,
+		icon: None,
+		color: None,
+		status: veritas_domain::GoalStatus::Active,
+		reached_month: None,
+		closed_month: None,
+		released_to: None,
+		released: None,
+		activity_seen_through: None,
+		activity_seen_total: None,
+		close_month_dismissed_available: None,
+	};
+	let available = inputs
+		.sheet
+		.category(month, category)
+		.map_or(Money::ZERO, |cell| cell.balance);
+	let reached_month = (available >= target)
+		.then(|| veritas_engine::goals::first_reached_month(inputs.sheet, &goal, month).or(Some(month)))
+		.flatten();
+	let spending_recorded = inputs.data.format.decimal_places() != 2
+		&& inputs.classification.rows().iter().any(|row| {
+			row.is_primary()
+				&& row.kind() == TransactionKind::Expense
+				&& row.category.as_ref() == Some(category)
+				&& row.date <= inputs.today
+		});
+	let suggestion = if spending_recorded || reached_month.is_some() {
+		None
+	} else {
+		veritas_engine::goals::suggestion(inputs.sheet, &goal, month)?
+	};
+	Ok(Some(GoalPreview {
+		reached_month,
+		monthly: suggestion.map(|suggestion| suggestion.monthly),
+		months_left: suggestion.map(|suggestion| suggestion.months_left),
+		spending_recorded,
+	}))
 }
 
 fn candidate(data: &BudgetData, id: &CategoryId) -> bool {
@@ -276,70 +338,138 @@ fn from_settings(data: &BudgetData, id: &CategoryId, places: u8) -> Option<Targe
 	})
 }
 
-/// A `#goal <amount>` line, or `#template <amount> by <YYYY-MM>` (optionally
-/// `#template-<priority>`, and `spend from <YYYY-MM>` after), never with
-/// `repeat`. The amount is in major units, as Actual's `amountToInteger`.
+/// MIG-4.2's line test, `goal-template.pegjs` as amended: read from the
+/// first `#`, which must start the literal `#goal` or `#template` (case
+/// sensitive), then `#goal AMOUNT`, or `#template[-PRIORITY] AMOUNT by
+/// YYYY-MM`, optionally `spend from YYYY-MM`, never `repeat`. `by`, `spend`
+/// and `from` are in any case, and spaces and tabs between parts are
+/// optional.
 pub(super) fn from_line(line: &str, places: u8) -> Option<Target> {
-	let words: Vec<&str> = line.split_whitespace().collect();
-	let (&directive, rest) = words.split_first()?;
-	if directive == "#goal" {
-		let [amount] = rest else {
+	let mut rest = &line[line.find('#')?..];
+	if let Some(after) = rest.strip_prefix("#goal") {
+		let (amount, after) = amount(after.trim_start_matches([' ', '\t']), places)?;
+		if !after.trim_matches([' ', '\t']).is_empty() {
 			return None;
-		};
-		let amount = major_units_text(amount, places)?;
+		}
 		return (amount > Money::ZERO).then_some(Target {
 			source: Source::Note,
 			amount,
 			date: None,
 		});
 	}
-	let priority = directive.strip_prefix("#template")?;
-	if !(priority.is_empty()
-		|| priority
-			.strip_prefix('-')
-			.is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())))
-	{
-		return None;
-	}
-	let date = match rest {
-		[amount, "by", month] | [amount, "by", month, "spend", "from", _] => {
-			(major_units_text(amount, places)?, month_end(month)?)
+	rest = rest.strip_prefix("#template")?;
+	if let Some(priority) = rest.strip_prefix('-') {
+		let digits = priority.bytes().take_while(u8::is_ascii_digit).count();
+		if digits == 0 {
+			return None;
 		}
-		_ => return None,
-	};
-	(date.0 > Money::ZERO).then_some(Target {
+		rest = &priority[digits..];
+	}
+	let (amount, after) = amount(rest.trim_start_matches([' ', '\t']), places)?;
+	let after = word(after, "by")?;
+	let (date, after) = month(after)?;
+	let after = after.trim_start_matches([' ', '\t']);
+	if !after.is_empty() {
+		let after = word(word(after, "spend")?, "from")?;
+		let (_, after) = month(after)?;
+		if !after.trim_matches([' ', '\t']).is_empty() {
+			return None;
+		}
+	}
+	(amount > Money::ZERO).then_some(Target {
 		source: Source::Template,
-		amount: date.0,
-		date: Some(date.1),
+		amount,
+		date: Some(date),
 	})
 }
 
-/// Major units to minor, rounded as `Math.round(amount * 10^places)`.
-fn major_units_text(text: &str, places: u8) -> Option<Money> {
-	let text = text.trim_start_matches(['$', '€', '£', '¥']);
-	let (whole, fraction) = text.split_once('.').unwrap_or((text, ""));
-	if whole.is_empty() || !whole.bytes().all(|b| b.is_ascii_digit()) {
+/// `text` after optional spaces and tabs and `wanted` in any case.
+fn word<'a>(text: &'a str, wanted: &str) -> Option<&'a str> {
+	let text = text.trim_start_matches([' ', '\t']);
+	let head = text.get(..wanted.len())?;
+	head.eq_ignore_ascii_case(wanted).then(|| &text[wanted.len()..])
+}
+
+/// A `YYYY-MM` after optional spaces and tabs, as the last day of its month.
+fn month(text: &str) -> Option<(CivilDate, &str)> {
+	let text = text.trim_start_matches([' ', '\t']);
+	let written = text.get(..7)?;
+	Some((month_end(written)?, &text[7..]))
+}
+
+/// MIG-4.2's `AMOUNT`: an optional currency symbol (Unicode `Sc`), optional
+/// spaces or tabs, an optional `-`, digits, and optionally a decimal point
+/// with none, one or two digits. Converted with integer half-up at the
+/// currency's places (Actual's `amountToInteger`).
+fn amount(text: &str, places: u8) -> Option<(Money, &str)> {
+	let mut rest = text;
+	if let Some(symbol) = rest.chars().next().filter(|c| is_currency_symbol(*c)) {
+		rest = rest[symbol.len_utf8()..].trim_start_matches([' ', '\t']);
+	}
+	let negative = rest.starts_with('-');
+	if negative {
+		rest = &rest[1..];
+	}
+	let whole_len = rest.bytes().take_while(u8::is_ascii_digit).count();
+	if whole_len == 0 {
 		return None;
 	}
-	if !fraction.bytes().all(|b| b.is_ascii_digit()) {
-		return None;
+	let whole = &rest[..whole_len];
+	rest = &rest[whole_len..];
+	let mut fraction = "";
+	if let Some(after) = rest.strip_prefix('.') {
+		let digits = after.bytes().take_while(u8::is_ascii_digit).count();
+		if digits > 2 {
+			return None;
+		}
+		fraction = &after[..digits];
+		rest = &after[digits..];
 	}
+	let minor = scaled(whole, fraction, places)?;
+	Some((Money::from_minor(if negative { -minor } else { minor }), rest))
+}
+
+/// Unicode's `Sc` (currency symbol) characters, as of Unicode 15.
+fn is_currency_symbol(c: char) -> bool {
+	matches!(
+		c,
+		'$' | '\u{A2}'..='\u{A5}'
+			| '\u{58F}' | '\u{60B}' | '\u{7FE}'..='\u{7FF}'
+			| '\u{9F2}'..='\u{9F3}' | '\u{9FB}' | '\u{AF1}'
+			| '\u{BF9}' | '\u{E3F}' | '\u{17DB}' | '\u{20A0}'..='\u{20C0}'
+			| '\u{A838}' | '\u{FDFC}' | '\u{FE69}' | '\u{FF04}'
+			| '\u{FFE0}'..='\u{FFE1}' | '\u{FFE5}'..='\u{FFE6}'
+			| '\u{11FDD}'..='\u{11FE0}' | '\u{1E2FF}' | '\u{1ECB0}'
+	)
+}
+
+/// Digits written in major units, scaled by `10^places` and rounded half up,
+/// in integers.
+fn scaled(whole: &str, fraction: &str, places: u8) -> Option<i64> {
 	let scale = 10_i64.checked_pow(u32::from(places))?;
 	let mut minor = whole.parse::<i64>().ok()?.checked_mul(scale)?;
-	let digits: Vec<i64> = fraction.bytes().map(|b| i64::from(b - b'0')).collect();
 	let mut place_value = scale;
-	for (index, digit) in digits.iter().enumerate() {
+	for (index, digit) in fraction.bytes().map(|b| i64::from(b - b'0')).enumerate() {
 		if index < usize::from(places) {
 			place_value /= 10;
 			minor = minor.checked_add(digit * place_value)?;
 		} else {
-			if *digit >= 5 {
+			if digit >= 5 {
 				minor = minor.checked_add(1)?;
 			}
 			break;
 		}
 	}
-	Some(Money::from_minor(minor))
+	Some(minor)
+}
+
+/// A `goal_def` template's amount, a JSON number in major units.
+fn major_units_text(text: &str, places: u8) -> Option<Money> {
+	let (whole, fraction) = text.split_once('.').unwrap_or((text, ""));
+	if whole.is_empty() || !whole.bytes().all(|b| b.is_ascii_digit()) || !fraction.bytes().all(|b| b.is_ascii_digit()) {
+		return None;
+	}
+	scaled(whole, fraction, places).map(Money::from_minor)
 }
 
 fn major_units_value(value: &serde_json::Value, places: u8) -> Option<Money> {
@@ -404,10 +534,12 @@ fn s2(
 	let mut sorted = budgeted.clone();
 	sorted.sort_unstable();
 	let middle = sorted.len() / 2;
+	// FC-1's median: an even count averages the middle two, rounded half
+	// away from zero. Every budget here is above 0.
 	let median = if sorted.len() % 2 == 1 {
 		sorted[middle]
 	} else {
-		Money::from_minor((sorted[middle - 1].minor() + sorted[middle].minor()) / 2)
+		Money::from_minor((sorted[middle - 1].minor() + sorted[middle].minor() + 1) / 2)
 	};
 	let steady = budgeted.len() >= 4
 		&& largest.minor() <= smallest.minor().saturating_mul(2)

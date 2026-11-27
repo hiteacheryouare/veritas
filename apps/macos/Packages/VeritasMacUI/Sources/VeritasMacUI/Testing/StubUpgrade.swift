@@ -24,6 +24,7 @@ final class StubUpgrade: @unchecked Sendable {
 			confirmLines: ["\"Vacation\" moves to the top of the Goals group. Its budget amounts, notes and transactions stay with it, and every total stays the same."],
 			effects: [],
 			kindChange: nil,
+			goalPreview: MigrationGoalPreview(reachedMonth: nil, monthly: 22_500, monthsLeft: 8, spendingRecorded: false),
 			targetInActual: false,
 			asksToShowGoalsGroup: false,
 			dismissed: false
@@ -42,6 +43,7 @@ final class StubUpgrade: @unchecked Sendable {
 			confirmLines: [],
 			effects: [MigrationEffect(report: "Expenses", month: Month(year: 2026, month: 10), before: 158_550, after: 120_000)],
 			kindChange: MigrationKindChange(rows: 2, transfers: 2, amount: 77_100, purchases: 0, kind: .debtPrincipal),
+			goalPreview: nil,
 			targetInActual: false,
 			asksToShowGoalsGroup: false,
 			dismissed: false
@@ -60,6 +62,11 @@ final class StubUpgrade: @unchecked Sendable {
 		}
 	}
 
+	func preview(_ selection: MigrationSelection) -> [MigrationSuggestion] {
+		let keys = selection.items.map(\.key)
+		return suggestions().filter { keys.contains($0.key) }
+	}
+
 	func apply(_ selection: MigrationSelection) {
 		lock.withLock { applied += selection.items.map(\.key) }
 	}
@@ -67,7 +74,7 @@ final class StubUpgrade: @unchecked Sendable {
 	func appliedItems() -> [AppliedMigration] {
 		lock.withLock {
 			applied.compactMap { key in
-				Self.all.first { $0.key == key }.map { AppliedMigration(key: key, conversion: $0.conversion, subjectId: $0.subjectId) }
+				Self.all.first { $0.key == key }.map { AppliedMigration(key: key, conversion: $0.conversion, subjectId: $0.subjectId, closed: false) }
 			}
 		}
 	}

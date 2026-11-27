@@ -91,6 +91,19 @@ pub struct MigrationKindChange {
 	pub kind: CategoryKind,
 }
 
+/// MIG-2.4's goal lines for the Confirm step.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct MigrationGoalPreview {
+	/// GOAL-9's backfill when the envelope already holds the target; Wrapped
+	/// counts the goal in this month's year.
+	pub reached_month: Option<Month>,
+	/// DEBT-8.1, budget scale, with a target date.
+	pub monthly: Option<i64>,
+	pub months_left: Option<u32>,
+	/// D77: no suggestion and no ETA, as spending is recorded.
+	pub spending_recorded: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct MigrationSuggestion {
 	/// `<conversion>:<subject id>`.
@@ -111,6 +124,9 @@ pub struct MigrationSuggestion {
 	pub confirm_lines: Vec<String>,
 	pub effects: Vec<MigrationEffect>,
 	pub kind_change: Option<MigrationKindChange>,
+	/// (b) The goal lines, for the proposed target or, from
+	/// `migration_preview`, the edited one.
+	pub goal_preview: Option<MigrationGoalPreview>,
 	/// (b) Actual already shows the target, so there's no "Also show this
 	/// target in Actual" box.
 	pub target_in_actual: bool,
@@ -147,6 +163,9 @@ pub struct AppliedMigration {
 	pub key: String,
 	pub conversion: MigrationConversion,
 	pub subject_id: String,
+	/// MIG-4.7: a goal closed since, which Revert no longer offers; the
+	/// Upgraded list marks it "Closed".
+	pub closed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
@@ -231,6 +250,12 @@ impl From<&core::Suggestion> for MigrationSuggestion {
 			confirm_lines: suggestion.confirm_lines.clone(),
 			effects: suggestion.effects.iter().map(effect).collect(),
 			kind_change: suggestion.kind_change.as_ref().map(kind_change),
+			goal_preview: suggestion.goal_preview.as_ref().map(|preview| MigrationGoalPreview {
+				reached_month: preview.reached_month.map(Month::from),
+				monthly: preview.monthly.map(money),
+				months_left: preview.months_left,
+				spending_recorded: preview.spending_recorded,
+			}),
 			target_in_actual: suggestion.target_in_actual,
 			asks_to_show_goals_group: suggestion.asks_to_show_goals_group,
 			dismissed: suggestion.dismissed,
@@ -292,6 +317,30 @@ impl Session {
 				today,
 				with_inputs(today, |inputs| {
 					Ok(core::suggestions(inputs)?
+						.iter()
+						.map(MigrationSuggestion::from)
+						.collect())
+				}),
+			)
+		})
+	}
+
+	/// MIG-2.4: the ticked suggestions with the Confirm step's figures
+	/// recomputed for the user's edits: a goal's lines for its edited target
+	/// and date, a kind's counts and report figures for the chosen kind.
+	/// Writes nothing.
+	pub fn migration_preview(
+		&self,
+		selection: MigrationSelection,
+		today: String,
+	) -> Result<Vec<MigrationSuggestion>, FfiError> {
+		self.core.call(|session| {
+			let today = civil_date(&today)?;
+			let chosen = self::selection(&selection)?;
+			session.with_sheet_and_classification(
+				today,
+				with_inputs(today, |inputs| {
+					Ok(core::preview(inputs, &chosen)?
 						.iter()
 						.map(MigrationSuggestion::from)
 						.collect())
@@ -362,6 +411,7 @@ impl Session {
 					key: item.key,
 					conversion: item.conversion.into(),
 					subject_id: item.subject_id,
+					closed: item.closed,
 				})
 				.collect())
 		})
