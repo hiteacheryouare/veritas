@@ -3,9 +3,11 @@ import SwiftUI
 import VeritasDesign
 
 /// Veritas › About Veritas: the app icon, the wordmark, the version and the
-/// licences the app's notices list.
+/// copyright notice from LICENSE. The MIT notices the app owes ship in the
+/// bundle as Acknowledgements.md, copied from THIRD_PARTY_NOTICES.md at build time.
 struct AboutView: View {
 	static let windowID = "about"
+	static let copyright = "Copyright 2026 The Veritas Financial Technologies Corporation of Philadelphia (Veritas), Lattice & Company, Ryan Mullin, and contributors."
 
 	var icon = NSApp?.applicationIconImage ?? NSImage()
 	var version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
@@ -34,7 +36,7 @@ struct AboutView: View {
 					.foregroundStyle(.textSecondary)
 					.textSelection(.enabled)
 			}
-			Text("Includes code ported from Actual Budget and a coin from Bootstrap Icons, both MIT licensed.")
+			Text(Self.copyright)
 				.font(.text(.caption))
 				.foregroundStyle(.textTertiary)
 				.multilineTextAlignment(.center)
