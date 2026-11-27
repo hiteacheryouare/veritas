@@ -101,9 +101,60 @@ final class StubBudget: @unchecked Sendable {
 		}
 	}
 
+	/// The To Budget popover (TB-10.1): Assign to underfunded covers the stub's
+	/// overspent envelopes; the stub has no stored monthly goals, and Fund goals'
+	/// monthly has nothing to fund.
+	func toBudgetActions(_ month: Month) -> ToBudgetActions {
+		let sheet = self.month(month)
+		let fills = lock.withLock { overspentFills(toBudget: sheet.toBudget) }
+		let empty: ToBudgetBlock? = sheet.toBudget < 0 ? .overbudgeted(amount: -sheet.toBudget) : sheet.toBudget == 0 ? .zero : nil
+		let assign = ToBudgetPlanView(
+			block: empty ?? (fills.isEmpty ? .nothingUnderfunded : nil),
+			fills: empty == nil ? fills : [],
+			envelopes: empty == nil ? UInt32(fills.count) : 0,
+			total: empty == nil ? fills.reduce(0) { $0 + $1.amount } : 0,
+			hiddenLeftOut: 0,
+			skipped: []
+		)
+		let goals = ToBudgetPlanView(block: empty ?? .noGoalNeedsFunding, fills: [], envelopes: 0, total: 0, hiddenLeftOut: 0, skipped: [])
+		return ToBudgetActions(
+			month: sheet.month,
+			toBudget: sheet.toBudget,
+			state: sheet.toBudget < 0 ? .overbudgeted : sheet.toBudget == 0 ? .zero : .positive,
+			assign: assign,
+			fundGoals: goals,
+			hold: ToBudgetHold(offered: true, block: empty, defaultAmount: max(sheet.toBudget, 0), held: sheet.forNextMonth, autoHeld: 0, canReset: sheet.forNextMonth != 0)
+		)
+	}
+
+	/// Overspent expense envelopes in screen order, each covered from what To
+	/// Budget has left. The caller holds the lock.
+	private func overspentFills(toBudget: Int64) -> [ToBudgetFill] {
+		var left = max(toBudget, 0)
+		var fills: [ToBudgetFill] = []
+		for envelope in groups.filter({ !$0.isIncome && !$0.hidden }).flatMap(\.envelopes) where !envelope.hidden {
+			let need = -available(envelope)
+			let amount = min(need, left)
+			guard need > 0, amount > 0 else { continue }
+			left -= amount
+			fills.append(ToBudgetFill(categoryId: envelope.id, name: envelope.name, reason: .overspent, goalId: nil, need: need, amount: amount))
+		}
+		return fills
+	}
+
 	func perform(_ command: Command) throws {
 		try lock.withLock {
 			switch command {
+			case .assignToUnderfunded:
+				let income = groups.filter(\.isIncome).flatMap(\.envelopes).reduce(0) { $0 + $1.spent }
+				let budgeted = groups.filter { !$0.isIncome }.flatMap(\.envelopes).reduce(0) { $0 + $1.budgeted }
+				let fills = overspentFills(toBudget: income - budgeted - held)
+				guard !fills.isEmpty else { throw FfiError.Invalid(message: "Nothing is underfunded.") }
+				for fill in fills {
+					try update(fill.categoryId) { $0.budgeted += fill.amount }
+				}
+			case .fundGoalsMonthly:
+				throw FfiError.Invalid(message: "No active goal needs funding.")
 			case .setBudget(_, let id, let amount):
 				try update(id) { $0.budgeted = amount }
 			case .moveBudget(_, let amount, let from, let to):

@@ -161,6 +161,13 @@ public final class WorkspaceModel {
 		}
 	}
 
+	/// The popover is secondary to the Budget screen, whose own read reports
+	/// any problem, so a failure here only leaves the popover without actions.
+	public func toBudgetActions(_ month: Month) async -> ToBudgetActions? {
+		guard let session else { return nil }
+		return try? await session.toBudgetActions(month, today: Self.today())
+	}
+
 	public func goals() async -> [GoalSummary] {
 		await goalList().goals
 	}

@@ -9,6 +9,11 @@ import VeritasCore
 public final class BudgetScreenModel {
 	public private(set) var month: Month
 	public private(set) var sheet: BudgetMonth?
+	/// The To Budget card's popover for the month (TB-10.1).
+	public private(set) var toBudgetActions: ToBudgetActions?
+	/// What the last quick action did, shown under To Budget with Undo
+	/// (TB-2.4). Cleared when the month changes.
+	public private(set) var quickResult: String?
 	public private(set) var goals: [GoalSummary] = []
 	public var selection: String?
 	public private(set) var editing: AmountFieldModel?
@@ -83,8 +88,10 @@ public final class BudgetScreenModel {
 		let generation = loadGeneration
 		guard let loaded = await workspace.budgetMonth(month) else { return }
 		let openGoals = await workspace.goals().filter(\.isOpen)
+		let actions = await workspace.toBudgetActions(loaded.month)
 		guard generation == loadGeneration else { return }
 		sheet = loaded
+		toBudgetActions = actions
 		month = loaded.month
 		goals = openGoals
 		if let selection, !envelopeIDs.contains(selection) {
@@ -105,12 +112,14 @@ public final class BudgetScreenModel {
 
 	public func previousMonth() async {
 		guard canGoBack else { return }
+		quickResult = nil
 		month = Self.shift(month, by: -1)
 		await load()
 	}
 
 	public func nextMonth() async {
 		guard canGoForward else { return }
+		quickResult = nil
 		month = Self.shift(month, by: 1)
 		await load()
 	}
@@ -196,6 +205,35 @@ public final class BudgetScreenModel {
 		let held = await workspace.perform(.holdForNextMonth(month: month, amount: amount))
 		if held { await load() }
 		return held
+	}
+
+	/// TB-3: one command, one undo step. The result line says what it wrote.
+	public func assignToUnderfunded() async {
+		await quickAction(.assignToUnderfunded(month: month), plan: toBudgetActions?.assign, counting: .envelopes)
+	}
+
+	/// TB-4: the current month only; the read disables it otherwise.
+	public func fundGoalsMonthly() async {
+		await quickAction(.fundGoalsMonthly(month: month), plan: toBudgetActions?.fundGoals, counting: .goals)
+	}
+
+	/// Undoes the last quick action, the step its result line offers.
+	public func undoQuickAction() async {
+		quickResult = nil
+		await workspace.undo()
+		await load()
+	}
+
+	public func dismissQuickResult() {
+		quickResult = nil
+	}
+
+	private func quickAction(_ command: Command, plan: ToBudgetPlanView?, counting: ToBudgetWords.Counting) async {
+		let before = toBudgetActions?.toBudget
+		guard await workspace.perform(command) else { return }
+		await load()
+		guard let before, let after = toBudgetActions?.toBudget, let plan else { return }
+		quickResult = ToBudgetWords.result(assigned: before - after, plan: plan, counting: counting, format: format)
 	}
 
 	public func resetHold() async {

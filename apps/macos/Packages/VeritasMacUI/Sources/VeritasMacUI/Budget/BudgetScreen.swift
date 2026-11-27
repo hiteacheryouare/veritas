@@ -9,6 +9,8 @@ struct BudgetScreen: View {
 	@Bindable var workspace: WorkspaceModel
 	@State private var screen: BudgetScreenModel
 	@State private var isMovingBudget = false
+	/// Move budget opened from the To Budget card starts from To Budget.
+	@State private var movesFromToBudget = false
 	@State private var isAddingGroup = false
 	@State private var showsBar = true
 	@FocusState private var hasKeyFocus: Bool
@@ -23,17 +25,22 @@ struct BudgetScreen: View {
 			VStack(alignment: .leading, spacing: 0) {
 				if let sheet = screen.sheet {
 					if !screen.isTracking || (!workspace.isDense && !screen.goals.isEmpty) {
-						HStack(alignment: .center, spacing: Spacing.s4) {
+						VStack(spacing: Spacing.s4) {
 							if !screen.isTracking {
-								ToBudgetHeader(sheet: sheet, dense: workspace.isDense, screen: screen)
+								ToBudgetCard(sheet: sheet, dense: workspace.isDense, screen: screen) {
+									movesFromToBudget = true
+									isMovingBudget = true
+								}
 							}
-							Spacer(minLength: Spacing.s4)
-							if !workspace.isDense {
-								ForEach(screen.goals.prefix(2)) { goal in
-									GoalCard(goal: goal, format: screen.format)
+							if !workspace.isDense, !screen.goals.isEmpty {
+								HStack(spacing: Spacing.s4) {
+									ForEach(screen.goals.prefix(2)) { goal in
+										GoalCard(goal: goal, format: screen.format)
+									}
 								}
 							}
 						}
+						.frame(maxWidth: .infinity)
 						.padding(.bottom, workspace.isDense ? Spacing.s3 : Spacing.s6)
 					}
 					if workspace.isDense {
@@ -125,8 +132,8 @@ struct BudgetScreen: View {
 				}
 			}
 		}
-		.sheet(isPresented: $isMovingBudget) {
-			MoveBudgetSheet(screen: screen, from: screen.selection)
+		.sheet(isPresented: $isMovingBudget, onDismiss: { movesFromToBudget = false }) {
+			MoveBudgetSheet(screen: screen, from: movesFromToBudget ? nil : screen.selection)
 		}
 		.task(id: workspace.changeCount) { await screen.load() }
 		// Closing the amount field would leave keyboard focus with the sidebar.
@@ -174,53 +181,6 @@ private struct MonthStepper: View {
 			.accessibilityIdentifier("budget.nextMonth")
 		}
 		.help("Previous or next month (⌘← ⌘→)")
-	}
-}
-
-/// To Budget, the hero figure. Its menu holds part of it for next month.
-private struct ToBudgetHeader: View {
-	let sheet: BudgetMonth
-	let dense: Bool
-	let screen: BudgetScreenModel
-	@State private var isHolding = false
-
-	var body: some View {
-		HStack(alignment: .firstTextBaseline, spacing: Spacing.s3) {
-			HStack(spacing: Spacing.s2) {
-				Image(systemName: tone.symbol ?? "tray.and.arrow.down")
-					.font(.system(size: dense ? 15 : 26, weight: .semibold))
-				Text(screen.format.currency(sheet.toBudget, on: .budget))
-					.font(.figures(dense ? .title : .display, weight: .bold))
-					.lineLimit(1)
-					.fixedSize()
-			}
-			.foregroundStyle(Color(tone.text))
-			Text("To Budget")
-				.font(.text(dense ? .body : .heading, weight: .semibold))
-				.fixedSize()
-			if sheet.forNextMonth > 0 {
-				Text("\(screen.format.amount(sheet.forNextMonth, on: .budget)) held for next month")
-					.font(.text(.body))
-					.foregroundStyle(.textSecondary)
-			}
-		}
-		.contentShape(.rect)
-		.contextMenu {
-			Button("Hold for Next Month…") { isHolding = true }
-				.disabled(sheet.toBudget <= 0 || screen.isReadOnly)
-			Button("Reset Hold") { Task { await screen.resetHold() } }
-				.disabled(sheet.forNextMonth == 0 || screen.isReadOnly)
-		}
-		.popover(isPresented: $isHolding, arrowEdge: .bottom) {
-			HoldPopover(screen: screen, toBudget: sheet.toBudget)
-		}
-		.accessibilityElement(children: .combine)
-		.accessibilityIdentifier("budget.toBudget")
-		.tourAnchor(.toBudget)
-	}
-
-	private var tone: VeritasDesign.MoneyTone {
-		sheet.toBudgetTone.design
 	}
 }
 

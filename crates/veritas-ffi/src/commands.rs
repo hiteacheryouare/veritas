@@ -63,6 +63,18 @@ pub enum Command {
 	ResetHold {
 		month: Month,
 	},
+	/// v25, docs/finance/to-budget.md TB-3: covers each overspent envelope
+	/// from To Budget, then tops envelopes up to Actual's stored monthly goal,
+	/// never past the To Budget left. Refused, with `toBudgetActions`' reason,
+	/// when that read disables the row.
+	AssignToUnderfunded {
+		month: Month,
+	},
+	/// v25, TB-4: budgets each active goal's monthly suggestion from To
+	/// Budget, never past what is left. The current month only.
+	FundGoalsMonthly {
+		month: Month,
+	},
 	/// Rolls an overspent balance into next month instead of To Budget, from
 	/// `month` on.
 	SetCarryover {
@@ -557,6 +569,8 @@ impl veritas_session::Command for Command {
 				| Command::CoverOverspending { .. }
 				| Command::HoldForNextMonth { .. }
 				| Command::ResetHold { .. }
+				| Command::AssignToUnderfunded { .. }
+				| Command::FundGoalsMonthly { .. }
 				| Command::SetCarryover { .. }
 				| Command::ArchiveCategory { .. }
 				| Command::DeleteCategoryMovingHistory { .. }
@@ -664,6 +678,19 @@ impl veritas_session::Command for Command {
 			Command::ResetHold { month } => edit(data, sheet, *month, |editor, month| {
 				Ok(editor.reset_hold(month))
 			}),
+			Command::AssignToUnderfunded { month } => edit(data, sheet, *month, |editor, month| {
+				crate::to_budget::plan_assign(data, editor, month)?
+					.map(|plan| plan.writes)
+					.map_err(|block| crate::to_budget::refusal(&block))
+			}),
+			Command::FundGoalsMonthly { month } => {
+				let current = sheet.today().year_month();
+				edit(data, sheet, *month, |editor, month| {
+					crate::to_budget::plan_fund_goals(data, editor, month, current)?
+						.map(|plan| plan.writes)
+						.map_err(|block| crate::to_budget::refusal(&block))
+				})
+			}
 			Command::SetCarryover {
 				month,
 				category_id,
