@@ -19,12 +19,15 @@ public struct SidebarAccount: Hashable, Identifiable, Sendable {
 public struct SidebarGroup: Hashable, Identifiable, Sendable {
 	public let name: String
 	public let accounts: [SidebarAccount]
+	/// The core placed these accounts as liabilities (ST-9.1): Credit and Loans.
+	public let isLiability: Bool
 
 	public var id: String { name }
 
-	public init(name: String, accounts: [SidebarAccount]) {
+	public init(name: String, accounts: [SidebarAccount], isLiability: Bool = false) {
 		self.name = name
 		self.accounts = accounts
+		self.isLiability = isLiability
 	}
 }
 
@@ -81,6 +84,13 @@ public struct BudgetOverview: Hashable, Sendable {
 
 	public var accounts: [SidebarAccount] {
 		accountGroups.flatMap(\.accounts)
+	}
+}
+
+public extension BudgetOverview {
+	/// Whether the core places this account as a liability (ST-9.1), as the sidebar groups it.
+	func isLiability(_ accountID: String) -> Bool {
+		accountGroups.first { $0.accounts.contains { $0.id == accountID } }?.isLiability ?? false
 	}
 }
 

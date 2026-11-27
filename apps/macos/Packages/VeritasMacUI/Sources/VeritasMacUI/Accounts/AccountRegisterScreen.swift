@@ -79,7 +79,7 @@ struct AccountRegisterScreen: View {
 				}
 				.motion(.fast, value: account == nil)
 				if !isEmpty {
-					BalanceGraph(history: register.history, format: register.format)
+					BalanceGraph(history: register.history, format: register.format, isLiability: workspace.overview?.isLiability(accountID) ?? false)
 						.frame(height: 120)
 				}
 				RegisterFilters(register: register, search: $search)
@@ -255,6 +255,9 @@ private struct RegisterFilters: View {
 struct BalanceGraph: View {
 	let history: BalanceHistory?
 	let format: MoneyFormat
+	/// The core's placement (ST-9.1). A liability sits below zero by nature, so
+	/// below zero it is drawn in neutral ink, not the overspent red.
+	var isLiability = false
 
 	var body: some View {
 		if let history, history.points.count > 1, let first = history.points.first, let last = history.points.last {
@@ -264,9 +267,9 @@ struct BalanceGraph: View {
 				let baseline = ZeroSplit.baseline(in: domain)
 				Chart(history.points, id: \.date) { point in
 					AreaMark(x: .value("Day", point.date), yStart: .value("Floor", baseline), yEnd: .value("Balance", Double(point.balance) / 100))
-						.foregroundStyle(Self.split(ZeroSplit.areaStop(values, baseline: baseline), above: Color.moneyAvailableFill.opacity(0.22), below: Color.moneyOverspentFill.opacity(0.18)))
+						.foregroundStyle(Self.split(ZeroSplit.areaStop(values, baseline: baseline), above: Color.moneyAvailableFill.opacity(0.22), below: belowArea))
 					LineMark(x: .value("Day", point.date), y: .value("Balance", Double(point.balance) / 100))
-						.foregroundStyle(Self.split(ZeroSplit.lineStop(values), above: .chartMark(.moneyAvailableFill), below: .chartMark(.moneyOverspentFill)))
+						.foregroundStyle(Self.split(ZeroSplit.lineStop(values), above: .chartMark(.moneyAvailableFill), below: belowLine))
 						.lineStyle(StrokeStyle(lineWidth: 1.5))
 				}
 				.chartXAxis(.hidden)
@@ -304,8 +307,13 @@ struct BalanceGraph: View {
 		return (low - pad)...(high + pad)
 	}
 
-	/// Green above zero and red below, changing exactly where the balance crosses zero.
-	/// Lines take the 3:1 chart shade of each fill; the area under them keeps the fill.
+	private var belowLine: Color { isLiability ? .textPrimary : .chartMark(.moneyOverspentFill) }
+	private var belowArea: Color { isLiability ? Color.textPrimary.opacity(0.08) : Color.moneyOverspentFill.opacity(0.18) }
+
+	/// Green above zero for every account: an overpaid card is an asset that day
+	/// (ST-2). Below zero, an asset is red and a liability neutral. The color
+	/// changes exactly where the balance crosses zero. Lines take the 3:1 chart
+	/// shade of each fill; the area under them keeps the fill, faint.
 	static func split(_ stop: Double, above: Color, below: Color) -> LinearGradient {
 		LinearGradient(
 			stops: [.init(color: above, location: 0), .init(color: above, location: stop), .init(color: below, location: stop), .init(color: below, location: 1)],

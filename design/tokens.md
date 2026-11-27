@@ -41,7 +41,7 @@ Every color has a light and a dark value. There is no pure black or white anywhe
 | `color-chart-expense` | #6e6e78 | #a5a5ae | Spending in charts. Spending is not a warning, so it is graphite |
 | `color-chart-savings` | #56e39f | #56e39f | Savings in Net Profit and the Sankey (good) |
 | `color-chart-debt-paydown` | #8b5e34 | #c99a6b | Debt paydown in Net Profit and the Sankey |
-| `color-category-1..8` | | | Chart categories: custom reports, dashboard cards, Sankey groups. See Categories |
+| `color-category-1..9` | | | Chart categories: custom reports, dashboard cards, Sankey groups. See Categories |
 | `color-brand-deep` | #1b107e | #120a4e | The splash's gradient runs from `color-brand` down to this |
 | `color-text-on-brand-secondary` | #cfcbf2 | #cfcbf2 | The splash's sentence, under `color-text-on-brand` |
 | `color-scenario-1..3` | blue, umber, teal | | What-if lines. Baseline uses `color-scenario-baseline` |
@@ -82,7 +82,7 @@ The fills themselves are not 3:1 everywhere. In light mode the mint is 1.6:1 and
 
 ### Categories
 
-Charts that color by category (custom reports, dashboard cards, the dashboard Sankey, and the spending groups on the Sankey screen) use eight hues from Ryan's brand, in this order. Actual's chart colors 1 to 9 map onto them in turn.
+Charts that color by category (custom reports, dashboard cards, the dashboard Sankey, and the spending groups on the Sankey screen) use nine colors from Ryan's brand, in this order, one for each of the core's nine chart series (Actual's chart colors 1 to 9).
 
 | # | Light | Dark | Hue |
 |---|---|---|---|
@@ -94,6 +94,7 @@ Charts that color by category (custom reports, dashboard cards, the dashboard Sa
 | 6 | #03544b | #70b3a8 | Pine |
 | 7 | #4e6376 | #aac1d6 | Slate |
 | 8 | #707102 | #909235 | Olive |
+| 9 | #544f08 | #d2ce8d | Moss: near olive's hue, much darker in light mode and much lighter in dark. No other hue clears the money states, debt paydown's brown and the distance floors |
 
 - **Not money:** no category sits within 26° of bad's OKLCH hue, 20° of warning's or 22° of good's. Good, warning and bad keep their meaning, and only a money state uses them. On the Sankey screen, the spending groups skip cerulean and copper, because income is cerulean and debt paydown is brown.
 - **Readable:** every category reaches 3:1 on the window, grouped and raised surfaces in its own appearance, so its marks need no edge.
@@ -103,7 +104,12 @@ Charts that color by category (custom reports, dashboard cards, the dashboard Sa
 
 ### Balance graphs
 
-The account page's balance graph is green above zero and red below. It changes color exactly where the balance crosses zero. The line takes each fill's chart mark (`money-available` and `money-overspent`, at 3:1). The area between the line and zero keeps the fills, faint.
+The account page's balance graph is split at zero and changes color exactly where the balance crosses it.
+- **Above zero:** green, for every account. An overpaid card is an asset that day (ST-2).
+- **Below zero, asset accounts** (on or off budget): red. An overdrawn or negative asset is worth a look.
+- **Below zero, liabilities:** neutral ink, for accounts the core places as liabilities (ST-9.1, the sidebar's Credit and Loans). A card or a loan sits below zero by nature, and red would make a loan being paid down look like trouble.
+
+The line takes each fill's chart mark (`money-available`, `money-overspent` at 3:1) or `text-primary`. The area between the line and zero keeps the fills, faint.
 
 ### Tags
 

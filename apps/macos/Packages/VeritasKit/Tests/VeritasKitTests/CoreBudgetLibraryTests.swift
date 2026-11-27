@@ -67,6 +67,9 @@ struct CoreBudgetLibraryTests {
 		#expect(!overview.accounts.isEmpty)
 		#expect(overview.accountGroups.allSatisfy { !$0.accounts.isEmpty })
 		#expect(Set(overview.accountGroups.map(\.name)).isSubset(of: ["Cash", "Credit", "Investments & Other assets", "Loans"]))
+		for group in overview.accountGroups {
+			#expect(group.isLiability == ["Credit", "Loans"].contains(group.name), "\(group.name): ST-9.1 places Credit and Loans as liabilities")
+		}
 		await session.close()
 	}
 

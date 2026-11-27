@@ -37,13 +37,31 @@ struct BrandScreenshotTests {
 		#expect(Motion.mintIn.reduced != nil && Motion.mintIn.duration(reduceMotion: true) <= Motion.Duration.fast, "Reduce Motion gives a short fade")
 	}
 
-	@Test func accountGraphCrossingZero() throws {
-		let balances: [Int64] = [42_000, 30_000, 12_000, -8_000, -21_000, -6_000, 9_000, 18_000]
-		let points = balances.enumerated().map { BalancePoint(date: String(format: "2026-11-%02d", $0.offset + 1), balance: $0.element) }
-		let graph = BalanceGraph(history: BalanceHistory(points: points, change: -0.57), format: MoneyFormat())
-			.frame(width: 760, height: 120)
-			.padding(Spacing.s4)
-		try render(graph, named: "account-graph-crossing-zero")
+	/// ST-9.1 and ST-2: an asset is red below zero; a liability is neutral there,
+	/// and every account is green above zero, an overpaid card included.
+	@Test func accountGraphs() throws {
+		let cases: [(name: String, balances: [Int64], isLiability: Bool)] = [
+			("account-graph-asset-crossing-zero", [42_000, 30_000, 12_000, -8_000, -21_000, -6_000, 9_000, 18_000], false),
+			("account-graph-loan-paid-down", [-980_000, -968_000, -957_000, -945_000, -934_000, -922_000, -911_000, -900_000], true),
+			("account-graph-card-overpaid", [-64_000, -41_000, -23_000, -9_000, 4_000, 12_000, 2_000, -5_000], true)
+		]
+		for item in cases {
+			let points = item.balances.enumerated().map { BalancePoint(date: String(format: "2026-11-%02d", $0.offset + 1), balance: $0.element) }
+			let graph = BalanceGraph(history: BalanceHistory(points: points, change: nil), format: MoneyFormat(), isLiability: item.isLiability)
+				.frame(width: 760, height: 120)
+				.padding(Spacing.s4)
+			try render(graph, named: item.name)
+		}
+	}
+
+	@Test func theGraphReadsTheCoresPlacement() {
+		let overview = BudgetOverview(name: "Household", directory: URL(filePath: "/tmp/budget"), readOnly: nil, accountGroups: [
+			SidebarGroup(name: "Cash", accounts: [SidebarAccount(id: "checking", name: "Checking", balance: -2_000)]),
+			SidebarGroup(name: "Loans", accounts: [SidebarAccount(id: "mortgage", name: "Mortgage", balance: -980_000)], isLiability: true)
+		])
+		#expect(!overview.isLiability("checking"), "an overdrawn checking account the user pinned as an asset stays an asset")
+		#expect(overview.isLiability("mortgage"))
+		#expect(!overview.isLiability("unknown"))
 	}
 
 	@Test func aboutShowsLicensesCopyright() throws {
