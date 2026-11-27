@@ -258,6 +258,21 @@ impl<S: Store> CommandBus<S> {
 		Ok(changed)
 	}
 
+	/// Writes rows as one transaction that is not an undo step, for settings
+	/// a dismissed sheet records (MIG-1.8). The undo and redo stacks are left
+	/// as they are.
+	pub fn perform_rows_outside_undo(&mut self, rows: Vec<Row>) -> Result<ChangeSet, CoreError> {
+		self.ensure_writable()?;
+		let changes = transact(
+			&mut self.data,
+			&mut self.store,
+			rows.into_iter().map(Intent::Put),
+		)?;
+		let changed = ChangeSet::of(&changes);
+		self.notify(&changed);
+		Ok(changed)
+	}
+
 	pub fn undo(&mut self) -> Result<ChangeSet, CoreError> {
 		self.ensure_writable()?;
 		let Some(step) = self.undo.pop() else {

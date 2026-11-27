@@ -281,10 +281,13 @@ pub fn edit_bill(
 	Ok(rows)
 }
 
-fn label(id: &ScheduleId, paused: bool) -> Row {
+fn label(data: &BudgetData, id: &ScheduleId, paused: bool) -> Row {
 	Row::ScheduleMeta(ScheduleMetaRow {
 		schedule: id.clone(),
-		meta: ScheduleMeta { paused },
+		meta: ScheduleMeta {
+			paused,
+			..data.schedule_meta.get(id).cloned().unwrap_or_default()
+		},
 	})
 }
 
@@ -305,7 +308,7 @@ pub fn end_bill(data: &BudgetData, id: &ScheduleId, paused: bool) -> Result<Vec<
 	};
 	let labelled = data.schedule_meta.get(id).map(|meta| meta.paused);
 	if labelled != Some(paused) && (paused || labelled.is_some()) {
-		rows.push(label(id, paused));
+		rows.push(label(data, id, paused));
 	}
 	Ok(rows)
 }
@@ -328,7 +331,7 @@ pub fn resume_bill(
 	)?
 	.rows;
 	if data.schedule_meta.get(id).is_some_and(|meta| meta.paused) {
-		rows.push(label(id, false));
+		rows.push(label(data, id, false));
 	}
 	Ok(rows)
 }

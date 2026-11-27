@@ -214,6 +214,13 @@ pub struct BillSummary {
 	/// v13. Whether Skip moves the bill: active, with a later date to move to.
 	#[uniffi(default = false)]
 	pub can_skip: bool,
+	/// v25: the name Bills shows in Veritas only (MIG-6.2), before `name`
+	/// and the payee's. Actual never sees it.
+	#[uniffi(default = None)]
+	pub display_name: Option<String>,
+	/// v25: an SF Symbol name or one emoji, Veritas only (MIG-6.3).
+	#[uniffi(default = None)]
+	pub icon: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -230,6 +237,8 @@ pub struct BillDetail {
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct UpcomingBill {
 	pub bill_id: String,
+	/// v25: the Veritas display name when there is one (MIG-6.2), else
+	/// Actual's name.
 	pub name: Option<String>,
 	pub payee_name: Option<String>,
 	pub account_id: Option<String>,
@@ -515,6 +524,14 @@ fn summary(data: &BudgetData, id: &ScheduleId, today: CivilDate) -> Result<BillS
 		last_paid_amount: last_paid.map(|(_, amount)| amount.minor()),
 		last_paid_date: last_paid.map(|(date, _)| date.to_string()),
 		can_skip: readable && veritas_rules::can_skip(data, id)?,
+		display_name: data
+			.schedule_meta
+			.get(id)
+			.and_then(|meta| meta.display_name.clone()),
+		icon: data
+			.schedule_meta
+			.get(id)
+			.and_then(|meta| meta.icon.clone()),
 	})
 }
 
@@ -615,7 +632,7 @@ pub(crate) fn upcoming(
 			};
 			out.push(UpcomingBill {
 				bill_id: bill.id.clone(),
-				name: bill.name.clone(),
+				name: bill.display_name.clone().or_else(|| bill.name.clone()),
 				payee_name: bill.payee_name.clone(),
 				account_id: bill.account_id.clone(),
 				account_name: bill.account_name.clone(),

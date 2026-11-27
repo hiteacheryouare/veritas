@@ -10,6 +10,7 @@ mod custom_reports;
 mod dashboards;
 mod forecast;
 mod goals;
+mod migration;
 mod money;
 mod names;
 mod records;

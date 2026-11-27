@@ -719,13 +719,15 @@ Veritas keeps what Actual can't express in its own tables in the same `db.sqlite
 
 | Table | Holds |
 |---|---|
-| `veritas_meta` | `(key, value)` rows. `schema_version`: the Veritas schema the file was adopted at, written once by veritas-store and never set by a command. `entity_name`: the statements' entity name (ST-3), the trimmed text, one line of at most 100 Unicode scalar values; the row is deleted when the name is cleared, and setting it is one undo step. These are the only keys: `SettingKey` (veritas-domain) lists the settable ones, and a row with any other key is left alone and never read |
+| `veritas_meta` | `(key, value)` rows. `schema_version`: the Veritas schema the file was adopted at, written once by veritas-store and never set by a command. `entity_name`: the statements' entity name (ST-3), the trimmed text, one line of at most 100 Unicode scalar values; the row is deleted when the name is cleared, and setting it is one undo step. `migration.offered`: `1` once the upgrade sheet has offered itself after an import (MIG-1.1). `migration.dismissed`: a JSON array of the upgrade suggestion keys the user dismissed (MIG-1.6). The two `migration.*` keys are written outside undo (MIG-1.8). These are the only keys: `SettingKey` (veritas-domain) lists the settable ones, and a row with any other key is left alone and never read |
 | `veritas_category_meta` | a category's kind, tax bucket and archive date (CLS-3, TAX-2, R-BUD-5) |
 | `veritas_account_meta` | an account's kind and loan terms (ST-2, R-DEBT-1) |
 | `veritas_goal` | goals (DEBT-8) |
 | `veritas_transaction_meta` | reconcile adjustments and "may need Actual" notes (CLS-5, D64) |
 | `veritas_loan_payment_part` | `(id, payment, line, part, tombstone)`: which expense line of a loan payment the wizard wrote as `interest`, `escrow` or `fees`, written in the same SQLite transaction and undo step as the payment; an edit tombstones the old rows. DEBT-3's pre-fill and FC-2's forecast read parts only through it (D76) |
-| `veritas_schedule_meta` | Paused versus Ended for a completed bill (R-BILL-3) |
+| `veritas_schedule_meta` | Paused versus Ended for a completed bill (R-BILL-3), and the bill's Veritas-only `display_name` and `icon` (MIG-6.5), added to older files with `ALTER TABLE … ADD COLUMN` |
+| `veritas_widget_override` | `(widget_id, native_type, native_meta, fingerprint, created_at)`: an Actual dashboard widget Veritas shows as a native card while `fingerprint` matches the widget and its report (MIG-3.4, MIG-3.6, MIG-3.8). A stale row is kept |
+| `veritas_migration_applied` | `(item_key, prior, applied_at)`: what one upgraded item's Revert restores, as JSON (MIG-7.1) |
 | `veritas_tax_tag` | which tags mean which tax bucket (TAX-1) |
 | `veritas_scenario`, `veritas_scenario_event` | forecast scenarios (R-FC-2) |
 

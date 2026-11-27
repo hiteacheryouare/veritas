@@ -525,6 +525,17 @@ fn references(data: &BudgetData, findings: &mut Findings) {
 			exists,
 		);
 	}
+	for widget in data.widget_overrides.keys() {
+		let exists = data.widgets.get(widget).map(|_| false);
+		reference(
+			findings,
+			"veritas_widget_override",
+			widget.as_str(),
+			"widget",
+			widget.as_str(),
+			exists,
+		);
+	}
 	for goal in data.goals.values() {
 		let id = goal.id.as_str();
 		reference(

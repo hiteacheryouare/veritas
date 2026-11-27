@@ -15,6 +15,7 @@ pub mod goals;
 pub mod kinds;
 pub mod loans;
 mod lock;
+pub mod migration;
 mod overview;
 pub mod payees;
 pub mod register;

@@ -1,6 +1,7 @@
 //! Actual's dashboards: every widget drawn natively with its settings (D73),
 //! and the edits Actual's dashboard handlers make, written in its format.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -13,6 +14,7 @@ use veritas_engine::EnvelopeSheet;
 use veritas_reports::{
 	self as reports, CustomReport, Json, WidgetContent, WidgetSettings, WidgetType,
 };
+use veritas_session::migration;
 
 use crate::blocking::{CancelToken as CancelHandle, run};
 use crate::budget::civil_date;
@@ -499,6 +501,14 @@ pub struct DashboardWidget {
 	pub min_height: i64,
 	pub config: WidgetConfig,
 	pub view: WidgetView,
+	/// v25: Actual stores a custom report here, and Veritas shows its native
+	/// card instead (MIG-3.4). The slot offers Revert.
+	#[uniffi(default = false)]
+	pub upgraded: bool,
+	/// v25: "This report changed in Actual, so Veritas shows it again."
+	/// (MIG-3.6).
+	#[uniffi(default = None)]
+	pub notice: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
@@ -1165,16 +1175,48 @@ fn session_dashboards<B: veritas_session::Backend>(
 /// so every card's money figures come out register-scale.
 fn dashboards(inputs: &Inputs) -> Result<Vec<DashboardPage>, CoreError> {
 	let budget = inputs.budget;
-	let pages = reports::dashboards(budget)?;
+	let mut pages = reports::dashboards(budget)?;
+	let mut upgraded: BTreeMap<WidgetId, (String, Option<String>)> = BTreeMap::new();
+	let mut stale: BTreeSet<WidgetId> = BTreeSet::new();
+	for widget in pages.iter_mut().flat_map(|page| page.widgets.iter_mut()) {
+		match migration::override_state(budget, &widget.id) {
+			migration::OverrideState::Active(row) => {
+				let Some(kind) = WidgetType::parse(&row.native_type) else {
+					continue;
+				};
+				let meta = Json::parse(&row.native_meta).ok();
+				widget.content = WidgetContent::Card {
+					kind,
+					name: meta
+						.as_ref()
+						.and_then(|meta| meta.get("name"))
+						.and_then(Json::as_str)
+						.map(str::to_owned),
+					meta,
+				};
+				upgraded.insert(
+					widget.id.clone(),
+					(row.native_type.clone(), Some(row.native_meta.clone())),
+				);
+			}
+			migration::OverrideState::Stale => {
+				stale.insert(widget.id.clone());
+			}
+			migration::OverrideState::None => {}
+		}
+	}
 	let kinds: Vec<(String, Option<WidgetType>)> = pages
 		.iter()
 		.flat_map(|page| &page.widgets)
 		.map(|widget| {
-			let kind = budget
-				.widgets
-				.get(&widget.id)
-				.and_then(|stored| stored.kind.clone())
-				.unwrap_or_default();
+			let kind = match upgraded.get(&widget.id) {
+				Some((kind, _)) => kind.clone(),
+				None => budget
+					.widgets
+					.get(&widget.id)
+					.and_then(|stored| stored.kind.clone())
+					.unwrap_or_default(),
+			};
 			let known = WidgetType::parse(&kind);
 			(kind, known)
 		})
@@ -1197,7 +1239,11 @@ fn dashboards(inputs: &Inputs) -> Result<Vec<DashboardPage>, CoreError> {
 				.ok_or_else(|| CoreError::Internal("a widget's view went missing".to_owned()))?;
 			let (min_width, min_height) = known.map_or((1, 1), WidgetType::minimum_size);
 			let stored = budget.widgets.get(&widget.id);
-			let meta = reports::parse_meta(stored.and_then(|stored| stored.meta.as_deref()))?;
+			let native = upgraded
+				.get(&widget.id)
+				.and_then(|(_, meta)| meta.as_deref());
+			let meta =
+				reports::parse_meta(native.or(stored.and_then(|stored| stored.meta.as_deref())))?;
 			widgets.push(DashboardWidget {
 				id: widget.id.to_string(),
 				kind,
@@ -1209,6 +1255,10 @@ fn dashboards(inputs: &Inputs) -> Result<Vec<DashboardPage>, CoreError> {
 				min_height,
 				config: config(budget, reports::read_settings(known, meta.as_ref())),
 				view,
+				upgraded: upgraded.contains_key(&widget.id),
+				notice: stale
+					.contains(&widget.id)
+					.then(|| migration::STALE_OVERRIDE.to_owned()),
 			});
 		}
 		shown.push(DashboardPage {

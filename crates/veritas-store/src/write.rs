@@ -7,9 +7,10 @@ use veritas_domain::SettingKey;
 use veritas_domain::{
 	Account, AccountGroup, AccountId, AccountKind, AccountMeta, BudgetCell, BudgetType, Cadence,
 	Category, CategoryGroup, CategoryId, CategoryKind, CategoryMeta, CivilDate, CoreError,
-	CustomReportRow, DashboardPage, Goal, GoalStatus, IncomeDelta, LoanPaymentPart, Money, Payee,
-	PayeeId, Rule, RuleStage, Scenario, ScenarioChange, Schedule, ScheduleId, ScheduleJsonPaths,
-	ScheduleMeta, SplitRole, Tag, Transaction, TransactionId, TransactionMeta, Widget, YearMonth,
+	CustomReportRow, DashboardPage, Goal, GoalStatus, IncomeDelta, LoanPaymentPart,
+	MigrationApplied, Money, Payee, PayeeId, Rule, RuleStage, Scenario, ScenarioChange, Schedule,
+	ScheduleId, ScheduleJsonPaths, ScheduleMeta, SplitRole, Tag, Transaction, TransactionId,
+	TransactionMeta, Widget, WidgetOverride, YearMonth,
 };
 
 use crate::connection::storage;
@@ -263,7 +264,27 @@ fn loan_payment_part_columns(row: &LoanPaymentPart) -> Columns {
 }
 
 fn schedule_meta_columns(row: &ScheduleMeta) -> Columns {
-	vec![("paused", flag(row.paused))]
+	vec![
+		("paused", flag(row.paused)),
+		("display_name", opt_text(row.display_name.as_deref())),
+		("icon", opt_text(row.icon.as_deref())),
+	]
+}
+
+fn opt_text(value: Option<&str>) -> Value {
+	value.map_or(Value::Null, owned)
+}
+
+fn widget_override_columns(row: &WidgetOverride) -> Columns {
+	vec![
+		("native_type", owned(&row.native_type)),
+		("native_meta", owned(&row.native_meta)),
+		("fingerprint", owned(&row.fingerprint)),
+	]
+}
+
+fn migration_applied_columns(row: &MigrationApplied) -> Columns {
+	vec![("prior", owned(&row.prior))]
 }
 
 fn goal_columns(row: &Goal) -> Columns {
@@ -1272,6 +1293,68 @@ impl<'conn> Writer<'conn> {
 			);
 		}
 		self.put_veritas("veritas_goal", "id", &id, before, after, goal_columns)
+	}
+
+	/// MIG-3.4. `created_at` is written once, when the row is made.
+	pub fn put_widget_override(
+		&mut self,
+		before: Option<&WidgetOverride>,
+		after: Option<&WidgetOverride>,
+	) -> Result<(), CoreError> {
+		let Some(id) = before.or(after).map(|row| row.widget.as_str().to_owned()) else {
+			return Ok(());
+		};
+		if before.is_none()
+			&& let Some(row) = after
+		{
+			let mut columns = widget_override_columns(row);
+			columns.push(("created_at", Value::Text(now_ms().to_string())));
+			return self.insert(
+				"veritas_widget_override",
+				&[("widget_id", owned(&id))],
+				&columns,
+				Nulls::Write,
+			);
+		}
+		self.put_veritas(
+			"veritas_widget_override",
+			"widget_id",
+			&id,
+			before,
+			after,
+			widget_override_columns,
+		)
+	}
+
+	/// MIG-7.1. `applied_at` is written once, when the row is made.
+	pub fn put_migration_applied(
+		&mut self,
+		before: Option<&MigrationApplied>,
+		after: Option<&MigrationApplied>,
+	) -> Result<(), CoreError> {
+		let Some(key) = before.or(after).map(|row| row.key.clone()) else {
+			return Ok(());
+		};
+		if before.is_none()
+			&& let Some(row) = after
+		{
+			let mut columns = migration_applied_columns(row);
+			columns.push(("applied_at", Value::Text(now_ms().to_string())));
+			return self.insert(
+				"veritas_migration_applied",
+				&[("item_key", owned(&key))],
+				&columns,
+				Nulls::Write,
+			);
+		}
+		self.put_veritas(
+			"veritas_migration_applied",
+			"item_key",
+			&key,
+			before,
+			after,
+			migration_applied_columns,
+		)
 	}
 
 	/// A scenario and its events (R-FC-2). These two tables are the only ones
