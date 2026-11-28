@@ -250,6 +250,9 @@ public final class DashboardModel {
 	public private(set) var sheets: [DashboardSheet] = []
 	/// False until the first load has finished, so the screen can show it's loading.
 	public private(set) var hasLoaded = false
+	/// Loads started and not yet finished, an overtaken one included.
+	public private(set) var loadsInFlight = 0
+	public var isLoading: Bool { loadsInFlight > 0 }
 	public var pageID: String?
 	public var isEditing = false
 	/// Payees, accounts and categories, for the widget filter editor's pickers.
@@ -276,6 +279,8 @@ public final class DashboardModel {
 	@ObservationIgnored private var loadGeneration = 0
 
 	public func load() async {
+		loadsInFlight += 1
+		defer { loadsInFlight -= 1 }
 		loadGeneration += 1
 		let generation = loadGeneration
 		let today = WorkspaceModel.today()

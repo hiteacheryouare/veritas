@@ -10,6 +10,8 @@ struct WrappedScreen: View {
 	let workspace: WorkspaceModel
 	@State private var model: WrappedModel
 	@FocusState private var hasKeyFocus: Bool
+	/// Which way the last turn went, so the next card comes in from that side.
+	@State private var isGoingBack = false
 
 	init(workspace: WorkspaceModel, model: WrappedModel? = nil) {
 		self.workspace = workspace
@@ -20,14 +22,18 @@ struct WrappedScreen: View {
 		Group {
 			if let card = model.card {
 				HStack(spacing: Spacing.s5) {
-					arrow("chevron.left", label: "Previous card", id: "wrapped.previous", enabled: model.canGoBack) { model.previous() }
-					WrappedCardView(card: card, progress: (model.index, model.cards.count))
-						.shadow(color: .black.opacity(0.18), radius: 24, y: 10)
-					arrow("chevron.right", label: "Next card", id: "wrapped.next", enabled: model.canGoForward) { model.next() }
+					arrow("chevron.left", label: "Previous card", id: "wrapped.previous", enabled: model.canGoBack) { turn(back: true) }
+					ZStack {
+						WrappedCardView(card: card, progress: (model.index, model.cards.count))
+							.shadow(color: .black.opacity(0.18), radius: 24, y: 10)
+							.id(card.id)
+							.motionTransition(isGoingBack ? .turnBack : .turnForward)
+					}
+					arrow("chevron.right", label: "Next card", id: "wrapped.next", enabled: model.canGoForward) { turn(back: false) }
 				}
 				.padding(Spacing.s5)
 			} else {
-				ProgressView()
+				ScreenState(kind: .loading)
 			}
 		}
 		.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -37,7 +43,7 @@ struct WrappedScreen: View {
 		.focused($hasKeyFocus)
 		.defaultFocus($hasKeyFocus, true)
 		.onKeyPress(keys: [.leftArrow, .rightArrow]) { press in
-			if press.key == .leftArrow { model.previous() } else { model.next() }
+			turn(back: press.key == .leftArrow)
 			return .handled
 		}
 		.toolbar {
@@ -75,6 +81,11 @@ struct WrappedScreen: View {
 		.navigationTitle(model.title)
 		.task(id: workspace.changeCount) { await model.load() }
 		.containerIdentifier("screen.wrapped")
+	}
+
+	private func turn(back: Bool) {
+		isGoingBack = back
+		if back { model.previous() } else { model.next() }
 	}
 
 	private func arrow(_ symbol: String, label: String, id: String, enabled: Bool, action: @escaping () -> Void) -> some View {

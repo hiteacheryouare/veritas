@@ -35,15 +35,80 @@ struct TokenBehaviorTests {
 		}
 	}
 
-	@Test func reduceMotionTurnsEveryDurationIntoNone() {
-		for motion in [Motion.fast, .sheet] {
-			#expect(motion.animation(reduceMotion: true) == nil)
-			#expect(motion.animation(.exit, reduceMotion: true) == nil)
-			#expect(motion.duration(reduceMotion: true) == 0)
-			#expect(motion.animation(reduceMotion: false) != nil)
+	/// design/motion.md, Reduce Motion: movement becomes a short fade. No reduced
+	/// motion springs, none outlasts `fast`, and small changes happen at once.
+	@Test func reduceMotionTurnsMovementIntoAShortFade() {
+		for motion in Motion.all {
+			if let reduced = motion.reduced {
+				#expect(!reduced.isSpring, "\(motion.name)")
+				#expect(reduced.duration <= Motion.Duration.fast, "\(motion.name)")
+				#expect(reduced.delay == 0, "\(motion.name)")
+				#expect(motion.animation(reduceMotion: true) != nil, "\(motion.name)")
+			} else {
+				#expect(motion.animation(reduceMotion: true) == nil, "\(motion.name)")
+				#expect(motion.duration(reduceMotion: true) == 0, "\(motion.name)")
+			}
+			#expect(motion.animation(reduceMotion: false) != nil, "\(motion.name)")
 		}
-		#expect(Motion.fast.duration(reduceMotion: false) == 0.15)
-		#expect(Motion.sheet.duration(reduceMotion: false) == 0.22)
+		for motion in [Motion.instant, .fast, .leave, .settle] {
+			#expect(motion.reduced == nil, "\(motion.name) happens at once")
+		}
+		for motion in [Motion.sheet, .pageIn, .morph, .push, .turn] {
+			#expect(motion.reduced != nil, "\(motion.name) still fades")
+		}
+	}
+
+	@Test func reduceMotionDropsEveryOffsetAndKeepsAFade() {
+		for transition in MotionTransition.all {
+			let reduced = transition.resolved(reduceMotion: true)
+			for side in [reduced.insertion, reduced.removal] {
+				#expect(side.offset == .zero, "\(transition.name)")
+				#expect(side.fades, "\(transition.name)")
+			}
+			#expect(transition.resolved(reduceMotion: false) == transition)
+		}
+	}
+
+	@Test func noSpringBounces() {
+		for motion in Motion.all {
+			if case .spring(_, let bounce) = motion.curve {
+				#expect(bounce == 0, "\(motion.name): an overshoot shows an amount that isn't real")
+			}
+		}
+	}
+
+	/// Sampled every 5 ms, no motion ever passes its target, and each has
+	/// arrived by its duration (springs within 1% by one and a half times it).
+	@Test func everyMotionArrivesWithoutOvershoot() {
+		for motion in Motion.all {
+			var last = 0.0
+			for step in 0...400 {
+				let value = motion.progress(at: Double(step) * 0.005)
+				#expect(value <= 1.0001, "\(motion.name) overshoots at \(step * 5) ms")
+				#expect(value >= last - 0.0001, "\(motion.name) turns back at \(step * 5) ms")
+				last = value
+			}
+			#expect(motion.progress(at: 0) == 0, "\(motion.name)")
+			let settled = motion.curve.isSpring ? motion.progress(at: motion.duration * 1.5) : motion.progress(at: motion.curve.delay + motion.duration)
+			#expect(settled >= 0.99, "\(motion.name) hasn't arrived: \(settled)")
+		}
+		#expect(Motion.pageIn.progress(at: Motion.Duration.pageDelay) == 0, "the new page waits for the old one")
+	}
+
+	@Test func exitsAreQuickerThanEntrances() {
+		#expect(Motion.pageOut.duration < Motion.pageIn.duration)
+		#expect(Motion.leave.duration < Motion.fast.duration)
+		#expect(Motion.fast.duration == 0.15)
+		#expect(Motion.sheet.duration == 0.22)
+	}
+
+	@Test func aRepeatInsideTheWindowIsRapid() {
+		let gate = RapidRepeat()
+		let start = Date(timeIntervalSinceReferenceDate: 0)
+		#expect(!gate.isRapid(at: start), "the first press animates")
+		#expect(gate.isRapid(at: start.addingTimeInterval(0.05)))
+		#expect(gate.isRapid(at: start.addingTimeInterval(0.15)), "measured from the last press, 0.10 s ago")
+		#expect(!gate.isRapid(at: start.addingTimeInterval(0.5)))
 	}
 
 	@Test func everyMoneyStateButZeroHasAnIconThatExists() {

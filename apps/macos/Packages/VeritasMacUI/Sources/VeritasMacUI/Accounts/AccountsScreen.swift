@@ -90,7 +90,7 @@ struct AccountsScreen: View {
 					ForEach(accounts) { account in
 						Divider().padding(.leading, Spacing.s4)
 						AccountRow(account: account, format: model.format) {
-							workspace.go(to: .account(id: account.id))
+							workspace.go(to: .account(id: account.id), arrival: .drill)
 						}
 						.contextMenu { menu(account) }
 						.tourAnchor(.openAccount, isOn: account.id == firstShownAccountID)
@@ -112,7 +112,7 @@ struct AccountsScreen: View {
 	}
 
 	@ViewBuilder private func menu(_ account: AccountDetail) -> some View {
-		Button("Open Register") { workspace.go(to: .account(id: account.id)) }
+		Button("Open Register") { workspace.go(to: .account(id: account.id), arrival: .drill) }
 		Divider()
 		Group {
 			editingMenu(account)

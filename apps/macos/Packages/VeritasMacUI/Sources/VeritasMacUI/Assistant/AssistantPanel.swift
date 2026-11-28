@@ -74,8 +74,11 @@ struct AssistantPanel: View {
 		ScrollView {
 			VStack(spacing: Spacing.s3) {
 				ForEach(model.exchanges) { exchange in
-					QuestionBubble(text: exchange.question)
-					AnswerBubble(exchange: exchange, width: width - Spacing.s6)
+					Group {
+						QuestionBubble(text: exchange.question)
+						AnswerBubble(exchange: exchange, width: width - Spacing.s6)
+					}
+					.motionTransition(.rise)
 				}
 			}
 			.frame(width: width)

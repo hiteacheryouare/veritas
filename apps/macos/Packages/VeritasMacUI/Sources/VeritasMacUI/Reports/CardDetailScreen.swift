@@ -10,6 +10,7 @@ struct CardDetail: View {
 	let card: DashboardCard
 	@Bindable var workspace: WorkspaceModel
 	let model: DashboardModel
+	var morphSpace: Namespace.ID? = nil
 	let configure: (DashboardCard) -> Void
 	let close: () -> Void
 
@@ -33,6 +34,7 @@ struct CardDetail: View {
 					.padding(Spacing.s5)
 					.background(.surfaceGrouped, in: .rect(cornerRadius: Radius.section))
 					.overlay { RoundedRectangle(cornerRadius: Radius.section).strokeBorder(Color.edgeGrouped) }
+					.morph(card.id, in: morphSpace)
 					.padding(.top, Spacing.s2)
 					.padding(.horizontal, Spacing.s5)
 					.padding(.bottom, Spacing.s6)
@@ -40,7 +42,6 @@ struct CardDetail: View {
 			}
 		}
 		.background(.surfaceWindow)
-		.navigationTitle(card.title ?? card.rawKind)
 		.toolbar {
 			ToolbarItem(placement: .navigation) {
 				Button(action: close) {

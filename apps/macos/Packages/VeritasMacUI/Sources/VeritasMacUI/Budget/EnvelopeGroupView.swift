@@ -88,6 +88,7 @@ struct EnvelopeGroupView: View {
 	private func figure(_ amount: Int64) -> some View {
 		Text(screen.format.amount(amount, on: .budget))
 			.font(.figures(.body, weight: .semibold))
+			.rowFigureChange(amount)
 			.foregroundStyle(.textSecondary)
 	}
 }

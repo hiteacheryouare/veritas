@@ -41,9 +41,10 @@ struct ForecastScreen: View {
 					}
 					ForecastLists(model: model, forecast: forecast)
 				} else {
-					ProgressView().frame(maxWidth: .infinity, minHeight: 200)
+					ScreenState(kind: .loading).frame(minHeight: 200)
 				}
 			}
+			.motion(.fast, value: model.forecast == nil)
 			.padding(.top, Spacing.s2)
 			.padding(.horizontal, Spacing.s5)
 			.padding(.bottom, Spacing.s6)
