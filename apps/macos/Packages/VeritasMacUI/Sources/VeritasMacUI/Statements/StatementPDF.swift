@@ -3,8 +3,9 @@ import CoreText
 import VeritasDesign
 import VeritasKit
 
-/// A statement as US Letter pages: the paper's header on every page, rows
-/// that never leave a heading alone at the foot of a page, and page numbers.
+/// A statement as US Letter pages: the paper's header and footnote on every
+/// page, rows that never leave a heading alone at the foot of a page, and
+/// page numbers.
 @MainActor
 enum StatementPDF {
 	static let pageNumberSpace: CGFloat = 28
@@ -46,6 +47,7 @@ enum StatementPDF {
 			if isLast, let notice = document.notice(format: format) {
 				drawNotice(notice, at: y)
 			}
+			drawFootnote()
 			if sheets.count > 1 {
 				drawCentered("Page \(index + 1) of \(sheets.count)", font: font(PaperMetrics.pageNumberSize), color: secondary, y: PaperMetrics.height - PaperMetrics.bottom + 12)
 			}
@@ -60,7 +62,7 @@ enum StatementPDF {
 	/// page with the row under it, and ST-4's notice stays with the last line.
 	static func paginate(_ document: StatementDocument, format: MoneyFormat) -> [[StatementLine]] {
 		let top = PaperMetrics.top + headerHeight
-		let limit = PaperMetrics.height - PaperMetrics.bottom - pageNumberSpace
+		let limit = PaperMetrics.height - PaperMetrics.bottom - footer
 		var pages: [[StatementLine]] = [[]]
 		var y = top
 		for (index, line) in document.lines.enumerated() {
@@ -98,6 +100,9 @@ enum StatementPDF {
 	}
 	private static var contentWidth: CGFloat { PaperMetrics.width - PaperMetrics.side * 2 }
 
+	/// The space below the last row: a gap, then the footnote, above the bottom margin.
+	static var footer: CGFloat { pageNumberSpace + footnoteHeight }
+
 	private static var headerHeight: CGFloat {
 		lineHeight(font(PaperMetrics.entitySize, .semibold)) + 6
 			+ lineHeight(font(PaperMetrics.titleSize, .semibold)) + 2
@@ -110,11 +115,9 @@ enum StatementPDF {
 
 	private static func drawHeader(_ document: StatementDocument) -> CGFloat {
 		var y = PaperMetrics.top
-		let entity = NSMutableAttributedString(string: document.entity, attributes: [.font: font(PaperMetrics.entitySize, .semibold), .foregroundColor: ink])
-		entity.append(NSAttributedString(string: " (\(StatementDocument.unaudited))", attributes: [.font: font(PaperMetrics.unauditedSize, italic: true), .foregroundColor: secondary]))
-		drawCentered(entity, y: y)
+		drawCentered(document.entity, font: font(PaperMetrics.entitySize, .semibold), color: ink, y: y)
 		y += lineHeight(font(PaperMetrics.entitySize, .semibold)) + 6
-		drawCentered(document.title, font: font(PaperMetrics.titleSize, .semibold), color: ink, y: y)
+		drawCentered(document.title + StatementDocument.footnoteMark, font: font(PaperMetrics.titleSize, .semibold), color: ink, y: y)
 		y += lineHeight(font(PaperMetrics.titleSize, .semibold)) + 2
 		drawCentered(document.basis, font: font(PaperMetrics.basisSize), color: secondary, y: y)
 		return y + lineHeight(font(PaperMetrics.basisSize)) + PaperMetrics.headerGap
@@ -160,6 +163,19 @@ enum StatementPDF {
 
 	private static func drawNotice(_ notice: String, at top: CGFloat) {
 		noticeText(notice).draw(with: CGRect(x: PaperMetrics.side, y: top + PaperMetrics.noticeGap, width: contentWidth, height: noticeHeight(notice)), options: .usesLineFragmentOrigin)
+	}
+
+	private static var footnoteText: NSAttributedString {
+		NSAttributedString(string: "\(StatementDocument.footnoteMark) \(StatementDocument.footnote)", attributes: [.font: font(PaperMetrics.footnoteSize), .foregroundColor: secondary])
+	}
+
+	private static var footnoteHeight: CGFloat {
+		ceil(footnoteText.boundingRect(with: CGSize(width: contentWidth, height: .greatestFiniteMagnitude), options: .usesLineFragmentOrigin).height)
+	}
+
+	private static func drawFootnote() {
+		let top = PaperMetrics.height - PaperMetrics.bottom - footnoteHeight
+		footnoteText.draw(with: CGRect(x: PaperMetrics.side, y: top, width: contentWidth, height: footnoteHeight), options: .usesLineFragmentOrigin)
 	}
 
 	private static func rule(from x1: CGFloat, to x2: CGFloat, y: CGFloat, width: CGFloat, color: NSColor) {
