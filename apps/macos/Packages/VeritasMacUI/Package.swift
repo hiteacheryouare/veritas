@@ -19,6 +19,7 @@ let package = Package(
 				.product(name: "VeritasDesign", package: "VeritasKit")
 			]
 		),
-		.testTarget(name: "VeritasMacUITests", dependencies: ["VeritasMacUI"])
+		.target(name: "ObjCExceptions", path: "Tests/ObjCExceptions"),
+		.testTarget(name: "VeritasMacUITests", dependencies: ["VeritasMacUI", "ObjCExceptions"])
 	]
 )

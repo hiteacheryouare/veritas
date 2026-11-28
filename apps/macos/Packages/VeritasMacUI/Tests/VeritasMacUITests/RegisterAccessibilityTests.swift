@@ -1,4 +1,5 @@
 import AppKit
+import ObjCExceptions
 import SwiftUI
 import Testing
 import VeritasCore
@@ -119,5 +120,19 @@ struct RegisterAccessibilityTests {
 		#expect(label().hasSuffix(status(!row.cleared)), "the label follows the change: \(label())")
 		let cleared = try #require(((table.accessibilityRows() ?? [])[index] as? NSAccessibilityElement)?.accessibilityChildren()?.last as? NSAccessibilityElement)
 		#expect(cleared.accessibilityLabel() == status(!row.cleared))
+	}
+
+	@Test func theRowListRaisesForAnIndexPastItsEndAndComparesWithoutMakingRows() {
+		var made = 0
+		let list = RegisterRowList(rows: 2, then: ["column"]) { index in made += 1; return "row \(index)" }
+		#expect(list.count == 3)
+		#expect(ObjCExceptions.catching { _ = list.object(at: 3) }?.name == .rangeException, "as NSArray does, rather than a trap")
+		#expect(ObjCExceptions.catching { _ = list.object(at: -1) }?.name == .rangeException)
+		#expect(ObjCExceptions.catching { #expect(list.object(at: 2) as? String == "column") } == nil)
+		made = 0
+		let other = RegisterRowList(rows: 2) { _ in made += 1; return "row" }
+		#expect(!list.isEqual(other))
+		#expect(list.isEqual(list))
+		#expect(made == 0, "comparing lists made no row")
 	}
 }

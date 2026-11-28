@@ -180,6 +180,16 @@ final class RegisterRowList: NSArray {
 	override func copy(with zone: NSZone? = nil) -> Any { self }
 
 	override func object(at index: Int) -> Any {
-		index < rows ? row(index) : extra[index - rows]
+		guard (0..<count).contains(index) else {
+			NSException(name: .rangeException, reason: "index \(index) beyond bounds of \(count) register rows", userInfo: nil).raise()
+			return NSNull()
+		}
+		return index < rows ? row(index) : extra[index - rows]
+	}
+
+	/// Only the same list is equal, so comparing two lists never makes every
+	/// row's element to compare them one by one.
+	override func isEqual(_ object: Any?) -> Bool {
+		(object as AnyObject?) === self
 	}
 }
