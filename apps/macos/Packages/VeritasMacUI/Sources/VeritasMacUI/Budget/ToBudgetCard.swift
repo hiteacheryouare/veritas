@@ -3,9 +3,6 @@ import VeritasCore
 import VeritasDesign
 import VeritasKit
 
-/// The brand accent, until #115's accent token lands and replaces it.
-private let brandAccent = Color(.sRGB, red: 0x23 / 255, green: 0x16 / 255, blue: 0x9C / 255)
-
 /// The Budget screen's To Budget figure as a centred hero card
 /// (docs/finance/to-budget.md TB-1.1). Clicking it opens the quick actions
 /// (TB-1.2); after one runs, its result line offers Undo (TB-2.4).
@@ -79,10 +76,10 @@ struct ToBudgetCard: View {
 		.padding(.vertical, dense ? Spacing.s3 : Spacing.s5)
 		.padding(.horizontal, Spacing.s6)
 		.frame(minWidth: dense ? 260 : 360)
-		.background(brandAccent.opacity(isHovering ? 0.1 : 0.06), in: .rect(cornerRadius: Radius.section))
+		.background(Color.accent.opacity(isHovering ? 0.1 : 0.06), in: .rect(cornerRadius: Radius.section))
 		.overlay {
 			RoundedRectangle(cornerRadius: Radius.section)
-				.strokeBorder(brandAccent.opacity(isHovering ? 0.45 : 0.25), lineWidth: 1)
+				.strokeBorder(Color.accent.opacity(isHovering ? 0.45 : 0.25), lineWidth: 1)
 		}
 		.contentShape(.rect(cornerRadius: Radius.section))
 	}
