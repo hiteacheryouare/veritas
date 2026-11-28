@@ -137,9 +137,9 @@ final class StubAccounts: @unchecked Sendable {
 			let item = { (account: AccountDetail) in SidebarAccount(id: account.id, name: account.name, balance: account.total) }
 			return [
 				SidebarGroup(name: "Cash", accounts: open.filter { ["checking", "savings"].contains($0.id) || (!$0.offBudget && !["visa", "checking", "savings"].contains($0.id)) }.map(item)),
-				SidebarGroup(name: "Credit", accounts: open.filter { $0.id == "visa" }.map(item)),
+				SidebarGroup(name: "Credit", accounts: open.filter { $0.id == "visa" }.map(item), isLiability: true),
 				SidebarGroup(name: "Investments", accounts: open.filter { $0.offBudget && loans[$0.id] == nil }.map(item)),
-				SidebarGroup(name: "Loans", accounts: open.filter { $0.offBudget && loans[$0.id] != nil }.map(item))
+				SidebarGroup(name: "Loans", accounts: open.filter { $0.offBudget && loans[$0.id] != nil }.map(item), isLiability: true)
 			].filter { !$0.accounts.isEmpty }
 		}
 	}

@@ -16,7 +16,7 @@ struct SetupScreenshotTests {
 		.standardizedFileURL
 
 	@Test func firstLaunch() throws {
-		try render(EmptyStateView(isWorking: false, newBudget: {}, importActualZip: {}).frame(width: 1028, height: 640).background(.surfaceWindow), named: "1-first-launch")
+		try render(EmptyStateView(isWorking: false, newBudget: {}, importActualZip: {}, playsMintIn: false).frame(width: 1028, height: 640).background(.surfaceWindow), named: "1-first-launch")
 	}
 
 	@Test func basics() async throws {

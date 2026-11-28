@@ -120,6 +120,7 @@
 				7E5A00000000000000000011 /* Sources */,
 				7E5A00000000000000000012 /* Frameworks */,
 				7E5A00000000000000000013 /* Resources */,
+				7E5A00000000000000000060 /* Copy Acknowledgements */,
 				7E5A0000000000000000005D /* Embed PlugIns */,
 			);
 			buildRules = (
@@ -249,6 +250,31 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		7E5A00000000000000000060 /* Copy Acknowledgements */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/../../THIRD_PARTY_NOTICES.md",
+				"$(SRCROOT)/../../LICENSE",
+			);
+			name = "Copy Acknowledgements";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Acknowledgements.md",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/LICENSE",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -eu\ncp \"$SCRIPT_INPUT_FILE_0\" \"$SCRIPT_OUTPUT_FILE_0\"\ncp \"$SCRIPT_INPUT_FILE_1\" \"$SCRIPT_OUTPUT_FILE_1\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		7E5A00000000000000000011 /* Sources */ = {

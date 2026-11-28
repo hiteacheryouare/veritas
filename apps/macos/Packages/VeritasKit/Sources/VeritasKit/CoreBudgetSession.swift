@@ -25,7 +25,7 @@ final class CoreBudgetSession: BudgetSession {
 			accountGroups: overview.groups.filter { !$0.accounts.isEmpty }.map { group in
 				SidebarGroup(name: group.group.title, accounts: group.accounts.map { account in
 					SidebarAccount(id: account.id, name: account.name, balance: account.balance, isInactive: account.closed || account.deleted)
-				})
+				}, isLiability: group.group == .credit || group.group == .loans)
 			},
 			format: overview.numberFormat.map { MoneyFormat($0, currency: currency) },
 			currencyCode: currency.flatMap { $0.code.isEmpty ? nil : $0.code },

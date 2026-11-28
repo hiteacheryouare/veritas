@@ -22,9 +22,10 @@ struct StatementsScreen: View {
 				if let document = model.document {
 					StatementPaper(document: document, format: model.format)
 				} else {
-					ProgressView().frame(maxWidth: .infinity, minHeight: 200)
+					ScreenState(kind: .loading).frame(minHeight: 200)
 				}
 			}
+			.motion(.fast, value: model.document == nil)
 			.padding(.top, Spacing.s2)
 			.padding(.horizontal, Spacing.s5)
 			.padding(.bottom, Spacing.s6)

@@ -67,6 +67,9 @@ struct CoreBudgetLibraryTests {
 		#expect(!overview.accounts.isEmpty)
 		#expect(overview.accountGroups.allSatisfy { !$0.accounts.isEmpty })
 		#expect(Set(overview.accountGroups.map(\.name)).isSubset(of: ["Cash", "Credit", "Investments & Other assets", "Loans"]))
+		for group in overview.accountGroups {
+			#expect(group.isLiability == ["Credit", "Loans"].contains(group.name), "\(group.name): ST-9.1 places Credit and Loans as liabilities")
+		}
 		await session.close()
 	}
 
@@ -105,6 +108,12 @@ struct CoreBudgetLibraryTests {
 		#expect(groups["Credit"] == ["Visa"])
 		#expect(groups["Loans"] == ["Car loan"])
 		#expect(groups["Investments & Other assets"]?.count == 1, "the 401(k)")
+		// ST-9.1: the core places Credit and Loans as liabilities; the balance graph reads this.
+		let liability = Dictionary(uniqueKeysWithValues: overview.accountGroups.map { ($0.name, $0.isLiability) })
+		#expect(liability["Loans"] == true, "a loan is a liability")
+		#expect(liability["Credit"] == true, "a card is a liability")
+		#expect(liability["Cash"] == false)
+		#expect(liability["Investments & Other assets"] == false)
 		let balances = Dictionary(uniqueKeysWithValues: overview.accounts.map { ($0.name, $0.balance) })
 		#expect(balances["Checking"] == 214_018)
 		#expect(balances["Visa"] == -61_233)

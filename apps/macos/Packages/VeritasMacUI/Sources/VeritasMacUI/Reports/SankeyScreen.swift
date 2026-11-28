@@ -90,6 +90,16 @@ struct SankeyCanvas: View {
 	let format: MoneyFormat
 	var compact = false
 	let open: (SankeyNode) -> Void
+	/// Each node's color, worked out once per report rather than on every redraw.
+	private let tokens: [ColorToken]
+
+	init(report: SankeyReport, format: MoneyFormat, compact: Bool = false, open: @escaping (SankeyNode) -> Void) {
+		self.report = report
+		self.format = format
+		self.compact = compact
+		self.open = open
+		tokens = Self.tokens(for: report)
+	}
 	@State private var hovered: SankeyTarget?
 	@State private var pointer: CGPoint = .zero
 	@State private var explaining: Int?
@@ -107,16 +117,16 @@ struct SankeyCanvas: View {
 				Canvas { context, _ in
 					for ribbon in layout.ribbons {
 						let opacity = lit.map { $0.flows.contains(ribbon.flow) ? 0.55 : 0.12 } ?? 0.28
-						context.fill(Path(ribbon.outline), with: .color(color(report.nodes[ribbon.to]).opacity(opacity)))
+						context.fill(Path(ribbon.outline), with: .color(Color(tokens[Int(ribbon.to)]).opacity(opacity)))
 					}
 					for node in layout.nodes {
 						let shape = Path(roundedRect: node.rect, cornerRadius: 3)
 						let isLit = lit?.nodes.contains(node.index) ?? false
 						let dimmed = lit != nil && !isLit
 						let isShown = isLit && shown == .node(node.index)
-						context.fill(shape, with: .color(isShown ? .textPrimary : color(report.nodes[node.index]).opacity(dimmed ? 0.45 : 1)))
+						context.fill(shape, with: .color(isShown ? .textPrimary : Color(tokens[node.index]).opacity(dimmed ? 0.45 : 1)))
 						if !isShown {
-							context.stroke(shape, with: .color(Color.chartEdge(token(report.nodes[node.index])).opacity(dimmed ? 0.45 : 1)), lineWidth: 1)
+							context.stroke(shape, with: .color(Color.chartEdge(tokens[node.index]).opacity(dimmed ? 0.45 : 1)), lineWidth: 1)
 						}
 					}
 				}
@@ -277,16 +287,30 @@ struct SankeyCanvas: View {
 		}
 	}
 
-	func color(_ node: SankeyNode) -> Color { Color(token(node)) }
+	/// Spending groups take the category palette in order, and each category its
+	/// group's. Income and its sources are cerulean and debt paydown is brown, so the
+	/// groups skip cerulean, copper and moss; savings keeps the good color.
+	static let groupTokens: [ColorToken] = ColorToken.categories.filter { ![ColorToken.category2, .category4, .category9].contains($0) }
 
-	func token(_ node: SankeyNode) -> ColorToken {
-		switch node.key.kind {
-		case .incomeCategory, .income, .refundsAndWithdrawals, .unreviewedTransfersIn, .shortfall: .moneyIncomeFill
-		case .savings: .chartSavings
-		case .debtPaydown: .chartDebtPaydown
-		case .unallocated: .chartUnallocated
-		default: .chartExpense
+	static func tokens(for report: SankeyReport) -> [ColorToken] {
+		var tokens: [ColorToken] = []
+		var groups = 0
+		for node in report.nodes {
+			switch node.key.kind {
+			case .incomeCategory, .income, .refundsAndWithdrawals, .unreviewedTransfersIn, .shortfall: tokens.append(.moneyIncomeFill)
+			case .savings: tokens.append(.chartSavings)
+			case .debtPaydown: tokens.append(.chartDebtPaydown)
+			case .unallocated: tokens.append(.chartUnallocated)
+			case .categoryGroup:
+				tokens.append(groupTokens[groups % groupTokens.count])
+				groups += 1
+			default: tokens.append(.chartExpense)
+			}
 		}
+		for flow in report.flows where report.nodes[Int(flow.to)].key.kind == .category && report.nodes[Int(flow.from)].key.kind == .categoryGroup {
+			tokens[Int(flow.to)] = tokens[Int(flow.from)]
+		}
+		return tokens
 	}
 
 	static func identifier(_ key: SankeyNodeKey) -> String {

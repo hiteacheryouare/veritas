@@ -66,13 +66,20 @@ struct AccountRegisterScreen: View {
 					self.reconcile = nil
 					register.isReconciling = false
 				}
+				.motionTransition(.reveal)
 			}
 			VStack(alignment: .leading, spacing: Spacing.s3) {
-				if let account {
-					BalanceSummary(account: account, format: register.format)
+				// The summary's line is held from the first frame, so the table doesn't drop when the account loads.
+				Group {
+					if let account {
+						BalanceSummary(account: account, format: register.format)
+					} else {
+						BalanceSummary.placeholder
+					}
 				}
+				.motion(.fast, value: account == nil)
 				if !isEmpty {
-					BalanceGraph(history: register.history, format: register.format)
+					BalanceGraph(history: register.history, format: register.format, isLiability: workspace.overview?.isLiability(accountID) ?? false)
 						.frame(height: 120)
 				}
 				RegisterFilters(register: register, search: $search)
@@ -245,19 +252,24 @@ private struct RegisterFilters: View {
 
 /// The account's end-of-day balance over the date filter, and how much it
 /// changed, as in the register mockup.
-private struct BalanceGraph: View {
+struct BalanceGraph: View {
 	let history: BalanceHistory?
 	let format: MoneyFormat
+	/// The core's placement (ST-9.1). A liability sits below zero by nature, so
+	/// below zero it is drawn in neutral ink, not the overspent red.
+	var isLiability = false
 
 	var body: some View {
 		if let history, history.points.count > 1, let first = history.points.first, let last = history.points.last {
 			ZStack {
-				let domain = Self.domain(history.points.map { Double($0.balance) / 100 })
+				let values = history.points.map { Double($0.balance) / 100 }
+				let domain = Self.domain(values)
+				let baseline = ZeroSplit.baseline(in: domain)
 				Chart(history.points, id: \.date) { point in
-					AreaMark(x: .value("Day", point.date), yStart: .value("Floor", domain.lowerBound), yEnd: .value("Balance", Double(point.balance) / 100))
-						.foregroundStyle(.linearGradient(colors: [Color.textPrimary.opacity(0.10), Color.textPrimary.opacity(0)], startPoint: .top, endPoint: .bottom))
+					AreaMark(x: .value("Day", point.date), yStart: .value("Floor", baseline), yEnd: .value("Balance", Double(point.balance) / 100))
+						.foregroundStyle(Self.split(ZeroSplit.areaStop(values, baseline: baseline), above: Self.aboveArea().color, below: Self.belowArea(isLiability: isLiability).color))
 					LineMark(x: .value("Day", point.date), y: .value("Balance", Double(point.balance) / 100))
-						.foregroundStyle(Color.textPrimary)
+						.foregroundStyle(Self.split(ZeroSplit.lineStop(values), above: Self.aboveLine().color, below: Self.belowLine(isLiability: isLiability).color))
 						.lineStyle(StrokeStyle(lineWidth: 1.5))
 				}
 				.chartXAxis(.hidden)
@@ -295,6 +307,34 @@ private struct BalanceGraph: View {
 		return (low - pad)...(high + pad)
 	}
 
+	/// The tokens and opacities the graph draws with, as a seam for tests.
+	struct Ink: Equatable {
+		let token: ColorToken
+		let opacity: Double
+
+		var color: Color { Color(token).opacity(opacity) }
+	}
+
+	static func aboveLine() -> Ink { Ink(token: ColorToken.moneyAvailableFill.chartMark, opacity: 1) }
+	static func aboveArea() -> Ink { Ink(token: .moneyAvailableFill, opacity: 0.22) }
+	static func belowLine(isLiability: Bool) -> Ink {
+		isLiability ? Ink(token: .textPrimary, opacity: 1) : Ink(token: ColorToken.moneyOverspentFill.chartMark, opacity: 1)
+	}
+	static func belowArea(isLiability: Bool) -> Ink {
+		isLiability ? Ink(token: .textPrimary, opacity: 0.08) : Ink(token: .moneyOverspentFill, opacity: 0.18)
+	}
+
+	/// Green above zero for every account: an overpaid card is an asset that day
+	/// (ST-2). Below zero, an asset is red and a liability neutral. The color
+	/// changes exactly where the balance crosses zero. Lines take the 3:1 chart
+	/// shade of each fill; the area under them keeps the fill, faint.
+	static func split(_ stop: Double, above: Color, below: Color) -> LinearGradient {
+		LinearGradient(
+			stops: [.init(color: above, location: 0), .init(color: above, location: stop), .init(color: below, location: stop), .init(color: below, location: 1)],
+			startPoint: .top, endPoint: .bottom
+		)
+	}
+
 	/// "+101.4%": the core's fraction, with its sign.
 	static func change(_ fraction: Double) -> String {
 		(fraction > 0 ? "+" : "") + fraction.formatted(.percent.precision(.fractionLength(1)))
@@ -323,6 +363,15 @@ private struct BalanceSummary: View {
 		.font(.text(.body))
 		.accessibilityElement(children: .combine)
 		.accessibilityIdentifier("register.summary")
+	}
+
+	static var placeholder: some View {
+		HStack(spacing: Spacing.s5) {
+			LabeledFigure(title: "Balance", value: " ")
+		}
+		.font(.text(.body))
+		.hidden()
+		.accessibilityHidden(true)
 	}
 }
 

@@ -47,6 +47,7 @@ struct EnvelopeRowView: View {
 			if !isIncome {
 				Text(screen.format.amount(-envelope.spent, on: .budget))
 					.font(.figures(.body))
+					.rowFigureChange(envelope.spent)
 					.foregroundStyle(envelope.spent == 0 ? Color(ColorToken.moneyNeutral) : Color.textPrimary)
 			}
 		} available: {
@@ -120,6 +121,7 @@ struct EnvelopeRowView: View {
 			} label: {
 				Text(screen.format.amount(envelope.budgeted, on: .budget))
 					.font(.figures(.body))
+					.rowFigureChange(envelope.budgeted)
 					.foregroundStyle(envelope.budgeted == 0 ? Color(ColorToken.moneyNeutral) : Color.textPrimary)
 					.frame(maxWidth: .infinity, alignment: .trailing)
 					.contentShape(.rect)

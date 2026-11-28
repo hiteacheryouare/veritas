@@ -87,7 +87,7 @@ struct StubLibrary: BudgetLibrary {
 		}
 		let groups = VeritasCore.AccountGroup.allCases.compactMap { group -> SidebarGroup? in
 			let members = accounts.filter { $0.0 == group }.map(\.1)
-			return members.isEmpty ? nil : SidebarGroup(name: group.title, accounts: members)
+			return members.isEmpty ? nil : SidebarGroup(name: group.title, accounts: members, isLiability: group == .credit || group == .loans)
 		}
 		return StubSession(readOnly: readOnly, name: budget.name, groups: groups)
 	}
@@ -140,7 +140,7 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 		name = "Stub"
 		accountGroups = [
 			SidebarGroup(name: "Cash", accounts: [SidebarAccount(id: "checking", name: "Checking", balance: 0)]),
-			SidebarGroup(name: "Credit", accounts: [SidebarAccount(id: "visa", name: "Visa", balance: 0)])
+			SidebarGroup(name: "Credit", accounts: [SidebarAccount(id: "visa", name: "Visa", balance: 0)], isLiability: true)
 		]
 	}
 
