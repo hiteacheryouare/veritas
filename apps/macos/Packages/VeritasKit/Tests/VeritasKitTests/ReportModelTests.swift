@@ -159,21 +159,20 @@ final class ReportFakeSession: BudgetSession, @unchecked Sendable {
 		asked.append(ReportPeriod(first: first, last: last))
 		return report
 	}
-	/// Holds the next read with what it read, until `releaseDashboards`, as a slow load would.
-	var holdsNextDashboards = false
-	private(set) var isHoldingDashboards = false
-	private var heldDashboards: CheckedContinuation<Void, Never>?
+	/// Holds this many of the next reads with what they read, until `releaseOldestDashboards`, as slow loads would.
+	var dashboardReadsToHold = 0
+	private var heldDashboards: [CheckedContinuation<Void, Never>] = []
+	var heldDashboardReads: Int { heldDashboards.count }
 	func dashboards(today: String) async throws -> [DashboardPage] {
 		let read = dashboard
-		if holdsNextDashboards {
-			holdsNextDashboards = false
-			await withCheckedContinuation { heldDashboards = $0; isHoldingDashboards = true }
+		if dashboardReadsToHold > 0 {
+			dashboardReadsToHold -= 1
+			await withCheckedContinuation { heldDashboards.append($0) }
 		}
 		return read
 	}
-	func releaseDashboards() {
-		heldDashboards?.resume()
-		heldDashboards = nil
+	func releaseOldestDashboards() {
+		heldDashboards.removeFirst().resume()
 	}
 	var flows: [CashFlowColumn] = []
 	func cashFlow(first: Month, last: Month) async throws -> [CashFlowColumn] { flows }
@@ -366,14 +365,37 @@ struct DashboardModelTests {
 		let model = DashboardModel(workspace: workspace)
 		await model.load()
 		let widget = try #require(model.sheet?.cards.first)
-		session.holdsNextDashboards = true
+		session.dashboardReadsToHold = 1
 		let slow = Task { await model.load() }
-		while !session.isHoldingDashboards { await Task.yield() }
+		while session.heldDashboardReads < 1 { await Task.yield() }
 		await model.move(widget, rows: 1)
 		#expect(model.sheet?.cards.first?.y == 3)
-		session.releaseDashboards()
+		session.releaseOldestDashboards()
 		await slow.value
 		#expect(model.sheet?.cards.first?.y == 3, "the older load's layout never lands after the move's")
+	}
+
+	@Test func anOvertakenFirstLoadNeverShowsTheEmptyDashboard() async {
+		let session = ReportFakeSession()
+		session.dashboard = [DashboardPage(id: "main", name: "Main", widgets: [
+			DashboardWidget(id: "w", kind: "net-worth-card", x: 0, y: 0, width: 6, height: 3, minWidth: 3, minHeight: 2, config: .named("Net worth"), view: .markdown(text: "", align: nil))
+		])]
+		let workspace = WorkspaceModel(library: ReportFakeLibrary(session: session), format: MoneyFormat())
+		await workspace.reopen(directory: URL(filePath: "/tmp/budget"))
+		let model = DashboardModel(workspace: workspace)
+		session.dashboardReadsToHold = 2
+		let older = Task { await model.load() }
+		while session.heldDashboardReads < 1 { await Task.yield() }
+		let newer = Task { await model.load() }
+		while session.heldDashboardReads < 2 { await Task.yield() }
+		session.releaseOldestDashboards()
+		await older.value
+		#expect(!model.hasLoaded, "an overtaken load leaves the screen loading, not empty")
+		#expect(model.sheets.isEmpty)
+		session.releaseOldestDashboards()
+		await newer.value
+		#expect(model.hasLoaded)
+		#expect(model.sheet?.cards.map(\.id) == ["w"])
 	}
 
 	@Test func placingAWidgetClampsToTheGridAndSendsOneCommand() async {
