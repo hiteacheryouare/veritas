@@ -21,13 +21,13 @@ final class BudgetSwitcherJourneyTests: XCTestCase {
 		let switcher = app.descendants(matching: .any)["budgetSwitcher"]
 		XCTAssertTrue(waitUntil { self.text(of: switcher).contains("Household") }, text(of: switcher))
 		switcher.click()
-		XCTAssertFalse(menuItem("Household", in: app).exists, "the open budget isn't offered again")
-		app.menuItems["New Budget…"].click()
+		XCTAssertFalse(recentBudget("Household", in: switcher).exists, "the open budget isn't offered again")
+		switcher.menuItems["New Budget…"].click()
 		createBudget(named: "Side business", account: "Business checking", in: app)
 		XCTAssertTrue(waitUntil { self.text(of: switcher).contains("Side business") }, text(of: switcher))
 
 		switcher.click()
-		let household = menuItem("Household", in: app)
+		let household = recentBudget("Household", in: switcher)
 		XCTAssertTrue(household.waitForExistence(timeout: 5), "the first budget is in the list")
 		attachScreenshot(of: app, named: "budget-switcher-menu", wholeScreen: true)
 		household.click()
@@ -36,9 +36,11 @@ final class BudgetSwitcherJourneyTests: XCTestCase {
 		XCTAssertFalse(sidebarAccount(named: "Business checking", in: app).exists)
 		XCTAssertFalse(app.descendants(matching: .any)["readOnlyBanner"].exists, "the budget closed before this one opened, so it's writable")
 
-		app.menuBars.menuBarItems["File"].click()
-		app.menuItems["Open Recent"].hover()
-		let business = menuItem("Side business", in: app)
+		let file = app.menuBars.menuBarItems["File"]
+		file.click()
+		let openRecent = file.menuItems["Open Recent"]
+		openRecent.hover()
+		let business = recentBudget("Side business", in: openRecent)
 		XCTAssertTrue(business.waitForExistence(timeout: 5))
 		attachScreenshot(of: app, named: "open-recent-menu", wholeScreen: true)
 		business.click()
@@ -58,8 +60,9 @@ final class BudgetSwitcherJourneyTests: XCTestCase {
 
 		app.typeKey("w", modifierFlags: .command)
 		XCTAssertTrue(app.windows.firstMatch.waitForDisappearance(timeout: 10), "the window closed")
-		app.menuBars.menuBarItems["File"].click()
-		app.menuItems["New Window"].click()
+		let file = app.menuBars.menuBarItems["File"]
+		file.click()
+		file.menuItems["New Window"].click()
 
 		let switcher = app.descendants(matching: .any)["budgetSwitcher"]
 		XCTAssertTrue(waitUntil { self.text(of: switcher).contains("Household") }, "the budget opens again: \(text(of: switcher))")
@@ -93,11 +96,13 @@ final class BudgetSwitcherJourneyTests: XCTestCase {
 		XCTAssertTrue(app.screen("budget").waitForExistence(timeout: 15), "\(name) opens")
 	}
 
-	/// A recent budget's menu item, by its identifier or, where a menu drops
-	/// identifiers, by the name it starts with.
+	/// A recent budget's item in one menu, by its identifier or, where a menu
+	/// drops identifiers, by the name it starts with. The sidebar's menu and
+	/// File › Open Recent list the same budgets, and the menu bar's menus are
+	/// always in the tree, so each query names the menu it means.
 	@MainActor
-	private func menuItem(_ name: String, in app: XCUIApplication) -> XCUIElement {
-		app.menuItems.matching(NSPredicate(format: "identifier == %@ OR title BEGINSWITH %@", "recentBudget.\(name)", name)).firstMatch
+	private func recentBudget(_ name: String, in menu: XCUIElement) -> XCUIElement {
+		menu.menuItems.matching(NSPredicate(format: "identifier == %@ OR title BEGINSWITH %@", "recentBudget.\(name)", name)).element
 	}
 
 	@MainActor
