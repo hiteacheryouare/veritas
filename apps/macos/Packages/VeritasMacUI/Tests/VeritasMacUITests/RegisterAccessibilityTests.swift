@@ -128,7 +128,9 @@ struct RegisterAccessibilityTests {
 		#expect(list.count == 3)
 		#expect(ObjCExceptions.catching { _ = list.object(at: 3) }?.name == .rangeException, "as NSArray does, rather than a trap")
 		#expect(ObjCExceptions.catching { _ = list.object(at: -1) }?.name == .rangeException)
-		#expect(ObjCExceptions.catching { #expect(list.object(at: 2) as? String == "column") } == nil)
+		var last: Any?
+		#expect(ObjCExceptions.catching { last = list.object(at: 2) } == nil)
+		#expect(last as? String == "column")
 		made = 0
 		let other = RegisterRowList(rows: 2) { _ in made += 1; return "row" }
 		#expect(!list.isEqual(other))
