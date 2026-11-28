@@ -242,13 +242,9 @@ pub(super) fn preview(
 			veritas_engine::goals::first_reached_month(inputs.sheet, &goal, month).or(Some(month))
 		})
 		.flatten();
-	let spending_recorded = inputs.data.format.decimal_places() != 2
-		&& inputs.classification.rows().iter().any(|row| {
-			row.is_primary()
-				&& row.kind() == TransactionKind::Expense
-				&& row.category.as_ref() == Some(category)
-				&& row.date <= inputs.today
-		});
+	// D77, the same test the Goals screen uses, so the two never disagree.
+	let spending_recorded =
+		veritas_forecast::spending_recorded(inputs.data, inputs.classification, category, month)?;
 	let suggestion = if spending_recorded || reached_month.is_some() {
 		None
 	} else {

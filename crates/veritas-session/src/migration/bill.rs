@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use veritas_domain::{AccountKind, CategoryId, CoreError, ScheduleId, ScheduleMeta};
+use veritas_domain::{CategoryId, CoreError, Money, ScheduleId, ScheduleMeta};
 use veritas_rules::{BillAmount, read_bill};
 
 use super::{Confidence, Conversion, Inputs, Suggestion, signal};
@@ -52,17 +52,11 @@ pub(super) fn suggestions(inputs: &Inputs<'_>) -> Result<Vec<Suggestion>, CoreEr
 			BillAmount::Exact(amount) | BillAmount::About(amount) => amount.minor() > 0,
 			BillAmount::Between(low, high) => low.minor() > 0 && high.minor() > 0,
 		});
-		// MIG-6.3: ST-9.1's rule 1 or 2 only, never a balance below zero.
+		// MIG-6.3: ST-9.1's placement, rules 1 and 2 only. A zero balance
+		// keeps rule 3, a balance below zero, out of it.
 		let loan = payee
 			.and_then(|payee| payee.transfer_account.as_ref())
-			.filter(|account| {
-				data.account_meta.get(*account).is_some_and(|meta| {
-					meta.kind == Some(AccountKind::Liability)
-						|| meta.loan_rate_bps.is_some()
-						|| meta.loan_payment.is_some()
-						|| meta.loan_payment_day.is_some()
-				})
-			})
+			.filter(|account| crate::overview::placement(data, account, Money::ZERO).0)
 			.and_then(|account| data.accounts.get(account))
 			.map(|account| account.name.clone());
 		let meta = data

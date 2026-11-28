@@ -131,6 +131,9 @@ struct UpgradeSheet: View {
 				}
 			}
 			.frame(maxHeight: 420)
+			if let problem = model.problem {
+				ProblemNote(text: problem)
+			}
 			HStack {
 				Button("Select Suggested") { model.selectSuggested() }
 					.accessibilityIdentifier("upgrade.selectSuggested")

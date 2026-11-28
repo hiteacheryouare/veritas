@@ -1635,3 +1635,72 @@ fn mig_2_4_and_5_4_the_confirm_figures_follow_the_chosen_kind() {
 			.any(|effect| effect.report == "Debt paydown")
 	);
 }
+
+#[test]
+fn d77_the_confirm_step_reads_spending_as_the_goals_screen_does() {
+	let preview = |refunded: bool| {
+		let mut budget = goal_budget();
+		budget.data.format.currency_code = Some("JPY".to_owned());
+		budget.category("trip", "Trip", "everyday", 4.0);
+		budget.note("trip", "#template 100000 by 2027-06");
+		budget.row("checking", "2026-11-05", -5_000, Some("trip"), None);
+		if refunded {
+			budget.row("checking", "2026-11-09", 5_000, Some("trip"), None);
+		}
+		find(&budget.suggestions(TODAY), "goal:trip")
+			.and_then(|s| s.goal_preview.clone())
+			.unwrap()
+	};
+	let spent = preview(false);
+	assert!(
+		spent.spending_recorded,
+		"example 9: spending recorded, so no suggestion and no ETA"
+	);
+	assert_eq!(spent.monthly, None);
+	let refunded = preview(true);
+	assert!(
+		!refunded.spending_recorded,
+		"a refund that nets it to zero is no recorded spending, as on the Goals screen"
+	);
+	assert!(refunded.monthly.is_some());
+}
+
+#[test]
+fn mig_6_3_the_loan_icon_follows_st_9_1_rules_1_and_2() {
+	let icon_for = |meta: AccountMeta| {
+		let mut budget = bill_budget();
+		budget.account("debt", "Debt", true);
+		budget.opening("debt", 10_000);
+		budget
+			.data
+			.account_meta
+			.insert(AccountId::new("debt"), meta);
+		schedule(&mut budget, "pay", Some("Pay it"), "to-debt", -1_000, None);
+		find(&budget.suggestions(TODAY), "bill:pay").and_then(|s| s.proposed.icon.clone())
+	};
+	let lender = AccountMeta {
+		lender: Some("Credit union".to_owned()),
+		..AccountMeta::default()
+	};
+	assert_eq!(
+		icon_for(lender.clone()).as_deref(),
+		Some(bill::LOAN_ICON),
+		"a lender is a rule 2 loan field"
+	);
+	assert_eq!(
+		icon_for(AccountMeta {
+			loan_payment_day: Some(15),
+			..AccountMeta::default()
+		}),
+		None,
+		"a payment day alone isn't one of rule 2's fields"
+	);
+	assert_eq!(
+		icon_for(AccountMeta {
+			kind: Some(AccountKind::Asset),
+			..lender
+		}),
+		None,
+		"rule 1's explicit asset kind comes first"
+	);
+}

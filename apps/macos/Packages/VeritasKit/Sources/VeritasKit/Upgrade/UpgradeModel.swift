@@ -195,13 +195,26 @@ public final class UpgradeModel: Identifiable {
 	}
 
 	/// Review to Confirm: the figures are recomputed for the user's edits,
-	/// such as a changed target or kind (MIG-2.4).
+	/// such as a changed target or kind (MIG-2.4). If that fails, the sheet
+	/// stays on Review with the error, so Confirm never shows figures that
+	/// ignore an edit.
 	public func continueToConfirm() async {
 		problem = nil
 		guard let selection = await selection() else { return }
 		let today = today
-		confirming = await workspace.report { try await $0.migrationPreview(selection, today: today) } ?? tickedSuggestions
-		step = .confirm
+		switch await workspace.attempt({ try await $0.migrationPreview(selection, today: today) }) {
+		case .success(let previewed):
+			confirming = previewed
+			step = .confirm
+		case .failure(let error):
+			if case .inline(let message) = ErrorPresentation(error) {
+				problem = message
+			} else {
+				problem = "The figures couldn't be worked out. Try again."
+			}
+		case nil:
+			break
+		}
 	}
 
 	/// MIG-1.5: every ticked item as one command and one undo step.

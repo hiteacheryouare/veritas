@@ -121,6 +121,17 @@ struct UpgradeModelTests {
 		#expect(!workspace.isUpgraded("goal:vacation"), "MIG-4.7: a closed goal offers no Revert")
 	}
 
+	@Test func aFailedPreviewStaysOnReviewWithTheError() async {
+		let session = UpgradeSession()
+		session.previewFails = true
+		let (model, _) = await openUpgrade(session)
+		model.step = .review
+		await model.continueToConfirm()
+		#expect(model.step == .review, "Confirm never shows figures that ignore an edit")
+		#expect(model.problem != nil)
+		#expect(model.confirming.isEmpty)
+	}
+
 	@Test func theOverviewCountsEachConversion() async {
 		let (model, _) = await openUpgrade()
 		#expect(model.counts.map(\.count) == [2, 1, 1])
@@ -172,6 +183,7 @@ private final class UpgradeSession: BudgetSession, @unchecked Sendable {
 	var upgraded: [String] = []
 	var closedGoals: Set<String> = []
 	var previews: [MigrationSelection] = []
+	var previewFails = false
 
 	func overview() async throws -> BudgetOverview {
 		BudgetOverview(name: "Household", directory: URL(filePath: "/tmp/budget"), readOnly: nil, accountGroups: [])
@@ -199,6 +211,7 @@ private final class UpgradeSession: BudgetSession, @unchecked Sendable {
 
 	func migrationPreview(_ selection: MigrationSelection, today: String) async throws -> [MigrationSuggestion] {
 		previews.append(selection)
+		if previewFails { throw FfiError.Storage(message: "disk I/O error") }
 		let all = try await migrationSuggestions(today: today)
 		return selection.items.compactMap { item in
 			guard var suggestion = all.first(where: { $0.key == item.key }) else { return nil }
