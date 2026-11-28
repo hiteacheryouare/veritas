@@ -38,9 +38,11 @@ struct UpgradeScreenshotTests {
 		model.toggle(try #require(model.visible.first { $0.key == "kind:carloan" }))
 		await model.continueToConfirm()
 		#expect(model.step == .confirm)
-		let confirm = try DrawnText.texts(in: UpgradeSheet(model: model, format: workspace.format), size: CGSize(width: 560, height: 520))
-		#expect(confirm.contains("The Goals screen lists the goal."), "MIG-2.4")
-		#expect(confirm.contains { $0.hasPrefix("It suggests") })
+		// The Confirm step scrolls, and a scroll view draws nothing for DrawnText, so its words are read from the model.
+		let goal = try #require(model.confirming.first { $0.key == "goal:vacation" }?.goalPreview)
+		let lines = UpgradeWords.goalLines(goal, format: workspace.format)
+		#expect(lines.contains("The Goals screen lists the goal."), "MIG-2.4")
+		#expect(lines.contains { $0.hasPrefix("It suggests") && $0.contains("8 months") })
 		try render(UpgradeSheet(model: model, format: workspace.format), named: "confirm", size: CGSize(width: 560, height: 520))
 	}
 
