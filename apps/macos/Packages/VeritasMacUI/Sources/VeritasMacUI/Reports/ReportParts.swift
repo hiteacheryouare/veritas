@@ -208,6 +208,9 @@ struct MonthRangePicker: View {
 
 /// The rows behind a number: date, payee, category, account and amount (ST-1.6).
 struct DrilldownSheet: View {
+	/// Loading, empty and filled all take the table's height, so the sheet never resizes when rows arrive.
+	static let tableHeight: CGFloat = 260
+
 	let model: DrilldownModel
 	@Environment(\.dismiss) private var dismiss
 
@@ -224,7 +227,7 @@ struct DrilldownSheet: View {
 					if rows.isEmpty {
 						Text("No transactions")
 							.foregroundStyle(.textSecondary)
-							.frame(maxWidth: .infinity, minHeight: 120)
+							.frame(maxWidth: .infinity, minHeight: Self.tableHeight)
 					} else {
 						Table(rows) {
 							TableColumn("Date") { Text(Self.date($0.date)).monospacedDigit() }
@@ -240,14 +243,15 @@ struct DrilldownSheet: View {
 							}
 							.width(min: 90, ideal: 110)
 						}
-						.frame(minHeight: 260)
+						.frame(minHeight: Self.tableHeight)
 						.accessibilityIdentifier("drilldown.table")
 					}
 				} else {
-					ProgressView()
-						.frame(maxWidth: .infinity, minHeight: 120)
+					ScreenState(kind: .loading)
+						.frame(minHeight: Self.tableHeight)
 				}
 			}
+			.motion(.fast, value: model.transactions == nil)
 			HStack {
 				if let rows = model.transactions, !rows.isEmpty {
 					Text(rows.count == 1 ? "1 transaction" : "\(rows.count.formatted()) transactions")

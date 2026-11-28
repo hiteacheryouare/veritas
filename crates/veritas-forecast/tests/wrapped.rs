@@ -1,4 +1,4 @@
-//! R-WRAP-1 and R-WRAP-2: every FC-8 worked example (W-1 to W-23).
+//! R-WRAP-1 and R-WRAP-2: every FC-8 worked example (W-1 to W-36).
 
 #![allow(clippy::unwrap_used, clippy::panic)]
 
@@ -776,4 +776,359 @@ fn w_19_no_spend_share_rounds_half_away_from_zero() {
 			tenths: 313
 		})
 	);
+}
+
+// N1 to N4, the editorial pages' figures (W-24 to W-36).
+
+/// The net worth at each month end, as (month, amount), oldest first.
+fn month_ends(result: &Wrapped) -> Vec<(&'static str, i64)> {
+	const MONTHS: [&str; 12] = [
+		"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+	];
+	result
+		.month_ends
+		.iter()
+		.map(|end| {
+			(
+				MONTHS[end.month.month() as usize - 1],
+				end.net_worth.minor(),
+			)
+		})
+		.collect()
+}
+
+/// Rows that move net worth by each month's change, on the 15th.
+fn moves(book: &mut Book, year: i32, changes: &[i64]) {
+	for (index, change) in changes.iter().enumerate() {
+		let on = format!("{year}-{:02}-15", index + 1);
+		if *change >= 0 {
+			book.spend("Paycheck", &on, *change);
+		} else {
+			book.spend("Groceries", &on, *change);
+		}
+	}
+}
+
+#[test]
+fn w_24_month_end_net_worth() {
+	let mut book = Book::household();
+	book.opening("CHK", "2026-12-31", 720000);
+	moves(
+		&mut book,
+		2027,
+		&[
+			15000, -33000, 58000, 20000, 10000, 10000, 15000, 5000, 20000, 60000, 100000, 118300,
+		],
+	);
+	let result = wrap(&book, 2027, "2028-01-10");
+	assert_eq!(
+		month_ends(&result),
+		[
+			("Jan", 735000),
+			("Feb", 702000),
+			("Mar", 760000),
+			("Apr", 780000),
+			("May", 790000),
+			("Jun", 800000),
+			("Jul", 815000),
+			("Aug", 820000),
+			("Sep", 840000),
+			("Oct", 900000),
+			("Nov", 1000000),
+			("Dec", 1118300)
+		]
+	);
+	let lowest = result.lowest_month_end.unwrap();
+	let highest = result.highest_month_end.unwrap();
+	assert_eq!(
+		(lowest.month, lowest.net_worth),
+		(ym("2027-02"), cents(702000))
+	);
+	assert_eq!(
+		(highest.month, highest.net_worth),
+		(ym("2027-12"), cents(1118300))
+	);
+	assert_eq!(
+		result.month_ends.last().unwrap().net_worth,
+		result.net_worth_end
+	);
+	assert_eq!(result.net_worth_change, cents(398300));
+	let redacted = result.redacted();
+	assert_eq!(
+		redacted.month_ends[..4],
+		[Some(21), Some(-25), Some(56), Some(83)]
+	);
+	assert_eq!(redacted.month_ends[11], Some(553));
+	assert_eq!(redacted.lowest_month_end, Some(-25));
+	assert_eq!(redacted.highest_month_end, Some(553));
+}
+
+#[test]
+fn w_25_month_end_net_worth_year_to_date() {
+	let mut book = Book::household();
+	book.opening("CHK", "2026-12-31", 720000);
+	book.spend("Paycheck", "2027-01-15", 15000);
+	book.spend("Groceries", "2027-02-15", -33000);
+	book.spend("Paycheck", "2027-03-05", 8000);
+	let result = wrap(&book, 2027, "2027-03-10");
+	assert_eq!(
+		month_ends(&result),
+		[("Jan", 735000), ("Feb", 702000), ("Mar", 710000)]
+	);
+	assert_eq!(result.month_ends[2].date, date("2027-03-10"));
+	assert_eq!(result.lowest_month_end.unwrap().month, ym("2027-02"));
+	assert_eq!(result.highest_month_end.unwrap().month, ym("2027-01"));
+	assert_eq!(result.net_worth_end, cents(710000));
+	assert_eq!(result.net_worth_change, cents(-10000));
+	assert_eq!(result.redacted().month_ends[2], Some(-14));
+}
+
+#[test]
+fn w_26_months_before_the_first_row_are_left_out_and_have_no_shares() {
+	let mut book = Book::household();
+	book.opening("CHK", "2027-03-05", 500000);
+	book.spend("Groceries", "2027-03-20", -20000);
+	book.spend("Paycheck", "2027-04-20", 40000);
+	let result = wrap(&book, 2027, "2028-01-01");
+	assert_eq!(result.month_ends.len(), 10);
+	assert_eq!(result.month_ends[0].month, ym("2027-03"));
+	assert_eq!(month_ends(&result)[..2], [("Mar", 480000), ("Apr", 520000)]);
+	assert_eq!(result.lowest_month_end.unwrap().month, ym("2027-03"));
+	assert_eq!(
+		result.highest_month_end.unwrap().month,
+		ym("2027-04"),
+		"ties to the earliest of April to December"
+	);
+	assert_eq!(result.net_worth_start, cents(0));
+	let redacted = result.redacted();
+	assert!(redacted.month_ends.iter().all(Option::is_none));
+	assert_eq!(
+		(redacted.lowest_month_end, redacted.highest_month_end),
+		(None, None)
+	);
+}
+
+#[test]
+fn w_27_negative_opening_net_worth_has_no_shares() {
+	let mut book = Book::household();
+	book.opening("CHK", "2026-12-31", -50000);
+	book.spend("Paycheck", "2027-01-15", 30000);
+	let result = wrap(&book, 2027, "2027-01-31");
+	assert_eq!(month_ends(&result), [("Jan", -20000)]);
+	assert_eq!(result.lowest_month_end.unwrap().net_worth, cents(-20000));
+	assert_eq!(result.redacted().month_ends, [None]);
+}
+
+#[test]
+fn w_28_typical_month_with_an_even_count() {
+	let mut book = Book::household();
+	book.monthly(
+		"Groceries",
+		&[
+			("2027-01", 30000),
+			("2027-02", 36000),
+			("2027-03", 42000),
+			("2027-04", 50000),
+		],
+	);
+	let result = wrap(&book, 2027, "2027-12-31");
+	assert_eq!(result.total_out, cents(158000));
+	assert_eq!(result.typical_month, Some(cents(39000)));
+	assert_eq!(result.redacted().typical_month, Some(247));
+	assert_eq!(result.biggest_vs_typical, Some(2821));
+}
+
+#[test]
+fn w_29_typical_month_counts_a_refund_month() {
+	let mut book = Book::household();
+	book.spend("Groceries", "2027-01-15", -30000);
+	book.spend("Gifts", "2027-02-15", 5000);
+	book.spend("Groceries", "2027-03-15", -20000);
+	let result = wrap(&book, 2027, "2027-12-31");
+	assert_eq!(result.total_out, cents(45000));
+	assert_eq!(result.typical_month, Some(cents(20000)));
+	assert_eq!(result.redacted().typical_month, Some(444));
+}
+
+#[test]
+fn w_30_typical_month_rounds_half_away_from_zero() {
+	let mut book = Book::household();
+	book.spend("Groceries", "2027-01-15", -10001);
+	book.spend("Groceries", "2027-02-15", -10000);
+	let result = wrap(&book, 2027, "2027-12-31");
+	assert_eq!(result.typical_month, Some(cents(10001)));
+	assert_eq!(result.redacted().typical_month, Some(500));
+
+	let mut refunds = Book::household();
+	refunds.spend("Gifts", "2027-01-15", 3);
+	refunds.spend("Gifts", "2027-02-15", 2);
+	assert_eq!(
+		wrap(&refunds, 2027, "2027-12-31").typical_month,
+		Some(cents(-3))
+	);
+}
+
+#[test]
+fn w_31_a_month_without_expense_rows_is_left_out() {
+	let mut book = Book::household();
+	book.spend("Groceries", "2027-01-15", -30000);
+	book.spend("Paycheck", "2027-02-15", 90000);
+	book.spend("Groceries", "2027-03-15", -10000);
+	let result = wrap(&book, 2027, "2027-12-31");
+	assert_eq!(result.typical_month, Some(cents(20000)));
+	assert_eq!(result.redacted().typical_month, Some(500));
+}
+
+#[test]
+fn w_32_typical_month_not_shown() {
+	let mut book = Book::household();
+	book.spend("Gifts", "2027-01-15", 5000);
+	let result = wrap(&book, 2027, "2027-12-31");
+	assert_eq!(result.typical_month, Some(cents(-5000)));
+	assert_eq!(result.biggest_vs_typical, None);
+	assert_eq!(result.redacted().typical_month, None);
+}
+
+/// W-33: W-1's days plus a capitalized transfer, a savings move, a loan
+/// payment's interest, a bill-linked purchase and a zero row.
+fn w_33_book() -> Book {
+	let mut book = w_1_book();
+	book.account("CAR", true)
+		.category("Savings", "Goals")
+		.kind("Savings", CategoryKind::Savings);
+	book.transfer("CHK", "CAR", "2027-01-05", -50000)
+		.in_category("Gifts");
+	book.transfer("CHK", "SAV", "2027-01-04", -20000)
+		.in_category("Savings");
+	book.row_with_id("pay", "CHK", "2027-01-03", -10000).split = veritas_domain::SplitRole::Parent;
+	book.transfer("CHK", "LOAN", "2027-01-03", -8800)
+		.in_category("Loan principal")
+		.child_of("pay");
+	book.spend("Loan interest", "2027-01-03", -1200)
+		.child_of("pay");
+	book.row("VISA", "2027-01-06", -4000)
+		.in_category("Dining")
+		.bill("Phone");
+	book.row("VISA", "2027-01-07", 0).in_category("Dining");
+	book
+}
+
+#[test]
+fn w_33_no_spend_dates() {
+	let result = wrap(&w_33_book(), 2027, "2027-01-10");
+	let expected: Vec<_> = ["01", "04", "07", "08", "10"]
+		.iter()
+		.map(|day| date(&format!("2027-01-{day}")))
+		.collect();
+	assert_eq!(result.no_spend.dates, expected);
+	assert_eq!(result.no_spend.days, 5);
+	assert_eq!(
+		result.no_spend.longest,
+		Some(Streak {
+			start: date("2027-01-07"),
+			days: 2
+		})
+	);
+	assert_eq!(result.no_spend.current, Some(1));
+}
+
+#[test]
+fn w_34_the_calendar_has_three_states() {
+	let result = wrap(&w_33_book(), 2027, "2027-01-10");
+	let evaluated = result.no_spend.evaluated.unwrap();
+	assert_eq!(
+		(evaluated.first(), evaluated.last()),
+		(date("2027-01-01"), date("2027-01-10"))
+	);
+	let spent: Vec<u32> = (1..=10)
+		.filter(|day| {
+			!result
+				.no_spend
+				.dates
+				.contains(&date(&format!("2027-01-{day:02}")))
+		})
+		.collect();
+	assert_eq!(spent, [2, 3, 5, 6, 9]);
+
+	let mut late = Book::household();
+	late.spend("Dining", "2027-01-05", -1000);
+	let result = wrap(&late, 2027, "2027-01-10");
+	assert_eq!(
+		result.no_spend.evaluated.unwrap().first(),
+		date("2027-01-05")
+	);
+	assert!(
+		result
+			.no_spend
+			.dates
+			.iter()
+			.all(|day| *day > date("2027-01-05"))
+	);
+}
+
+fn w_35_book() -> Book {
+	let mut book = Book::household();
+	for (id, month) in [
+		("A", "2027-03"),
+		("B", "2027-07"),
+		("C", "2026-11"),
+		("D", "2027-02"),
+	] {
+		book.category(id, "Goals");
+		book.goal(id, id, 100000, None).reached_month = Some(ym(month));
+	}
+	book.spend("B", "2027-08-02", -60000);
+	book.spend("Groceries", "2026-10-01", -1000);
+	book
+}
+
+fn reached(result: &Wrapped) -> Vec<(&str, veritas_domain::YearMonth)> {
+	result
+		.reached_goals
+		.iter()
+		.map(|goal| (goal.name.as_str(), goal.month))
+		.collect()
+}
+
+#[test]
+fn w_35_reached_month_per_goal() {
+	let result = wrap(&w_35_book(), 2027, "2028-01-10");
+	assert_eq!(
+		reached(&result),
+		[
+			("D", ym("2027-02")),
+			("A", ym("2027-03")),
+			("B", ym("2027-07"))
+		]
+	);
+	assert_eq!(result.reached_goals.len(), result.goals_completed);
+	assert!(result.reached_goals.iter().all(|goal| !goal.deleted));
+	assert_eq!(
+		wrap(&w_35_book(), 2026, "2028-01-10").reached_goals.len(),
+		1
+	);
+}
+
+#[test]
+fn w_36_reached_month_year_to_date() {
+	let result = wrap(&w_35_book(), 2027, "2027-03-10");
+	assert_eq!(
+		reached(&result),
+		[("D", ym("2027-02")), ("A", ym("2027-03"))]
+	);
+	assert_eq!(result.goals_completed, 2);
+}
+
+#[test]
+fn a_reached_goal_whose_category_was_deleted_says_so() {
+	let mut book = w_35_book();
+	book.budget.categories.get_mut(&cat("A")).unwrap().tombstone = true;
+	let result = wrap(&book, 2027, "2028-01-10");
+	let goal = result
+		.reached_goals
+		.iter()
+		.find(|goal| goal.goal == GoalId::new("A"))
+		.unwrap();
+	assert!(goal.deleted);
+	assert_eq!(goal.name, "A");
 }

@@ -69,8 +69,9 @@ struct BudgetScreen: View {
 			.padding(.horizontal, Spacing.s5)
 			.padding(.bottom, Spacing.s6)
 			.frame(maxWidth: .infinity, alignment: .leading)
-			.contentTransition(.opacity)
-			.motion(.fast, value: screen.sheet?.month)
+			.environment(\.shownMonth, screen.sheet?.month)
+			.environment(\.largeBudgetMonth, Self.isLarge(screen.groups) ? screen.sheet?.month : nil)
+			.stillOnRapidRepeat(of: screen.sheet?.month)
 			.onGeometryChange(for: Bool.self) { $0.size.width - 2 * Spacing.s5 >= EnvelopeLayout.widthWithBar } action: { showsBar = $0 }
 			.environment(\.showsDrainBar, showsBar)
 		}
@@ -146,6 +147,11 @@ struct BudgetScreen: View {
 		}
 	}
 
+	/// Too many rows to cross-fade each one when the month changes.
+	static func isLarge(_ groups: [EnvelopeGroup]) -> Bool {
+		groups.reduce(0) { $0 + $1.envelopes.count } > Motion.animatedRowLimit
+	}
+
 	static func title(_ month: Month) -> String {
 		guard let date = month.date() else { return "Budget" }
 		return date.formatted(.dateTime.month(.wide).year())
@@ -191,6 +197,7 @@ private struct ToBudgetHeader: View {
 					.font(.system(size: dense ? 15 : 26, weight: .semibold))
 				Text(screen.format.currency(sheet.toBudget, on: .budget))
 					.font(.figures(dense ? .title : .display, weight: .bold))
+					.valueChange(sheet.toBudget)
 					.lineLimit(1)
 					.fixedSize()
 			}

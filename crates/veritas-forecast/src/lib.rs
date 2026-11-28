@@ -40,6 +40,6 @@ pub use schedules::{
 };
 pub use suggest::{Basis, Envelope, Suggestion, Suggestions, next_month_envelopes};
 pub use wrapped::{
-	CategoryRank, Change, FunFact, GroupRank, Measure, NoSpend, PayeeRank, PriorYear, Redacted,
-	Streak, Wrapped, wrapped, wrapped_years,
+	CategoryRank, Change, FunFact, GroupRank, Measure, MonthEnd, NoSpend, PayeeRank, PriorYear,
+	ReachedGoal, Redacted, Streak, Wrapped, wrapped, wrapped_years,
 };

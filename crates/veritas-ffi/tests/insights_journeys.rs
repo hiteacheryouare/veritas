@@ -423,6 +423,91 @@ fn wrapped_monthly_spending_is_each_months_expenses_and_its_share_of_out() {
 }
 
 #[test]
+fn wrapped_editorial_figures_keep_fc_8s_identities() {
+	// v24, FC-8 N1 to N4 on a real import: each figure agrees with the report
+	// figures it restates, so the editorial pages and the old cards can't drift.
+	let scratch = Scratch::new("wrapped-editorial");
+	let session = import(&scratch);
+	for year in [2025, 2026] {
+		let report = wrapped(&session, year);
+		assert!(!report.budget_name.is_empty(), "{year}: the cover's name");
+		let months: Vec<_> = report.months.iter().map(|bar| bar.month).collect();
+		let ends: Vec<_> = report.month_ends.iter().map(|end| end.month).collect();
+		assert_eq!(ends, months, "{year}: N1 has the monthly series' months");
+		let last = report.month_ends.last().unwrap();
+		assert_eq!(last.net_worth, report.net_worth_end, "{year}");
+		assert_eq!(last.date, report.last, "{year}");
+		let lowest = report.lowest_month_end.as_ref().unwrap();
+		let highest = report.highest_month_end.as_ref().unwrap();
+		for end in &report.month_ends {
+			assert!(
+				lowest.net_worth <= end.net_worth && end.net_worth <= highest.net_worth,
+				"{year}"
+			);
+		}
+		let first_lowest = report
+			.month_ends
+			.iter()
+			.find(|end| end.net_worth == lowest.net_worth)
+			.unwrap();
+		assert_eq!(
+			first_lowest.month, lowest.month,
+			"{year}: ties to the earliest"
+		);
+		if report.net_worth_start <= 0 {
+			assert!(
+				report.month_ends.iter().all(|end| end.share.is_none()),
+				"{year}"
+			);
+		}
+		assert_eq!(
+			report.no_spend.dates.len(),
+			report.no_spend.days as usize,
+			"{year}: N3"
+		);
+		assert!(
+			report
+				.no_spend
+				.dates
+				.windows(2)
+				.all(|pair| pair[0] < pair[1]),
+			"{year}"
+		);
+		if let (Some(first), Some(last)) = (&report.no_spend.first, &report.no_spend.last) {
+			assert!(
+				report
+					.no_spend
+					.dates
+					.iter()
+					.all(|day| first <= day && day <= last),
+				"{year}"
+			);
+		}
+		let reached: Vec<_> = report
+			.reached_goals
+			.iter()
+			.map(|goal| goal.goal_id.clone())
+			.collect();
+		let mut completed = report.completed_goal_ids.clone();
+		completed.sort();
+		let mut sorted = reached.clone();
+		sorted.sort();
+		assert_eq!(sorted, completed, "{year}: N4 is the goals completed");
+		if let (Some(typical), true) = (report.typical_month, report.total_out > 0) {
+			let scaled = i128::from(typical) * 1000;
+			let whole = i128::from(report.total_out);
+			let rounded = (scaled.abs() * 2 + whole) / (whole * 2);
+			let expected = i64::try_from(if scaled < 0 { -rounded } else { rounded }).unwrap();
+			assert_eq!(
+				report.shares.typical_month,
+				Some(expected),
+				"{year}: N2's share"
+			);
+		}
+	}
+}
+
+#[test]
 fn wrapped_years_lists_exactly_the_years_with_data_and_pins_today() {
 	let (_scratch, session) = fresh("wrapped-years", "USD");
 	let years = |today: &str| {

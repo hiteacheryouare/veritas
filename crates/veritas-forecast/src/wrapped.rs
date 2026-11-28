@@ -48,6 +48,9 @@ pub struct NoSpend {
 	/// `max(Jan 1, first row) ..= min(Dec 31, today)`; `None` before the first row.
 	pub evaluated: Option<Period>,
 	pub days: u32,
+	/// N3: every no-spend date in the evaluated range, ascending. Its length
+	/// is `days`.
+	pub dates: Vec<CivilDate>,
 	pub longest: Option<Streak>,
 	/// The streak running through today, for the current year only.
 	pub current: Option<u32>,
@@ -78,6 +81,26 @@ pub struct PriorYear {
 	/// Set when the budget's first row falls inside the prior range, so the
 	/// prior figures cover only the days from it ("prior year from {date}").
 	pub from: Option<CivilDate>,
+}
+
+/// N1: net worth at the end of one month of the period.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MonthEnd {
+	pub month: YearMonth,
+	/// The month's last day, or `last` for a final month the period ends inside.
+	pub date: CivilDate,
+	pub net_worth: Money,
+}
+
+/// N4: a goal reached in the year, with the month it was first reached.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReachedGoal {
+	pub goal: GoalId,
+	/// The goal's category name, with no brackets.
+	pub name: String,
+	/// The category has been deleted, so the name reads "(deleted) {name}".
+	pub deleted: bool,
+	pub month: YearMonth,
 }
 
 /// FC-8's aggregates for one calendar year, or the current year to date (R-WRAP-1).
@@ -114,6 +137,15 @@ pub struct Wrapped {
 	pub net_worth_end: Money,
 	pub net_worth_change: Money,
 	pub prior_year: PriorYear,
+	/// N1: the same months as `monthly_spending`, each at its month end.
+	pub month_ends: Vec<MonthEnd>,
+	/// N1: the lowest and highest of `month_ends`, ties to the earliest.
+	pub lowest_month_end: Option<MonthEnd>,
+	pub highest_month_end: Option<MonthEnd>,
+	/// N2: the median month `biggest_vs_typical` compares with, as an amount.
+	pub typical_month: Option<Money>,
+	/// N4: in ascending order of month, then goal id. Its length is `goals_completed`.
+	pub reached_goals: Vec<ReachedGoal>,
 }
 
 /// R-WRAP-2: shares in tenths of a percent, never an amount. `None` is
@@ -137,6 +169,13 @@ pub struct Redacted {
 	/// by one (FC-8 monthly series).
 	pub months: Vec<Option<i64>>,
 	pub net_worth_change: Option<i64>,
+	/// N1: each month end's change over `net_worth_start`, in `month_ends`'
+	/// order. All `None` when `net_worth_start <= 0`.
+	pub month_ends: Vec<Option<i64>>,
+	pub lowest_month_end: Option<i64>,
+	pub highest_month_end: Option<i64>,
+	/// N2: `typical_month` over total out.
+	pub typical_month: Option<i64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -219,7 +258,30 @@ impl Wrapped {
 				.map(|(_, total)| tenths(*total, self.total_out))
 				.collect(),
 			net_worth_change: tenths(self.net_worth_change, self.net_worth_start),
+			month_ends: self
+				.month_ends
+				.iter()
+				.map(|end| self.month_end_share(end))
+				.collect(),
+			lowest_month_end: self
+				.lowest_month_end
+				.and_then(|end| self.month_end_share(&end)),
+			highest_month_end: self
+				.highest_month_end
+				.and_then(|end| self.month_end_share(&end)),
+			typical_month: self
+				.typical_month
+				.and_then(|typical| tenths(typical, self.total_out)),
 		}
+	}
+
+	/// N1 redacted: `(NW(e) - NW(start)) * 1000 / NW(start)`, the rule of
+	/// the net-worth change share.
+	fn month_end_share(&self, end: &MonthEnd) -> Option<i64> {
+		let change = i128::from(end.net_worth.minor()) - i128::from(self.net_worth_start.minor());
+		to_money(change)
+			.ok()
+			.and_then(|change| tenths(change, self.net_worth_start))
 	}
 
 	pub fn fun_facts(&self) -> Vec<FunFact> {
@@ -523,7 +585,8 @@ pub fn wrapped(
 	);
 	let monthly_spending = monthly_series(classification, period, &months)?;
 	let monthly: Vec<i64> = months.values().copied().collect();
-	let biggest_vs_typical = match (biggest_month, median(&monthly)) {
+	let typical_month = median(&monthly);
+	let biggest_vs_typical = match (biggest_month, typical_month) {
 		(Some((_, max)), Some(mid)) if mid > 0 => Some(
 			i64::try_from(round_half_away(
 				(i128::from(max) - i128::from(mid)) * 10_000,
@@ -535,16 +598,27 @@ pub fn wrapped(
 	};
 
 	let no_spend = no_spend(budget, classification, period, year == today.year())?;
-	let completed_goals: Vec<GoalId> = budget
-		.goals
-		.values()
-		.filter(|goal| goal.reached_month.is_some_and(|month| month.year() == year))
-		.map(|goal| goal.id.clone())
-		.collect();
+	let reached_goals = reached_goals(budget, year, last);
+	let completed_goals: Vec<GoalId> = reached_goals.iter().map(|goal| goal.goal.clone()).collect();
 
 	let day_before = first.naive().pred_opt().map_or(first, CivilDate::from);
 	let net_worth_start = net_worth(classification, day_before)?;
 	let net_worth_end = net_worth(classification, last)?;
+	let month_ends = month_ends(classification, period, &monthly_spending)?;
+	let lowest_month_end = month_ends.iter().copied().reduce(|low, end| {
+		if end.net_worth < low.net_worth {
+			end
+		} else {
+			low
+		}
+	});
+	let highest_month_end = month_ends.iter().copied().reduce(|high, end| {
+		if end.net_worth > high.net_worth {
+			end
+		} else {
+			high
+		}
+	});
 
 	let prior = Period::new(
 		CivilDate::new(year - 1, 1, 1)?,
@@ -591,7 +665,64 @@ pub fn wrapped(
 			net: change(net, previous_net),
 			from,
 		},
+		month_ends,
+		lowest_month_end,
+		highest_month_end,
+		typical_month: typical_month.map(Money::from_minor),
+		reached_goals,
 	})
+}
+
+/// N1: net worth at the end of each month of the monthly series, the final
+/// month at `last` when the period ends inside it.
+fn month_ends(
+	classification: &Classification,
+	period: Period,
+	series: &[(YearMonth, Money)],
+) -> Result<Vec<MonthEnd>, CoreError> {
+	series
+		.iter()
+		.map(|(month, _)| {
+			let month_last = month
+				.offset(1)?
+				.first_day()
+				.naive()
+				.pred_opt()
+				.map(CivilDate::from)
+				.ok_or(CoreError::Overflow)?;
+			let date = month_last.min(period.last());
+			Ok(MonthEnd {
+				month: *month,
+				date,
+				net_worth: net_worth(classification, date)?,
+			})
+		})
+		.collect()
+}
+
+/// N4: goals whose stored `reached_month` falls in `year`, and for the current
+/// year no later than the month of `last`, by month then goal id.
+fn reached_goals(budget: &BudgetData, year: i32, last: CivilDate) -> Vec<ReachedGoal> {
+	let mut reached: Vec<ReachedGoal> = budget
+		.goals
+		.values()
+		.filter_map(|goal| {
+			let month = goal.reached_month?;
+			(month.year() == year && month <= last.year_month()).then(|| {
+				let category = budget.categories.get(&goal.category);
+				ReachedGoal {
+					goal: goal.id.clone(),
+					name: category
+						.map(|category| category.name.clone())
+						.unwrap_or_default(),
+					deleted: category.is_none_or(|category| category.tombstone),
+					month,
+				}
+			})
+		})
+		.collect();
+	reached.sort_by(|a, b| a.month.cmp(&b.month).then_with(|| a.goal.cmp(&b.goal)));
+	reached
 }
 
 /// Every month of `period` from the month of the budget's first row, with
@@ -632,6 +763,7 @@ fn no_spend(
 	let empty = NoSpend {
 		evaluated: None,
 		days: 0,
+		dates: Vec::new(),
 		longest: None,
 		current: None,
 	};
@@ -659,6 +791,7 @@ fn no_spend(
 		.collect();
 
 	let mut days = 0u32;
+	let mut dates = Vec::new();
 	let mut longest: Option<Streak> = None;
 	let mut run: Option<Streak> = None;
 	let mut date = evaluated.first();
@@ -667,6 +800,7 @@ fn no_spend(
 			run = None;
 		} else {
 			days += 1;
+			dates.push(date);
 			let streak = run.map_or(
 				Streak {
 					start: date,
@@ -690,6 +824,7 @@ fn no_spend(
 	Ok(NoSpend {
 		evaluated: Some(evaluated),
 		days,
+		dates,
 		longest,
 		current: current_year.then(|| run.map_or(0, |streak| streak.days)),
 	})

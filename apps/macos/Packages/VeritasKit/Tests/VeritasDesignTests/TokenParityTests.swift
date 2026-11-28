@@ -28,7 +28,16 @@ struct TokenParityTests {
 		"text-display": TextSize.display.rawValue, "text-showcase": TextSize.showcase.rawValue
 	]
 
-	static let otherMirrored: Set<String> = ["duration-fast", "duration-sheet", "easing-standard", "easing-exit", "line-tight", "line-body"]
+	/// Each motion token and the motion whose duration it mirrors, normally and with Reduce Motion.
+	static let motions: [String: Motion] = [
+		"duration-instant": .instant, "duration-fast": .fast, "duration-sheet": .sheet,
+		"duration-page": .pageIn, "duration-page-exit": .pageOut, "duration-story": .turn,
+		"spring-settle": .settle, "spring-morph": .morph, "spring-push": .push, "spring-turn": .turn
+	]
+
+	static let otherMirrored: Set<String> = Set(motions.keys).union([
+		"delay-page", "duration-stage", "easing-standard", "easing-exit", "line-tight", "line-body"
+	])
 
 	let css: String
 
@@ -74,11 +83,22 @@ struct TokenParityTests {
 		#expect(number("line-body") == LineHeight.body)
 	}
 
-	@Test func motionMatches() {
-		#expect(value("duration-fast") == "\(Int(Motion.fast.duration * 1000))ms")
-		#expect(value("duration-sheet") == "\(Int(Motion.sheet.duration * 1000))ms")
+	@Test func motionMatches() throws {
+		let reduced = try block(from: "@media (prefers-reduced-motion: reduce)", to: "}")
+		for (name, motion) in Self.motions {
+			#expect(value(name) == milliseconds(motion.duration), "--\(name)")
+			#expect(value(name, in: reduced) == milliseconds(motion.duration(reduceMotion: true)), "--\(name) with Reduce Motion")
+		}
+		#expect(value("delay-page") == milliseconds(Motion.pageIn.curve.delay))
+		#expect(value("delay-page", in: reduced) == milliseconds(Motion.pageIn.reduced?.delay ?? 0))
+		#expect(value("duration-stage") == milliseconds(Motion.Duration.stage))
+		#expect(value("duration-story") == milliseconds(Motion.Duration.story))
 		#expect(value("easing-standard") == bezier(.standard))
 		#expect(value("easing-exit") == bezier(.exit))
+	}
+
+	private func milliseconds(_ seconds: Double) -> String {
+		"\(Int((seconds * 1000).rounded()))ms"
 	}
 
 	private func block(from start: String, to end: String) throws -> Substring {
@@ -106,9 +126,9 @@ struct TokenParityTests {
 		return RGBA(red << 16 | green << 8 | blue, alpha: alpha)
 	}
 
-	private func value(_ name: String) -> String? {
+	private func value(_ name: String, in text: Substring? = nil) -> String? {
 		let pattern = try? Regex("--\(name):\\s*([^;]+);")
-		guard let pattern, let match = css.firstMatch(of: pattern) else { return nil }
+		guard let pattern, let match = (text ?? css[...]).firstMatch(of: pattern) else { return nil }
 		return match.output[1].substring.map { String($0).trimmingCharacters(in: .whitespaces) }
 	}
 

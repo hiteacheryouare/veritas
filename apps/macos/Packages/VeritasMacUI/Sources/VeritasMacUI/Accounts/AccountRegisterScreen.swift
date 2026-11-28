@@ -66,11 +66,18 @@ struct AccountRegisterScreen: View {
 					self.reconcile = nil
 					register.isReconciling = false
 				}
+				.motionTransition(.reveal)
 			}
 			VStack(alignment: .leading, spacing: Spacing.s3) {
-				if let account {
-					BalanceSummary(account: account, format: register.format)
+				// The summary's line is held from the first frame, so the table doesn't drop when the account loads.
+				Group {
+					if let account {
+						BalanceSummary(account: account, format: register.format)
+					} else {
+						BalanceSummary.placeholder
+					}
 				}
+				.motion(.fast, value: account == nil)
 				if !isEmpty {
 					BalanceGraph(history: register.history, format: register.format)
 						.frame(height: 120)
@@ -323,6 +330,15 @@ private struct BalanceSummary: View {
 		.font(.text(.body))
 		.accessibilityElement(children: .combine)
 		.accessibilityIdentifier("register.summary")
+	}
+
+	static var placeholder: some View {
+		HStack(spacing: Spacing.s5) {
+			LabeledFigure(title: "Balance", value: " ")
+		}
+		.font(.text(.body))
+		.hidden()
+		.accessibilityHidden(true)
 	}
 }
 
