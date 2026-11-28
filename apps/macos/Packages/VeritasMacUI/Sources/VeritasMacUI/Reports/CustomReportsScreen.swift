@@ -20,9 +20,11 @@ struct CustomReportsScreen: View {
 
 	var body: some View {
 		HStack(spacing: 0) {
-			ReportList(model: model)
-				.frame(width: 230)
-			Divider()
+			if !model.isEditing {
+				ReportList(model: model)
+					.frame(width: 230)
+				Divider()
+			}
 			CustomReportPane(model: model) { drilldown = $0 }
 		}
 		.background(.surfaceWindow)
@@ -203,14 +205,24 @@ struct CustomReportDetail: View {
 				} else {
 					Hero(amount: data.total, caption: Self.range(view.settings), format: format)
 					Card {
-						HStack(alignment: .top, spacing: Spacing.s4) {
-							CustomReportChart(data: data, settings: view.settings, format: format, expanded: true)
-							if CustomReportChart.colorsGroups(view.settings) {
-								ReportLegend(series: ReportSeries.all(data, balance: view.settings.balanceType))
-									.frame(width: 200)
+						if CustomReportChart.colorsGroups(view.settings) {
+							let chart = CustomReportChart(data: data, settings: view.settings, format: format, expanded: true)
+							let legend = ReportLegend(series: ReportSeries.all(data, balance: view.settings.balanceType))
+							ViewThatFits(in: .horizontal) {
+								HStack(alignment: .top, spacing: Spacing.s4) {
+									chart.frame(minWidth: Self.chartMinimum)
+									legend.frame(width: 200)
+								}
+								.frame(height: 300)
+								VStack(alignment: .leading, spacing: Spacing.s3) {
+									chart.frame(height: 220)
+									legend.frame(height: 96)
+								}
 							}
+						} else {
+							CustomReportChart(data: data, settings: view.settings, format: format, expanded: true)
+								.frame(height: 300)
 						}
-						.frame(height: 300)
 					}
 					CustomReportTable(data: data, settings: view.settings, format: format)
 				}
@@ -223,6 +235,9 @@ struct CustomReportDetail: View {
 		}
 		.containerIdentifier("customReport.detail")
 	}
+
+	/// Narrower than this, the legend moves under the graph.
+	static let chartMinimum: CGFloat = 320
 
 	static func range(_ settings: CustomReportSettings) -> String {
 		if !settings.dateStatic, let name = settings.dateRange { return name }
@@ -256,9 +271,11 @@ struct CustomReportChart: View {
 	}
 
 	private var points: [Point] {
-		series.flatMap { group in
+		let keys = data.intervals.map(\.interval.interval)
+		let headings = Dictionary(zip(keys, ReportPeriod.intervals(keys)), uniquingKeysWith: { first, _ in first })
+		return series.flatMap { group in
 			group.points.map { point in
-				Point(id: "\(point.interval).\(group.id)", interval: ReportPeriod.interval(point.interval), series: group.id, amount: format.chartValue(point.amount, on: .register))
+				Point(id: "\(point.interval).\(group.id)", interval: headings[point.interval] ?? ReportPeriod.interval(point.interval), series: group.id, amount: format.chartValue(point.amount, on: .register))
 			}
 		}
 	}
@@ -350,45 +367,41 @@ private struct CustomReportTable: View {
 	let format: MoneyFormat
 
 	var body: some View {
-		let intervals = settings.totalMode ? [] : data.intervals.map(\.interval.interval)
-		Grid(alignment: .trailing, horizontalSpacing: 0, verticalSpacing: 0) {
-			GridRow {
-				Text(settings.groupBy.title).gridColumnAlignment(.leading)
-					.font(.text(.caption)).foregroundStyle(.textTertiary).padding(.leading, Spacing.s4)
-				ForEach(intervals, id: \.self) { Text(ReportPeriod.interval($0)).font(.text(.caption)).foregroundStyle(.textTertiary).padding(.horizontal, Spacing.s3) }
-				Text("Total").font(.text(.caption)).foregroundStyle(.textTertiary).padding(.horizontal, Spacing.s4)
-			}
-			.frame(height: 30)
-			ForEach(data.groups) { group in
-				Divider()
-				GridRow {
-					Text(group.name).lineLimit(1).fixedSize().padding(.leading, Spacing.s4).padding(.trailing, Spacing.s3).frame(maxWidth: .infinity, alignment: .leading)
-					if !settings.totalMode {
-						ForEach(Array(group.intervals.enumerated()), id: \.offset) { _, cell in
-							ReportAmount(amount: cell.amount, format: format).padding(.horizontal, Spacing.s3)
-						}
-					}
-					ReportAmount(amount: group.amount, format: format, weight: .semibold).padding(.horizontal, Spacing.s4)
-				}
-				.frame(minHeight: 34)
-			}
-			Divider().overlay(Color.textTertiary)
-			GridRow {
-				Text("Total").font(.text(.body, weight: .bold)).frame(maxWidth: .infinity, alignment: .leading).padding(.leading, Spacing.s4)
-				if !settings.totalMode {
-					ForEach(Array(data.intervals.enumerated()), id: \.offset) { _, interval in
-						ReportAmount(amount: interval.interval.amount, format: format, weight: .bold).padding(.horizontal, Spacing.s3)
-					}
-				}
-				ReportAmount(amount: data.total, format: format, weight: .bold).padding(.horizontal, Spacing.s4)
-			}
-			.frame(minHeight: 36)
+		let intervals = settings.totalMode ? [] : ReportPeriod.intervals(data.intervals.map(\.interval.interval))
+		let headings = intervals + ["Total"]
+		let groups = data.groups.map { group in
+			line(id: group.id, title: group.name, height: 34, rule: .light, weight: .regular, headings: headings,
+				amounts: (settings.totalMode ? [] : group.intervals.map(\.amount)) + [group.amount])
 		}
-		.padding(.vertical, Spacing.s1)
-		.background(.surfaceGrouped, in: .rect(cornerRadius: Radius.section))
-		.overlay { RoundedRectangle(cornerRadius: Radius.section).strokeBorder(Color.edgeGrouped) }
-		.accessibilityElement(children: .contain)
-		.accessibilityIdentifier("customReport.table")
+		let total = line(id: "total", title: "Total", height: 36, rule: .strong, weight: .bold, headings: headings,
+			amounts: (settings.totalMode ? [] : data.intervals.map(\.interval.amount)) + [data.total])
+		PinnedTable(leadingHeading: settings.groupBy.title, headings: headings, lines: groups + [total])
+			.accessibilityElement(children: .contain)
+			.accessibilityIdentifier("customReport.table")
+	}
+
+	/// The last amount is the line's total, set heavier than the intervals.
+	private func line(id: String, title: String, height: CGFloat, rule: TableLine.Rule, weight: Font.Weight, headings: [String], amounts: [Int64]) -> TableLine {
+		TableLine(
+			id: id,
+			height: height,
+			rule: rule,
+			leading: AnyView(
+				Text(title)
+					.font(.text(.body, weight: weight))
+					.padding(.leading, Spacing.s4)
+					.padding(.trailing, Spacing.s3)
+			),
+			cells: amounts.indices.map { index in
+				let isTotal = index == amounts.count - 1
+				return AnyView(
+					ReportAmount(amount: amounts[index], format: format, weight: weight == .bold ? .bold : (isTotal ? .semibold : .medium))
+						.padding(.horizontal, Spacing.s4)
+						.accessibilityElement(children: .ignore)
+						.accessibilityLabel("\(title), \(headings[index]): \(format.amount(amounts[index], on: .register))")
+				)
+			}
+		)
 	}
 }
 
