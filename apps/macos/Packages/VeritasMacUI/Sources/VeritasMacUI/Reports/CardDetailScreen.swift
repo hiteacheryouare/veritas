@@ -10,7 +10,7 @@ struct CardDetail: View {
 	let card: DashboardCard
 	@Bindable var workspace: WorkspaceModel
 	let model: DashboardModel
-	let morphSpace: Namespace.ID
+	var morphSpace: Namespace.ID? = nil
 	let configure: (DashboardCard) -> Void
 	let close: () -> Void
 

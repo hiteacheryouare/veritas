@@ -70,7 +70,7 @@ struct WrappedScreenshotTests {
 		let shownIssue = try #require(model.issue(redacted: false))
 		let hidden = try renderedText(redactedIssue.spreads)
 		#expect(hidden.contains("36.1%"), "the core's share for Rent")
-		#expect(hidden.contains("72.9% of what came in went out."))
+		#expect(hidden.contains("72.9% of what came in") && hidden.contains("went out."), "the ledger headline, over two lines")
 		#expect(hidden.contains("Rent took the") && hidden.contains("largest share."), "a headline over two lines, which the PDF text interleaves with the facing page")
 		#expect(!hidden.contains("$"), "no currency symbol")
 		#expect(hidden.firstMatch(of: /\d\.\d\d(?![\d%])/) == nil, "no two-place figure")
@@ -82,7 +82,7 @@ struct WrappedScreenshotTests {
 		#expect(shown.contains("$84,210.00"))
 		// An export draws one mode only: the hidden twin that keeps a figure's
 		// room on screen never reaches the file (the PNG draws the same view).
-		#expect(!shown.contains("72.9% of what came in went out."), "no redacted twin in the shown export")
+		#expect(!shown.contains("72.9% of what came in"), "no redacted twin in the shown export")
 		#expect(!shown.contains("Since the start of 2026."))
 		#expect(!hidden.contains("From "), "no shown twin, the net worth dek, in the redacted export")
 		try FileManager.default.createDirectory(at: Self.output, withIntermediateDirectories: true)
