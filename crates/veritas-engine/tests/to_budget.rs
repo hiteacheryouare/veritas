@@ -358,3 +358,56 @@ impl SingleNote for Vec<(String, String)> {
 		self[0].1.clone()
 	}
 }
+
+#[test]
+fn tb_2_3_a_hidden_envelope_below_its_monthly_goal_is_not_topped_up() {
+	let mut budget = book(55_000);
+	budget.budget(M, "old-gym", 5_000);
+	budget.cell(M, "old-gym").goal = Some(cents(20_000));
+	let before = to_budget(&budget);
+	assert_eq!(before, cents(50_000));
+	let plan = plan(&budget, |editor| {
+		editor.assign_to_underfunded(ym(M)).unwrap()
+	});
+	assert!(
+		plan.fills.is_empty(),
+		"TB-2.3: pass 2 leaves a hidden envelope out: {:?}",
+		written(&plan)
+	);
+	assert_eq!(plan.hidden_left_out, 1, "and counts it");
+	plan.writes.apply_to(&mut budget.0);
+	assert_eq!(to_budget(&budget), before);
+}
+
+#[test]
+fn tb_3_4_an_envelope_filled_by_both_passes_is_one_envelope() {
+	let mut budget = book(55_000);
+	budget.budget(M, "groceries", 5_000);
+	budget.cell(M, "groceries").goal = Some(cents(20_000));
+	budget.txn("food", "checking", "2026-11-05", -8_000, Some("groceries"));
+	let before = to_budget(&budget);
+	assert_eq!(before, cents(50_000));
+	let plan = plan(&budget, |editor| {
+		editor.assign_to_underfunded(ym(M)).unwrap()
+	});
+	assert_eq!(
+		written(&plan),
+		[("groceries", 3_000), ("groceries", 12_000)],
+		"TB-3.2 covers the 30.00, then TB-3.3 tops 80.00 up to the 200.00 goal"
+	);
+	assert_eq!(
+		plan.fills
+			.iter()
+			.map(|f| f.reason.clone())
+			.collect::<Vec<_>>(),
+		[FillReason::Overspent, FillReason::GoalShortfall]
+	);
+	assert_eq!(plan.envelopes(), 1, "TB-3.4: the subtitle counts it once");
+	assert_eq!(plan.total().unwrap(), cents(15_000));
+	plan.writes.apply_to(&mut budget.0);
+	assert_eq!(
+		to_budget(&budget),
+		cents(35_000),
+		"To Budget falls by the total"
+	);
+}
