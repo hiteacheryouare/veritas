@@ -93,8 +93,8 @@ struct WrappedCardView: View {
 	}
 }
 
-/// The card's colors: the window's appearance on screen, and the light
-/// palette in an exported image so the file looks the same wherever it opens.
+/// The card's colors: Ryan's primary in both appearances, with the window's
+/// page behind it on screen and the light page in an exported image.
 struct WrappedColors {
 	let card: Color
 	let ink: Color
@@ -102,11 +102,11 @@ struct WrappedColors {
 	/// The biggest month's bar.
 	let highlight: Color
 
-	static let window = WrappedColors(card: .accentFill, ink: .textOnAccent, page: .surfaceWindow, highlight: .moneyAvailableFill)
+	static let window = WrappedColors(card: .brand, ink: .textOnBrand, page: .surfaceWindow, highlight: .moneyAvailableFill)
 
 	static let image = WrappedColors(
-		card: Color(rgba: ColorToken.accentFill.light),
-		ink: Color(rgba: ColorToken.textOnAccent.light),
+		card: Color(rgba: ColorToken.brand.light),
+		ink: Color(rgba: ColorToken.textOnBrand.light),
 		page: Color(rgba: ColorToken.surfaceWindow.light),
 		highlight: Color(rgba: ColorToken.moneyAvailableFill.light)
 	)
@@ -171,7 +171,7 @@ private struct WrappedBars: View {
 	}
 }
 
-private extension Color {
+extension Color {
 	init(rgba: RGBA) {
 		self.init(.sRGB, red: rgba.red, green: rgba.green, blue: rgba.blue, opacity: rgba.alpha)
 	}

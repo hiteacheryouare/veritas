@@ -128,7 +128,7 @@ struct TokenParityTests {
 }
 
 /// The app's AccentColor asset drives system selection and focus rings, so it
-/// has to stay graphite like `color-accent`.
+/// has to match `color-accent` in both appearances.
 struct AccentAssetParityTests {
 	@Test func theAppsAccentColorIsTheAccentToken() throws {
 		let asset = URL(filePath: #filePath)

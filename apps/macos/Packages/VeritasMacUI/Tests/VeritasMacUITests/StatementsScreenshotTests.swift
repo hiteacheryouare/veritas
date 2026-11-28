@@ -94,7 +94,7 @@ struct StatementsScreenshotTests {
 			let found = try #require(pdf.findString("Check the audit.", withOptions: []).first)
 			let page = try #require(found.pages.first)
 			#expect(pdf.index(for: page) == pdf.pageCount - 1, "the notice is on the last page")
-			#expect(found.bounds(for: page).minY >= PaperMetrics.bottom + StatementPDF.pageNumberSpace - 1, "above the page number with \(count) extra lines")
+			#expect(found.bounds(for: page).minY >= PaperMetrics.bottom + StatementPDF.footer - 1, "above the footnote with \(count) extra lines")
 		}
 	}
 
@@ -106,7 +106,7 @@ struct StatementsScreenshotTests {
 			#expect(pdf.pageCount == StatementPDF.paginate(document, format: model.format).count, "\(kind)")
 			#expect(pdf.pageCount == (kind == .incomeStatement ? 2 : 1), "\(kind)")
 			let text = try #require(pdf.string)
-			for expected in ["Stub", "Unaudited. Obviously.", document.title, document.basis] {
+			for expected in ["Stub", document.title + StatementDocument.footnoteMark, document.basis] {
 				#expect(text.contains(expected), "\(kind): \(expected)")
 			}
 			for line in document.lines {
@@ -135,6 +135,7 @@ struct StatementsScreenshotTests {
 		for index in 0..<pdf.pageCount {
 			let text = try #require(pdf.page(at: index)?.string)
 			#expect(text.contains("Balance sheet") && text.contains(short.basis), "page \(index + 1) has the header")
+			#expect(Self.flattened(text).contains(Self.flattened(StatementDocument.footnote)), "page \(index + 1) has the footnote")
 			#expect(text.contains("Page \(index + 1) of \(pdf.pageCount)"))
 		}
 		#expect(pdf.page(at: pdf.pageCount - 1)?.string?.contains("Net worth") == true)
@@ -159,6 +160,23 @@ struct StatementsScreenshotTests {
 		let png = try #require(bitmap.representation(using: .png, properties: [:]))
 		try FileManager.default.createDirectory(at: Self.output, withIntermediateDirectories: true)
 		try png.write(to: Self.output.appending(path: "statement-pdf-page-1.png"))
+	}
+
+	@Test func everyPDFPageCarriesTheFootnote() async throws {
+		for kind in StatementKind.allCases {
+			let (_, model) = await model(kind)
+			let document = try #require(model.document)
+			let pdf = try #require(PDFDocument(data: StatementPDF.data(document, format: model.format)))
+			for index in 0..<pdf.pageCount {
+				let text = Self.flattened(try #require(pdf.page(at: index)?.string))
+				#expect(text.contains("\(StatementDocument.footnoteMark) \(Self.flattened(StatementDocument.footnote))"), "\(kind) page \(index + 1)")
+			}
+		}
+	}
+
+	/// PDF text breaks a wrapped footnote across lines.
+	static func flattened(_ text: String) -> String {
+		text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
 	}
 
 	func render(_ view: some View, named name: String, size: CGSize, settle: TimeInterval = 0.4) throws {
