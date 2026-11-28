@@ -151,7 +151,7 @@ jobs:
   app:
     name: app
     runs-on: xcode-27
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
 
