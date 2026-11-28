@@ -6,6 +6,7 @@ mod budget_edits;
 pub mod category_kinds;
 mod envelope;
 pub mod goals;
+mod to_budget;
 
 pub use amount_field::{
 	AmountEdit, MAX_SAFE_MINOR, Rejection, amount_to_minor, commit_amount, currency_text_at,
@@ -17,3 +18,4 @@ pub use budget_edits::{AverageSpan, BudgetEditor, BudgetWrites, CellWrite, Envel
 pub use envelope::{
 	CategoryMonth, EnvelopeSheet, GroupMonth, MonthSheet, MonthSummary, SheetChange,
 };
+pub use to_budget::{Fill, FillReason, Skip, ToBudgetPlan};

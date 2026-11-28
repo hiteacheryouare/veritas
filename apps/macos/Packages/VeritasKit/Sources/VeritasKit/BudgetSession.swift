@@ -116,6 +116,9 @@ public protocol BudgetSession: AnyObject, Sendable {
 
 	/// The Budget screen for `month`. `today` is the local civil date, `YYYY-MM-DD`.
 	func budgetMonth(_ month: Month, today: String) async throws -> BudgetMonth
+	/// The To Budget card's popover for `month` (docs/finance/to-budget.md
+	/// TB-10.1): each quick action's plan or why it can't act. Writes nothing.
+	func toBudgetActions(_ month: Month, today: String) async throws -> ToBudgetActions
 	/// One user action: one transaction and one undo step.
 	func perform(_ command: Command) async throws
 	/// Every goal, closed ones included, in the core's order.
@@ -261,4 +264,11 @@ public protocol BudgetLibrary: Sendable {
 	func currencies() async throws -> [CurrencyOption]
 	/// Reads an amount the way every amount field does, arithmetic included.
 	func evaluateAmount(_ text: String, style: NumberStyle) async throws -> Int64
+}
+
+public extension BudgetSession {
+	/// Test sessions that never show the To Budget popover needn't answer it.
+	func toBudgetActions(_ month: Month, today: String) async throws -> ToBudgetActions {
+		throw FfiError.Invalid(message: "This session has no To Budget actions.")
+	}
 }

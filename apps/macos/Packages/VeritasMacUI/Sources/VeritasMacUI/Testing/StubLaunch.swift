@@ -222,6 +222,10 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 		budget.month(month)
 	}
 
+	func toBudgetActions(_ month: Month, today: String) async throws -> ToBudgetActions {
+		budget.toBudgetActions(month)
+	}
+
 	func goals(today: String) async throws -> GoalList {
 		GoalList(goals: budget.goals, mixedScaleNote: nil, zeroPlaces: false)
 	}

@@ -83,7 +83,7 @@ impl BudgetWrites {
 		}
 	}
 
-	fn amount(
+	pub(crate) fn amount(
 		&mut self,
 		month: YearMonth,
 		category: &CategoryId,
@@ -527,13 +527,26 @@ impl<'a> BudgetEditor<'a> {
 			.map_or(0, |cell| cell.budgeted.minor())
 	}
 
-	fn balance(&self, month: YearMonth, category: &CategoryId) -> i64 {
+	pub(crate) fn budget(&self) -> &'a BudgetData {
+		self.budget
+	}
+
+	pub(crate) fn sheet(&self) -> &'a EnvelopeSheet {
+		self.sheet
+	}
+
+	pub(crate) fn balance(&self, month: YearMonth, category: &CategoryId) -> i64 {
 		self.sheet
 			.category(month, category)
 			.map_or(0, |c| c.balance.minor())
 	}
 
-	fn available_to_budget(&self, month: YearMonth) -> i64 {
+	/// Actual's `to-budget` for the month, 0 for a month the sheet doesn't hold.
+	pub fn to_budget(&self, month: YearMonth) -> i64 {
+		self.available_to_budget(month)
+	}
+
+	pub(crate) fn available_to_budget(&self, month: YearMonth) -> i64 {
 		self.sheet.summary(month).map_or(0, |s| s.to_budget.minor())
 	}
 
@@ -573,7 +586,19 @@ impl<'a> BudgetEditor<'a> {
 		from: &Envelope,
 		to: Destination,
 	) -> Result<(String, String), CoreError> {
-		let id = format!("budget-{month}");
+		let id = month_note_id(month);
+		let line = self.movement_line(amount, from, &to)?;
+		let existing = self.budget.notes.get(&id).and_then(|n| n.as_deref());
+		Ok((id, append_line(existing, &line)))
+	}
+
+	/// One "- Reassigned {amount} from {from} → {to} on {Month dd}" line.
+	pub(crate) fn movement_line(
+		&self,
+		amount: i64,
+		from: &Envelope,
+		to: &Destination,
+	) -> Result<String, CoreError> {
 		// `addMovementNotes` runs on the server, where `integerToCurrency`
 		// divides by the currency's places and formats with the default
 		// formatter: comma-dot with 2 fraction digits, whatever the budget's
@@ -600,23 +625,32 @@ impl<'a> BudgetEditor<'a> {
 			Envelope::ToBudget => "To Budget".to_owned(),
 			Envelope::Category(category) => name(category),
 		};
-		let to = match &to {
+		let to = match to {
 			Destination::ToBudget => "To Budget".to_owned(),
 			Destination::Overbudgeted => "Overbudgeted".to_owned(),
 			Destination::Category(category) => name(category),
 		};
 		let day = note_day(self.sheet.today());
-		let line = format!("- Reassigned {display} from {from} \u{2192} {to} on {day}");
-		let existing = self.budget.notes.get(&id).and_then(|n| n.as_deref());
-		let text = match existing.filter(|n| !n.is_empty()) {
-			Some(existing) => format!("{existing}\n{line}"),
-			None => line,
-		};
-		Ok((id, text))
+		Ok(format!(
+			"- Reassigned {display} from {from} \u{2192} {to} on {day}"
+		))
 	}
 }
 
-enum Destination {
+/// The `notes` row id of a month's budget note.
+pub(crate) fn month_note_id(month: YearMonth) -> String {
+	format!("budget-{month}")
+}
+
+/// A note with `line` on a new line after its text, or `line` alone.
+pub(crate) fn append_line(existing: Option<&str>, line: &str) -> String {
+	match existing.filter(|n| !n.is_empty()) {
+		Some(existing) => format!("{existing}\n{line}"),
+		None => line.to_owned(),
+	}
+}
+
+pub(crate) enum Destination {
 	Category(CategoryId),
 	ToBudget,
 	Overbudgeted,
