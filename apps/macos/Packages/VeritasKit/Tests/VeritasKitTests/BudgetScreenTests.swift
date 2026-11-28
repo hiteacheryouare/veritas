@@ -205,6 +205,26 @@ struct BudgetScreenTests {
 		#expect(session.commands == [.closeGoal(goalId: "tires", releaseToCategoryId: "groceries", alsoMoveLater: false)])
 	}
 
+	@Test func anOvertakenGoalsLoadNeverShowsTheEmptyState() async {
+		session.goals = [Self.goal("laptop", state: .active, available: 400, target: 1_000)]
+		session.holdsGoals = true
+		let workspace = WorkspaceModel(library: BudgetFakeLibrary(session: session), format: MoneyFormat())
+		await workspace.reopen(directory: URL(filePath: "/tmp/budget"))
+		let goals = GoalsScreenModel(workspace: workspace)
+		let older = Task { await goals.load() }
+		while session.heldGoalReads < 1 { await Task.yield() }
+		let newer = Task { await goals.load() }
+		while session.heldGoalReads < 2 { await Task.yield() }
+		session.releaseOldestGoals()
+		await older.value
+		#expect(!goals.hasLoaded, "an overtaken load leaves the screen loading, not empty")
+		#expect(goals.goals.isEmpty)
+		session.releaseOldestGoals()
+		await newer.value
+		#expect(goals.hasLoaded)
+		#expect(goals.open.map(\.id) == ["laptop"])
+	}
+
 	@Test func aSlowReloadNeverTakesTheScreenBackAMonth() async {
 		session.echoesMonth = true
 		let workspace = WorkspaceModel(library: BudgetFakeLibrary(session: session), format: MoneyFormat())
@@ -291,8 +311,21 @@ final class BudgetFakeSession: BudgetSession, @unchecked Sendable {
 	var echoesMonth = false
 	var slowMonth: Month?
 
+	/// Holds each goals read with what it read, until `releaseOldestGoals`, as a slow load would.
+	var holdsGoals = false
+	private var heldGoals: [CheckedContinuation<Void, Never>] = []
+	var heldGoalReads: Int { heldGoals.count }
+
 	func goals(today: String) async throws -> GoalList {
-		GoalList(goals: goals, mixedScaleNote: nil, zeroPlaces: false)
+		let read = GoalList(goals: goals, mixedScaleNote: nil, zeroPlaces: false)
+		if holdsGoals {
+			await withCheckedContinuation { heldGoals.append($0) }
+		}
+		return read
+	}
+
+	func releaseOldestGoals() {
+		heldGoals.removeFirst().resume()
 	}
 
 	func categoryHistory(_ categoryID: String) async throws -> CategoryHistory {
