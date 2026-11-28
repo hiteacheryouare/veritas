@@ -117,7 +117,7 @@ pub struct Session<B: Backend> {
 	dirty: bool,
 	last_snapshot: Option<DateTime<Utc>>,
 	open_check: Option<Pending>,
-	snapshot_problem: Option<CoreError>,
+	snapshot_problem: Option<(SnapshotReason, CoreError)>,
 	schedule_problem: Option<String>,
 	audit: Option<AuditReport>,
 	backup_folder: Option<PathBuf>,
@@ -138,6 +138,14 @@ impl<B: Backend> Session<B> {
 	/// passed. If the full check fails, the budget turns read-only and
 	/// subscribers are told to refetch.
 	pub fn open(dir: &Path, options: SessionOptions) -> Result<Self, CoreError> {
+		let mut session = Session::open_unchecked(dir, options)?;
+		session.start_open_check();
+		Ok(session)
+	}
+
+	/// `open` without the background check, for a caller that must finish
+	/// something before the open snapshot can be taken.
+	fn open_unchecked(dir: &Path, options: SessionOptions) -> Result<Self, CoreError> {
 		let db = dir.join(DB_FILE);
 		if !db.is_file() {
 			return Err(CoreError::Io(format!(
@@ -149,7 +157,7 @@ impl<B: Backend> Session<B> {
 		let (bus, load_report) =
 			open_bus(&db, lock.as_ref(), Listeners::default()).map_err(|(error, _)| error)?;
 		let today = CivilDate::from((options.clock)().date_naive());
-		let mut session = Session {
+		Ok(Session {
 			dir: dir.to_path_buf(),
 			db,
 			snapshots: dir.join(SNAPSHOTS_DIR),
@@ -169,20 +177,21 @@ impl<B: Backend> Session<B> {
 			register: None,
 			classification: ClassificationCache::default(),
 			today,
-		};
-		let take_snapshot = session.read_only().is_none();
-		session.open_check = Some(
+		})
+	}
+
+	fn start_open_check(&mut self) {
+		self.open_check = Some(
 			OpenCheck {
-				db: session.db.clone(),
-				snapshots: session.snapshots.clone(),
-				retention: session.options.retention,
-				clock: session.options.clock.clone(),
-				take_snapshot,
+				db: self.db.clone(),
+				snapshots: self.snapshots.clone(),
+				retention: self.options.retention,
+				clock: self.options.clock.clone(),
+				take_snapshot: self.read_only().is_none(),
 				verify: B::verify,
 			}
 			.start(),
 		);
-		Ok(session)
 	}
 
 	/// Starts a brand-new budget in `budget_dir`, which must not exist yet,
@@ -261,14 +270,16 @@ impl<B: Backend> Session<B> {
 				}),
 			},
 		)?;
-		let mut session = Session::open(budget_dir, options)?;
-		// R-REL-3: the budget as it arrived from Actual, before any edit can
-		// reach the background open snapshot.
+		let mut session = Session::open_unchecked(budget_dir, options)?;
+		// R-REL-3: the budget as it arrived from Actual, before any edit. The
+		// open check starts after it, so the open snapshot is always newer and
+		// retention never counts it as replaced by this one.
 		if session.read_only().is_none()
 			&& let Err(problem) = session.snapshot(SnapshotReason::Import)
 		{
-			session.snapshot_problem = Some(problem);
+			session.snapshot_failed(SnapshotReason::Import, problem);
 		}
+		session.start_open_check();
 		Ok(session)
 	}
 
@@ -312,10 +323,39 @@ impl<B: Backend> Session<B> {
 		self.bus().is_ok_and(CommandBus::can_redo)
 	}
 
-	/// Why the background open snapshot failed, until a later snapshot works.
-	/// A failed open snapshot never stops the budget opening.
+	/// Why a snapshot failed. A failed snapshot never stops the budget
+	/// opening. An open or hourly snapshot's problem lasts until any later
+	/// snapshot works, since each holds the budget as it is now. The import
+	/// snapshot's lasts until another import snapshot works: no later copy
+	/// holds the budget as it arrived.
 	pub fn snapshot_problem(&self) -> Option<&CoreError> {
-		self.snapshot_problem.as_ref()
+		self.snapshot_problem.as_ref().map(|(_, problem)| problem)
+	}
+
+	/// The kind of snapshot `snapshot_problem` is about.
+	pub fn snapshot_problem_reason(&self) -> Option<SnapshotReason> {
+		self.snapshot_problem.as_ref().map(|(reason, _)| *reason)
+	}
+
+	fn snapshot_failed(&mut self, reason: SnapshotReason, problem: CoreError) {
+		let hides_an_operations_problem = reason.is_routine()
+			&& self
+				.snapshot_problem
+				.as_ref()
+				.is_some_and(|(failed, _)| !failed.is_routine());
+		if !hides_an_operations_problem {
+			self.snapshot_problem = Some((reason, problem));
+		}
+	}
+
+	fn snapshot_worked(&mut self, reason: SnapshotReason) {
+		if self
+			.snapshot_problem
+			.as_ref()
+			.is_some_and(|(failed, _)| failed.is_routine() || *failed == reason)
+		{
+			self.snapshot_problem = None;
+		}
 	}
 
 	/// Why the last run of the daily schedule service failed, until a later
@@ -615,7 +655,7 @@ impl<B: Backend> Session<B> {
 		self.ensure_writer()?;
 		let now = self.now();
 		let snapshot = take_snapshot(&self.db, &self.snapshots, reason, now)?;
-		self.snapshot_problem = None;
+		self.snapshot_worked(reason);
 		self.dirty = false;
 		self.last_snapshot = Some(now);
 		prune_snapshots(&self.snapshots, &self.options.retention, now)?;
@@ -809,9 +849,9 @@ impl<B: Backend> Session<B> {
 		match checked.snapshot {
 			Some(Ok(snapshot)) => {
 				self.last_snapshot = Some(snapshot.taken_at);
-				self.snapshot_problem = None;
+				self.snapshot_worked(snapshot.reason);
 			}
-			Some(Err(error)) => self.snapshot_problem = Some(error),
+			Some(Err(error)) => self.snapshot_failed(SnapshotReason::Open, error),
 			None => {}
 		}
 		let sound = checked
