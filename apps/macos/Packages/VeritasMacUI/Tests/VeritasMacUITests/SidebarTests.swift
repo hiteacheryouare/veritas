@@ -69,6 +69,46 @@ struct SidebarTests {
 		#expect(fullWidth.table.selectionHighlightStyle == .regular)
 	}
 
+	@Test func theFinderKeepsTheTableItFoundUntilItGoesAway() throws {
+		let root = NSView(frame: CGRect(x: 0, y: 0, width: 1000, height: 800))
+		let finder = NoSystemHighlight.Finder(frame: CGRect(x: 0, y: 50, width: 252, height: 750))
+		root.addSubview(finder)
+		let list = Self.scrolledTable(frame: CGRect(x: 0, y: 0, width: 252, height: 800))
+		root.addSubview(list.scroll)
+		#expect(finder.listTable() === list.table)
+		let replacement = Self.scrolledTable(frame: list.scroll.frame)
+		root.addSubview(replacement.scroll, positioned: .below, relativeTo: nil)
+		#expect(finder.listTable() === list.table, "a later lookup reuses the table instead of scanning the window again")
+		list.scroll.removeFromSuperview()
+		#expect(finder.listTable() === replacement.table, "a table that left the window is dropped and the window scanned again")
+	}
+
+	@Test func aZeroWidthOrHiddenListNeverMatches() {
+		let root = NSView(frame: CGRect(x: 0, y: 0, width: 1000, height: 800))
+		let collapsed = NoSystemHighlight.Finder(frame: CGRect(x: 0, y: 50, width: 0, height: 750))
+		root.addSubview(collapsed)
+		let zeroWidth = Self.scrolledTable(frame: CGRect(x: 0, y: 0, width: 0, height: 800))
+		root.addSubview(zeroWidth.scroll)
+		collapsed.apply()
+		#expect(collapsed.listTable() == nil, "a collapsed List matches nothing, not even a table as narrow as it")
+		#expect(zeroWidth.table.selectionHighlightStyle == .regular)
+
+		let finder = NoSystemHighlight.Finder(frame: CGRect(x: 0, y: 50, width: 252, height: 750))
+		root.addSubview(finder)
+		let hiddenTable = Self.scrolledTable(frame: CGRect(x: 0, y: 0, width: 252, height: 800))
+		hiddenTable.scroll.isHidden = true
+		root.addSubview(hiddenTable.scroll)
+		finder.apply()
+		#expect(finder.listTable() == nil, "a hidden table is never the List's")
+		#expect(hiddenTable.table.selectionHighlightStyle == .regular)
+
+		let list = Self.scrolledTable(frame: CGRect(x: 0, y: 0, width: 252, height: 800))
+		root.addSubview(list.scroll)
+		#expect(finder.listTable() === list.table)
+		finder.isHidden = true
+		#expect(finder.listTable() == nil, "a hidden List matches nothing, even with a table already found")
+	}
+
 	private static func scrolledTable(frame: CGRect) -> (scroll: NSScrollView, table: NSTableView) {
 		let scroll = NSScrollView(frame: frame)
 		let table = NSTableView(frame: CGRect(origin: .zero, size: frame.size))

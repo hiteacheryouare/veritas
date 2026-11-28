@@ -113,7 +113,11 @@ struct SankeyCanvas: View {
 						let shape = Path(roundedRect: node.rect, cornerRadius: 3)
 						let isLit = lit?.nodes.contains(node.index) ?? false
 						let dimmed = lit != nil && !isLit
-						context.fill(shape, with: .color(isLit && shown == .node(node.index) ? .textPrimary : color(report.nodes[node.index]).opacity(dimmed ? 0.45 : 1)))
+						let isShown = isLit && shown == .node(node.index)
+						context.fill(shape, with: .color(isShown ? .textPrimary : color(report.nodes[node.index]).opacity(dimmed ? 0.45 : 1)))
+						if !isShown {
+							context.stroke(shape, with: .color(Color.chartEdge(token(report.nodes[node.index])).opacity(dimmed ? 0.45 : 1)), lineWidth: 1)
+						}
 					}
 				}
 				ForEach(layout.nodes, id: \.index) { placed in
@@ -273,7 +277,9 @@ struct SankeyCanvas: View {
 		}
 	}
 
-	func color(_ node: SankeyNode) -> Color {
+	func color(_ node: SankeyNode) -> Color { Color(token(node)) }
+
+	func token(_ node: SankeyNode) -> ColorToken {
 		switch node.key.kind {
 		case .incomeCategory, .income, .refundsAndWithdrawals, .unreviewedTransfersIn, .shortfall: .moneyIncomeFill
 		case .savings: .chartSavings

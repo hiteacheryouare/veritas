@@ -22,34 +22,38 @@
 	--color-separator: rgba(20, 22, 30, 0.08);
 
 	--color-text-primary: #1c1c21;
-	--color-text-secondary: #66666f;
-	--color-text-tertiary: #6c6c75;
+	--color-text-secondary: #5d5d66;
+	--color-text-tertiary: #5f5f68;
 	--color-text-paper: #23232a;
 
-	--color-accent: #3b3d45;
-	--color-accent-fill: #2f3138;
-	--color-accent-soft: rgba(40, 42, 52, 0.09);
+	--color-accent: #23169c;
+	--color-accent-fill: #23169c;
+	--color-accent-soft: rgba(35, 22, 156, 0.1);
 	--color-surface-selected: rgba(20, 22, 30, 0.08);
-	--color-focus-ring: #3b3d45;
+	--color-focus-ring: #23169c;
 	--color-text-on-accent: #f5f5f7;
+	--color-brand-secondary: #00688b;
+	--color-brand-secondary-fill: #007ea7;
+	--color-brand: #23169c;
+	--color-text-on-brand: #f5f5f7;
 
 	--color-track: rgba(20, 22, 30, 0.08);
 
-	--color-money-available: #127a49;
-	--color-money-available-fill: #26a066;
-	--color-money-low: #9a5a00;
-	--color-money-low-fill: #d98b12;
-	--color-money-overspent: #c4262e;
-	--color-money-overspent-fill: #e0474e;
-	--color-money-income: #1668bd;
-	--color-money-income-fill: #2f84dc;
-	--color-money-neutral: #6c6c75;
+	--color-money-available: #036f46;
+	--color-money-available-fill: #56e39f;
+	--color-money-low: #7c5b02;
+	--color-money-low-fill: #f5b700;
+	--color-money-overspent: #c30225;
+	--color-money-overspent-fill: #db162f;
+	--color-money-income: #00688b;
+	--color-money-income-fill: #007ea7;
+	--color-money-neutral: #5f5f68;
 
 	--color-chart-expense: #6e6e78;
 	--color-chart-expense-soft: rgba(110, 110, 120, 0.28);
-	--color-chart-savings: #26a066;
+	--color-chart-savings: #56e39f;
 	--color-chart-debt-paydown: #8b5e34;
-	--color-chart-unallocated: rgba(47, 132, 220, 0.35);
+	--color-chart-unallocated: rgba(0, 126, 167, 0.35);
 	--color-chart-band: rgba(58, 58, 66, 0.2);
 	--color-chart-grid: rgba(20, 22, 30, 0.07);
 	--color-scenario-baseline: #3a3a42;
@@ -86,34 +90,38 @@
 	--color-separator: rgba(240, 240, 250, 0.08);
 
 	--color-text-primary: #ececf0;
-	--color-text-secondary: #a2a2ab;
-	--color-text-tertiary: #97979f;
+	--color-text-secondary: #b0b0b9;
+	--color-text-tertiary: #afafb7;
 	--color-text-paper: #23232a;
 
-	--color-accent: #d9dae0;
-	--color-accent-fill: #e2e3e8;
-	--color-accent-soft: rgba(240, 240, 250, 0.11);
+	--color-accent: #98acff;
+	--color-accent-fill: #98acff;
+	--color-accent-soft: rgba(152, 172, 255, 0.14);
 	--color-surface-selected: rgba(240, 240, 250, 0.12);
-	--color-focus-ring: #d9dae0;
+	--color-focus-ring: #98acff;
 	--color-text-on-accent: #1c1c21;
+	--color-brand-secondary: #59bbe6;
+	--color-brand-secondary-fill: #007ea7;
+	--color-brand: #23169c;
+	--color-text-on-brand: #f5f5f7;
 
 	--color-track: rgba(240, 240, 250, 0.09);
 
-	--color-money-available: #4cc47a;
-	--color-money-available-fill: #3fb06d;
-	--color-money-low: #eda23a;
-	--color-money-low-fill: #e0952a;
-	--color-money-overspent: #ff6a64;
-	--color-money-overspent-fill: #f05650;
-	--color-money-income: #5eaaf5;
-	--color-money-income-fill: #4796e6;
-	--color-money-neutral: #97979f;
+	--color-money-available: #56e39f;
+	--color-money-available-fill: #56e39f;
+	--color-money-low: #f5b700;
+	--color-money-low-fill: #f5b700;
+	--color-money-overspent: #ff908a;
+	--color-money-overspent-fill: #db162f;
+	--color-money-income: #59bbe6;
+	--color-money-income-fill: #007ea7;
+	--color-money-neutral: #afafb7;
 
 	--color-chart-expense: #a5a5ae;
 	--color-chart-expense-soft: rgba(165, 165, 174, 0.3);
-	--color-chart-savings: #3fb06d;
+	--color-chart-savings: #56e39f;
 	--color-chart-debt-paydown: #c99a6b;
-	--color-chart-unallocated: rgba(94, 170, 245, 0.4);
+	--color-chart-unallocated: rgba(0, 126, 167, 0.4);
 	--color-chart-band: rgba(226, 226, 232, 0.2);
 	--color-chart-grid: rgba(240, 240, 250, 0.07);
 	--color-scenario-baseline: #e2e2e8;

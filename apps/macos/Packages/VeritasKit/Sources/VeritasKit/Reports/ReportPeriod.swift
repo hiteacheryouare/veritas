@@ -98,6 +98,17 @@ public struct ReportPeriod: Hashable, Sendable {
 		}
 	}
 
+	/// One report's interval headings, with the year added to each when a
+	/// heading would otherwise repeat, as November does across 13 months.
+	public static func intervals(_ texts: [String]) -> [String] {
+		let headings = texts.map(interval)
+		guard Set(headings).count < headings.count else { return headings }
+		return zip(texts, headings).map { text, heading in
+			let year = text.prefix(4)
+			return text.split(separator: "-").count == 3 ? "\(heading), \(year)" : "\(heading) \(year)"
+		}
+	}
+
 	/// "Jun", for table headings and chart axes.
 	public static func shortMonth(_ month: Month) -> String {
 		month.date()?.formatted(.dateTime.month(.abbreviated)) ?? ""

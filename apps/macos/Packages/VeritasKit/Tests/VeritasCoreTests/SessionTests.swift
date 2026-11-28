@@ -63,6 +63,7 @@ private final class Recorder: ChangeListener, @unchecked Sendable {
 	#expect(state.readOnly == nil)
 	#expect(!state.canUndo)
 	#expect(state.snapshotProblem == nil)
+	#expect(!state.snapshotProblemIsImport)
 	#expect(state.auditFindings == 0)
 	#expect(try session.auditReport() == [])
 	let reasons = try session.snapshots().map(\.reason)

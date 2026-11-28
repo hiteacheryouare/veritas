@@ -20,10 +20,10 @@ struct StandardReportView: View {
 					let stop = ZeroSplit.lineStop(model.netWorth.map { model.format.chartValue($0.netWorth, on: .register) })
 					Chart(model.netWorth, id: \.month) { point in
 						LineMark(x: .value("Month", ReportPeriod.shortMonth(point.month)), y: .value("Net worth", model.format.chartValue(point.netWorth, on: .register)))
-							.foregroundStyle(LinearGradient(stops: [.init(color: .moneyIncomeFill, location: 0), .init(color: .moneyIncomeFill, location: stop), .init(color: .moneyOverspent, location: stop), .init(color: .moneyOverspent, location: 1)], startPoint: .top, endPoint: .bottom))
+							.foregroundStyle(LinearGradient(stops: [.init(color: .chartMark(.moneyIncomeFill), location: 0), .init(color: .chartMark(.moneyIncomeFill), location: stop), .init(color: .moneyOverspent, location: stop), .init(color: .moneyOverspent, location: 1)], startPoint: .top, endPoint: .bottom))
 							.lineStyle(StrokeStyle(lineWidth: 2.5))
 						PointMark(x: .value("Month", ReportPeriod.shortMonth(point.month)), y: .value("Net worth", model.format.chartValue(point.netWorth, on: .register)))
-							.foregroundStyle(point.netWorth < 0 ? Color.moneyOverspent : Color.moneyIncomeFill)
+							.foregroundStyle(point.netWorth < 0 ? Color.moneyOverspent : Color.chartMark(.moneyIncomeFill))
 					}
 					.chartYAxis { thousandsAxis }
 					.frame(height: 220)
@@ -40,7 +40,7 @@ struct StandardReportView: View {
 						let month = column.month.map(ReportPeriod.shortMonth) ?? ""
 						BarMark(x: .value("Month", month), y: .value("Amount", model.format.chartValue(column.income.total, on: .register)), width: .fixed(22))
 							.position(by: .value("Series", "Income"))
-							.foregroundStyle(Color.moneyIncomeFill)
+							.foregroundStyle(Color.chartMark(.moneyIncomeFill))
 						BarMark(x: .value("Month", month), y: .value("Amount", model.format.chartValue(column.expenses.total, on: .register)), width: .fixed(22))
 							.position(by: .value("Series", "Expenses"))
 							.foregroundStyle(Color.chartExpense)
@@ -73,12 +73,20 @@ struct Hero: View {
 	var tone: VeritasCore.MoneyTone = .neutral
 
 	var body: some View {
-		HStack(alignment: .firstTextBaseline, spacing: Spacing.s3) {
-			ReportAmount(amount: amount, tone: tone, format: format, weight: .bold, size: .display)
-			Text(caption)
-				.font(.text(.heading, weight: .semibold))
-				.foregroundStyle(.textSecondary)
+		ViewThatFits(in: .horizontal) {
+			HStack(alignment: .firstTextBaseline, spacing: Spacing.s3) { figure; label }
+			VStack(alignment: .leading, spacing: Spacing.s1) { figure; label.lineLimit(2) }
 		}
+	}
+
+	private var figure: some View {
+		ReportAmount(amount: amount, tone: tone, format: format, weight: .bold, size: .display)
+	}
+
+	private var label: some View {
+		Text(caption)
+			.font(.text(.heading, weight: .semibold))
+			.foregroundStyle(.textSecondary)
 	}
 }
 
@@ -102,46 +110,33 @@ struct RowsTable: View {
 	let id: String
 
 	var body: some View {
-		VStack(spacing: 0) { grid }
+		PinnedTable(headings: headings, lines: rows.map(line))
 			.containerIdentifier(id)
 	}
 
-	private var grid: some View {
-		Grid(alignment: .trailing, horizontalSpacing: 0, verticalSpacing: 0) {
-			GridRow {
-				Text("").gridColumnAlignment(.leading)
-				ForEach(Array(headings.enumerated()), id: \.offset) { _, heading in
-					Text(heading)
-						.font(.text(.caption))
-						.foregroundStyle(.textTertiary)
+	private func line(_ row: ReportRow) -> TableLine {
+		let weight: Font.Weight = row.isTotal ? .bold : .medium
+		return TableLine(
+			id: row.id,
+			height: 38,
+			rule: row.isTotal ? .strong : .light,
+			leading: AnyView(
+				Text(row.title)
+					.font(.text(.body, weight: weight))
+					.padding(.leading, Spacing.s4)
+					.padding(.trailing, Spacing.s3)
+					.accessibilityIdentifier("\(id).\(row.id)")
+			),
+			cells: row.values.indices.map { index in
+				AnyView(
+					ReportAmount(amount: row.values[index], tone: row.tones[index], format: format, weight: weight)
 						.frame(minWidth: 96, alignment: .trailing)
 						.padding(.horizontal, Spacing.s4)
-				}
+						.accessibilityElement(children: .ignore)
+						.accessibilityLabel("\(row.title), \(headings.indices.contains(index) ? headings[index] : ""): \(format.amount(row.values[index], on: .register))")
+				)
 			}
-			.frame(height: 30)
-			ForEach(rows) { row in
-				Divider().overlay(row.isTotal ? Color.textTertiary : Color.separator)
-				GridRow {
-					Text(row.title)
-						.font(.text(.body, weight: row.isTotal ? .bold : .medium))
-						.lineLimit(1)
-						.fixedSize()
-						.padding(.leading, Spacing.s4)
-						.padding(.trailing, Spacing.s3)
-						.frame(maxWidth: .infinity, alignment: .leading)
-					ForEach(Array(row.values.enumerated()), id: \.offset) { index, value in
-						ReportAmount(amount: value, tone: row.tones[index], format: format, weight: row.isTotal ? .bold : .medium)
-							.frame(minWidth: 96, alignment: .trailing)
-							.padding(.horizontal, Spacing.s4)
-					}
-				}
-				.frame(minHeight: 38)
-				.accessibilityIdentifier("\(id).\(row.id)")
-			}
-		}
-		.padding(.vertical, Spacing.s1)
-		.background(.surfaceGrouped, in: .rect(cornerRadius: Radius.section))
-		.overlay { RoundedRectangle(cornerRadius: Radius.section).strokeBorder(Color.edgeGrouped) }
+		)
 	}
 }
 
@@ -158,7 +153,8 @@ private struct SpendingList: View {
 				} label: {
 					HStack(spacing: Spacing.s3) {
 						Text(line.title)
-							.frame(width: 220, alignment: .leading)
+							.lineLimit(1)
+							.frame(minWidth: 120, idealWidth: 220, maxWidth: 220, alignment: .leading)
 						GeometryReader { proxy in
 							Capsule()
 								.fill(Color.chartExpense)

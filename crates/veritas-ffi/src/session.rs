@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use veritas_domain::{CoreError, NewBudget};
 use veritas_session::{
 	Backend, CancelToken, ChangeSet, Session as CoreSession, SessionOptions, SharedSession,
+	SnapshotReason,
 };
 
 use crate::accounts::{
@@ -160,6 +161,8 @@ impl<B: Backend> Core<B> {
 				can_redo: session.can_redo(),
 				checking: session.open_check_pending(),
 				snapshot_problem: session.snapshot_problem().map(ToString::to_string),
+				snapshot_problem_is_import: session.snapshot_problem_reason()
+					== Some(SnapshotReason::Import),
 				schedule_problem: session.schedule_problem().map(ToOwned::to_owned),
 				skipped_rows: session.load_report().skipped.len() as u64,
 				audit_findings: session
@@ -820,6 +823,7 @@ pub(crate) mod tests {
 		assert_eq!(state.read_only, None);
 		assert!(!state.can_undo);
 		assert_eq!(state.snapshot_problem, None);
+		assert!(!state.snapshot_problem_is_import);
 		assert!(state.directory.ends_with("budget"));
 
 		let second =

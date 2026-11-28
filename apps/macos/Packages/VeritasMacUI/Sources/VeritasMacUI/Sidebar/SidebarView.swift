@@ -68,7 +68,10 @@ struct NoSystemHighlight: NSViewRepresentable {
 	/// (the scroll view also runs under the pinned Settings row), so a screen's
 	/// table, such as the register, is never touched. Until the List's table
 	/// exists it does nothing, and tries again on the next layout pass or update.
+	/// Once found, the table is kept until it leaves the view tree or stops matching.
 	final class Finder: NSView {
+		private weak var table: NSTableView?
+
 		override func viewDidMoveToWindow() {
 			super.viewDidMoveToWindow()
 			apply()
@@ -86,15 +89,20 @@ struct NoSystemHighlight: NSViewRepresentable {
 		}
 
 		func listTable() -> NSTableView? {
-			guard !bounds.isEmpty else { return nil }
+			guard !bounds.isEmpty, !isHiddenOrHasHiddenAncestor else { return nil }
 			let root = window?.contentView ?? Self.root(of: self)
 			let mine = convert(bounds, to: nil)
-			return Self.tables(in: root).first { table in
-				guard let scroll = table.enclosingScrollView else { return false }
-				let theirs = scroll.convert(scroll.bounds, to: nil)
-				return abs(theirs.minX - mine.minX) <= 1 && abs(theirs.width - mine.width) <= 1
-					&& theirs.insetBy(dx: -1, dy: -1).contains(mine)
-			}
+			if let table, table.isDescendant(of: root), Self.table(table, spans: mine) { return table }
+			table = Self.tables(in: root).first { Self.table($0, spans: mine) }
+			return table
+		}
+
+		private static func table(_ table: NSTableView, spans list: CGRect) -> Bool {
+			guard let scroll = table.enclosingScrollView, !scroll.isHiddenOrHasHiddenAncestor else { return false }
+			let theirs = scroll.convert(scroll.bounds, to: nil)
+			return !theirs.isEmpty
+				&& abs(theirs.minX - list.minX) <= 1 && abs(theirs.width - list.width) <= 1
+				&& theirs.insetBy(dx: -1, dy: -1).contains(list)
 		}
 
 		private static func root(of view: NSView) -> NSView {
