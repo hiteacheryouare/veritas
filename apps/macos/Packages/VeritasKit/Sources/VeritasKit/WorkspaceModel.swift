@@ -20,6 +20,8 @@ public final class WorkspaceModel {
 	public private(set) var integrityReport: IntegrityReport?
 	public private(set) var budgetList: [BudgetListingItem]?
 	public var isOpenPickerShown = false
+	/// Shared by every window, so each one's menus list the same budgets.
+	public let recents: RecentBudgets
 	/// Goes up after every change the core announces, so open screens refetch.
 	public private(set) var changeCount = 0
 	public var destination = Destination.start
@@ -46,6 +48,8 @@ public final class WorkspaceModel {
 	@ObservationIgnored private var session: (any BudgetSession)?
 	@ObservationIgnored private var retry: (@MainActor () async -> Void)?
 	@ObservationIgnored private var maintenance: Task<Void, Never>?
+	/// The folder this window holds in `recents`, while it opens or has it open.
+	@ObservationIgnored private var held: URL?
 	@ObservationIgnored private let maintenanceInterval: Duration
 	@ObservationIgnored private let checkingInterval: Duration
 
@@ -54,12 +58,14 @@ public final class WorkspaceModel {
 	public init(
 		library: any BudgetLibrary,
 		localSettings: any LocalBudgetSettings = InMemoryBudgetSettings(),
+		recents: RecentBudgets? = nil,
 		format: MoneyFormat = MoneyFormat(locale: .current),
 		maintenanceInterval: Duration = .seconds(300),
 		checkingInterval: Duration = .seconds(2)
 	) {
 		self.library = library
 		self.localSettings = localSettings
+		self.recents = recents ?? RecentBudgets(defaults: nil, locate: { _ in .here })
 		fallbackFormat = format
 		self.maintenanceInterval = maintenanceInterval
 		self.checkingInterval = checkingInterval
@@ -88,9 +94,28 @@ public final class WorkspaceModel {
 		}
 	}
 
+	/// The folder is held from before the first `await`, so a window opening at
+	/// the same time, such as an empty one at launch, doesn't pick it too.
 	public func reopen(directory: URL) async {
 		let library = library
+		recents.hold(directory)
 		await open(during: .open) { try await library.open(directory: directory) }
+		recents.release(directory)
+	}
+
+	/// A new window with nothing to restore opens the budget used last, so
+	/// closing the window and coming back from the Dock or a relaunch finds it.
+	public func reopenMostRecent() async {
+		guard phase == .empty, let budget = recents.budgetToReopen else { return }
+		await reopen(directory: budget.folder)
+	}
+
+	/// Swaps the folder this window holds in `recents` for `folder`.
+	private func hold(_ folder: URL?) {
+		if let held, let folder, RecentBudgets.key(held) == RecentBudgets.key(folder) { return }
+		if let held { recents.release(held) }
+		held = folder
+		if let folder { recents.hold(folder) }
 	}
 
 	/// Holds the zip's sandbox access for each attempt, so a retry can still read it.
@@ -354,6 +379,16 @@ public final class WorkspaceModel {
 		await reopen(directory: budget.folder)
 	}
 
+	/// Closes this window's budget as Close Budget does, so its lock and
+	/// snapshots settle, then opens the chosen one.
+	public func switchTo(_ budget: RecentBudgets.Entry) async {
+		guard phase != .working else { return }
+		if overview.map({ RecentBudgets.key($0.directory) }) == budget.id { return }
+		await closeBudget()
+		await reopen(directory: budget.folder)
+		if phase != .open { recents.forgetMissing() }
+	}
+
 	public func undo() async {
 		guard let session, canUndo else { return }
 		do {
@@ -374,7 +409,10 @@ public final class WorkspaceModel {
 		}
 	}
 
+	/// Working until the session has closed, so nothing opens or switches meanwhile.
 	public func closeBudget() async {
+		phase = .working
+		hold(nil)
 		maintenance?.cancel()
 		maintenance = nil
 		await session?.close()
@@ -490,6 +528,8 @@ public final class WorkspaceModel {
 			canExport = opened.canExport
 			apply(overview)
 			phase = .open
+			hold(overview.directory)
+			recents.opened(name: overview.name, folder: overview.directory)
 			let settings = BudgetSettingsModel(session: opened, local: localSettings, budget: overview.directory) { [weak self] error in
 				self?.present(error)
 			}
@@ -535,6 +575,7 @@ public final class WorkspaceModel {
 	private func apply(_ overview: BudgetOverview) {
 		self.overview = overview
 		readOnly = overview.readOnly
+		recents.renamed(overview.name, folder: overview.directory)
 		if case .account(let id) = destination, !overview.accounts.contains(where: { $0.id == id }) {
 			destination = .screen(.accounts)
 		}

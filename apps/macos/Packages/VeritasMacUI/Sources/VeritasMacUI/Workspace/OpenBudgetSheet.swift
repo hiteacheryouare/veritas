@@ -20,7 +20,7 @@ struct OpenBudgetSheet: View {
 				} else {
 					List(budgets, selection: $selection) { budget in
 						HStack {
-							Text(budget.name ?? "Untitled budget")
+							Text(budget.name ?? RecentBudgetItems.untitled)
 							Spacer()
 							if let opened = budget.lastOpened {
 								Text(When.text(opened))

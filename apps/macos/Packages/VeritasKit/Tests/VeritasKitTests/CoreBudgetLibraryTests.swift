@@ -30,6 +30,27 @@ struct CoreBudgetLibraryTests {
 		await session.close()
 	}
 
+	@MainActor
+	@Test func anImportedBudgetIsThereTheNextTimeTheAppOpens() async throws {
+		defer { try? FileManager.default.removeItem(at: budgets) }
+		let suite = "veritas-relaunch-tests"
+		let defaults = try #require(UserDefaults(suiteName: suite))
+		defer { defaults.removePersistentDomain(forName: suite) }
+		defaults.removePersistentDomain(forName: suite)
+		let before = WorkspaceModel(library: library, recents: RecentBudgets(defaults: defaults), format: MoneyFormat())
+		await before.importActualZip(smallZip)
+		let imported = try #require(before.overview)
+		await before.closeBudget()
+
+		let afterRelaunch = WorkspaceModel(library: library, recents: RecentBudgets(defaults: defaults), format: MoneyFormat())
+		await afterRelaunch.reopenMostRecent()
+		let reopened = try #require(afterRelaunch.overview, "the budget opens again, without a second import")
+		#expect(reopened.directory == imported.directory)
+		#expect(reopened.accounts.map(\.name) == imported.accounts.map(\.name))
+		#expect(reopened.readOnly == nil, "the closed window let the budget go")
+		await afterRelaunch.closeBudget()
+	}
+
 	@Test func aSecondWindowOnTheSameBudgetIsReadOnly() async throws {
 		// R-REL-6
 		defer { try? FileManager.default.removeItem(at: budgets) }

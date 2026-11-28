@@ -47,6 +47,14 @@ struct VeritasCommands: Commands {
 			Button("Open Budget…") { model?.showOpenPicker() }
 				.keyboardShortcut("o")
 				.disabled(model == nil || model?.phase == .working)
+			Menu("Open Recent") {
+				if let model {
+					RecentBudgetItems(model: model)
+					Divider()
+					Button("Clear Menu") { model.recents.clear() }
+				}
+			}
+			.disabled(model == nil || model?.phase == .working || model?.recents.entries.isEmpty != false)
 			Button("Import from Actual…") { model?.isImportPanelShown = true }
 				.disabled(model == nil || model?.phase == .working)
 			Button("Export to Actual…") {

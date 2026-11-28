@@ -44,6 +44,15 @@ struct ShellScreenshotTests {
 		try render(IntegrityReportSheet(report: .refusedImport(problems: 2)), named: "integrity-report-refused-import")
 	}
 
+	@Test func sidebarWithTheBudgetSwitcher() async throws {
+		let recents = RecentBudgets(defaults: nil, locate: { _ in .here })
+		recents.opened(name: "Side business", folder: URL(filePath: "/budgets/9F3A61C2", directoryHint: .isDirectory))
+		let model = WorkspaceModel(library: StubLibrary(readOnly: nil, importError: nil), localSettings: InMemoryBudgetSettings(), recents: recents, format: MoneyFormat())
+		await model.reopen(directory: StubLaunch.budgetDirectory)
+		#expect(recents.entries(besides: model.overview?.directory).map(\.name) == ["Side business"])
+		try render(SidebarView(model: model).frame(width: 252, height: 640), named: "sidebar-budget-switcher")
+	}
+
 	@Test func openBudget() async throws {
 		let budgets = try await StubLibrary(readOnly: nil, importError: nil).listBudgets()
 		try render(OpenBudgetSheet(budgets: budgets) { _ in }, named: "open-budget")

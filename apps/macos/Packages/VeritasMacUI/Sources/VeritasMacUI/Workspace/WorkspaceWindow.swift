@@ -7,7 +7,7 @@ import VeritasKit
 struct WorkspaceWindow: View {
 	static let id = "workspace"
 
-	@State private var model = WorkspaceModel(library: LaunchEnvironment.library(), localSettings: LaunchEnvironment.localSettings())
+	@State private var model = WorkspaceModel(library: LaunchEnvironment.library(), localSettings: LaunchEnvironment.localSettings(), recents: LaunchEnvironment.recentBudgets)
 	@State private var tour = GuidedTour(defaults: LaunchEnvironment.tourDefaults)
 	@SceneStorage("destination") private var storedDestination = Destination.start
 	@SceneStorage("budgetDirectory") private var storedBudgetDirectory = ""
@@ -71,7 +71,12 @@ struct WorkspaceWindow: View {
 				if model.phase != .open {
 					storedBudgetDirectory = ""
 				}
+			} else {
+				await model.reopenMostRecent()
 			}
+		}
+		.onDisappear {
+			Task { await model.closeBudget() }
 		}
 	}
 
