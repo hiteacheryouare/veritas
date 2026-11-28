@@ -94,18 +94,20 @@ public final class WorkspaceModel {
 		}
 	}
 
+	/// The folder is held from before the first `await`, so a window opening at
+	/// the same time, such as an empty one at launch, doesn't pick it too.
 	public func reopen(directory: URL) async {
 		let library = library
+		recents.hold(directory)
 		await open(during: .open) { try await library.open(directory: directory) }
+		recents.release(directory)
 	}
 
 	/// A new window with nothing to restore opens the budget used last, so
 	/// closing the window and coming back from the Dock or a relaunch finds it.
 	public func reopenMostRecent() async {
 		guard phase == .empty, let budget = recents.budgetToReopen else { return }
-		hold(budget.folder)
 		await reopen(directory: budget.folder)
-		if phase != .open { hold(nil) }
 	}
 
 	/// Swaps the folder this window holds in `recents` for `folder`.

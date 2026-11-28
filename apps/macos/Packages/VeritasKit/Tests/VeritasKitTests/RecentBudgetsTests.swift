@@ -125,6 +125,37 @@ struct RecentBudgetsTests {
 		#expect(library.log == ["open a"])
 	}
 
+	@Test func aWindowRestoringABudgetHoldsItAgainstAnEmptyWindowAtLaunch() async {
+		let library = SwitchingLibrary()
+		let recents = RecentBudgets(defaults: nil, locate: { _ in .here })
+		recents.opened(name: "a", folder: Self.folder("a"))
+		library.holdsOpen = true
+		let restoring = WorkspaceModel(library: library, recents: recents, format: MoneyFormat())
+		let empty = WorkspaceModel(library: library, recents: recents, format: MoneyFormat())
+		let opening = Task { await restoring.reopen(directory: Self.folder("a")) }
+		while !library.isHoldingOpen { await Task.yield() }
+		await empty.reopenMostRecent()
+		#expect(empty.phase == .empty, "the restoring window holds it, though it hasn't finished opening")
+		library.releaseOpen()
+		await opening.value
+		#expect(restoring.overview?.name == "a")
+		#expect(library.log == ["open a"])
+		#expect(recents.budgetToReopen == nil, "held once, by the window that opened it")
+		await restoring.closeBudget()
+		#expect(recents.budgetToReopen?.name == "a", "and released when it closes")
+	}
+
+	@Test func aRestoreThatFailsLeavesTheBudgetFree() async {
+		let library = SwitchingLibrary()
+		library.missing.insert(Self.folder("a"))
+		let recents = RecentBudgets(defaults: nil, locate: { _ in .here })
+		recents.opened(name: "a", folder: Self.folder("a"))
+		let restoring = WorkspaceModel(library: library, recents: recents, format: MoneyFormat())
+		await restoring.reopen(directory: Self.folder("a"))
+		#expect(restoring.phase == .empty)
+		#expect(recents.budgetToReopen?.name == "a")
+	}
+
 	@Test func aBudgetThatFailsToReopenIsntLeftHeld() async {
 		let library = SwitchingLibrary()
 		library.missing.insert(Self.folder("a"))
