@@ -39,13 +39,13 @@ public final class GoalsScreenModel {
 	@ObservationIgnored private var loadGeneration = 0
 
 	public func load() async {
-		defer { hasLoaded = true }
 		loadGeneration += 1
 		let generation = loadGeneration
 		let loaded = await workspace.goalList()
 		guard generation == loadGeneration else { return }
 		goals = loaded.goals
 		mixedScaleNote = loaded.mixedScaleNote
+		hasLoaded = true
 		if let selection, !goals.contains(where: { $0.id == selection }) {
 			self.selection = nil
 		}

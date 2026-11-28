@@ -50,6 +50,8 @@ public struct BudgetOverview: Hashable, Sendable {
 	public let scheduleProblem: String?
 	/// Why the last snapshot failed.
 	public let snapshotProblem: String?
+	/// The problem is the import snapshot's, which stays for the session.
+	public let snapshotProblemIsImport: Bool
 
 	public init(
 		name: String?,
@@ -63,7 +65,8 @@ public struct BudgetOverview: Hashable, Sendable {
 		currencyCode: String? = nil,
 		numberStyle: NumberStyle = .commaDot,
 		scheduleProblem: String? = nil,
-		snapshotProblem: String? = nil
+		snapshotProblem: String? = nil,
+		snapshotProblemIsImport: Bool = false
 	) {
 		self.name = name
 		self.directory = directory
@@ -77,6 +80,7 @@ public struct BudgetOverview: Hashable, Sendable {
 		self.numberStyle = numberStyle
 		self.scheduleProblem = scheduleProblem
 		self.snapshotProblem = snapshotProblem
+		self.snapshotProblemIsImport = snapshotProblemIsImport
 	}
 
 	public var accounts: [SidebarAccount] {

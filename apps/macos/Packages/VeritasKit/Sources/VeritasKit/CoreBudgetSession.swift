@@ -31,7 +31,8 @@ final class CoreBudgetSession: BudgetSession {
 			currencyCode: currency.flatMap { $0.code.isEmpty ? nil : $0.code },
 			numberStyle: overview.numberFormat?.style ?? .commaDot,
 			scheduleProblem: state.scheduleProblem,
-			snapshotProblem: state.snapshotProblem
+			snapshotProblem: state.snapshotProblem,
+			snapshotProblemIsImport: state.snapshotProblemIsImport
 		)
 	}
 

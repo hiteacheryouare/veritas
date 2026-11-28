@@ -151,6 +151,11 @@ pub struct SessionState {
 	/// The budget is usable meanwhile.
 	pub checking: bool,
 	pub snapshot_problem: Option<String>,
+	/// v22. True when `snapshot_problem` is the import snapshot's. It lasts
+	/// the session, since no later snapshot holds the budget as it arrived,
+	/// so the banner names that copy instead of "the last snapshot".
+	#[uniffi(default = false)]
+	pub snapshot_problem_is_import: bool,
 	/// Why the last daily schedule service run failed, until one works. It
 	/// never fails `maintain`; the service tries again on the next call.
 	pub schedule_problem: Option<String>,

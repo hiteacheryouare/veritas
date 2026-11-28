@@ -276,11 +276,13 @@ public final class DashboardModel {
 	@ObservationIgnored private var loadGeneration = 0
 
 	public func load() async {
-		defer { hasLoaded = true }
 		loadGeneration += 1
 		let generation = loadGeneration
 		let today = WorkspaceModel.today()
-		guard let sheets = await workspace.report({ try await $0.dashboardSheets(today: today) }), generation == loadGeneration else { return }
+		let loaded = await workspace.report { try await $0.dashboardSheets(today: today) }
+		guard generation == loadGeneration else { return }
+		hasLoaded = true
+		guard let sheets = loaded else { return }
 		self.sheets = sheets
 		if pageID == nil || !sheets.contains(where: { $0.id == pageID }) { pageID = sheets.first?.id }
 		let names = await workspace.budgetNames()
