@@ -17,7 +17,7 @@ struct StatementsScreen: View {
 	}
 
 	var body: some View {
-		ScrollView {
+		ScrollView([.vertical, .horizontal]) {
 			Group {
 				if let document = model.document {
 					StatementPaper(document: document, format: model.format)
@@ -28,7 +28,7 @@ struct StatementsScreen: View {
 			.padding(.top, Spacing.s2)
 			.padding(.horizontal, Spacing.s5)
 			.padding(.bottom, Spacing.s6)
-			.frame(maxWidth: .infinity)
+			.containerRelativeFrame(.horizontal) { width, _ in max(width, PaperMetrics.width + 2 * Spacing.s5) }
 		}
 		.background(.surfaceWindow)
 		.focusable()

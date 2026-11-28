@@ -27,6 +27,9 @@ struct VeritasCommands: Commands {
 	}
 
 	var body: some Commands {
+		CommandGroup(replacing: .appInfo) {
+			Button("About Veritas") { openWindow(id: AboutView.windowID) }
+		}
 		CommandGroup(replacing: .appSettings) {
 			Button("Settings…") { model?.go(to: .screen(.settings)) }
 				.keyboardShortcut(",")

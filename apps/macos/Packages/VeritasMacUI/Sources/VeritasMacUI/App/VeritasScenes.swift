@@ -1,4 +1,5 @@
 import SwiftUI
+import VeritasDesign
 import VeritasKit
 
 /// The whole app. The Xcode project's only source file puts this in its `App`.
@@ -17,5 +18,13 @@ public struct VeritasScenes: Scene {
 		.commands {
 			VeritasCommands()
 		}
+		Window("About Veritas", id: AboutView.windowID) {
+			AboutView()
+				.tint(Color.accent)
+		}
+		.windowResizability(.contentSize)
+		.windowStyle(.hiddenTitleBar)
+		.restorationBehavior(.disabled)
+		.defaultPosition(.center)
 	}
 }

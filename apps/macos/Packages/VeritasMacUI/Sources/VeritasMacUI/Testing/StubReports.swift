@@ -275,7 +275,8 @@ final class StubReports: @unchecked Sendable {
 		if settings.balanceType == .budgeted {
 			return CustomReportView(settings: settings, data: nil, problem: "Veritas can't evaluate this report yet: the Budgeted balance type")
 		}
-		let months = ReportPeriod(first: Month(year: 2026, month: 6), last: Month(year: 2026, month: 11)).months
+		let period = Self.period(settings)
+		let months = period.months
 		let balances = { (amount: Int64) in
 			CustomReportBalances(totalAssets: max(amount, 0), totalDebts: min(amount, 0), netAssets: max(amount, 0), netDebts: min(amount, 0), totalTotals: amount)
 		}
@@ -297,7 +298,7 @@ final class StubReports: @unchecked Sendable {
 			}
 		default:
 			groups = Self.expenses.prefix(8).map { category in
-				CustomReportGroup(id: category.id, name: category.name, uncategorized: nil, amount: -category.october * 6, balances: balances(-category.october * 6),
+				CustomReportGroup(id: category.id, name: category.name, uncategorized: nil, amount: -category.october * Int64(months.count), balances: balances(-category.october * Int64(months.count)),
 					intervals: months.map { cell($0, -category.october) })
 			}
 		}
@@ -311,9 +312,16 @@ final class StubReports: @unchecked Sendable {
 		}
 		return CustomReportView(
 			settings: settings,
-			data: CustomReportData(start: "2026-06-01", end: "2026-11-30", groups: groups, intervals: intervals, total: total, totals: balances(total)),
+			data: CustomReportData(start: period.first.firstDay, end: period.last.lastDay, groups: groups, intervals: intervals, total: total, totals: balances(total)),
 			problem: nil
 		)
+	}
+
+	/// Fixed dates as the report sets them, otherwise the stub's June to November.
+	private static func period(_ settings: CustomReportSettings) -> ReportPeriod {
+		let live = ReportPeriod(first: Month(year: 2026, month: 6), last: Month(year: 2026, month: 11))
+		guard settings.dateStatic, let first = Month(date: settings.startDate), let last = Month(date: settings.endDate), first <= last else { return live }
+		return ReportPeriod(first: first, last: last)
 	}
 
 	/// Actual's intervals stack every category, the empty and hidden ones at
