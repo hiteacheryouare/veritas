@@ -142,16 +142,23 @@ public final class RegisterModel {
 		tags = await workspace.report { try await $0.tags() } ?? []
 	}
 
+	/// The row, fetching its page if it isn't loaded yet.
 	public func row(at index: Int) -> RegisterRow? {
+		if let row = loadedRow(at: index) { return row }
 		let page = index / Self.pageSize
-		if let rows = pages[page] {
-			let offset = index - page * Self.pageSize
-			return rows.indices.contains(offset) ? rows[offset] : nil
-		}
-		if !loading.contains(page) {
+		if pages[page] == nil, !loading.contains(page) {
 			Task { await fetch(page: page) }
 		}
 		return nil
+	}
+
+	/// The row if its page is loaded, without fetching, for readers that walk
+	/// every row, such as accessibility.
+	public func loadedRow(at index: Int) -> RegisterRow? {
+		let page = index / Self.pageSize
+		guard let rows = pages[page] else { return nil }
+		let offset = index - page * Self.pageSize
+		return rows.indices.contains(offset) ? rows[offset] : nil
 	}
 
 	public func index(of id: String) -> Int? {
