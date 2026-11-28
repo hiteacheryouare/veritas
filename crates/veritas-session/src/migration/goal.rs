@@ -153,8 +153,13 @@ pub(super) fn suggestions(inputs: &Inputs<'_>) -> Result<Vec<Suggestion>, CoreEr
 			let name_key = category.name.to_uppercase();
 			let in_goals = goals.is_some_and(|goals| {
 				goals.id != category.group
-					&& crate::categories::ensure_free_name(data, &goals.id, &category.name, Some(id))
-						.is_err()
+					&& crate::categories::ensure_free_name(
+						data,
+						&goals.id,
+						&category.name,
+						Some(id),
+					)
+					.is_err()
 			});
 			if in_goals {
 				suggestion.blocked = Some(RENAME_FIRST.to_owned());
@@ -233,7 +238,9 @@ pub(super) fn preview(
 		.category(month, category)
 		.map_or(Money::ZERO, |cell| cell.balance);
 	let reached_month = (available >= target)
-		.then(|| veritas_engine::goals::first_reached_month(inputs.sheet, &goal, month).or(Some(month)))
+		.then(|| {
+			veritas_engine::goals::first_reached_month(inputs.sheet, &goal, month).or(Some(month))
+		})
 		.flatten();
 	let spending_recorded = inputs.data.format.decimal_places() != 2
 		&& inputs.classification.rows().iter().any(|row| {
@@ -387,7 +394,8 @@ pub(super) fn from_line(line: &str, places: u8) -> Option<Target> {
 fn word<'a>(text: &'a str, wanted: &str) -> Option<&'a str> {
 	let text = text.trim_start_matches([' ', '\t']);
 	let head = text.get(..wanted.len())?;
-	head.eq_ignore_ascii_case(wanted).then(|| &text[wanted.len()..])
+	head.eq_ignore_ascii_case(wanted)
+		.then(|| &text[wanted.len()..])
 }
 
 /// A `YYYY-MM` after optional spaces and tabs, as the last day of its month.
@@ -426,7 +434,10 @@ fn amount(text: &str, places: u8) -> Option<(Money, &str)> {
 		rest = &after[digits..];
 	}
 	let minor = scaled(whole, fraction, places)?;
-	Some((Money::from_minor(if negative { -minor } else { minor }), rest))
+	Some((
+		Money::from_minor(if negative { -minor } else { minor }),
+		rest,
+	))
 }
 
 /// Unicode's `Sc` (currency symbol) characters, as of Unicode 15.
@@ -466,7 +477,10 @@ fn scaled(whole: &str, fraction: &str, places: u8) -> Option<i64> {
 /// A `goal_def` template's amount, a JSON number in major units.
 fn major_units_text(text: &str, places: u8) -> Option<Money> {
 	let (whole, fraction) = text.split_once('.').unwrap_or((text, ""));
-	if whole.is_empty() || !whole.bytes().all(|b| b.is_ascii_digit()) || !fraction.bytes().all(|b| b.is_ascii_digit()) {
+	if whole.is_empty()
+		|| !whole.bytes().all(|b| b.is_ascii_digit())
+		|| !fraction.bytes().all(|b| b.is_ascii_digit())
+	{
 		return None;
 	}
 	scaled(whole, fraction, places).map(Money::from_minor)

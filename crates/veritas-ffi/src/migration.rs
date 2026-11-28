@@ -250,12 +250,15 @@ impl From<&core::Suggestion> for MigrationSuggestion {
 			confirm_lines: suggestion.confirm_lines.clone(),
 			effects: suggestion.effects.iter().map(effect).collect(),
 			kind_change: suggestion.kind_change.as_ref().map(kind_change),
-			goal_preview: suggestion.goal_preview.as_ref().map(|preview| MigrationGoalPreview {
-				reached_month: preview.reached_month.map(Month::from),
-				monthly: preview.monthly.map(money),
-				months_left: preview.months_left,
-				spending_recorded: preview.spending_recorded,
-			}),
+			goal_preview: suggestion
+				.goal_preview
+				.as_ref()
+				.map(|preview| MigrationGoalPreview {
+					reached_month: preview.reached_month.map(Month::from),
+					monthly: preview.monthly.map(money),
+					months_left: preview.months_left,
+					spending_recorded: preview.spending_recorded,
+				}),
 			target_in_actual: suggestion.target_in_actual,
 			asks_to_show_goals_group: suggestion.asks_to_show_goals_group,
 			dismissed: suggestion.dismissed,

@@ -29,7 +29,8 @@ pub fn applied_items(data: &veritas_domain::BudgetData) -> Vec<AppliedItem> {
 			let (conversion, subject) = Conversion::parse_key(key)?;
 			let closed = conversion == Conversion::Goal
 				&& data.goals.values().any(|goal| {
-					goal.category.as_str() == subject && goal.status == veritas_domain::GoalStatus::Closed
+					goal.category.as_str() == subject
+						&& goal.status == veritas_domain::GoalStatus::Closed
 				});
 			Some(AppliedItem {
 				key: key.clone(),
@@ -261,7 +262,11 @@ fn revert_goal(
 			.get(group)
 			.is_some_and(|group| !group.tombstone && !group.is_income)
 	};
-	if data.goals.values().any(|goal| &goal.category == category && goal.status == veritas_domain::GoalStatus::Closed) {
+	if data
+		.goals
+		.values()
+		.any(|goal| &goal.category == category && goal.status == veritas_domain::GoalStatus::Closed)
+	{
 		return Err(refuse(format!(
 			"{name} is a closed goal, so its upgrade can't be reverted. Its closing and archive are kept."
 		)));

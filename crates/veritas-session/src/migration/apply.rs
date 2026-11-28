@@ -120,7 +120,11 @@ pub fn preview(inputs: &Inputs<'_>, selection: &Selection) -> Result<Vec<Suggest
 				suggestion.goal_preview = super::goal::preview(inputs, &category, target, date)?;
 			}
 			Conversion::Kind => {
-				if let Some(kind) = item.edits.kind.filter(|kind| Some(*kind) != suggestion.proposed.kind) {
+				if let Some(kind) = item
+					.edits
+					.kind
+					.filter(|kind| Some(*kind) != suggestion.proposed.kind)
+				{
 					let category = CategoryId::new(suggestion.subject_id.as_str());
 					let (change, effects) = super::kind::change_to(inputs, &category, Some(kind))?;
 					suggestion.proposed.kind = Some(kind);

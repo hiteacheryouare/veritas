@@ -1431,25 +1431,38 @@ fn example_17_one_apply_holds_every_conversion() {
 fn example_7a_s2_takes_fc_1s_median_half_away_from_zero() {
 	let steady = |spent: i64| {
 		let mut budget = goal_budget();
-		for (at, amount) in [("2026-06", 5_000), ("2026-07", 5_000), ("2026-09", 5_001), ("2026-10", 5_001)] {
+		for (at, amount) in [
+			("2026-06", 5_000),
+			("2026-07", 5_000),
+			("2026-09", 5_001),
+			("2026-10", 5_001),
+		] {
 			budget.budget("vacation", at, amount);
 		}
 		budget.row("checking", "2026-10-14", -spent, Some("vacation"), None);
 		find(&budget.suggestions(TODAY), "goal:vacation").is_some()
 	};
-	assert!(!steady(10_001), "the median is 5001, so 10001 left is under the 10002 threshold");
+	assert!(
+		!steady(10_001),
+		"the median is 5001, so 10001 left is under the 10002 threshold"
+	);
 	assert!(steady(10_000), "10002 left meets it");
 }
 
 #[test]
 fn example_7b_and_mig_4_2_lines_follow_actuals_grammar() {
-	let line = |text: &str, places| goal::from_line(text, places).map(|target| target.amount.minor());
+	let line =
+		|text: &str, places| goal::from_line(text, places).map(|target| target.amount.minor());
 	assert_eq!(line("#goal 100.5", 0), Some(101));
 	assert_eq!(line("#goal 100.49", 0), Some(100));
 	assert_eq!(line("#goal ¥ 3000.", 0), Some(3_000));
 	assert_eq!(line("#goal¥100.5", 0), Some(101));
 	assert_eq!(line("#goal $ 3000", 2), Some(300_000));
-	assert_eq!(line("Vacation #goal 3000", 2), Some(300_000), "read from the first #");
+	assert_eq!(
+		line("Vacation #goal 3000", 2),
+		Some(300_000),
+		"read from the first #"
+	);
 	assert_eq!(line("#goal 3000.55", 1), Some(30_006));
 	assert_eq!(line("#goal 3000.55", 3), Some(3_000_550));
 	assert_eq!(line("#GOAL 3000", 2), None, "the start is case-sensitive");
@@ -1457,7 +1470,10 @@ fn example_7b_and_mig_4_2_lines_follow_actuals_grammar() {
 	assert_eq!(line("#goal 3000.123", 2), None);
 	assert_eq!(line("#goal -5", 2), None);
 	let dated = goal::from_line("#template-2 3000.5 BY 2027-06", 2).unwrap();
-	assert_eq!((dated.amount.minor(), dated.date), (300_050, Some(day("2027-06-30"))));
+	assert_eq!(
+		(dated.amount.minor(), dated.date),
+		(300_050, Some(day("2027-06-30")))
+	);
 	assert!(goal::from_line("#template 3000 by 2027-06 SPEND FROM 2027-01", 2).is_some());
 	assert!(goal::from_line("#template 3000 by 2027-06 repeat every year", 2).is_none());
 }
@@ -1473,7 +1489,9 @@ fn mig_4_1_the_same_name_is_the_moves_own_upper_case_test() {
 	budget.note("vacation", "#goal 100");
 	let all = budget.suggestions(TODAY);
 	assert_eq!(
-		find(&all, "goal:strasse").and_then(|s| s.blocked.clone()).as_deref(),
+		find(&all, "goal:strasse")
+			.and_then(|s| s.blocked.clone())
+			.as_deref(),
 		Some(goal::RENAME_FIRST),
 		"Straße upper-cases to STRASSE"
 	);
@@ -1482,7 +1500,10 @@ fn mig_4_1_the_same_name_is_the_moves_own_upper_case_test() {
 		None,
 		"\"Vacation \" with a trailing space is a different name"
 	);
-	assert!(budget.apply(TODAY, &tick(&["goal:vacation"])).is_ok(), "a name called free never fails Apply");
+	assert!(
+		budget.apply(TODAY, &tick(&["goal:vacation"])).is_ok(),
+		"a name called free never fails Apply"
+	);
 }
 
 #[test]
@@ -1490,12 +1511,33 @@ fn mig_6_3_an_overdrawn_checking_account_never_gets_the_loan_icon() {
 	let mut budget = bill_budget();
 	budget.account("joint", "Joint checking", false);
 	budget.opening("joint", -5_000);
-	schedule(&mut budget, "top-up", Some("Top up"), "to-joint", -5_000, None);
-	schedule(&mut budget, "car", Some("Car payment"), "to-loan", -38_550, None);
+	schedule(
+		&mut budget,
+		"top-up",
+		Some("Top up"),
+		"to-joint",
+		-5_000,
+		None,
+	);
+	schedule(
+		&mut budget,
+		"car",
+		Some("Car payment"),
+		"to-loan",
+		-38_550,
+		None,
+	);
 	let all = budget.suggestions(TODAY);
-	assert!(find(&all, "bill:top-up").is_none(), "a balance below zero is ST-9.1 rule 3, which MIG-6.3 leaves out");
+	assert!(
+		find(&all, "bill:top-up").is_none(),
+		"a balance below zero is ST-9.1 rule 3, which MIG-6.3 leaves out"
+	);
 	let car = find(&all, "bill:car").unwrap();
-	assert!(car.signals.iter().any(|signal| signal.text == "It pays Car Loan, a debt"));
+	assert!(
+		car.signals
+			.iter()
+			.any(|signal| signal.text == "It pays Car Loan, a debt")
+	);
 }
 
 #[test]
@@ -1508,7 +1550,11 @@ fn mig_3_3_a_deleted_account_with_live_rows_counts_in_the_comparison() {
 	}
 	let all = budget.suggestions(TODAY);
 	if let Some(report) = find(&all, "report:widget") {
-		let equal = report.signals.iter().find(|signal| signal.code == "equal").unwrap();
+		let equal = report
+			.signals
+			.iter()
+			.find(|signal| signal.code == "equal")
+			.unwrap();
 		assert!(
 			equal.figures.iter().all(|figure| figure.value == 695_000),
 			"suggested only when the report counts the deleted account's 5000 too"
@@ -1527,8 +1573,19 @@ fn mig_4_7_a_closed_goal_is_not_reverted_and_shows_as_closed() {
 	}
 	assert!(budget.try_revert(TODAY, "goal:vacation").is_err());
 	let items = applied_items(&budget.data);
-	assert!(items.iter().any(|item| item.key == "goal:vacation" && item.closed));
-	assert!(budget.data.goals.values().any(|goal| goal.category.as_str() == "vacation"), "the goal and its history stay");
+	assert!(
+		items
+			.iter()
+			.any(|item| item.key == "goal:vacation" && item.closed)
+	);
+	assert!(
+		budget
+			.data
+			.goals
+			.values()
+			.any(|goal| goal.category.as_str() == "vacation"),
+		"the goal and its history stay"
+	);
 }
 
 #[test]
@@ -1537,8 +1594,14 @@ fn mig_2_4_example_5_the_confirm_step_has_the_goal_lines() {
 	budget.note("vacation", "#template 3000 by 2027-06");
 	budget.budget("vacation", "2026-10", 120_000);
 	let all = budget.suggestions(TODAY);
-	let preview = find(&all, "goal:vacation").and_then(|s| s.goal_preview.clone()).unwrap();
-	assert_eq!(preview.monthly, Some(Money::from_minor(22_500)), "example 5: ceil(180000 / 8)");
+	let preview = find(&all, "goal:vacation")
+		.and_then(|s| s.goal_preview.clone())
+		.unwrap();
+	assert_eq!(
+		preview.monthly,
+		Some(Money::from_minor(22_500)),
+		"example 5: ceil(180000 / 8)"
+	);
 	assert_eq!(preview.months_left, Some(8));
 	assert_eq!(preview.reached_month, None);
 	let mut edited = tick(&["goal:vacation"]);
@@ -1559,6 +1622,16 @@ fn mig_2_4_and_5_4_the_confirm_figures_follow_the_chosen_kind() {
 	let shown = budget.preview(TODAY, &selection);
 	let change = shown[0].kind_change.clone().unwrap();
 	assert_eq!(change.kind, CategoryKind::Savings);
-	assert!(shown[0].effects.iter().any(|effect| effect.report == "Savings"));
-	assert!(!shown[0].effects.iter().any(|effect| effect.report == "Debt paydown"));
+	assert!(
+		shown[0]
+			.effects
+			.iter()
+			.any(|effect| effect.report == "Savings")
+	);
+	assert!(
+		!shown[0]
+			.effects
+			.iter()
+			.any(|effect| effect.report == "Debt paydown")
+	);
 }
