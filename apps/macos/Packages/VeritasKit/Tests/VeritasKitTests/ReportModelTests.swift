@@ -18,6 +18,15 @@ struct ReportPeriodTests {
 		#expect(ReportPeriod.interval("2026") == "2026")
 	}
 
+	@Test func thirteenMonthsNameTheirYearSoNovemberIsntTwice() {
+		let months = ReportPeriod(first: Month(year: 2025, month: 11), last: Month(year: 2026, month: 11)).months.map { String(format: "%04d-%02d", $0.year, $0.month) }
+		let headings = ReportPeriod.intervals(months)
+		#expect(headings.first == "Nov 2025")
+		#expect(headings.last == "Nov 2026")
+		#expect(Set(headings).count == 13)
+		#expect(ReportPeriod.intervals(["2026-06", "2026-07"]) == ["Jun", "Jul"], "a year of months or less keeps the short headings")
+	}
+
 	@Test func rangesReadAsTheMockupsWriteThem() {
 		let six = MonthSpan.sixMonths.period(endingIn: Month(year: 2026, month: 11), current: ReportPeriod(first: Month(year: 2026, month: 11), last: Month(year: 2026, month: 11)))
 		#expect(six.title == "June to November 2026")

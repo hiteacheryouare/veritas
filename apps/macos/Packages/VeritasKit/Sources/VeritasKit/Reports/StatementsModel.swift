@@ -61,7 +61,9 @@ public struct StatementLine: Identifiable, Hashable, Sendable {
 
 /// A statement ready to lay out on screen or paper: ST-3's header and its lines.
 public struct StatementDocument: Hashable, Sendable {
-	public static let unaudited = "Unaudited. Obviously."
+	/// The footnote every statement carries, marked after its title.
+	public static let footnote = "This is an illustrative representation of what such a statement would look like, built from your own records. It has not been prepared, reviewed or audited by an accountant and should not be relied on for legal, tax, lending or investment purposes."
+	public static let footnoteMark = "*"
 
 	public let kind: StatementKind
 	/// `statementEntity()`'s name: the one the user set, else the budget's.

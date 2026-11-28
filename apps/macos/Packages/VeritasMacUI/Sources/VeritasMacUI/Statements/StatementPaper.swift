@@ -14,15 +14,16 @@ enum PaperMetrics {
 	static let headerGap: CGFloat = 24
 	static let rowPadding: CGFloat = 4
 	static let noticeGap: CGFloat = 28
+	static let footnoteGap: CGFloat = 36
 
 	static let entitySize: CGFloat = 22
-	static let unauditedSize: CGFloat = 16
 	static let titleSize: CGFloat = 16
 	static let basisSize: CGFloat = 13
 	static let rowSize: CGFloat = 13.5
 	static let sectionSize: CGFloat = 14
 	static let grandSize: CGFloat = 15
 	static let pageNumberSize: CGFloat = 10
+	static let footnoteSize: CGFloat = 9.5
 
 	static let secondaryOpacity = 0.74
 	static let ruleOpacity = 0.5
@@ -76,11 +77,18 @@ struct StatementPaper: View {
 			if let notice = document.notice(format: format) {
 				Text(notice)
 					.font(Self.font(PaperMetrics.rowSize))
-					.foregroundStyle(.moneyOverspent)
+					.foregroundStyle(Color(rgba: ColorToken.moneyOverspent.light))
 					.frame(maxWidth: .infinity, alignment: .leading)
 					.padding(.top, PaperMetrics.noticeGap)
 					.accessibilityIdentifier("statements.notice")
 			}
+			Text("\(StatementDocument.footnoteMark) \(StatementDocument.footnote)")
+				.font(Self.font(PaperMetrics.footnoteSize))
+				.foregroundStyle(ink.opacity(PaperMetrics.secondaryOpacity))
+				.frame(maxWidth: .infinity, alignment: .leading)
+				.padding(.top, PaperMetrics.footnoteGap)
+				.accessibilityLabel(StatementDocument.footnote)
+				.accessibilityIdentifier("statements.footnote")
 		}
 		.padding(.top, PaperMetrics.top)
 		.padding(.horizontal, PaperMetrics.side)
@@ -98,14 +106,14 @@ struct StatementPaper: View {
 
 	private var header: some View {
 		VStack(spacing: 0) {
-			let entity = Text(document.entity).font(Self.font(PaperMetrics.entitySize, .semibold))
-			let unaudited = Text("(\(StatementDocument.unaudited))").font(Self.font(PaperMetrics.unauditedSize).italic()).foregroundStyle(ink.opacity(PaperMetrics.secondaryOpacity))
-			Text("\(entity) \(unaudited)")
+			Text(document.entity)
+				.font(Self.font(PaperMetrics.entitySize, .semibold))
 				.accessibilityIdentifier("statements.entity")
-			Text(document.title)
+			Text(document.title + StatementDocument.footnoteMark)
 				.font(Self.font(PaperMetrics.titleSize, .semibold))
 				.padding(.top, 6)
 				.padding(.bottom, 2)
+				.accessibilityLabel(document.title)
 				.accessibilityIdentifier("statements.title")
 			Text(document.basis)
 				.font(Self.font(PaperMetrics.basisSize))

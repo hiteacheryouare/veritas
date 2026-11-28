@@ -141,7 +141,7 @@ struct AssistantEmptyState: View {
 					} label: {
 						Text(example)
 							.font(.text(.body))
-							.foregroundStyle(.textPrimary)
+							.foregroundStyle(.accent)
 							.multilineTextAlignment(.center)
 							.fixedSize(horizontal: false, vertical: true)
 							.padding(.horizontal, Spacing.s3)

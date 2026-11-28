@@ -20,7 +20,7 @@ final class StatementsJourneyTests: XCTestCase {
 			kind(app, segment).click()
 			XCTAssertTrue(waitUntil { self.text(title) == heading }, "\(segment): \(text(title))")
 			XCTAssertTrue(app.descendants(matching: .any)[line].waitForExistence(timeout: 5), line)
-			XCTAssertTrue(text(app.staticTexts["statements.entity"]).contains("Unaudited. Obviously."))
+			XCTAssertTrue(text(app.staticTexts["statements.footnote"]).contains("not been prepared, reviewed or audited by an accountant"), "\(segment) carries the footnote")
 			attachScreenshot(of: app, named: segment)
 		}
 	}
