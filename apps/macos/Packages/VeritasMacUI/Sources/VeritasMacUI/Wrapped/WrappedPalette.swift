@@ -19,9 +19,7 @@ struct WrappedPalette {
 	let barSoft: Color
 	/// The one highlighted mark per chart and the cover rule.
 	let accent: Color
-	/// No-spend days on the calendar. The brand's secondary accent
-	/// (`brandSecondary`, #115) takes this place when it lands; until then
-	/// it is the accent.
+	/// No-spend days on the calendar: the brand's secondary accent.
 	let accentSecondary: Color
 
 	static func of(_ scheme: ColorScheme) -> WrappedPalette {
@@ -40,7 +38,7 @@ struct WrappedPalette {
 		bar: Color(rgba: ColorToken.chartExpense.light),
 		barSoft: Color(rgba: ColorToken.chartExpenseSoft.light),
 		accent: Color(rgba: ColorToken.accent.light),
-		accentSecondary: Color(rgba: ColorToken.accent.light)
+		accentSecondary: Color(rgba: ColorToken.brandSecondary.light)
 	)
 
 	static let dark = WrappedPalette(
@@ -55,7 +53,7 @@ struct WrappedPalette {
 		bar: Color(rgba: ColorToken.chartExpense.dark),
 		barSoft: Color(rgba: ColorToken.chartExpenseSoft.dark),
 		accent: Color(rgba: ColorToken.accent.dark),
-		accentSecondary: Color(rgba: ColorToken.accent.dark)
+		accentSecondary: Color(rgba: ColorToken.brandSecondary.dark)
 	)
 }
 

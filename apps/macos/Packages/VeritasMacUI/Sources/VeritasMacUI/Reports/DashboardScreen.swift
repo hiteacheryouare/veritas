@@ -593,7 +593,7 @@ struct WidgetBody: View {
 		case .netWorth(_, let interval, let points, _, _, _, _, _, _, let series):
 			NetWorthChart(points: points, series: series, interval: interval, stacked: card.config.mode == "stacked", filtered: card.isFiltered, format: format, expanded: expanded)
 		case .cashFlow(_, let income, let expense, _):
-			PairBars(first: ("Money in", income, Color.moneyIncomeFill), second: ("Money out", expense, Color.chartExpense), format: format)
+			PairBars(first: ("Money in", income, ColorToken.moneyIncomeFill), second: ("Money out", expense, ColorToken.chartExpense), format: format)
 		case .spending(let mode, let compare, let compareTo, _, _, let days, let headlineDay, _):
 			SpendingChart(mode: mode, compare: compare, compareTo: compareTo, days: days, headlineDay: headlineDay, filtered: card.isFiltered, format: format, expanded: expanded)
 		case .sankey(_, _, _, _, let showPercentages, let nodes, let links):
@@ -741,8 +741,8 @@ private struct FormulaFigure: View {
 }
 
 private struct PairBars: View {
-	let first: (String, Int64, Color)
-	let second: (String, Int64, Color)
+	let first: (String, Int64, ColorToken)
+	let second: (String, Int64, ColorToken)
 	let format: MoneyFormat
 
 	var body: some View {
@@ -757,13 +757,15 @@ private struct PairBars: View {
 		}
 	}
 
-	private func bar(_ item: (String, Int64, Color), height: CGFloat) -> some View {
+	private func bar(_ item: (String, Int64, ColorToken), height: CGFloat) -> some View {
 		VStack(spacing: 4) {
 			VStack(spacing: 0) {
 				Text(item.0).font(.text(.caption)).foregroundStyle(.textSecondary)
 				Text(format.amount(item.1, on: .register)).font(.figures(.caption, weight: .semibold))
 			}
-			RoundedRectangle(cornerRadius: 3).fill(item.2).frame(width: 18, height: max(height, 2))
+			RoundedRectangle(cornerRadius: 3).fill(Color(item.2))
+				.overlay { RoundedRectangle(cornerRadius: 3).strokeBorder(Color.chartEdge(item.2), lineWidth: 1) }
+				.frame(width: 18, height: max(height, 2))
 		}
 		.accessibilityElement(children: .combine)
 	}
@@ -837,7 +839,7 @@ private struct NetWorthChart: View {
 					LineMark(x: .value("Period", index), y: .value(CardWords.netWorth(filtered: filtered), value))
 						.interpolationMethod(.monotone)
 						.lineStyle(StrokeStyle(lineWidth: 2))
-						.foregroundStyle(values.allSatisfy { $0 == 0 } ? LinearGradient(colors: [Color.moneyNeutral], startPoint: .top, endPoint: .bottom) : zeroSplit(ZeroSplit.lineStop(values), positive: Color.moneyIncomeFill, negative: Color.moneyOverspent))
+						.foregroundStyle(values.allSatisfy { $0 == 0 } ? LinearGradient(colors: [Color.moneyNeutral], startPoint: .top, endPoint: .bottom) : zeroSplit(ZeroSplit.lineStop(values), positive: Color.chartMark(.moneyIncomeFill), negative: Color.moneyOverspent))
 				}
 			}
 			if let selected, points.indices.contains(selected) {
@@ -848,7 +850,7 @@ private struct NetWorthChart: View {
 					}
 			}
 		}
-		.chartForegroundStyleScale(domain: series.map(\.accountId), range: series.map { CardPalette.color($0.color) })
+		.chartForegroundStyleScale(domain: series.map(\.accountId), range: series.map { CardPalette.mark($0.color) })
 		.chartLegend(.hidden)
 		.chartXAxis {
 			if expanded { indexAxis(points.map { CardWords.day($0.start) }) }
@@ -953,7 +955,7 @@ private struct SpendingChart: View {
 							.foregroundStyle(Color.moneyIncomeFill.opacity(0.2))
 						LineMark(x: .value("Day", point.day), y: .value("Amount", format.chartValue(value, on: .register)), series: .value("Line", ReportPeriod.monthName(compare)))
 							.lineStyle(StrokeStyle(lineWidth: 2.5))
-							.foregroundStyle(Color.moneyIncomeFill)
+							.foregroundStyle(Color.chartMark(.moneyIncomeFill))
 					}
 				}
 			}
@@ -973,7 +975,7 @@ private struct SpendingChart: View {
 			}
 			if expanded {
 				HStack(spacing: Spacing.s4) {
-					LegendSwatch(title: ReportPeriod.monthName(compare), color: .moneyIncomeFill)
+					LegendSwatch(title: ReportPeriod.monthName(compare), color: .chartMark(.moneyIncomeFill))
 					LegendSwatch(title: comparison, color: .chartExpense, dashed: true)
 				}
 				.font(.text(.caption))
@@ -1018,7 +1020,7 @@ private struct ForecastChart: View {
 				LineMark(x: .value("Day", index), y: .value("Balance", value))
 					.interpolationMethod(.monotone)
 					.lineStyle(StrokeStyle(lineWidth: 2))
-					.foregroundStyle(zeroSplit(ZeroSplit.lineStop(values), positive: Color.moneyIncomeFill, negative: Color.moneyOverspent))
+					.foregroundStyle(zeroSplit(ZeroSplit.lineStop(values), positive: Color.chartMark(.moneyIncomeFill), negative: Color.moneyOverspent))
 			}
 			if values.contains(where: { $0 < 0 }) {
 				RuleMark(y: .value("Zero", 0))
@@ -1068,7 +1070,7 @@ private struct CrossoverChart: View {
 				}
 				LineMark(x: .value("Month", index), y: .value("Amount", format.chartValue(point.investmentIncome, on: .register)), series: .value("Line", CardWords.projectedReturn))
 					.interpolationMethod(.monotone)
-					.foregroundStyle(Color.chartSavings)
+					.foregroundStyle(Color.chartMark(.chartSavings))
 			}
 			if let crossover, let index = points.firstIndex(where: { $0.month == crossover }) {
 				RuleMark(x: .value("Month", index))
@@ -1101,13 +1103,13 @@ private struct BudgetAnalysisChart: View {
 				let month = ReportPeriod.shortMonth(point.month)
 				BarMark(x: .value("Month", month), y: .value("Amount", format.chartValue(point.budgeted, on: .register)))
 					.position(by: .value("Series", "Budgeted"))
-					.foregroundStyle(Color.moneyIncomeFill)
+					.foregroundStyle(Color.chartMark(.moneyIncomeFill))
 				BarMark(x: .value("Month", month), y: .value("Amount", format.chartValue(point.spent, on: .register)))
 					.position(by: .value("Series", "Spent"))
 					.foregroundStyle(Color.chartExpense)
 				BarMark(x: .value("Month", month), y: .value("Amount", format.chartValue(point.overspendingAdjustment, on: .register)))
 					.position(by: .value("Series", "Overspending"))
-					.foregroundStyle(Color.moneyOverspentFill)
+					.foregroundStyle(Color.chartMark(.moneyOverspentFill))
 				if showsBalance {
 					LineMark(x: .value("Month", month), y: .value("Amount", format.chartValue(point.balance, on: .register)), series: .value("Line", "Balance"))
 						.interpolationMethod(.monotone)
@@ -1160,7 +1162,7 @@ private struct MonteCarloChart: View {
 						.foregroundStyle(Color.chartBand)
 					LineMark(x: .value("Age", point.age), y: .value("Median", value(point.p50)), series: .value("Band", "median.\(run.id)"))
 						.interpolationMethod(.monotone)
-						.foregroundStyle(Color.moneyIncomeFill)
+						.foregroundStyle(Color.chartMark(.moneyIncomeFill))
 				}
 			}
 		}
@@ -1200,7 +1202,9 @@ private struct SankeyCardCanvas: View {
 					}
 					for node in layout.nodes {
 						let dimmed = lit.map { !$0.nodes.contains(node.index) } ?? false
-						context.fill(Path(roundedRect: node.rect, cornerRadius: 2), with: .color(CardPalette.color(nodes[node.index].color).opacity(dimmed ? 0.4 : 1)))
+						let shape = Path(roundedRect: node.rect, cornerRadius: 2)
+						context.fill(shape, with: .color(CardPalette.color(nodes[node.index].color).opacity(dimmed ? 0.4 : 1)))
+						context.stroke(shape, with: .color(CardPalette.edge(nodes[node.index].color).opacity(dimmed ? 0.4 : 1)), lineWidth: 1)
 					}
 				}
 				ForEach(layout.nodes, id: \.index) { placed in
@@ -1292,17 +1296,24 @@ struct SankeyReadoutView: View {
 /// The core's chart colours 0 to 8 (Actual's `chartQual1` to `chartQual9`),
 /// drawn in Veritas's own palette.
 enum CardPalette {
-	static let colors: [Color] = [
+	static let tokens: [ColorToken] = [
 		.moneyIncomeFill, .chartSavings, .chartDebtPaydown, .scenario3, .moneyLowFill, .chartExpense, .moneyOverspentFill, .scenarioBaseline, .moneyAvailable
 	]
 
-	static func color(_ index: UInt8) -> Color {
-		colors[Int(index) % colors.count]
+	static func token(_ index: UInt8) -> ColorToken {
+		tokens[Int(index) % tokens.count]
 	}
 
-	static func color(_ color: SankeyCardColor) -> Color {
+	static func color(_ index: UInt8) -> Color { Color(token(index)) }
+	static func color(_ color: SankeyCardColor) -> Color { Color(token(color)) }
+	static func edge(_ color: SankeyCardColor) -> Color { .chartEdge(token(color)) }
+	static func edge(_ index: UInt8) -> Color { .chartEdge(token(index)) }
+	/// For Swift Charts series, which can't take a stroke.
+	static func mark(_ index: UInt8) -> Color { .chartMark(token(index)) }
+
+	static func token(_ color: SankeyCardColor) -> ColorToken {
 		switch color {
-		case .palette(let index): Self.color(index)
+		case .palette(let index): Self.token(index)
 		case .toBudgetPositive: .moneyAvailableFill
 		case .toBudgetNegative: .moneyOverspentFill
 		case .gray: .chartExpense
@@ -1360,10 +1371,10 @@ private struct CalendarGrid: View {
 			RoundedRectangle(cornerRadius: 4).fill(Color.track.opacity(0.5))
 			HStack(alignment: .bottom, spacing: 2) {
 				if day.income > 0 {
-					Rectangle().fill(Color.moneyAvailableFill).frame(width: 4, height: 24 * CGFloat(day.incomeSize) / 100)
+					Rectangle().fill(Color.moneyAvailableFill).overlay { Rectangle().strokeBorder(Color.chartEdge(.moneyAvailableFill), lineWidth: 1) }.frame(width: 4, height: 24 * CGFloat(day.incomeSize) / 100)
 				}
 				if day.expense > 0 {
-					Rectangle().fill(Color.moneyOverspentFill).frame(width: 4, height: 24 * CGFloat(day.expenseSize) / 100)
+					Rectangle().fill(Color.moneyOverspentFill).overlay { Rectangle().strokeBorder(Color.chartEdge(.moneyOverspentFill), lineWidth: 1) }.frame(width: 4, height: 24 * CGFloat(day.expenseSize) / 100)
 				}
 			}
 			.frame(maxWidth: .infinity, alignment: .trailing)
