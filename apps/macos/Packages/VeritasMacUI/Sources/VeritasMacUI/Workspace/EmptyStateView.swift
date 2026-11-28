@@ -9,6 +9,9 @@ struct EmptyStateView: View {
 
 	var body: some View {
 		VStack(spacing: Spacing.s3) {
+			VeritasLockup(capHeight: 30)
+				.foregroundStyle(.accent)
+				.padding(.bottom, Spacing.s5)
 			Text("No budget open")
 				.font(.text(.title, weight: .semibold))
 				.foregroundStyle(.textPrimary)

@@ -1,0 +1,5 @@
+#23169C (primary)
+#007EA7 (secondary)
+#DB162F (bad)
+#56E39F (minty/good)
+#F5B700 (warning)
