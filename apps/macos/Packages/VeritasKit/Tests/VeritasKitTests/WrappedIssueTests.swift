@@ -285,7 +285,8 @@ struct WrappedIssueTests {
 		let ledger = Self.page(.ledger, redacted: true)
 		#expect(ledger?.headline == "115.0% of what came in went out.")
 		#expect(ledger?.dek == "That came up 15.0% short.")
-		#expect(ledger?.rows.map(\.value) == ["+7.5% vs 2026", "115.0% of what came in", "15.0% of what came in"])
+		#expect(ledger?.rows.map(\.value) == ["100.0%", "115.0% of what came in", "15.0% of what came in"])
+		#expect(ledger?.rows.map(\.note) == Self.page(.ledger)?.rows.map(\.note), "the changes stay as notes, as the shown page has them")
 		let categories = Self.page(.categories, redacted: true)
 		#expect(categories?.dek == "37.4% of categorized spending.")
 		#expect(categories?.rows.map(\.value) == ["37.4%", "26.1%", "14.8%", "8.7%", "5.2%", "7.8%"])
@@ -329,8 +330,9 @@ struct WrappedIssueTests {
 
 	// MARK: Hide amounts never reflows
 
-	/// The cowboy's six reports: a full year, a year to date, no shares, no
-	/// opening net worth, a refund-heavy year, and no typical share.
+	/// The cowboy's ten reports: a full year, a year to date, no shares, no
+	/// opening net worth, a refund-heavy year, no typical share, an empty
+	/// year, one month, no goals, and no prior year.
 	static var parityReports: [(String, WrappedReport)] {
 		var noShares = Self.report()
 		noShares.shares = WrappedShares(outVsIn: nil, net: nil, debtPaydown: nil, savings: nil, biggestMonth: nil, netWorthChange: nil, otherCategories: nil, otherGroups: nil, otherPayees: nil, typicalMonth: nil)
@@ -345,17 +347,36 @@ struct WrappedIssueTests {
 		refundHeavy.shares.net = 1_003
 		var noTypical = Self.report()
 		noTypical.shares.typicalMonth = nil
+		var empty = Self.report()
+		empty.hasData = false
+		var oneMonth = Self.report(last: "2027-01-31")
+		oneMonth.months = [oneMonth.months[0]]
+		oneMonth.monthEnds = [WrappedMonthEnd(month: Month(year: 2027, month: 1), date: "2027-01-31", netWorth: 735_000, share: 21)]
+		oneMonth.lowestMonthEnd = oneMonth.monthEnds[0]
+		oneMonth.highestMonthEnd = oneMonth.monthEnds[0]
+		oneMonth.biggestMonth = WrappedMonth(month: Month(year: 2027, month: 1), total: 20_000)
+		oneMonth.shares.biggestMonth = 174
+		var noGoals = Self.report()
+		noGoals.reachedGoals = []
+		noGoals.completedGoalIds = []
+		var noPrior = Self.report(prior: WrappedPriorYear(totalIn: .newThisYear, totalOut: .newThisYear, net: .newThisYear, from: "2027-01-01"))
+		noPrior.funFacts.removeAll { if case .priorYear = $0 { true } else { false } }
 		return [("full year", Self.report()), ("year to date", Self.report(last: "2027-04-10")), ("no shares", noShares),
-			("no opening net worth", noOpening), ("refund-heavy", refundHeavy), ("no typical share", noTypical)]
+			("no opening net worth", noOpening), ("refund-heavy", refundHeavy), ("no typical share", noTypical),
+			("empty year", empty), ("one month", oneMonth), ("no goals", noGoals), ("no prior year", noPrior)]
 	}
 
-	/// A page's shape: which of its words exist and which rows it has.
+	/// A page's shape: which of its words exist, which rows it has and which
+	/// of them carry a note line.
 	struct Shape: Equatable {
 		let heading: Bool
 		let headline: Bool
 		let dek: Bool
 		let hero: Bool
 		let rows: [String]
+		let rowNotes: [Bool]
+		let footnote: Bool
+		let notes: Int
 
 		init(_ page: WrappedPage) {
 			heading = page.heading != nil
@@ -363,6 +384,9 @@ struct WrappedIssueTests {
 			dek = page.dek != nil
 			hero = page.hero != nil
 			rows = page.rows.map(\.id)
+			rowNotes = page.rows.map { $0.note != nil }
+			footnote = page.footnote != nil
+			notes = page.notes.count
 		}
 	}
 
@@ -408,6 +432,7 @@ struct WrappedIssueTests {
 			report.shares.otherCategories, report.shares.otherGroups, report.shares.otherPayees, report.shares.typicalMonth].compactMap(\.self)
 		shares += report.topCategories.map(\.share) + report.topGroups.map(\.share) + report.topPayees.map(\.share)
 		shares += report.months.compactMap(\.share) + report.monthEnds.compactMap(\.share)
+		if redacted, report.shares.outVsIn != nil { shares.append(1_000) }
 		for fact in report.funFacts {
 			switch fact {
 			case .topCategoryShare(_, let tenths), .noSpendShare(_, _, let tenths): shares.append(tenths)

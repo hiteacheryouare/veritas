@@ -247,7 +247,8 @@ private struct WrappedIssueWriter {
 			page.headline = report.shares.outVsIn.flatMap { $0 >= 0 ? "\(percent($0)) of what came in went out." : nil } ?? "The ledger"
 			page.dek = [report.shares.net.map(netShareSentence) ?? netWordsSentence, partialPriorYear].compactMap(\.self).joined(separator: " ")
 			page.rows = [
-				WrappedPage.Row(id: "in", label: "Came in", value: change(prior.totalIn) ?? WrappedWords.notApplicable, note: nil, share: nil),
+				// Every share on the page is of what came in, so it is the whole.
+				WrappedPage.Row(id: "in", label: "Came in", value: report.shares.outVsIn == nil ? WrappedWords.notApplicable : percent(1_000), note: change(prior.totalIn), share: nil),
 				WrappedPage.Row(id: "out", label: "Went out", value: ofIncome(report.shares.outVsIn), note: change(prior.totalOut), share: nil),
 				WrappedPage.Row(id: "net", label: netLabel, value: ofIncome(report.shares.net.map(abs)), note: change(prior.net), share: nil)
 			]
