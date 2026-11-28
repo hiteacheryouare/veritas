@@ -111,6 +111,18 @@ impl StoreTransaction for Writer<'_> {
 				delta.before.as_ref().and_then(|row| row.scenario.as_ref()),
 				delta.after.as_ref().and_then(|row| row.scenario.as_ref()),
 			),
+			Change::WidgetOverride(delta) => self.put_widget_override(
+				delta.before.as_ref().and_then(|row| row.value.as_ref()),
+				delta.after.as_ref().and_then(|row| row.value.as_ref()),
+			),
+			Change::MigrationApplied(delta) => self.put_migration_applied(
+				delta.before.as_ref().and_then(|row| row.value.as_ref()),
+				delta.after.as_ref().and_then(|row| row.value.as_ref()),
+			),
+			Change::GoalRemoval(delta) => self.put_goal(
+				delta.before.as_ref().and_then(|row| row.goal.as_ref()),
+				delta.after.as_ref().and_then(|row| row.goal.as_ref()),
+			),
 		}
 	}
 

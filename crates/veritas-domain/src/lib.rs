@@ -18,6 +18,7 @@ pub use change::{
 	NextDateReset, Note, PayeeMapping, Record, Retired, Row, ScenarioRow, ScheduleJsonPathsRow,
 	ScheduleMetaRow, Setting, TaxTag, TransactionMetaRow,
 };
+pub use change::{GoalRemoval, MigrationAppliedRow, WidgetOverrideRow};
 pub use currency::{CURRENCIES, Currency, currency};
 pub use date::{CivilDate, YearMonth};
 pub use error::{CoreError, ReadOnlyReason};

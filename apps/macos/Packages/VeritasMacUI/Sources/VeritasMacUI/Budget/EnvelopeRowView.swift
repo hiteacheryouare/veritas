@@ -179,6 +179,10 @@ struct EnvelopeRowView: View {
 			Divider()
 			Button("Rename…") { isRenaming = true }
 			Button(envelope.hidden ? "Show" : "Hide") { Task { await screen.setHidden(envelope.id, !envelope.hidden) } }
+			if screen.hasUpgradedKind(envelope.id) {
+				Button("Revert Upgrade…") { Task { await screen.revertUpgradedKind(envelope.id) } }
+					.accessibilityIdentifier("envelope.revertUpgrade")
+			}
 			Button("Delete…") {
 				Task {
 					removal = await screen.removal(for: envelope.id)

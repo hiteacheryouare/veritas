@@ -54,6 +54,8 @@ struct VeritasCommands: Commands {
 				Task { await ExportPanel.run(for: model) }
 			}
 			.disabled(!isOpen || model?.canExport != true)
+			Button("Upgrade to Veritas Features…") { model?.showUpgrade() }
+				.disabled(!isOpen || model?.readOnly != nil)
 			Button("Close Budget") {
 				guard let model else { return }
 				Task { await model.closeBudget() }

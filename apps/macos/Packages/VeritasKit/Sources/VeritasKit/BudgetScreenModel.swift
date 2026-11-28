@@ -16,6 +16,16 @@ public final class BudgetScreenModel {
 
 	@ObservationIgnored let workspace: WorkspaceModel
 
+	/// MIG-1.5: the upgrade gave this category its debt or savings kind, so
+	/// its menu offers Revert.
+	public func hasUpgradedKind(_ categoryID: String) -> Bool {
+		workspace.isUpgraded("kind:\(categoryID)")
+	}
+
+	public func revertUpgradedKind(_ categoryID: String) async {
+		await workspace.revertUpgrade("kind:\(categoryID)")
+	}
+
 	public init(workspace: WorkspaceModel, month: Month = BudgetScreenModel.currentMonth()) {
 		self.workspace = workspace
 		self.month = month

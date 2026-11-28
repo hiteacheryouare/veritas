@@ -26,6 +26,7 @@ uniffi.workspace = true
 
 [dev-dependencies]
 rusqlite.workspace = true
+veritas-interop = { path = "../veritas-interop" }
 
 [lints]
 workspace = true

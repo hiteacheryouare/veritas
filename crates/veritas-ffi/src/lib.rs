@@ -10,6 +10,7 @@ mod custom_reports;
 mod dashboards;
 mod forecast;
 mod goals;
+mod migration;
 mod money;
 mod names;
 mod records;
@@ -61,6 +62,11 @@ pub use forecast::{
 	ScenarioSummary, SuggestionBasis, SuggestionList, UnforecastItem,
 };
 pub use goals::{GoalClosePreview, GoalList, GoalPace, GoalState, GoalSummary, MonthAmount};
+pub use migration::{
+	AppliedMigration, MigrationConfidence, MigrationConversion, MigrationEdits, MigrationEffect,
+	MigrationFigure, MigrationGoalPreview, MigrationItem, MigrationKindChange, MigrationProposal,
+	MigrationRevert, MigrationSelection, MigrationSignal, MigrationSuggestion,
+};
 pub use money::{
 	BalanceAfter, BalanceHistory, BalancePoint, CategoryKind, HiddenCategoryMatch,
 	KindCategoryPlan, KindTarget, LoanPaymentDefaults, LoanPaymentDraft, LoanPaymentPreview,

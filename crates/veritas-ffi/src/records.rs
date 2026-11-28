@@ -74,6 +74,11 @@ pub enum EntityKind {
 	Widget,
 	/// v16. A what-if scenario with its events (R-FC-2).
 	Scenario,
+	/// v26. A dashboard widget Veritas shows as a native card (MIG-3.4);
+	/// `id` is the widget's id.
+	WidgetOverride,
+	/// v26. An upgraded item's Revert record (MIG-7.1); `id` is its key.
+	MigrationRecord,
 }
 
 /// One changed row. `id` is the row's id, absent for a month's hold;
@@ -126,6 +131,8 @@ impl From<&CoreEntity> for EntityRef {
 			CoreEntity::DashboardPage(id) => row(EntityKind::DashboardPage, id),
 			CoreEntity::Widget(id) => row(EntityKind::Widget, id),
 			CoreEntity::Scenario(id) => row(EntityKind::Scenario, id),
+			CoreEntity::WidgetOverride(id) => row(EntityKind::WidgetOverride, id),
+			CoreEntity::MigrationApplied(key) => row(EntityKind::MigrationRecord, key),
 		}
 	}
 }

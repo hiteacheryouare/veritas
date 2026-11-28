@@ -6,12 +6,13 @@ use veritas_domain::SettingKey;
 use veritas_domain::{
 	Account, AccountGroup, AccountGroupId, AccountId, AccountKind, AccountMeta, BudgetCell,
 	BudgetData, BudgetType, Cadence, Category, CategoryGroup, CategoryGroupId, CategoryId,
-	CategoryKind, CategoryMeta, CivilDate, ConditionsOp, CoreError, CustomReportId,
-	CustomReportRow, DashboardPage, DashboardPageId, FormatPrefs, Goal, GoalId, GoalStatus,
-	IncomeDelta, LoanPart, LoanPaymentPart, LoanPaymentPartId, Money, Payee, PayeeId, Rule, RuleId,
-	RuleStage, Scenario, ScenarioChange, ScenarioEvent, ScenarioEventId, ScenarioId, Schedule,
-	ScheduleId, ScheduleJsonPaths, ScheduleMeta, SplitRole, Tag, TagId, Transaction, TransactionId,
-	TransactionMeta, Widget, WidgetId, YearMonth,
+	CategoryKind, CategoryMeta, CategoryTemplates, CivilDate, ConditionsOp, CoreError,
+	CustomReportId, CustomReportRow, DashboardPage, DashboardPageId, FormatPrefs, Goal, GoalId,
+	GoalStatus, IncomeDelta, LoanPart, LoanPaymentPart, LoanPaymentPartId, MigrationApplied, Money,
+	Payee, PayeeId, Rule, RuleId, RuleStage, Scenario, ScenarioChange, ScenarioEvent,
+	ScenarioEventId, ScenarioId, Schedule, ScheduleId, ScheduleJsonPaths, ScheduleMeta, SplitRole,
+	Tag, TagId, Transaction, TransactionId, TransactionMeta, Widget, WidgetId, WidgetOverride,
+	YearMonth,
 };
 
 use crate::cells::{
@@ -183,7 +184,10 @@ fn load_tables(conn: &Connection) -> Result<Loaded, CoreError> {
 	each_row(
 		conn,
 		"accounts",
-		"SELECT id, name, offbudget, closed, account_group_id, sort_order, tombstone, last_reconciled FROM accounts",
+		&format!(
+			"SELECT id, name, offbudget, closed, account_group_id, sort_order, tombstone, last_reconciled, {} FROM accounts",
+			column_or_null(conn, "accounts", "type")?,
+		),
 		&mut skipped,
 		|row| {
 			let id = AccountId::new(id(row, 0)?);
@@ -207,6 +211,9 @@ fn load_tables(conn: &Connection) -> Result<Loaded, CoreError> {
 					_ => None,
 				},
 			};
+			if let Some(kind) = text(at(row, 8)?)? {
+				data.account_types.insert(id.clone(), kind);
+			}
 			data.accounts.insert(id, account);
 			Ok(())
 		},
@@ -253,7 +260,11 @@ fn load_tables(conn: &Connection) -> Result<Loaded, CoreError> {
 	each_row(
 		conn,
 		"categories",
-		"SELECT id, name, cat_group, is_income, hidden, sort_order, tombstone FROM categories",
+		&format!(
+			"SELECT id, name, cat_group, is_income, hidden, sort_order, tombstone, {}, {} FROM categories",
+			column_or_null(conn, "categories", "goal_def")?,
+			column_or_null(conn, "categories", "template_settings")?,
+		),
 		&mut skipped,
 		|row| {
 			let id = CategoryId::new(id(row, 0)?);
@@ -269,6 +280,13 @@ fn load_tables(conn: &Connection) -> Result<Loaded, CoreError> {
 				sort_order: sort_order(at(row, 5)?)?,
 				tombstone: tombstone(at(row, 6)?),
 			};
+			let templates = CategoryTemplates {
+				goal_def: text(at(row, 7)?)?,
+				template_settings: text(at(row, 8)?)?,
+			};
+			if templates.goal_def.is_some() {
+				data.category_templates.insert(id.clone(), templates);
+			}
 			data.categories.insert(id, category);
 			Ok(())
 		},
@@ -798,12 +816,18 @@ fn load_veritas_tables(
 		each_row(
 			conn,
 			"veritas_schedule_meta",
-			"SELECT schedule_id, paused FROM veritas_schedule_meta",
+			&format!(
+				"SELECT schedule_id, paused, {}, {} FROM veritas_schedule_meta",
+				column_or_null(conn, "veritas_schedule_meta", "display_name")?,
+				column_or_null(conn, "veritas_schedule_meta", "icon")?,
+			),
 			skipped,
 			|row| {
 				let schedule = ScheduleId::new(id(row, 0)?);
 				let meta = ScheduleMeta {
 					paused: flag(at(row, 1)?),
+					display_name: text(at(row, 2)?)?,
+					icon: text(at(row, 3)?)?,
 				};
 				data.schedule_meta.insert(schedule, meta);
 				Ok(())
@@ -883,6 +907,42 @@ fn load_veritas_tables(
 					close_month_dismissed_available: money(at(row, 13)?)?,
 				};
 				data.goals.insert(id, goal);
+				Ok(())
+			},
+		)?;
+	}
+	if table_exists(conn, "veritas_widget_override")? {
+		each_row(
+			conn,
+			"veritas_widget_override",
+			"SELECT widget_id, native_type, native_meta, fingerprint FROM veritas_widget_override",
+			skipped,
+			|row| {
+				let widget = WidgetId::new(id(row, 0)?);
+				let row = WidgetOverride {
+					widget: widget.clone(),
+					native_type: required_text(at(row, 1)?, "the override has no card type")?,
+					native_meta: text(at(row, 2)?)?.unwrap_or_default(),
+					fingerprint: required_text(at(row, 3)?, "the override has no fingerprint")?,
+				};
+				data.widget_overrides.insert(widget, row);
+				Ok(())
+			},
+		)?;
+	}
+	if table_exists(conn, "veritas_migration_applied")? {
+		each_row(
+			conn,
+			"veritas_migration_applied",
+			"SELECT item_key, prior FROM veritas_migration_applied",
+			skipped,
+			|row| {
+				let key = required_text(at(row, 0)?, "the row has no item key")?;
+				let row = MigrationApplied {
+					key: key.clone(),
+					prior: text(at(row, 1)?)?.unwrap_or_else(|| "null".to_owned()),
+				};
+				data.migration_applied.insert(key, row);
 				Ok(())
 			},
 		)?;

@@ -426,7 +426,11 @@ fn undoing_a_creation_retires_rows_the_way_actual_does() {
 	assert!(data.transactions[&TransactionId::new("t3")].tombstone);
 	let rent = &data.budget_cells[&(march(), CategoryId::new("rent"))];
 	assert_eq!((rent.budgeted, rent.carryover), (Money::ZERO, false));
-	assert_eq!(rent.goal, Some(Money::from_minor(50_000)));
+	assert_eq!(
+		(rent.goal, rent.long_goal),
+		(None, false),
+		"MIG-7.5: a created cell keeps no goal figure"
+	);
 	assert_eq!(
 		data.notes["rent"], None,
 		"undo clears the note and keeps its row"
@@ -765,6 +769,8 @@ fn every_kind_of_row_undoes_and_redoes_exactly() {
 		BudgetCell {
 			budgeted: Money::ZERO,
 			carryover: false,
+			goal: None,
+			long_goal: false,
 			..created.cell.clone()
 		},
 	);

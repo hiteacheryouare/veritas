@@ -160,14 +160,24 @@ pub enum SettingKey {
 	/// The name on every statement's header (ST-3). Unset falls back to the
 	/// budget's name.
 	EntityName,
+	/// MIG-1.1: `1` once the upgrade sheet has offered itself after an import.
+	MigrationOffered,
+	/// MIG-1.6: a JSON array of the suggestion keys the user dismissed.
+	MigrationDismissed,
 }
 
 impl SettingKey {
-	pub const ALL: [SettingKey; 1] = [SettingKey::EntityName];
+	pub const ALL: [SettingKey; 3] = [
+		SettingKey::EntityName,
+		SettingKey::MigrationOffered,
+		SettingKey::MigrationDismissed,
+	];
 
 	pub fn id(self) -> &'static str {
 		match self {
 			SettingKey::EntityName => "entity_name",
+			SettingKey::MigrationOffered => "migration.offered",
+			SettingKey::MigrationDismissed => "migration.dismissed",
 		}
 	}
 
@@ -207,6 +217,37 @@ pub struct ScheduleJsonPaths {
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct ScheduleMeta {
 	pub paused: bool,
+	/// MIG-6.2: the name Bills shows in Veritas only. Actual never sees it.
+	pub display_name: Option<String>,
+	/// MIG-6.3: an SF Symbol name or one emoji, Veritas only.
+	pub icon: Option<String>,
+}
+
+/// `veritas_widget_override` (MIG-3.4): in Veritas, an Actual dashboard
+/// widget shows as a native card while `fingerprint` still matches the
+/// widget and its report (MIG-3.6).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WidgetOverride {
+	pub widget: WidgetId,
+	pub native_type: String,
+	pub native_meta: String,
+	pub fingerprint: String,
+}
+
+/// `veritas_migration_applied` (MIG-7.1): what one converted item's Revert
+/// restores, as JSON.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MigrationApplied {
+	pub key: String,
+	pub prior: String,
+}
+
+/// Actual's category template columns, read only for the upgrade's goal
+/// signal (MIG-4.2 S1). Veritas never writes them.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct CategoryTemplates {
+	pub goal_def: Option<String>,
+	pub template_settings: Option<String>,
 }
 
 /// Which part of a loan payment an expense line is (D76, DEBT-3).
@@ -408,6 +449,12 @@ pub struct BudgetData {
 	pub dashboard_pages: BTreeMap<DashboardPageId, DashboardPage>,
 	pub widgets: BTreeMap<WidgetId, Widget>,
 	pub scenarios: BTreeMap<ScenarioId, Scenario>,
+	pub widget_overrides: BTreeMap<WidgetId, WidgetOverride>,
+	pub migration_applied: BTreeMap<String, MigrationApplied>,
+	/// Actual's `accounts.type` (`savings`, `investment` and the rest), read
+	/// only, for MIG-5.3.
+	pub account_types: BTreeMap<AccountId, String>,
+	pub category_templates: BTreeMap<CategoryId, CategoryTemplates>,
 }
 
 impl BudgetData {
@@ -442,6 +489,10 @@ impl BudgetData {
 			dashboard_pages: BTreeMap::new(),
 			widgets: BTreeMap::new(),
 			scenarios: BTreeMap::new(),
+			widget_overrides: BTreeMap::new(),
+			migration_applied: BTreeMap::new(),
+			account_types: BTreeMap::new(),
+			category_templates: BTreeMap::new(),
 		}
 	}
 

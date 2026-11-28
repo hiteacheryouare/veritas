@@ -251,6 +251,22 @@ public protocol BudgetSession: AnyObject, Sendable {
 	/// first line are one undo step, and a refused line makes nothing (v17).
 	@discardableResult
 	func createScenario(named name: String, firstEvent: ScenarioChange?, today: String) async throws -> String
+	/// Upgrade to Veritas features (docs/finance/migration.md): every
+	/// suggestion, recomputed now. Writes nothing.
+	func migrationSuggestions(today: String) async throws -> [MigrationSuggestion]
+	/// The ticked items with the Confirm figures for the user's edits (MIG-2.4).
+	func migrationPreview(_ selection: MigrationSelection, today: String) async throws -> [MigrationSuggestion]
+	/// The ticked items as one command and one undo step (MIG-1.5).
+	func applyMigration(_ selection: MigrationSelection, today: String) async throws
+	/// One item's Revert (MIG-2.3), or what the user must answer first.
+	func revertMigration(key: String, groupID: String?, confirmed: Bool, today: String) async throws -> MigrationRevert
+	func appliedMigrations() async throws -> [AppliedMigration]
+	/// MIG-1.1: whether the sheet already offered itself for this file.
+	func migrationOffered() async throws -> Bool
+	/// Not an undo step (MIG-1.8).
+	func markMigrationOffered() async throws
+	/// "Don't suggest again", or bringing one back. Not an undo step.
+	func setMigrationDismissed(_ key: String, dismissed: Bool) async throws
 }
 
 /// The budgets in the app's budgets folder: new ones, Actual imports and reopened ones.

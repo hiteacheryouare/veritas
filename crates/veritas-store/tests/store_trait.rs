@@ -274,10 +274,13 @@ fn variant(change: &Change) -> &'static str {
 		Change::DashboardPage(_) => "DashboardPage",
 		Change::Widget(_) => "Widget",
 		Change::Scenario(_) => "Scenario",
+		Change::WidgetOverride(_) => "WidgetOverride",
+		Change::MigrationApplied(_) => "MigrationApplied",
+		Change::GoalRemoval(_) => "GoalRemoval",
 	}
 }
 
-const EVERY_VARIANT: [&str; 28] = [
+const EVERY_VARIANT: [&str; 31] = [
 	"Account",
 	"AccountGroup",
 	"CategoryGroup",
@@ -306,6 +309,9 @@ const EVERY_VARIANT: [&str; 28] = [
 	"DashboardPage",
 	"Widget",
 	"Scenario",
+	"WidgetOverride",
+	"MigrationApplied",
+	"GoalRemoval",
 ];
 
 /// One event of every kind the schema stores (R-FC-2).
@@ -489,7 +495,11 @@ fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
 		}),
 		Row::ScheduleMeta(veritas_domain::ScheduleMetaRow {
 			schedule: schedule.id.clone(),
-			meta: veritas_domain::ScheduleMeta { paused: true },
+			meta: veritas_domain::ScheduleMeta {
+				paused: true,
+				display_name: Some("Rent, flat".to_owned()),
+				icon: Some("house".to_owned()),
+			},
 		}),
 		Row::Transaction(transaction.clone()),
 		Row::LoanPaymentPart(veritas_domain::LoanPaymentPart {
@@ -629,6 +639,22 @@ fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
 			page: Some(DashboardPageId::new("v-page")),
 			tombstone: false,
 		}),
+		Row::WidgetOverride(veritas_domain::WidgetOverrideRow {
+			widget: WidgetId::new("v-widget"),
+			value: Some(veritas_domain::WidgetOverride {
+				widget: WidgetId::new("v-widget"),
+				native_type: "net-worth-card".to_owned(),
+				native_meta: "{\"name\":\"Net worth\"}".to_owned(),
+				fingerprint: "ab".repeat(32),
+			}),
+		}),
+		Row::MigrationApplied(veritas_domain::MigrationAppliedRow {
+			key: "kind:v-category".to_owned(),
+			value: Some(veritas_domain::MigrationApplied {
+				key: "kind:v-category".to_owned(),
+				prior: "{\"meta\":null}".to_owned(),
+			}),
+		}),
 	];
 	let mut seen = std::collections::BTreeSet::new();
 	let mut run = |data: &mut BudgetData, rows: Vec<Row>| {
@@ -671,7 +697,11 @@ fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
 				Row::ScheduleJsonPaths(row)
 			}
 			Row::ScheduleMeta(row) => Row::ScheduleMeta(veritas_domain::ScheduleMetaRow {
-				meta: veritas_domain::ScheduleMeta { paused: false },
+				meta: veritas_domain::ScheduleMeta {
+					paused: false,
+					display_name: None,
+					icon: Some("🏠".to_owned()),
+				},
 				..row
 			}),
 			Row::LoanPaymentPart(row) => Row::LoanPaymentPart(veritas_domain::LoanPaymentPart {
@@ -808,7 +838,22 @@ fn every_change_variant_is_created_then_edited_and_reloads_as_memory() {
 				width: Some(6),
 				..row
 			}),
+			Row::WidgetOverride(row) => Row::WidgetOverride(veritas_domain::WidgetOverrideRow {
+				value: row.value.map(|value| veritas_domain::WidgetOverride {
+					fingerprint: "cd".repeat(32),
+					..value
+				}),
+				..row
+			}),
+			Row::MigrationApplied(row) => {
+				Row::MigrationApplied(veritas_domain::MigrationAppliedRow { value: None, ..row })
+			}
+			Row::GoalRemoval(row) => Row::GoalRemoval(row),
 		})
+		.chain([Row::GoalRemoval(veritas_domain::GoalRemoval {
+			id: GoalId::new("v-goal"),
+			goal: None,
+		})])
 		.collect();
 	run(&mut data, edited);
 

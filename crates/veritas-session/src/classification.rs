@@ -70,6 +70,8 @@ fn affects_classification(entity: &EntityRef) -> bool {
 			| EntityRef::CustomReport(_)
 			| EntityRef::DashboardPage(_)
 			| EntityRef::Widget(_)
+			| EntityRef::WidgetOverride(_)
+			| EntityRef::MigrationApplied(_)
 	)
 }
 

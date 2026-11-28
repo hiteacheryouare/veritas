@@ -196,10 +196,16 @@ public struct DashboardCard: Identifiable, Hashable, Sendable {
 	public var content: WidgetView
 	/// The core's minimum for the type; `nil` falls back to Actual's table.
 	public var minimum: (width: Int64, height: Int64)?
+	/// Actual stores a custom report here and Veritas shows its native card
+	/// (MIG-3.4), so the card offers Revert.
+	public var upgraded: Bool
+	/// "This report changed in Actual, so Veritas shows it again." (MIG-3.6)
+	public var notice: String?
 
 	public init(
 		id: String, kind: WidgetKind?, rawKind: String, x: Int64, y: Int64, width: Int64, height: Int64,
-		config: WidgetConfig, content: WidgetView, minimum: (width: Int64, height: Int64)? = nil
+		config: WidgetConfig, content: WidgetView, minimum: (width: Int64, height: Int64)? = nil,
+		upgraded: Bool = false, notice: String? = nil
 	) {
 		self.id = id
 		self.kind = kind
@@ -211,13 +217,15 @@ public struct DashboardCard: Identifiable, Hashable, Sendable {
 		self.config = config
 		self.content = content
 		self.minimum = minimum
+		self.upgraded = upgraded
+		self.notice = notice
 	}
 
 	public var minimumSize: (width: Int64, height: Int64) { minimum ?? kind?.minimumSize ?? (1, 1) }
 
 	public static func == (lhs: DashboardCard, rhs: DashboardCard) -> Bool {
 		lhs.id == rhs.id && lhs.rawKind == rhs.rawKind && (lhs.x, lhs.y, lhs.width, lhs.height) == (rhs.x, rhs.y, rhs.width, rhs.height)
-			&& lhs.config == rhs.config && lhs.content == rhs.content
+			&& lhs.config == rhs.config && lhs.content == rhs.content && lhs.upgraded == rhs.upgraded && lhs.notice == rhs.notice
 	}
 
 	public func hash(into hasher: inout Hasher) {
@@ -377,7 +385,8 @@ extension DashboardCard {
 	public init(_ widget: DashboardWidget) {
 		self.init(
 			id: widget.id, kind: WidgetKind(rawValue: widget.kind), rawKind: widget.kind, x: widget.x, y: widget.y, width: widget.width, height: widget.height,
-			config: widget.config, content: widget.view, minimum: (widget.minWidth, widget.minHeight)
+			config: widget.config, content: widget.view, minimum: (widget.minWidth, widget.minHeight),
+			upgraded: widget.upgraded, notice: widget.notice
 		)
 	}
 }

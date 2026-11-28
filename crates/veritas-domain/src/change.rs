@@ -5,9 +5,9 @@ use crate::{
 	Account, AccountGroup, AccountGroupId, AccountId, AccountMeta, BudgetCell, BudgetData,
 	Category, CategoryGroup, CategoryGroupId, CategoryId, CategoryMeta, CivilDate, CustomReportId,
 	CustomReportRow, DashboardPage, DashboardPageId, Goal, GoalId, LoanPaymentPart,
-	LoanPaymentPartId, Money, Payee, PayeeId, Rule, RuleId, Scenario, ScenarioId, Schedule,
-	ScheduleId, ScheduleJsonPaths, ScheduleMeta, SettingKey, Tag, TagId, Transaction,
-	TransactionId, TransactionMeta, Widget, WidgetId, YearMonth,
+	LoanPaymentPartId, MigrationApplied, Money, Payee, PayeeId, Rule, RuleId, Scenario, ScenarioId,
+	Schedule, ScheduleId, ScheduleJsonPaths, ScheduleMeta, SettingKey, Tag, TagId, Transaction,
+	TransactionId, TransactionMeta, Widget, WidgetId, WidgetOverride, YearMonth,
 };
 
 /// One row a subscriber may need to refetch after a commit.
@@ -38,6 +38,8 @@ pub enum EntityRef {
 	DashboardPage(DashboardPageId),
 	Widget(WidgetId),
 	Scenario(ScenarioId),
+	WidgetOverride(WidgetId),
+	MigrationApplied(String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -121,6 +123,29 @@ pub struct NextDateReset {
 pub struct ScenarioRow {
 	pub id: ScenarioId,
 	pub scenario: Option<Scenario>,
+}
+
+/// `veritas_widget_override` (MIG-3.4) as a row a command may also delete:
+/// `None` is no row. Always read as a row, like [`ScenarioRow`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct WidgetOverrideRow {
+	pub widget: WidgetId,
+	pub value: Option<WidgetOverride>,
+}
+
+/// `veritas_migration_applied` (MIG-7.1), deletable the same way.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MigrationAppliedRow {
+	pub key: String,
+	pub value: Option<MigrationApplied>,
+}
+
+/// A goal's `veritas_goal` row, read so a command can delete it (MIG-4.7's
+/// Revert). `None` is no row. Undo puts back what was there.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GoalRemoval {
+	pub id: GoalId,
+	pub goal: Option<Goal>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -308,6 +333,9 @@ rows!(
 	DashboardPage(DashboardPage),
 	Widget(Widget),
 	Scenario(ScenarioRow),
+	WidgetOverride(WidgetOverrideRow),
+	MigrationApplied(MigrationAppliedRow),
+	GoalRemoval(GoalRemoval),
 );
 
 fn put<K: Ord + Clone, V>(map: &mut BTreeMap<K, V>, key: &K, value: Option<V>) {
@@ -410,10 +438,13 @@ impl Record for BudgetCell {
 		put(&mut data.budget_cells, key, value);
 	}
 
+	/// MIG-7.5: a created cell keeps no goal figure either.
 	fn retired(created: &Self) -> Retired<Self> {
 		Retired::Becomes(BudgetCell {
 			budgeted: Money::ZERO,
 			carryover: false,
+			goal: None,
+			long_goal: false,
 			..created.clone()
 		})
 	}
@@ -843,5 +874,94 @@ impl Record for ScenarioRow {
 
 	fn entity(key: &ScenarioId) -> EntityRef {
 		EntityRef::Scenario(key.clone())
+	}
+}
+
+impl Record for WidgetOverrideRow {
+	type Key = WidgetId;
+
+	fn key(&self) -> WidgetId {
+		self.widget.clone()
+	}
+
+	fn read(data: &BudgetData, key: &WidgetId) -> Option<Self> {
+		Some(WidgetOverrideRow {
+			widget: key.clone(),
+			value: data.widget_overrides.get(key).cloned(),
+		})
+	}
+
+	fn write(data: &mut BudgetData, key: &WidgetId, value: Option<Self>) {
+		put(
+			&mut data.widget_overrides,
+			key,
+			value.and_then(|row| row.value),
+		);
+	}
+
+	fn retired(_: &Self) -> Retired<Self> {
+		Retired::Removed
+	}
+
+	fn entity(key: &WidgetId) -> EntityRef {
+		EntityRef::WidgetOverride(key.clone())
+	}
+}
+
+impl Record for MigrationAppliedRow {
+	type Key = String;
+
+	fn key(&self) -> String {
+		self.key.clone()
+	}
+
+	fn read(data: &BudgetData, key: &String) -> Option<Self> {
+		Some(MigrationAppliedRow {
+			key: key.clone(),
+			value: data.migration_applied.get(key).cloned(),
+		})
+	}
+
+	fn write(data: &mut BudgetData, key: &String, value: Option<Self>) {
+		put(
+			&mut data.migration_applied,
+			key,
+			value.and_then(|row| row.value),
+		);
+	}
+
+	fn retired(_: &Self) -> Retired<Self> {
+		Retired::Removed
+	}
+
+	fn entity(key: &String) -> EntityRef {
+		EntityRef::MigrationApplied(key.clone())
+	}
+}
+
+impl Record for GoalRemoval {
+	type Key = GoalId;
+
+	fn key(&self) -> GoalId {
+		self.id.clone()
+	}
+
+	fn read(data: &BudgetData, key: &GoalId) -> Option<Self> {
+		Some(GoalRemoval {
+			id: key.clone(),
+			goal: data.goals.get(key).cloned(),
+		})
+	}
+
+	fn write(data: &mut BudgetData, key: &GoalId, value: Option<Self>) {
+		put(&mut data.goals, key, value.and_then(|row| row.goal));
+	}
+
+	fn retired(_: &Self) -> Retired<Self> {
+		Retired::Removed
+	}
+
+	fn entity(key: &GoalId) -> EntityRef {
+		EntityRef::Goal(key.clone())
 	}
 }

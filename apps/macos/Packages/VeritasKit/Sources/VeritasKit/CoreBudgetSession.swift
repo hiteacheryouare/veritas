@@ -457,6 +457,46 @@ final class CoreBudgetSession: BudgetSession {
 		_ = try await Core.run { try session.perform(command: command) }
 	}
 
+	func migrationSuggestions(today: String) async throws -> [MigrationSuggestion] {
+		let session = session
+		return try await Core.run { try session.migrationSuggestions(today: today) }
+	}
+
+	func migrationPreview(_ selection: MigrationSelection, today: String) async throws -> [MigrationSuggestion] {
+		let session = session
+		return try await Core.run { try session.migrationPreview(selection: selection, today: today) }
+	}
+
+	func applyMigration(_ selection: MigrationSelection, today: String) async throws {
+		let session = session
+		_ = try await Core.run { try session.applyMigration(selection: selection, today: today) }
+	}
+
+	func revertMigration(key: String, groupID: String?, confirmed: Bool, today: String) async throws -> MigrationRevert {
+		let session = session
+		return try await Core.run { try session.revertMigration(key: key, groupId: groupID, confirmed: confirmed, today: today) }
+	}
+
+	func appliedMigrations() async throws -> [AppliedMigration] {
+		let session = session
+		return try await Core.run { try session.appliedMigrations() }
+	}
+
+	func migrationOffered() async throws -> Bool {
+		let session = session
+		return try await Core.run { try session.migrationOffered() }
+	}
+
+	func markMigrationOffered() async throws {
+		let session = session
+		_ = try await Core.run { try session.markMigrationOffered() }
+	}
+
+	func setMigrationDismissed(_ key: String, dismissed: Bool) async throws {
+		let session = session
+		_ = try await Core.run { try session.setMigrationDismissed(key: key, dismissed: dismissed) }
+	}
+
 	func setRetention(_ retention: Retention) async throws {
 		let session = session
 		try await Core.run { try session.setRetention(retention: retention) }

@@ -27,6 +27,16 @@ public final class WorkspaceModel {
 	public var alert: ErrorAlert?
 	public var isImportPanelShown = false
 	public var newBudgetSetup: NewBudgetSetup?
+	/// "Upgrade to Veritas features" (MIG-1), offered once after an import
+	/// and opened from the File menu.
+	public var upgrade: UpgradeModel?
+	/// The keys of upgraded items (`goal:<category>`, `kind:<category>`,
+	/// `bill:<schedule>`, `report:<widget>`), so each screen offers Revert
+	/// where the item lives (MIG-1.5).
+	public private(set) var upgradedKeys: Set<String> = []
+	/// A Revert started from a screen, kept while it asks a question
+	/// (MIG-4.7, MIG-5.6).
+	public var reverting: UpgradeModel?
 	public var isPaletteShown = false
 	public var isFindShown = false
 	public var isAssistantShown = false
@@ -102,6 +112,39 @@ public final class WorkspaceModel {
 			defer { if access { zip.stopAccessingSecurityScopedResource() } }
 			return try await library.importActualZip(zip, into: directory)
 		}
+		if phase == .open {
+			await offerUpgrade()
+		}
+	}
+
+	public func isUpgraded(_ key: String) -> Bool {
+		upgradedKeys.contains(key)
+	}
+
+	/// Revert from the screen an upgraded item lives on. A kind change or a
+	/// goal whose group is gone asks first, through `reverting`.
+	public func revertUpgrade(_ key: String) async {
+		let model = UpgradeModel(workspace: self, offering: false)
+		reverting = model
+		await model.revert(key)
+		if model.question == nil {
+			reverting = nil
+		}
+	}
+
+	/// File, "Upgrade to Veritas features…", for any budget at any time.
+	public func showUpgrade() {
+		guard phase == .open else { return }
+		upgrade = UpgradeModel(workspace: self, offering: false)
+	}
+
+	/// MIG-1.1: the first time an imported budget opens, once per file. The
+	/// offer is recorded outside undo (MIG-1.8), so it never opens by itself
+	/// again, even after an export and a new import.
+	private func offerUpgrade() async {
+		guard let offered = await report({ try await $0.migrationOffered() }), !offered else { return }
+		await change { try await $0.markMigrationOffered() }
+		upgrade = UpgradeModel(workspace: self, offering: true)
 	}
 
 	public func startNewBudget() {
@@ -394,6 +437,7 @@ public final class WorkspaceModel {
 		guard let session else { return }
 		do {
 			apply(try await session.overview())
+			upgradedKeys = Set(try await session.appliedMigrations().filter { !$0.closed }.map(\.key))
 			if sheet == .integrityReport, integrityReport == .budget(findings: nil) {
 				integrityReport = .budget(findings: try await session.integrityFindings())
 			}

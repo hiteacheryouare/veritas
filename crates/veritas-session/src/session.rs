@@ -4,7 +4,8 @@ use std::time::{Duration, SystemTime};
 
 use chrono::{DateTime, TimeDelta, Utc};
 use veritas_domain::{
-	BudgetData, BudgetType, CivilDate, CoreError, NewBudget, ReadOnlyReason, Store,
+	BudgetData, BudgetType, CivilDate, CoreError, NewBudget, ReadOnlyReason, Row, Setting,
+	SettingKey, Store,
 };
 use veritas_interop::{ExportOutcome, ImportOutcome, Manifest, import_actual_zip};
 use veritas_store::{Access as StoreAccess, AuditReport, LoadReport, Loaded};
@@ -519,6 +520,31 @@ impl<B: Backend> Session<B> {
 				"the register index went missing".to_owned(),
 			)),
 		}
+	}
+
+	/// A settings write that is not an undo step (MIG-1.8): only the upgrade
+	/// sheet's `migration.offered` and `migration.dismissed`, so nothing
+	/// undo or redo could put back is ever written here.
+	pub fn write_outside_undo(&mut self, rows: Vec<Row>) -> Result<ChangeSet, CoreError> {
+		let allowed = |row: &Row| {
+			matches!(
+				row,
+				Row::Setting(Setting {
+					key: SettingKey::MigrationOffered | SettingKey::MigrationDismissed,
+					..
+				})
+			)
+		};
+		if !rows.iter().all(allowed) {
+			return Err(CoreError::Invalid(
+				"Only the upgrade sheet's offer and dismissals are written outside undo."
+					.to_owned(),
+			));
+		}
+		self.poll();
+		let changed = self.bus_mut()?.perform_rows_outside_undo(rows)?;
+		self.after_change(&changed);
+		Ok(changed)
 	}
 
 	pub fn undo(&mut self) -> Result<ChangeSet, CoreError> {

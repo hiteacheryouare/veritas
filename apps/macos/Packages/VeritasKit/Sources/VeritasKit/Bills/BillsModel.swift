@@ -150,6 +150,16 @@ public final class BillsModel {
 
 	@ObservationIgnored let workspace: WorkspaceModel
 
+	/// MIG-1.5: the upgrade named this bill in Veritas, so its editor offers
+	/// Revert.
+	public func hasUpgrade(_ billID: String) -> Bool {
+		workspace.isUpgraded("bill:\(billID)")
+	}
+
+	public func revertUpgrade(_ billID: String) async {
+		await workspace.revertUpgrade("bill:\(billID)")
+	}
+
 	public init(workspace: WorkspaceModel) {
 		self.workspace = workspace
 	}

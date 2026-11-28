@@ -165,6 +165,10 @@ pub struct CustomReportItem {
 	pub name: String,
 	/// Set when Veritas can't read the report's settings.
 	pub problem: Option<String>,
+	/// v26: a native card stands in for it on its dashboard (MIG-3.4), so the
+	/// list shows it only with "Show hidden reports".
+	#[uniffi(default = false)]
+	pub hidden: bool,
 }
 
 fn grouping(group_by: GroupBy) -> ReportGrouping {
@@ -548,6 +552,7 @@ pub(crate) fn view(
 }
 
 fn custom_reports(budget: &BudgetData) -> Vec<CustomReportItem> {
+	let hidden = veritas_session::migration::overridden_reports(budget);
 	let mut items: Vec<CustomReportItem> = budget
 		.custom_reports
 		.values()
@@ -558,6 +563,7 @@ fn custom_reports(budget: &BudgetData) -> Vec<CustomReportItem> {
 			problem: CustomReport::from_row(row)
 				.err()
 				.map(|error| error.to_string()),
+			hidden: hidden.contains(&row.id),
 		})
 		.collect();
 	items.sort_by(|a, b| {

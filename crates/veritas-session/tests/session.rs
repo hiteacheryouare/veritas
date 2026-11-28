@@ -1429,3 +1429,40 @@ fn rename_category(to: &'static str) -> impl Fn(&BudgetData) -> Result<Vec<Row>,
 		Ok(vec![Row::Category(category)])
 	}
 }
+
+/// MIG-1.8: only the upgrade sheet's two settings are written outside undo,
+/// so no write there can be clobbered by undo or redo.
+#[test]
+fn only_the_upgrade_settings_are_written_outside_undo() {
+	let (_root, dir) = imported("outside-undo");
+	let mut session = TestSession::open(&dir, TestClock::new().options()).unwrap();
+	let setting = |key| {
+		Row::Setting(veritas_domain::Setting {
+			key,
+			value: Some("1".to_owned()),
+		})
+	};
+	assert!(matches!(
+		session.write_outside_undo(vec![setting(veritas_domain::SettingKey::EntityName)]),
+		Err(CoreError::Invalid(_))
+	));
+	assert!(matches!(
+		session.write_outside_undo(vec![
+			rename("Outside")(session.data().unwrap())
+				.unwrap()
+				.remove(0)
+		]),
+		Err(CoreError::Invalid(_))
+	));
+	assert!(
+		!session
+			.data()
+			.unwrap()
+			.settings
+			.contains_key(&veritas_domain::SettingKey::EntityName)
+	);
+	session
+		.write_outside_undo(vec![setting(veritas_domain::SettingKey::MigrationOffered)])
+		.unwrap();
+	assert!(!session.can_undo(), "the offer is not an undo step");
+}

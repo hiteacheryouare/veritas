@@ -73,7 +73,26 @@ CREATE TABLE IF NOT EXISTS veritas_loan_payment_part (
 -- picks the label the bill screen shows for a completed bill; it never changes what posts.
 CREATE TABLE IF NOT EXISTS veritas_schedule_meta (
 	schedule_id TEXT PRIMARY KEY,
-	paused INTEGER NOT NULL DEFAULT 0 CHECK (paused IN (0, 1))
+	paused INTEGER NOT NULL DEFAULT 0 CHECK (paused IN (0, 1)),
+	display_name TEXT,
+	icon TEXT
+);
+
+-- docs/finance/migration.md MIG-3.4: an Actual dashboard widget Veritas shows
+-- as a native card while the fingerprint still matches (MIG-3.6, MIG-3.8).
+CREATE TABLE IF NOT EXISTS veritas_widget_override (
+	widget_id TEXT PRIMARY KEY,
+	native_type TEXT NOT NULL,
+	native_meta TEXT,
+	fingerprint TEXT NOT NULL,
+	created_at TEXT
+);
+
+-- MIG-7.1: what each upgraded item's Revert restores.
+CREATE TABLE IF NOT EXISTS veritas_migration_applied (
+	item_key TEXT PRIMARY KEY,
+	prior TEXT,
+	applied_at TEXT
 );
 
 -- docs/finance/tax-buckets.md TAX-1: which Actual tags mean which bucket.

@@ -47,6 +47,16 @@ struct WorkspaceWindow: View {
 				PlaceholderSheet(sheet: sheet)
 			}
 		}
+		.sheet(item: $model.upgrade) { upgrade in
+			UpgradeSheet(model: upgrade, format: model.format)
+		}
+		.sheet(item: Binding(get: { model.reverting?.question }, set: { question in
+			if question == nil { model.reverting = nil }
+		})) { question in
+			if let reverting = model.reverting {
+				UpgradeQuestionSheet(model: reverting, question: question, format: model.format)
+			}
+		}
 		.sheet(isPresented: $model.isOpenPickerShown) {
 			OpenBudgetSheet(budgets: model.budgetList) { budget in
 				Task { await model.openListedBudget(budget) }

@@ -131,6 +131,7 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 	private let billStore = StubBills()
 	private let ruleStore = StubRules()
 	private let forecastStore = StubForecast()
+	private let upgradeStore = StubUpgrade()
 
 	init(readOnly: ReadOnlyKind?, hasFindings: Bool = false, backupFails: Bool = false, hidesDecimals: Bool = false) {
 		self.readOnly = readOnly
@@ -232,6 +233,40 @@ final class StubSession: BudgetSession, @unchecked Sendable {
 
 	func categoryHistory(_ categoryID: String) async throws -> CategoryHistory {
 		budget.history(categoryID)
+	}
+
+	func migrationSuggestions(today: String) async throws -> [MigrationSuggestion] {
+		upgradeStore.suggestions()
+	}
+
+	func migrationPreview(_ selection: MigrationSelection, today: String) async throws -> [MigrationSuggestion] {
+		upgradeStore.preview(selection)
+	}
+
+	func applyMigration(_ selection: MigrationSelection, today: String) async throws {
+		if let readOnly { throw FfiError.ReadOnly(reason: readOnly) }
+		upgradeStore.apply(selection)
+	}
+
+	func revertMigration(key: String, groupID: String?, confirmed: Bool, today: String) async throws -> MigrationRevert {
+		if let readOnly { throw FfiError.ReadOnly(reason: readOnly) }
+		return upgradeStore.revert(key, confirmed: confirmed)
+	}
+
+	func appliedMigrations() async throws -> [AppliedMigration] {
+		upgradeStore.appliedItems()
+	}
+
+	func migrationOffered() async throws -> Bool {
+		upgradeStore.wasOffered()
+	}
+
+	func markMigrationOffered() async throws {
+		upgradeStore.markOffered()
+	}
+
+	func setMigrationDismissed(_ key: String, dismissed: Bool) async throws {
+		upgradeStore.setDismissed(key, dismissed)
 	}
 
 	func perform(_ command: Command) async throws {
