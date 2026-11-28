@@ -25,7 +25,8 @@ struct StatementSetPDFTests {
 		var first = 0
 		for (document, count) in zip(documents, pages) {
 			let page = try #require(pdf.page(at: first)?.string)
-			#expect(page.contains(document.title) && page.contains("Stub") && page.contains("Unaudited. Obviously."), "\(document.title) starts its own page")
+			#expect(page.contains(document.title + StatementDocument.footnoteMark) && page.contains("Stub"), "\(document.title) starts its own page")
+			#expect(StatementsScreenshotTests.flattened(page).contains(StatementsScreenshotTests.flattened(StatementDocument.footnote)), "\(document.title) carries the footnote")
 			#expect(page.contains("Page \(first + 1) of \(pdf.pageCount)"))
 			first += count
 		}
